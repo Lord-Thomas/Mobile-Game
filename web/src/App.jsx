@@ -1,8 +1,8 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment } from '@react-three/drei'
+import { Environment, useGLTF } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody } from '@react-three/rapier'
-import { BackSide, MathUtils } from 'three'
-import { useEffect, useRef, useState } from 'react'
+import { BackSide, Box3, MathUtils, Mesh, Vector3 } from 'three'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const ROOM_LIMIT = 4.6
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
@@ -110,6 +110,45 @@ function PhysicsBounds() {
 }
 
 function Ball({ ballRef }) {
+  const ballSkin = useGLTF('/ball-skin/base_basic_pbr.glb')
+  const visual = useMemo(() => {
+    const candidates = []
+
+    ballSkin.scene.traverse((object) => {
+      if (!(object instanceof Mesh) || !object.geometry) return
+      const geometry = object.geometry
+      if (!geometry.boundingBox) geometry.computeBoundingBox()
+      if (!geometry.boundingBox) return
+
+      const size = geometry.boundingBox.getSize(new Vector3())
+      const maxSide = Math.max(size.x, size.y, size.z)
+      const minSide = Math.min(size.x, size.y, size.z)
+      if (maxSide <= 0) return
+
+      const roundness = minSide / maxSide
+      const volume = size.x * size.y * size.z
+      const score = roundness * roundness * volume
+      candidates.push({ object, score })
+    })
+
+    const picked = candidates.sort((a, b) => b.score - a.score)[0]?.object
+    if (!picked) return null
+
+    const geometry = picked.geometry.clone()
+    if (!geometry.boundingBox) geometry.computeBoundingBox()
+    const center = geometry.boundingBox.getCenter(new Vector3())
+    const size = geometry.boundingBox.getSize(new Vector3())
+    const maxSide = Math.max(size.x, size.y, size.z) || 1
+
+    geometry.translate(-center.x, -center.y, -center.z)
+
+    return {
+      geometry,
+      material: picked.material.clone(),
+      scale: 0.64 / maxSide,
+    }
+  }, [ballSkin.scene])
+
   return (
     <RigidBody
       ref={ballRef}
@@ -123,10 +162,17 @@ function Ball({ ballRef }) {
       mass={1}
     >
       <BallCollider args={[0.32]} />
-      <mesh castShadow name="ball">
-        <sphereGeometry args={[0.32, 26, 26]} />
-        <meshStandardMaterial color="#ffffff" roughness={0.42} metalness={0.04} />
-      </mesh>
+      <group name="ball">
+        {visual && (
+          <mesh
+            geometry={visual.geometry}
+            material={visual.material}
+            scale={visual.scale}
+            castShadow
+            frustumCulled={false}
+          />
+        )}
+      </group>
     </RigidBody>
   )
 }
@@ -577,3 +623,5 @@ function App() {
 }
 
 export default App
+
+useGLTF.preload('/ball-skin/base_basic_pbr.glb')
