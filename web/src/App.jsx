@@ -1,5 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment } from '@react-three/drei'
+import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody } from '@react-three/rapier'
 import { BackSide, MathUtils } from 'three'
 import { useEffect, useRef, useState } from 'react'
 
@@ -47,7 +48,7 @@ function useKeyboardInput() {
       if (key === 'z' || key === 'arrowup' || key === 'w') keysRef.current.forward = false
       if (key === 's' || key === 'arrowdown') keysRef.current.back = false
       if (key === 'q' || key === 'arrowleft' || key === 'a') keysRef.current.left = false
-      if (key === 'd' || key === 'arrowright') keysRef.current.right = false
+      if (key === 'd' || key === 'arrowright' || key === 'd') keysRef.current.right = false
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -94,15 +95,49 @@ function WhiteRoom() {
   )
 }
 
-function Player({ touchRef }) {
-  const playerRef = useRef()
+function PhysicsBounds() {
+  return (
+    <RigidBody type="fixed" colliders={false}>
+      <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
+      <CuboidCollider args={[0.2, 2.4, 5]} position={[-5, 2.2, 0]} />
+      <CuboidCollider args={[0.2, 2.4, 5]} position={[5, 2.2, 0]} />
+      <CuboidCollider args={[5, 2.4, 0.2]} position={[0, 2.2, -5]} />
+      <CuboidCollider args={[5, 2.4, 0.2]} position={[0, 2.2, 5]} />
+    </RigidBody>
+  )
+}
+
+function Ball({ ballRef }) {
+  return (
+    <RigidBody
+      ref={ballRef}
+      colliders={false}
+      position={[0.8, 0.34, -0.8]}
+      restitution={0.82}
+      friction={0.55}
+      linearDamping={0.35}
+      angularDamping={0.4}
+      mass={1}
+    >
+      <BallCollider args={[0.32]} />
+      <mesh castShadow>
+        <sphereGeometry args={[0.32, 26, 26]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.42} metalness={0.04} />
+      </mesh>
+    </RigidBody>
+  )
+}
+
+function Player({ touchRef, ballRef }) {
+  const playerBodyRef = useRef()
+  const visualRef = useRef()
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
   const keyboardRef = useKeyboardInput()
   const { camera } = useThree()
 
   useFrame((_, delta) => {
-    if (!playerRef.current) return
+    if (!playerBodyRef.current || !visualRef.current) return
 
     const key = keyboardRef.current
     const touch = touchRef.current
@@ -133,73 +168,95 @@ function Player({ touchRef }) {
 
     const isMoving = worldX !== 0 || worldZ !== 0
 
-    if (worldX !== 0 || worldZ !== 0) {
+    if (isMoving) {
       const length = Math.hypot(worldX, worldZ)
       worldX /= length
       worldZ /= length
     }
 
     const speed = 3.2
-    playerRef.current.position.x += worldX * speed * delta
-    playerRef.current.position.z += worldZ * speed * delta
+    const translation = playerBodyRef.current.translation()
+
+    let nextX = translation.x + worldX * speed * delta
+    let nextZ = translation.z + worldZ * speed * delta
 
     if (isMoving) {
       const targetYaw = Math.atan2(worldX, worldZ)
-      playerRef.current.rotation.y = dampAngle(
-        playerRef.current.rotation.y,
-        targetYaw,
-        12,
-        delta,
-      )
+      visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 12, delta)
     }
 
-    playerRef.current.position.x = MathUtils.clamp(playerRef.current.position.x, -ROOM_LIMIT, ROOM_LIMIT)
-    playerRef.current.position.z = MathUtils.clamp(playerRef.current.position.z, -ROOM_LIMIT, ROOM_LIMIT)
+    nextX = MathUtils.clamp(nextX, -ROOM_LIMIT, ROOM_LIMIT)
+    nextZ = MathUtils.clamp(nextZ, -ROOM_LIMIT, ROOM_LIMIT)
 
     const wantsAction = key.actionQueued || touch.actionQueued
-    if (wantsAction && onGroundRef.current) {
-      velocityYRef.current = 4.9
-      onGroundRef.current = false
+    if (wantsAction) {
+      const ball = ballRef.current
+      if (ball) {
+        const ballPos = ball.translation()
+        const dx = ballPos.x - nextX
+        const dz = ballPos.z - nextZ
+        const planarDistance = Math.hypot(dx, dz)
+
+        if (planarDistance < 1.4) {
+          const inv = planarDistance > 0.0001 ? 1 / planarDistance : 0
+          ball.applyImpulse(
+            { x: dx * inv * 2.7, y: 1.15, z: dz * inv * 2.7 },
+            true,
+          )
+        } else if (onGroundRef.current) {
+          velocityYRef.current = 4.9
+          onGroundRef.current = false
+        }
+      } else if (onGroundRef.current) {
+        velocityYRef.current = 4.9
+        onGroundRef.current = false
+      }
     }
+
     key.actionQueued = false
     touch.actionQueued = false
 
     velocityYRef.current -= 12 * delta
-    playerRef.current.position.y += velocityYRef.current * delta
+    let nextY = translation.y + velocityYRef.current * delta
 
-    if (playerRef.current.position.y <= PLAYER_HEIGHT) {
-      playerRef.current.position.y = PLAYER_HEIGHT
+    if (nextY <= PLAYER_HEIGHT) {
+      nextY = PLAYER_HEIGHT
       velocityYRef.current = 0
       onGroundRef.current = true
     }
 
+    playerBodyRef.current.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
+
     const pitch = touch.cameraPitch
     const horizontalDistance = CAMERA_DISTANCE * Math.cos(pitch)
-    const targetX = playerRef.current.position.x + Math.sin(yaw) * horizontalDistance
-    const targetY = playerRef.current.position.y + CAMERA_HEIGHT + Math.sin(pitch) * CAMERA_DISTANCE
-    const targetZ = playerRef.current.position.z + Math.cos(yaw) * horizontalDistance
+    const targetX = nextX + Math.sin(yaw) * horizontalDistance
+    const targetY = nextY + CAMERA_HEIGHT + Math.sin(pitch) * CAMERA_DISTANCE
+    const targetZ = nextZ + Math.cos(yaw) * horizontalDistance
 
     camera.position.x += (targetX - camera.position.x) * 0.13
     camera.position.y += (targetY - camera.position.y) * 0.13
     camera.position.z += (targetZ - camera.position.z) * 0.13
-    camera.lookAt(playerRef.current.position.x, playerRef.current.position.y + 0.55, playerRef.current.position.z)
+    camera.lookAt(nextX, nextY + 0.55, nextZ)
   })
 
   return (
-    <group ref={playerRef} position={[0, PLAYER_HEIGHT, 2.2]}>
-      <mesh>
-        <capsuleGeometry args={[0.22, 0.42, 6, 10]} />
-        <meshStandardMaterial color="#27a2ff" roughness={0.5} metalness={0.08} />
-      </mesh>
-      <mesh position={[0, 0.22, 0.22]}>
-        <sphereGeometry args={[0.06, 16, 16]} />
-        <meshStandardMaterial color="#ffffff" />
-      </mesh>
-      <mesh position={[0.11, 0.22, 0.22]}>
-        <sphereGeometry args={[0.06, 16, 16]} />
-        <meshStandardMaterial color="#ffffff" />
-      </mesh>
-    </group>
+    <RigidBody ref={playerBodyRef} type="kinematicPosition" colliders={false} position={[0, PLAYER_HEIGHT, 2.2]}>
+      <CapsuleCollider args={[0.2, 0.22]} />
+      <group ref={visualRef}>
+        <mesh>
+          <capsuleGeometry args={[0.22, 0.42, 6, 10]} />
+          <meshStandardMaterial color="#27a2ff" roughness={0.5} metalness={0.08} />
+        </mesh>
+        <mesh position={[0, 0.22, 0.22]}>
+          <sphereGeometry args={[0.06, 16, 16]} />
+          <meshStandardMaterial color="#ffffff" />
+        </mesh>
+        <mesh position={[0.11, 0.22, 0.22]}>
+          <sphereGeometry args={[0.06, 16, 16]} />
+          <meshStandardMaterial color="#ffffff" />
+        </mesh>
+      </group>
+    </RigidBody>
   )
 }
 
@@ -230,16 +287,12 @@ function ControlsOverlay({ touchRef }) {
 
     touchRef.current.moveX = clampedX / radius
     touchRef.current.moveY = -clampedY / radius
-    touchRef.current.stickX = clampedX
-    touchRef.current.stickY = clampedY
     setStickVisual({ x: clampedX, y: clampedY })
   }
 
   const resetJoystick = () => {
     touchRef.current.moveX = 0
     touchRef.current.moveY = 0
-    touchRef.current.stickX = 0
-    touchRef.current.stickY = 0
     setStickVisual({ x: 0, y: 0 })
     joystickPointerIdRef.current = null
   }
@@ -298,12 +351,7 @@ function ControlsOverlay({ touchRef }) {
     if (edgeTop) touchRef.current.lookY = -1
     if (edgeBottom) touchRef.current.lookY = 1
 
-    setEdgeGlow({
-      left: edgeLeft,
-      right: edgeRight,
-      top: edgeTop,
-      bottom: edgeBottom,
-    })
+    setEdgeGlow({ left: edgeLeft, right: edgeRight, top: edgeTop, bottom: edgeBottom })
 
     lookLastRef.current.x = event.clientX
     lookLastRef.current.y = event.clientY
@@ -354,13 +402,8 @@ function ControlsOverlay({ touchRef }) {
         </div>
       </div>
 
-      <button
-        className="action-btn"
-        type="button"
-        onPointerDown={triggerAction}
-        aria-label="Action"
-      >
-        <span className="action-symbol">␣</span>
+      <button className="action-btn" type="button" onPointerDown={triggerAction} aria-label="Action">
+        <span className="action-symbol">?</span>
       </button>
     </div>
   )
@@ -370,14 +413,13 @@ function App() {
   const touchRef = useRef({
     moveX: 0,
     moveY: 0,
-    stickX: 0,
-    stickY: 0,
     cameraYaw: 0,
     cameraPitch: -0.22,
     lookX: 0,
     lookY: 0,
     actionQueued: false,
   })
+  const ballRef = useRef()
 
   return (
     <main className="app">
@@ -387,7 +429,11 @@ function App() {
         gl={{ antialias: true, powerPreference: 'high-performance' }}
       >
         <WhiteRoom />
-        <Player touchRef={touchRef} />
+        <Physics gravity={[0, -9.81, 0]}>
+          <PhysicsBounds />
+          <Ball ballRef={ballRef} />
+          <Player touchRef={touchRef} ballRef={ballRef} />
+        </Physics>
       </Canvas>
 
       <ControlsOverlay touchRef={touchRef} />
