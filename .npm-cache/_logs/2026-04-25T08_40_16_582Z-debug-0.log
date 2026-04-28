@@ -1,0 +1,35 @@
+0 verbose cli C:\Users\thoma\Documents\New project\node-v20.19.0-win-x64\node.exe C:\Users\thoma\Documents\New project\node-v20.19.0-win-x64\node_modules\npm\bin\npm-cli.js
+1 info using npm@10.8.2
+2 info using node@v20.19.0
+3 silly config load:file:C:\Users\thoma\Documents\New project\node-v20.19.0-win-x64\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\thoma\Documents\New project\.npmrc
+5 silly config load:file:C:\Users\thoma\.npmrc
+6 silly config load:file:C:\Users\thoma\Documents\New project\node-v20.19.0-win-x64\etc\npmrc
+7 verbose title npm install create-vite@9.0.6
+8 verbose argv "install" "create-vite@9.0.6" "--no-save"
+9 verbose logfile logs-max:10 dir:C:\Users\thoma\Documents\New project\.npm-cache\_logs\2026-04-25T08_40_16_582Z-
+10 verbose logfile C:\Users\thoma\Documents\New project\.npm-cache\_logs\2026-04-25T08_40_16_582Z-debug-0.log
+11 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+12 silly logfile done cleaning log files
+13 silly idealTree buildDeps
+14 silly fetch manifest create-vite@9.0.6
+15 silly packumentCache full:https://registry.npmjs.org/create-vite cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/create-vite 109ms (cache miss)
+17 silly packumentCache full:https://registry.npmjs.org/create-vite set size:undefined disposed:false
+18 silly placeDep ROOT create-vite@9.0.6 OK for:  want: 9.0.6
+19 silly reify moves {}
+20 http fetch GET 200 https://registry.npmjs.org/npm 176ms
+21 silly tarball no local data for create-vite@https://registry.npmjs.org/create-vite/-/create-vite-9.0.6.tgz. Extracting by manifest.
+22 http fetch GET 200 https://registry.npmjs.org/create-vite/-/create-vite-9.0.6.tgz 273ms (cache miss)
+23 silly ADD node_modules/create-vite
+24 verbose cwd C:\Users\thoma\Documents\New project
+25 verbose os Windows_NT 10.0.26200
+26 verbose node v20.19.0
+27 verbose npm  v10.8.2
+28 notice
+28 notice New major version of npm available! 10.8.2 -> 11.13.0
+28 notice Changelog: https://github.com/npm/cli/releases/tag/v11.13.0
+28 notice To update run: npm install -g npm@11.13.0
+28 notice  { force: true, [Symbol(proc-log.meta)]: true }
+29 verbose exit 0
+30 info ok
