@@ -50,7 +50,7 @@ function useKeyboardInput() {
       if (key === 'z' || key === 'arrowup' || key === 'w') keysRef.current.forward = false
       if (key === 's' || key === 'arrowdown') keysRef.current.back = false
       if (key === 'q' || key === 'arrowleft' || key === 'a') keysRef.current.left = false
-      if (key === 'd' || key === 'arrowright' || key === 'd') keysRef.current.right = false
+      if (key === 'd' || key === 'arrowright') keysRef.current.right = false
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -237,6 +237,7 @@ function Player({ touchRef, ballRef }) {
   const visualRef = useRef()
   const playerPosRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
   const planarVelocityRef = useRef({ x: 0, z: 0 })
+  const filteredInputRef = useRef({ x: 0, y: 0 })
   const cameraLookRef = useRef({ x: 0, y: PLAYER_HEIGHT + 0.55, z: 2.2 })
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
@@ -265,12 +266,24 @@ function Player({ touchRef, ballRef }) {
     const keyboardAxisX = (key.right ? 1 : 0) - (key.left ? 1 : 0)
     const keyboardAxisY = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
 
-    let moveX = MathUtils.clamp(touch.moveX + keyboardAxisX, -1, 1)
-    let moveY = MathUtils.clamp(touch.moveY + keyboardAxisY, -1, 1)
+    const rawX = MathUtils.clamp(touch.moveX + keyboardAxisX, -1, 1)
+    const rawY = MathUtils.clamp(touch.moveY + keyboardAxisY, -1, 1)
+    const rawLength = Math.hypot(rawX, rawY)
+
+    const moveFilter = 16
+    filteredInputRef.current.x +=
+      (rawX - filteredInputRef.current.x) * Math.min(1, moveFilter * delta)
+    filteredInputRef.current.y +=
+      (rawY - filteredInputRef.current.y) * Math.min(1, moveFilter * delta)
+
+    let moveX = filteredInputRef.current.x
+    let moveY = filteredInputRef.current.y
     const inputLength = Math.hypot(moveX, moveY)
-    if (inputLength < 0.1) {
+    if (rawLength < 0.08 && inputLength < 0.12) {
       moveX = 0
       moveY = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
     } else if (inputLength > 1) {
       moveX /= inputLength
       moveY /= inputLength
@@ -365,6 +378,9 @@ function Player({ touchRef, ballRef }) {
     playerPosRef.current.z = nextZ
 
     playerBodyRef.current.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
+    if (visualRef.current) {
+      visualRef.current.position.set(nextX, nextY, nextZ)
+    }
 
     const pitch = touch.cameraPitch
     const horizontalDistance = CAMERA_DISTANCE * Math.cos(pitch)
@@ -383,9 +399,16 @@ function Player({ touchRef, ballRef }) {
   })
 
   return (
-    <RigidBody ref={playerBodyRef} type="kinematicPosition" colliders={false} position={[0, PLAYER_HEIGHT, 2.2]}>
-      <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
-      <group ref={visualRef}>
+    <>
+      <RigidBody
+        ref={playerBodyRef}
+        type="kinematicPosition"
+        colliders={false}
+        position={[0, PLAYER_HEIGHT, 2.2]}
+      >
+        <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
+      </RigidBody>
+      <group ref={visualRef} position={[0, PLAYER_HEIGHT, 2.2]}>
         <mesh>
           <capsuleGeometry args={[0.22, 0.42, 6, 10]} />
           <meshStandardMaterial color="#27a2ff" roughness={0.5} metalness={0.08} />
@@ -399,7 +422,7 @@ function Player({ touchRef, ballRef }) {
           <meshStandardMaterial color="#ffffff" />
         </mesh>
       </group>
-    </RigidBody>
+    </>
   )
 }
 
