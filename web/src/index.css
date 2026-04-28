@@ -150,6 +150,22 @@ canvas {
   background: rgba(39, 162, 255, 0.95);
 }
 
+.score {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 4;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(18, 26, 34, 0.76);
+  color: #f8fbff;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
 @media (max-width: 520px) {
   .joystick-zone {
     width: 126px;
@@ -164,5 +180,9 @@ canvas {
   .action-btn {
     width: 98px;
     height: 52px;
+  }
+
+  .score {
+    font-size: 18px;
   }
 }

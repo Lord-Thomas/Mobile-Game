@@ -5,7 +5,9 @@ import { BackSide, MathUtils } from 'three'
 import { useEffect, useRef, useState } from 'react'
 
 const ROOM_LIMIT = 4.6
-const PLAYER_HEIGHT = 0.6
+const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
+const PLAYER_CAPSULE_RADIUS = 0.22
+const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
 const CAMERA_DISTANCE = 4.6
 const CAMERA_HEIGHT = 1.55
 const EDGE_TRIGGER_PX = 14
@@ -111,6 +113,7 @@ function Ball({ ballRef }) {
   return (
     <RigidBody
       ref={ballRef}
+      name="ball"
       colliders={false}
       position={[0.8, 0.34, -0.8]}
       restitution={0.82}
@@ -120,7 +123,7 @@ function Ball({ ballRef }) {
       mass={1}
     >
       <BallCollider args={[0.32]} />
-      <mesh castShadow>
+      <mesh castShadow name="ball">
         <sphereGeometry args={[0.32, 26, 26]} />
         <meshStandardMaterial color="#ffffff" roughness={0.42} metalness={0.04} />
       </mesh>
@@ -128,9 +131,67 @@ function Ball({ ballRef }) {
   )
 }
 
+function Goal({ onGoal }) {
+  return (
+    <group position={[0, 0, -4.62]}>
+      <mesh position={[-1.5, 1, 0]}>
+        <boxGeometry args={[0.1, 2, 0.1]} />
+        <meshStandardMaterial color="#a5afb9" metalness={0.28} roughness={0.45} />
+      </mesh>
+      <mesh position={[1.5, 1, 0]}>
+        <boxGeometry args={[0.1, 2, 0.1]} />
+        <meshStandardMaterial color="#a5afb9" metalness={0.28} roughness={0.45} />
+      </mesh>
+      <mesh position={[0, 2, 0]}>
+        <boxGeometry args={[3.1, 0.1, 0.1]} />
+        <meshStandardMaterial color="#a5afb9" metalness={0.28} roughness={0.45} />
+      </mesh>
+
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, -0.55]}>
+        <planeGeometry args={[2.9, 1.25]} />
+        <meshStandardMaterial
+          color="#2c8fe0"
+          emissive="#1f6fb2"
+          emissiveIntensity={0.35}
+          transparent
+          opacity={0.58}
+        />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.016, -0.55]}>
+        <planeGeometry args={[2.1, 0.62]} />
+        <meshStandardMaterial
+          color="#9dddff"
+          emissive="#6cc7ff"
+          emissiveIntensity={0.2}
+          transparent
+          opacity={0.42}
+        />
+      </mesh>
+
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider
+          args={[1.45, 0.85, 0.2]}
+          position={[0, 1, -0.28]}
+          sensor
+          onIntersectionEnter={(event) => {
+            const bodyName = event.other.rigidBodyObject?.name
+            const colliderName = event.other.colliderObject?.name
+            if (bodyName === 'ball' || colliderName === 'ball') {
+              onGoal()
+            }
+          }}
+        />
+      </RigidBody>
+    </group>
+  )
+}
+
 function Player({ touchRef, ballRef }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
+  const playerPosRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
+  const planarVelocityRef = useRef({ x: 0, z: 0 })
+  const cameraLookRef = useRef({ x: 0, y: PLAYER_HEIGHT + 0.55, z: 2.2 })
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
   const keyboardRef = useKeyboardInput()
@@ -144,6 +205,10 @@ function Player({ touchRef, ballRef }) {
 
     const cameraYawSpeed = 2.9
     const cameraPitchSpeed = 2.1
+    if (!touch.lookActive) {
+      touch.lookX = 0
+      touch.lookY = 0
+    }
     touch.cameraYaw -= touch.lookX * cameraYawSpeed * delta
     touch.cameraPitch = MathUtils.clamp(
       touch.cameraPitch + touch.lookY * cameraPitchSpeed * delta,
@@ -154,8 +219,16 @@ function Player({ touchRef, ballRef }) {
     const keyboardAxisX = (key.right ? 1 : 0) - (key.left ? 1 : 0)
     const keyboardAxisY = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
 
-    const moveX = MathUtils.clamp(touch.moveX + keyboardAxisX, -1, 1)
-    const moveY = MathUtils.clamp(touch.moveY + keyboardAxisY, -1, 1)
+    let moveX = MathUtils.clamp(touch.moveX + keyboardAxisX, -1, 1)
+    let moveY = MathUtils.clamp(touch.moveY + keyboardAxisY, -1, 1)
+    const inputLength = Math.hypot(moveX, moveY)
+    if (inputLength < 0.1) {
+      moveX = 0
+      moveY = 0
+    } else if (inputLength > 1) {
+      moveX /= inputLength
+      moveY /= inputLength
+    }
 
     const yaw = touch.cameraYaw
     const forwardX = -Math.sin(yaw)
@@ -175,10 +248,22 @@ function Player({ touchRef, ballRef }) {
     }
 
     const speed = 3.2
-    const translation = playerBodyRef.current.translation()
+    const targetVelX = worldX * speed
+    const targetVelZ = worldZ * speed
+    const planarDamping = 14
+    planarVelocityRef.current.x +=
+      (targetVelX - planarVelocityRef.current.x) * Math.min(1, planarDamping * delta)
+    planarVelocityRef.current.z +=
+      (targetVelZ - planarVelocityRef.current.z) * Math.min(1, planarDamping * delta)
+    if (Math.abs(targetVelX) < 0.0001 && Math.abs(planarVelocityRef.current.x) < 0.02) {
+      planarVelocityRef.current.x = 0
+    }
+    if (Math.abs(targetVelZ) < 0.0001 && Math.abs(planarVelocityRef.current.z) < 0.02) {
+      planarVelocityRef.current.z = 0
+    }
 
-    let nextX = translation.x + worldX * speed * delta
-    let nextZ = translation.z + worldZ * speed * delta
+    let nextX = playerPosRef.current.x + planarVelocityRef.current.x * delta
+    let nextZ = playerPosRef.current.z + planarVelocityRef.current.z * delta
 
     if (isMoving) {
       const targetYaw = Math.atan2(worldX, worldZ)
@@ -216,14 +301,22 @@ function Player({ touchRef, ballRef }) {
     key.actionQueued = false
     touch.actionQueued = false
 
-    velocityYRef.current -= 12 * delta
-    let nextY = translation.y + velocityYRef.current * delta
+    if (!onGroundRef.current) {
+      velocityYRef.current -= 12 * delta
+    } else {
+      velocityYRef.current = 0
+    }
+    let nextY = onGroundRef.current ? PLAYER_HEIGHT : playerPosRef.current.y + velocityYRef.current * delta
 
     if (nextY <= PLAYER_HEIGHT) {
       nextY = PLAYER_HEIGHT
       velocityYRef.current = 0
       onGroundRef.current = true
     }
+
+    playerPosRef.current.x = nextX
+    playerPosRef.current.y = nextY
+    playerPosRef.current.z = nextZ
 
     playerBodyRef.current.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
 
@@ -233,15 +326,19 @@ function Player({ touchRef, ballRef }) {
     const targetY = nextY + CAMERA_HEIGHT + Math.sin(pitch) * CAMERA_DISTANCE
     const targetZ = nextZ + Math.cos(yaw) * horizontalDistance
 
-    camera.position.x += (targetX - camera.position.x) * 0.13
-    camera.position.y += (targetY - camera.position.y) * 0.13
-    camera.position.z += (targetZ - camera.position.z) * 0.13
-    camera.lookAt(nextX, nextY + 0.55, nextZ)
+    camera.position.x = MathUtils.damp(camera.position.x, targetX, 12, delta)
+    camera.position.y = MathUtils.damp(camera.position.y, targetY, 12, delta)
+    camera.position.z = MathUtils.damp(camera.position.z, targetZ, 12, delta)
+
+    cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, nextX, 16, delta)
+    cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, nextY + 0.55, 16, delta)
+    cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, nextZ, 16, delta)
+    camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
   })
 
   return (
     <RigidBody ref={playerBodyRef} type="kinematicPosition" colliders={false} position={[0, PLAYER_HEIGHT, 2.2]}>
-      <CapsuleCollider args={[0.2, 0.22]} />
+      <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       <group ref={visualRef}>
         <mesh>
           <capsuleGeometry args={[0.22, 0.42, 6, 10]} />
@@ -319,6 +416,7 @@ function ControlsOverlay({ touchRef }) {
     lookLastRef.current.x = event.clientX
     lookLastRef.current.y = event.clientY
     event.currentTarget.setPointerCapture(event.pointerId)
+    touchRef.current.lookActive = true
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
     setEdgeGlow({ left: false, right: false, top: false, bottom: false })
@@ -360,6 +458,7 @@ function ControlsOverlay({ touchRef }) {
   const onLookUp = (event) => {
     if (lookPointerIdRef.current !== event.pointerId) return
     lookPointerIdRef.current = null
+    touchRef.current.lookActive = false
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
     setEdgeGlow({ left: false, right: false, top: false, bottom: false })
@@ -403,10 +502,14 @@ function ControlsOverlay({ touchRef }) {
       </div>
 
       <button className="action-btn" type="button" onPointerDown={triggerAction} aria-label="Action">
-        <span className="action-symbol">?</span>
+        <span className="action-symbol">{'\u2423'}</span>
       </button>
     </div>
   )
+}
+
+function ScoreOverlay({ score }) {
+  return <div className="score">Score {score}</div>
 }
 
 function App() {
@@ -417,9 +520,39 @@ function App() {
     cameraPitch: -0.22,
     lookX: 0,
     lookY: 0,
+    lookActive: false,
     actionQueued: false,
   })
   const ballRef = useRef()
+  const scoreCooldownRef = useRef(false)
+  const [score, setScore] = useState(0)
+
+  const handleGoal = () => {
+    if (scoreCooldownRef.current) return
+
+    scoreCooldownRef.current = true
+    setScore((current) => current + 1)
+
+    const ball = ballRef.current
+    if (ball) {
+      // Hide immediately, then respawn from the top-center after a short cooldown.
+      ball.setTranslation({ x: 0, y: -10, z: 0 }, true)
+      ball.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      ball.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    }
+
+    window.setTimeout(() => {
+      if (ball) {
+        ball.setTranslation({ x: 0, y: 3.2, z: 0 }, true)
+        ball.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        ball.setAngvel({ x: 0, y: 0, z: 0 }, true)
+      }
+    }, 650)
+
+    window.setTimeout(() => {
+      scoreCooldownRef.current = false
+    }, 1200)
+  }
 
   return (
     <main className="app">
@@ -432,11 +565,13 @@ function App() {
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <Ball ballRef={ballRef} />
+          <Goal onGoal={handleGoal} />
           <Player touchRef={touchRef} ballRef={ballRef} />
         </Physics>
       </Canvas>
 
       <ControlsOverlay touchRef={touchRef} />
+      <ScoreOverlay score={score} />
     </main>
   )
 }
