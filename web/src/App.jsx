@@ -1,8 +1,8 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment, useGLTF, useTexture } from '@react-three/drei'
+import { Environment, useAnimations, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, Box3, MathUtils, Mesh, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 const ROOM_LIMIT = 4.95
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
@@ -102,16 +102,16 @@ function WhiteRoom() {
         <boxGeometry args={[12, 5, 0.1]} />
         <meshStandardMaterial color="#f8fafc" side={BackSide} />
       </mesh>
-      <mesh position={[-4, 2.5, 5.05]}>
-        <boxGeometry args={[4, 5, 0.1]} />
+      <mesh position={[-4.5, 2.5, 5.05]}>
+        <boxGeometry args={[3, 5, 0.1]} />
         <meshStandardMaterial color="#f8fafc" side={BackSide} />
       </mesh>
-      <mesh position={[4, 2.5, 5.05]}>
-        <boxGeometry args={[4, 5, 0.1]} />
+      <mesh position={[4.5, 2.5, 5.05]}>
+        <boxGeometry args={[3, 5, 0.1]} />
         <meshStandardMaterial color="#f8fafc" side={BackSide} />
       </mesh>
       <mesh position={[0, 3.88, 5.05]}>
-        <boxGeometry args={[4, 2.24, 0.1]} />
+        <boxGeometry args={[6, 2.24, 0.1]} />
         <meshStandardMaterial color="#f8fafc" side={BackSide} />
       </mesh>
       <mesh position={[0, 4.98, 0]}>
@@ -152,36 +152,36 @@ function PhysicsBounds() {
       <CuboidCollider args={[0.1, 2.4, 5]} position={[-5.1, 2.2, 0]} />
       <CuboidCollider args={[0.1, 2.4, 5]} position={[5.1, 2.2, 0]} />
       <CuboidCollider args={[5, 2.4, 0.1]} position={[0, 2.2, -5.1]} />
-      <CuboidCollider args={[1.5, 2.4, 0.1]} position={[-3.5, 2.2, 5.1]} />
-      <CuboidCollider args={[1.5, 2.4, 0.1]} position={[3.5, 2.2, 5.1]} />
-      <CuboidCollider args={[2, 0.7, 0.1]} position={[0, 3.9, 5.1]} />
+      <CuboidCollider args={[1, 2.4, 0.1]} position={[-4, 2.2, 5.1]} />
+      <CuboidCollider args={[1, 2.4, 0.1]} position={[4, 2.2, 5.1]} />
+      <CuboidCollider args={[3, 0.7, 0.1]} position={[0, 3.9, 5.1]} />
     </RigidBody>
   )
 }
 
 function GlassContainmentRoom() {
   return (
-    <group position={[0, 0, 6.3]}>
+    <group position={[0, 0, 7.03]}>
       <mesh position={[0, 0.012, 0]}>
-        <boxGeometry args={[3.9, 0.05, 2.6]} />
+        <boxGeometry args={[6, 0.05, 4]} />
         <meshStandardMaterial color="#d4dbe3" />
       </mesh>
 
-      <mesh position={[0, 1.35, 1.28]}>
-        <boxGeometry args={[3.9, 2.7, 0.1]} />
+      <mesh position={[0, 1.9, 1.98]}>
+        <boxGeometry args={[6, 3.8, 0.1]} />
         <meshStandardMaterial color="#edf1f5" />
       </mesh>
-      <mesh position={[-1.95, 1.35, 0]}>
-        <boxGeometry args={[0.1, 2.7, 2.6]} />
+      <mesh position={[-3, 1.9, 0]}>
+        <boxGeometry args={[0.1, 3.8, 4]} />
         <meshStandardMaterial color="#edf1f5" />
       </mesh>
-      <mesh position={[1.95, 1.35, 0]}>
-        <boxGeometry args={[0.1, 2.7, 2.6]} />
+      <mesh position={[3, 1.9, 0]}>
+        <boxGeometry args={[0.1, 3.8, 4]} />
         <meshStandardMaterial color="#edf1f5" />
       </mesh>
 
-      <mesh position={[0, 1.35, -1.28]}>
-        <boxGeometry args={[3.9, 2.7, 0.06]} />
+      <mesh position={[0, 1.9, -1.98]}>
+        <boxGeometry args={[6, 3.8, 0.06]} />
         <meshPhysicalMaterial
           color="#bfefff"
           transparent
@@ -196,29 +196,24 @@ function GlassContainmentRoom() {
         />
       </mesh>
 
-      <mesh position={[0, 2.73, -1.245]}>
-        <boxGeometry args={[4.02, 0.06, 0.06]} />
+      <mesh position={[0, 3.83, -1.945]}>
+        <boxGeometry args={[6.12, 0.06, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
-      <mesh position={[0, -0.03, -1.245]}>
-        <boxGeometry args={[4.02, 0.06, 0.06]} />
+      <mesh position={[0, -0.03, -1.945]}>
+        <boxGeometry args={[6.12, 0.06, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
-      <mesh position={[-1.98, 1.35, -1.245]}>
-        <boxGeometry args={[0.06, 2.82, 0.06]} />
+      <mesh position={[-3.03, 1.9, -1.945]}>
+        <boxGeometry args={[0.06, 3.92, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
-      <mesh position={[1.98, 1.35, -1.245]}>
-        <boxGeometry args={[0.06, 2.82, 0.06]} />
+      <mesh position={[3.03, 1.9, -1.945]}>
+        <boxGeometry args={[0.06, 3.92, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
 
-      <pointLight position={[0, 2.3, 0.05]} intensity={1.25} color="#bfefff" />
-
-      <mesh position={[0, 0.48, 0.2]}>
-        <sphereGeometry args={[0.34, 26, 26]} />
-        <meshStandardMaterial color="#6a8dff" emissive="#304cc2" emissiveIntensity={0.28} />
-      </mesh>
+      <pointLight position={[0, 3.2, 0.05]} intensity={1.45} color="#bfefff" />
     </group>
   )
 }
@@ -226,10 +221,10 @@ function GlassContainmentRoom() {
 function GlassContainmentColliders() {
   return (
     <RigidBody type="fixed" colliders={false}>
-      <CuboidCollider args={[1.95, 1.35, 0.06]} position={[0, 1.35, 5.02]} />
-      <CuboidCollider args={[0.05, 1.35, 1.3]} position={[-1.95, 1.35, 6.3]} />
-      <CuboidCollider args={[0.05, 1.35, 1.3]} position={[1.95, 1.35, 6.3]} />
-      <CuboidCollider args={[1.95, 1.35, 0.05]} position={[0, 1.35, 7.58]} />
+      <CuboidCollider args={[3, 1.9, 0.06]} position={[0, 1.9, 5.05]} />
+      <CuboidCollider args={[0.05, 1.9, 2]} position={[-3, 1.9, 7.03]} />
+      <CuboidCollider args={[0.05, 1.9, 2]} position={[3, 1.9, 7.03]} />
+      <CuboidCollider args={[3, 1.9, 0.05]} position={[0, 1.9, 9.01]} />
     </RigidBody>
   )
 }
@@ -302,6 +297,134 @@ function Ball({ ballRef }) {
   )
 }
 
+const DRAGON_POSITION = { x: 0, y: 0.03, z: 7.03 }
+const DRAGON_WAKE_DISTANCE = 3.2
+const DRAGON_WAKE_DELAY = 2
+const DRAGON_SLEEP_DELAY = 4
+const DRAGON_PATROL_IDLE_OFFSET = 0.45
+
+function Dragon({ playerPositionRef }) {
+  const groupRef = useRef()
+  const { scene, animations } = useGLTF('/models/dragon.glb')
+  const { actions, mixer } = useAnimations(animations, groupRef)
+  const stateRef = useRef('patrol')
+  const nearTimeRef = useRef(0)
+  const awayTimeRef = useRef(0)
+  const currentActionRef = useRef(null)
+  const [isReady, setIsReady] = useState(false)
+
+  const playAction = (name, { loop = true, fade = 0.25, startAt = 0 } = {}) => {
+    const action = actions[name]
+    if (!action || currentActionRef.current === action) return action
+
+    currentActionRef.current?.fadeOut(fade)
+    action
+      .reset()
+      .setLoop(loop ? LoopRepeat : LoopOnce, loop ? Infinity : 1)
+      .play()
+    action.time = Math.min(startAt, action.getClip().duration)
+    action.setEffectiveWeight(1)
+    if (fade > 0) action.fadeIn(fade)
+    action.clampWhenFinished = !loop
+    currentActionRef.current = action
+
+    return action
+  }
+
+  useEffect(() => {
+    scene.traverse((object) => {
+      if (object instanceof Mesh) {
+        object.castShadow = true
+        object.receiveShadow = true
+      }
+    })
+  }, [scene])
+
+  useLayoutEffect(() => {
+    const initialAction = playAction('Dragon_Ancient_Patrol_Idle', {
+      fade: 0,
+      startAt: DRAGON_PATROL_IDLE_OFFSET,
+    })
+    if (!initialAction) return
+
+    mixer.update(0)
+    setIsReady(true)
+  }, [actions, mixer])
+
+  useEffect(() => {
+    const onFinished = (event) => {
+      if (
+        stateRef.current === 'entering' &&
+        event.action === actions.Dragon_Ancient_Dialogue_Entry_Neutral
+      ) {
+        stateRef.current = 'dialogue'
+        playAction('Dragon_Ancient_Dialogue_Relaxed_Idle')
+      }
+
+      if (stateRef.current === 'leaving' && event.action === actions.Dragon_Ancient_Dialogue_Out) {
+        stateRef.current = 'patrol'
+        nearTimeRef.current = 0
+        awayTimeRef.current = 0
+        playAction('Dragon_Ancient_Patrol_Idle', { startAt: DRAGON_PATROL_IDLE_OFFSET })
+      }
+    }
+
+    mixer.addEventListener('finished', onFinished)
+    return () => mixer.removeEventListener('finished', onFinished)
+  }, [actions, mixer])
+
+  useFrame((_, delta) => {
+    if (!currentActionRef.current) {
+      const initialAction = playAction('Dragon_Ancient_Patrol_Idle', {
+        fade: 0,
+        startAt: DRAGON_PATROL_IDLE_OFFSET,
+      })
+      if (!initialAction) return
+
+      mixer.update(0)
+      setIsReady(true)
+    }
+
+    const playerPosition = playerPositionRef.current
+    const distanceToPlayer = Math.hypot(
+      playerPosition.x - DRAGON_POSITION.x,
+      playerPosition.z - DRAGON_POSITION.z,
+    )
+    const isNear = distanceToPlayer <= DRAGON_WAKE_DISTANCE
+
+    if (stateRef.current === 'patrol') {
+      nearTimeRef.current = isNear ? nearTimeRef.current + delta : 0
+      if (nearTimeRef.current >= DRAGON_WAKE_DELAY) {
+        stateRef.current = 'entering'
+        awayTimeRef.current = 0
+        playAction('Dragon_Ancient_Dialogue_Entry_Neutral', { loop: false })
+      }
+      return
+    }
+
+    if (stateRef.current === 'dialogue') {
+      awayTimeRef.current = isNear ? 0 : awayTimeRef.current + delta
+      if (awayTimeRef.current >= DRAGON_SLEEP_DELAY) {
+        stateRef.current = 'leaving'
+        nearTimeRef.current = 0
+        playAction('Dragon_Ancient_Dialogue_Out', { loop: false })
+      }
+    }
+  })
+
+  return (
+    <group
+      ref={groupRef}
+      position={[DRAGON_POSITION.x, DRAGON_POSITION.y, DRAGON_POSITION.z]}
+      rotation={[0, Math.PI, 0]}
+      scale={2}
+      visible={isReady}
+    >
+      <primitive object={scene} />
+    </group>
+  )
+}
+
 function Goal({ onGoal }) {
   return (
     <group position={[0, 0, -4.38]}>
@@ -357,7 +480,7 @@ function Goal({ onGoal }) {
   )
 }
 
-function Player({ touchRef, ballRef }) {
+function Player({ touchRef, ballRef, playerPositionRef }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
   const playerPosRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
@@ -502,6 +625,9 @@ function Player({ touchRef, ballRef }) {
     playerPosRef.current.x = nextX
     playerPosRef.current.y = nextY
     playerPosRef.current.z = nextZ
+    playerPositionRef.current.x = nextX
+    playerPositionRef.current.y = nextY
+    playerPositionRef.current.z = nextZ
 
     playerBodyRef.current.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
     if (visualRef.current) {
@@ -743,6 +869,7 @@ function App() {
     actionQueued: false,
   })
   const ballRef = useRef()
+  const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
   const scoreCooldownRef = useRef(false)
   const [score, setScore] = useState(0)
 
@@ -781,13 +908,14 @@ function App() {
         gl={{ antialias: true, powerPreference: 'high-performance' }}
       >
         <WhiteRoom />
+        <Dragon playerPositionRef={playerPositionRef} />
         <GlassContainmentRoom />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
           <Ball ballRef={ballRef} />
           <Goal onGoal={handleGoal} />
-          <Player touchRef={touchRef} ballRef={ballRef} />
+          <Player touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef} />
         </Physics>
       </Canvas>
 
@@ -800,3 +928,4 @@ function App() {
 export default App
 
 useGLTF.preload('/ball-skin/base_basic_pbr.glb')
+useGLTF.preload('/models/dragon.glb')
