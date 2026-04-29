@@ -2,7 +2,8 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, useAnimations, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const ROOM_LIMIT = 4.95
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
@@ -301,29 +302,25 @@ const DRAGON_POSITION = { x: 0, y: 0.03, z: 7.03 }
 const DRAGON_WAKE_DISTANCE = 3.2
 const DRAGON_WAKE_DELAY = 2
 const DRAGON_SLEEP_DELAY = 4
-const DRAGON_PATROL_IDLE_OFFSET = 0.45
 
 function Dragon({ playerPositionRef }) {
-  const groupRef = useRef()
   const { scene, animations } = useGLTF('/models/dragon.glb')
-  const { actions, mixer } = useAnimations(animations, groupRef)
+  const dragon = useMemo(() => clone(scene), [scene])
+  const { actions, mixer } = useAnimations(animations, dragon)
   const stateRef = useRef('patrol')
   const nearTimeRef = useRef(0)
   const awayTimeRef = useRef(0)
   const currentActionRef = useRef(null)
-  const [isReady, setIsReady] = useState(false)
 
-  const playAction = (name, { loop = true, fade = 0.25, startAt = 0 } = {}) => {
+  const playAction = (name, { loop = true, fade = 0.25, force = false } = {}) => {
     const action = actions[name]
-    if (!action || currentActionRef.current === action) return action
+    if (!action || (!force && currentActionRef.current === action)) return action
 
-    currentActionRef.current?.fadeOut(fade)
-    action
-      .reset()
-      .setLoop(loop ? LoopRepeat : LoopOnce, loop ? Infinity : 1)
-      .play()
-    action.time = Math.min(startAt, action.getClip().duration)
+    if (currentActionRef.current !== action) currentActionRef.current?.fadeOut(fade)
+    if (!action.isRunning()) action.reset()
+    action.setLoop(loop ? LoopRepeat : LoopOnce, loop ? Infinity : 1).play()
     action.setEffectiveWeight(1)
+    action.setEffectiveTimeScale(1)
     if (fade > 0) action.fadeIn(fade)
     action.clampWhenFinished = !loop
     currentActionRef.current = action
@@ -332,24 +329,13 @@ function Dragon({ playerPositionRef }) {
   }
 
   useEffect(() => {
-    scene.traverse((object) => {
+    dragon.traverse((object) => {
       if (object instanceof Mesh) {
         object.castShadow = true
         object.receiveShadow = true
       }
     })
-  }, [scene])
-
-  useLayoutEffect(() => {
-    const initialAction = playAction('Dragon_Ancient_Patrol_Idle', {
-      fade: 0,
-      startAt: DRAGON_PATROL_IDLE_OFFSET,
-    })
-    if (!initialAction) return
-
-    mixer.update(0)
-    setIsReady(true)
-  }, [actions, mixer])
+  }, [dragon])
 
   useEffect(() => {
     const onFinished = (event) => {
@@ -365,7 +351,7 @@ function Dragon({ playerPositionRef }) {
         stateRef.current = 'patrol'
         nearTimeRef.current = 0
         awayTimeRef.current = 0
-        playAction('Dragon_Ancient_Patrol_Idle', { startAt: DRAGON_PATROL_IDLE_OFFSET })
+        playAction('Dragon_Ancient_Patrol_Idle')
       }
     }
 
@@ -374,17 +360,6 @@ function Dragon({ playerPositionRef }) {
   }, [actions, mixer])
 
   useFrame((_, delta) => {
-    if (!currentActionRef.current) {
-      const initialAction = playAction('Dragon_Ancient_Patrol_Idle', {
-        fade: 0,
-        startAt: DRAGON_PATROL_IDLE_OFFSET,
-      })
-      if (!initialAction) return
-
-      mixer.update(0)
-      setIsReady(true)
-    }
-
     const playerPosition = playerPositionRef.current
     const distanceToPlayer = Math.hypot(
       playerPosition.x - DRAGON_POSITION.x,
@@ -393,6 +368,9 @@ function Dragon({ playerPositionRef }) {
     const isNear = distanceToPlayer <= DRAGON_WAKE_DISTANCE
 
     if (stateRef.current === 'patrol') {
+      const patrolIdle = playAction('Dragon_Ancient_Patrol_Idle', { fade: 0, force: true })
+      if (!patrolIdle) return
+
       nearTimeRef.current = isNear ? nearTimeRef.current + delta : 0
       if (nearTimeRef.current >= DRAGON_WAKE_DELAY) {
         stateRef.current = 'entering'
@@ -414,13 +392,11 @@ function Dragon({ playerPositionRef }) {
 
   return (
     <group
-      ref={groupRef}
       position={[DRAGON_POSITION.x, DRAGON_POSITION.y, DRAGON_POSITION.z]}
       rotation={[0, Math.PI, 0]}
       scale={2}
-      visible={isReady}
     >
-      <primitive object={scene} />
+      <primitive object={dragon} />
     </group>
   )
 }
