@@ -1,10 +1,10 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment, useGLTF } from '@react-three/drei'
-import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody } from '@react-three/rapier'
-import { BackSide, Box3, MathUtils, Mesh, Vector3 } from 'three'
+import { Environment, useGLTF, useTexture } from '@react-three/drei'
+import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
+import { BackSide, Box3, MathUtils, Mesh, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-const ROOM_LIMIT = 4.6
+const ROOM_LIMIT = 4.95
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
 const PLAYER_CAPSULE_RADIUS = 0.22
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
@@ -12,12 +12,21 @@ const CAMERA_DISTANCE = 4.6
 const CAMERA_HEIGHT = 1.55
 const EDGE_TRIGGER_PX = 14
 const CAMERA_DRAG_SENSITIVITY = 0.007
+const SHOW_FLOOR_GRID = false
 
 function dampAngle(current, target, damping, delta) {
   let diff = (target - current + Math.PI) % (Math.PI * 2)
   if (diff < 0) diff += Math.PI * 2
   diff -= Math.PI
   return current + diff * Math.min(1, damping * delta)
+}
+
+function clampCameraInPlayableVolume(x, y, z) {
+  const clampedX = MathUtils.clamp(x, -4.9, 4.9)
+  const clampedY = MathUtils.clamp(y, 0.35, 4.7)
+  // Keep camera in main lab volume only (outside the containment room).
+  const clampedZ = MathUtils.clamp(z, -4.9, 4.94)
+  return { x: clampedX, y: clampedY, z: clampedZ }
 }
 
 function useKeyboardInput() {
@@ -66,6 +75,12 @@ function useKeyboardInput() {
 }
 
 function WhiteRoom() {
+  const floorColorMap = useTexture('/textures/wood/parquet-color.png')
+  floorColorMap.wrapS = RepeatWrapping
+  floorColorMap.wrapT = RepeatWrapping
+  floorColorMap.repeat.set(3.2, 3.2)
+  floorColorMap.colorSpace = SRGBColorSpace
+
   return (
     <>
       <color attach="background" args={['#eef3f8']} />
@@ -75,24 +90,57 @@ function WhiteRoom() {
       <hemisphereLight args={['#f7fbff', '#d8dee9', 0.7]} />
       <directionalLight position={[4, 7, 5]} intensity={1.15} color="#ffffff" />
 
-      <mesh position={[0, 2.5, 0]}>
-        <boxGeometry args={[12, 5, 12]} />
+      <mesh position={[-5.05, 2.5, 0]}>
+        <boxGeometry args={[0.1, 5, 12]} />
+        <meshStandardMaterial color="#f8fafc" side={BackSide} />
+      </mesh>
+      <mesh position={[5.05, 2.5, 0]}>
+        <boxGeometry args={[0.1, 5, 12]} />
+        <meshStandardMaterial color="#f8fafc" side={BackSide} />
+      </mesh>
+      <mesh position={[0, 2.5, -5.05]}>
+        <boxGeometry args={[12, 5, 0.1]} />
+        <meshStandardMaterial color="#f8fafc" side={BackSide} />
+      </mesh>
+      <mesh position={[-4, 2.5, 5.05]}>
+        <boxGeometry args={[4, 5, 0.1]} />
+        <meshStandardMaterial color="#f8fafc" side={BackSide} />
+      </mesh>
+      <mesh position={[4, 2.5, 5.05]}>
+        <boxGeometry args={[4, 5, 0.1]} />
+        <meshStandardMaterial color="#f8fafc" side={BackSide} />
+      </mesh>
+      <mesh position={[0, 3.88, 5.05]}>
+        <boxGeometry args={[4, 2.24, 0.1]} />
+        <meshStandardMaterial color="#f8fafc" side={BackSide} />
+      </mesh>
+      <mesh position={[0, 4.98, 0]}>
+        <boxGeometry args={[12, 0.1, 12]} />
         <meshStandardMaterial color="#f8fafc" side={BackSide} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[10, 10]} />
-        <meshStandardMaterial color="#e6ebf1" />
+        <meshStandardMaterial
+          map={floorColorMap}
+          roughness={0.66}
+          metalness={0.08}
+          color="#b8ad9b"
+        />
       </mesh>
 
-      <gridHelper args={[10, 20, '#c3ccd6', '#d8e0e8']} position={[0, 0.01, 0]} />
+      <gridHelper
+        args={[10, 20, '#c3ccd6', '#d8e0e8']}
+        position={[0, 0.01, 0]}
+        visible={SHOW_FLOOR_GRID}
+      />
 
       <mesh position={[0, 2.48, -4.9]}>
         <boxGeometry args={[7, 0.08, 0.08]} />
         <meshStandardMaterial color="#dce3eb" emissive="#dce3eb" emissiveIntensity={0.25} />
       </mesh>
 
-      <Environment preset="studio" />
+      <Environment preset="city" />
     </>
   )
 }
@@ -101,10 +149,87 @@ function PhysicsBounds() {
   return (
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
-      <CuboidCollider args={[0.2, 2.4, 5]} position={[-5, 2.2, 0]} />
-      <CuboidCollider args={[0.2, 2.4, 5]} position={[5, 2.2, 0]} />
-      <CuboidCollider args={[5, 2.4, 0.2]} position={[0, 2.2, -5]} />
-      <CuboidCollider args={[5, 2.4, 0.2]} position={[0, 2.2, 5]} />
+      <CuboidCollider args={[0.1, 2.4, 5]} position={[-5.1, 2.2, 0]} />
+      <CuboidCollider args={[0.1, 2.4, 5]} position={[5.1, 2.2, 0]} />
+      <CuboidCollider args={[5, 2.4, 0.1]} position={[0, 2.2, -5.1]} />
+      <CuboidCollider args={[1.5, 2.4, 0.1]} position={[-3.5, 2.2, 5.1]} />
+      <CuboidCollider args={[1.5, 2.4, 0.1]} position={[3.5, 2.2, 5.1]} />
+      <CuboidCollider args={[2, 0.7, 0.1]} position={[0, 3.9, 5.1]} />
+    </RigidBody>
+  )
+}
+
+function GlassContainmentRoom() {
+  return (
+    <group position={[0, 0, 6.3]}>
+      <mesh position={[0, 0.012, 0]}>
+        <boxGeometry args={[3.9, 0.05, 2.6]} />
+        <meshStandardMaterial color="#d4dbe3" />
+      </mesh>
+
+      <mesh position={[0, 1.35, 1.28]}>
+        <boxGeometry args={[3.9, 2.7, 0.1]} />
+        <meshStandardMaterial color="#edf1f5" />
+      </mesh>
+      <mesh position={[-1.95, 1.35, 0]}>
+        <boxGeometry args={[0.1, 2.7, 2.6]} />
+        <meshStandardMaterial color="#edf1f5" />
+      </mesh>
+      <mesh position={[1.95, 1.35, 0]}>
+        <boxGeometry args={[0.1, 2.7, 2.6]} />
+        <meshStandardMaterial color="#edf1f5" />
+      </mesh>
+
+      <mesh position={[0, 1.35, -1.28]}>
+        <boxGeometry args={[3.9, 2.7, 0.06]} />
+        <meshPhysicalMaterial
+          color="#bfefff"
+          transparent
+          opacity={1}
+          roughness={0.05}
+          metalness={0}
+          transmission={1}
+          thickness={0.2}
+          ior={1.5}
+          reflectivity={0.8}
+          envMapIntensity={1.35}
+        />
+      </mesh>
+
+      <mesh position={[0, 2.73, -1.245]}>
+        <boxGeometry args={[4.02, 0.06, 0.06]} />
+        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, -0.03, -1.245]}>
+        <boxGeometry args={[4.02, 0.06, 0.06]} />
+        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+      </mesh>
+      <mesh position={[-1.98, 1.35, -1.245]}>
+        <boxGeometry args={[0.06, 2.82, 0.06]} />
+        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+      </mesh>
+      <mesh position={[1.98, 1.35, -1.245]}>
+        <boxGeometry args={[0.06, 2.82, 0.06]} />
+        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+      </mesh>
+
+      <pointLight position={[0, 2.3, 0.05]} intensity={1.25} color="#bfefff" />
+
+      <mesh position={[0, 0.48, 0.2]}>
+        <sphereGeometry args={[0.34, 26, 26]} />
+        <meshStandardMaterial color="#6a8dff" emissive="#304cc2" emissiveIntensity={0.28} />
+      </mesh>
+    </group>
+  )
+}
+
+function GlassContainmentColliders() {
+  return (
+    <RigidBody type="fixed" colliders={false}>
+      <CuboidCollider args={[1.95, 1.35, 0.06]} position={[0, 1.35, 5.02]} />
+      <CuboidCollider args={[0.05, 1.35, 1.3]} position={[-1.95, 1.35, 6.3]} />
+      <CuboidCollider args={[0.05, 1.35, 1.3]} position={[1.95, 1.35, 6.3]} />
+      <CuboidCollider args={[1.95, 1.35, 0.05]} position={[0, 1.35, 7.58]} />
     </RigidBody>
   )
 }
@@ -179,7 +304,7 @@ function Ball({ ballRef }) {
 
 function Goal({ onGoal }) {
   return (
-    <group position={[0, 0, -4.62]}>
+    <group position={[0, 0, -4.38]}>
       <mesh position={[-1.5, 1, 0]}>
         <boxGeometry args={[0.1, 2, 0.1]} />
         <meshStandardMaterial color="#a5afb9" metalness={0.28} roughness={0.45} />
@@ -243,6 +368,7 @@ function Player({ touchRef, ballRef }) {
   const onGroundRef = useRef(true)
   const keyboardRef = useKeyboardInput()
   const { camera } = useThree()
+  const { world, rapier } = useRapier()
 
   useFrame((_, delta) => {
     if (!playerBodyRef.current || !visualRef.current) return
@@ -384,13 +510,37 @@ function Player({ touchRef, ballRef }) {
 
     const pitch = touch.cameraPitch
     const horizontalDistance = CAMERA_DISTANCE * Math.cos(pitch)
-    const targetX = nextX + Math.sin(yaw) * horizontalDistance
-    const targetY = nextY + CAMERA_HEIGHT + Math.sin(pitch) * CAMERA_DISTANCE
-    const targetZ = nextZ + Math.cos(yaw) * horizontalDistance
+    const desiredX = nextX + Math.sin(yaw) * horizontalDistance
+    const desiredY = nextY + CAMERA_HEIGHT + Math.sin(pitch) * CAMERA_DISTANCE
+    const desiredZ = nextZ + Math.cos(yaw) * horizontalDistance
 
-    camera.position.x = MathUtils.damp(camera.position.x, targetX, 12, delta)
-    camera.position.y = MathUtils.damp(camera.position.y, targetY, 12, delta)
-    camera.position.z = MathUtils.damp(camera.position.z, targetZ, 12, delta)
+    let targetX = desiredX
+    let targetY = desiredY
+    let targetZ = desiredZ
+
+    const originY = nextY + 0.7
+    const dirX = desiredX - nextX
+    const dirY = desiredY - originY
+    const dirZ = desiredZ - nextZ
+    const rayDistance = Math.hypot(dirX, dirY, dirZ)
+
+    if (rayDistance > 0.001) {
+      const inv = 1 / rayDistance
+      const rayDir = { x: dirX * inv, y: dirY * inv, z: dirZ * inv }
+      const ray = new rapier.Ray({ x: nextX, y: originY, z: nextZ }, rayDir)
+      const hit = world.castRay(ray, rayDistance, true)
+      if (hit && hit.toi < rayDistance) {
+        const safe = Math.max(0.2, hit.toi - 0.14)
+        targetX = nextX + rayDir.x * safe
+        targetY = originY + rayDir.y * safe
+        targetZ = nextZ + rayDir.z * safe
+      }
+    }
+
+    const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ)
+    camera.position.x = MathUtils.damp(camera.position.x, clampedTarget.x, 12, delta)
+    camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, 12, delta)
+    camera.position.z = MathUtils.damp(camera.position.z, clampedTarget.z, 12, delta)
 
     cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, nextX, 16, delta)
     cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, nextY + 0.55, 16, delta)
@@ -631,8 +781,10 @@ function App() {
         gl={{ antialias: true, powerPreference: 'high-performance' }}
       >
         <WhiteRoom />
+        <GlassContainmentRoom />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
+          <GlassContainmentColliders />
           <Ball ballRef={ballRef} />
           <Goal onGoal={handleGoal} />
           <Player touchRef={touchRef} ballRef={ballRef} />
