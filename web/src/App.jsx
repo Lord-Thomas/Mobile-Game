@@ -299,7 +299,7 @@ function Ball({ ballRef }) {
 }
 
 const DRAGON_POSITION = { x: 0, y: 0.03, z: 7.03 }
-const DRAGON_WAKE_DISTANCE = 3.2
+const DRAGON_WAKE_DISTANCE = 5
 const DRAGON_WAKE_DELAY = 2
 const DRAGON_SLEEP_DELAY = 4
 
