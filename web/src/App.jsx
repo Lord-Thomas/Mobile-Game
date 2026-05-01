@@ -1517,7 +1517,7 @@ function App() {
   const respawnTimerRef = useRef(null)
   const outRespawnCooldownRef = useRef(false)
   const [scorePopups, setScorePopups] = useState([])
-  const [coins, setCoins] = useState(isAdminMode ? 67 : 0)
+  const [coins, setCoins] = useState(isAdminMode ? 850 : 0)
   const [ownedSkins, setOwnedSkins] = useState(['classic'])
   const [selectedSkinId, setSelectedSkinId] = useState('classic')
   const [previewSkinId, setPreviewSkinId] = useState('classic')
@@ -1539,7 +1539,7 @@ function App() {
       if (!raw) return
       const parsed = JSON.parse(raw)
       // Economy by mode: normal starts at 0, admin uses test wallet.
-      setCoins(isAdminMode ? 67 : 0)
+      setCoins(isAdminMode ? 850 : 0)
       if (Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setOwnedSkins(parsed.ownedSkins)
       if (typeof parsed.selectedSkinId === 'string') {
         setSelectedSkinId(parsed.selectedSkinId)
