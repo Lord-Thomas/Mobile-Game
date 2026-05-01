@@ -6,7 +6,7 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 const ROOM_LIMIT = 4.95
-const GOAL_Z = -3.65
+const GOAL_Z = -3.42
 const BALL_RADIUS = 0.256
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
 const PLAYER_CAPSULE_RADIUS = 0.22
@@ -250,7 +250,7 @@ function GlassContainmentColliders() {
 }
 
 function Ball({ ballRef }) {
-  const ballSkin = useGLTF('/ball-skin/base_basic_pbr.glb')
+  const ballSkin = useGLTF('/models/ball/ballon.glb')
   const visual = useMemo(() => {
     const candidates = []
 
@@ -597,8 +597,8 @@ function GoalNet({ ballRef }) {
       const vy = p.y
       const vzLocal = p.z - GOAL_Z
       const speed = Math.hypot(v.x, v.y, v.z)
-      const impactRadius = 1.02
-      const impactForce = Math.min(0.22, 0.045 + speed * 0.012)
+      const impactRadius = 0.9
+      const impactForce = Math.min(0.11, 0.016 + speed * 0.0065)
 
       for (let i = 0; i < vertexCount; i += 1) {
         if (fixed[i]) continue
@@ -619,8 +619,9 @@ function GoalNet({ ballRef }) {
       }
     }
 
-    const spring = Math.min(1, 7.5 * delta)
-    const damp = Math.max(0.8, 1 - 6.5 * delta)
+    const spring = Math.min(1, 8.2 * delta)
+    const damp = Math.max(0.84, 1 - 7.2 * delta)
+    const maxPush = 0.34
 
     for (let i = 0; i < vertexCount; i += 1) {
       const i3 = i * 3
@@ -633,6 +634,7 @@ function GoalNet({ ballRef }) {
       velocity[i] *= damp
       displacement[i] += velocity[i]
       displacement[i] += (0 - displacement[i]) * spring
+      displacement[i] = Math.max(-maxPush, Math.min(maxPush * 0.35, displacement[i]))
       positions[i3 + 2] = base[i3 + 2] + displacement[i]
     }
 
@@ -643,33 +645,39 @@ function GoalNet({ ballRef }) {
     <group>
       <mesh ref={netRef} geometry={netGeometry} position={[0, 1, -0.02]}>
         <meshStandardMaterial
-          color="#f4f8ff"
+          color="#9ec5ff"
+          emissive="#4f7fc7"
+          emissiveIntensity={0.2}
           wireframe
           transparent
-          opacity={0.72}
-          roughness={0.7}
-          metalness={0.04}
+          opacity={0.92}
+          roughness={0.62}
+          metalness={0.03}
         />
       </mesh>
 
       <mesh position={[-1.5, 0.98, -0.01]} rotation={[0, Math.PI / 2, 0]} geometry={sideGeometry}>
         <meshStandardMaterial
-          color="#f4f8ff"
+          color="#9ec5ff"
+          emissive="#4f7fc7"
+          emissiveIntensity={0.16}
           wireframe
           transparent
-          opacity={0.62}
-          roughness={0.75}
+          opacity={0.86}
+          roughness={0.68}
           metalness={0.03}
         />
       </mesh>
 
       <mesh position={[1.5, 0.98, -0.01]} rotation={[0, Math.PI / 2, 0]} geometry={sideGeometry}>
         <meshStandardMaterial
-          color="#f4f8ff"
+          color="#9ec5ff"
+          emissive="#4f7fc7"
+          emissiveIntensity={0.16}
           wireframe
           transparent
-          opacity={0.62}
-          roughness={0.75}
+          opacity={0.86}
+          roughness={0.68}
           metalness={0.03}
         />
       </mesh>
@@ -792,7 +800,7 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
         if (planarDistance < 1.4) {
           const inv = planarDistance > 0.0001 ? 1 / planarDistance : 0
           ball.applyImpulse(
-            { x: dx * inv * 2.7, y: 1.15, z: dz * inv * 2.7 },
+            { x: dx * inv * 1.85, y: 0.75, z: dz * inv * 1.85 },
             true,
           )
         } else if (onGroundRef.current) {
@@ -1070,6 +1078,36 @@ function ScoreOverlay({ score }) {
   )
 }
 
+function BallRespawnGuard({ ballRef, onOutOfBounds }) {
+  const outTimerRef = useRef(0)
+  const triggerLockRef = useRef(false)
+
+  useFrame((_, delta) => {
+    const ball = ballRef.current
+    if (!ball) return
+
+    const p = ball.translation()
+    const isOut =
+      p.y < -1.2 ||
+      p.y > 7 ||
+      Math.abs(p.x) > 8.2 ||
+      Math.abs(p.z) > 12
+
+    if (isOut) {
+      outTimerRef.current += delta
+      if (outTimerRef.current > 1.6 && !triggerLockRef.current) {
+        triggerLockRef.current = true
+        onOutOfBounds()
+      }
+    } else {
+      outTimerRef.current = 0
+      triggerLockRef.current = false
+    }
+  })
+
+  return null
+}
+
 function ScorePopups({ popups }) {
   return (
     <>
@@ -1102,6 +1140,7 @@ function App() {
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
   const scoreCooldownRef = useRef(false)
   const respawnTimerRef = useRef(null)
+  const outRespawnCooldownRef = useRef(false)
   const [score, setScore] = useState(0)
   const [scorePopups, setScorePopups] = useState([])
 
@@ -1121,6 +1160,19 @@ function App() {
     ball.setLinvel({ x: 0, y: 0, z: 0 }, true)
     ball.setAngvel({ x: 0, y: 0, z: 0 }, true)
     scoreCooldownRef.current = false
+  }
+
+  const handleOutOfBoundsRespawn = () => {
+    if (outRespawnCooldownRef.current) return
+    outRespawnCooldownRef.current = true
+    if (respawnTimerRef.current) {
+      clearTimeout(respawnTimerRef.current)
+      respawnTimerRef.current = null
+    }
+    handleBallRespawn()
+    window.setTimeout(() => {
+      outRespawnCooldownRef.current = false
+    }, 1200)
   }
 
   const handleGoal = () => {
@@ -1172,6 +1224,7 @@ function App() {
           <PhysicsBounds />
           <GlassContainmentColliders />
           <Ball ballRef={ballRef} />
+          <BallRespawnGuard ballRef={ballRef} onOutOfBounds={handleOutOfBoundsRespawn} />
           <Goal onBallZoneEnter={handleBallZoneEnter} onBallZoneExit={handleBallZoneExit} ballRef={ballRef} />
           <Player touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef} />
           <ScorePopups popups={scorePopups} />
@@ -1186,5 +1239,5 @@ function App() {
 
 export default App
 
-useGLTF.preload('/ball-skin/base_basic_pbr.glb')
+useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
