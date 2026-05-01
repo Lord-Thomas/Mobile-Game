@@ -8,6 +8,7 @@ Base V1 conforme au manifeste:
 - Deplacement + saut
 - Camera lisible
 - Controles clavier et tactiles
+- Deploiement Vercel connecte au repo GitHub
 
 ## Lancement standard
 
@@ -35,3 +36,15 @@ Build production:
 - Clavier: `WASD` ou fleches
 - Saut: `Espace`
 - Mobile: boutons tactiles en bas de l'ecran
+
+## Deploiement Vercel
+
+- Projet Vercel relie au repo GitHub
+- Root Directory Vercel: `web`
+- Chaque `push` sur `main` declenche un redeploiement automatique en production
+- Chaque `push` sur une autre branche declenche un lien preview
+
+## Workflow recommande
+
+- Garde `main` stable
+- Fais les tests sur des branches de feature, puis merge sur `main` quand c'est valide
