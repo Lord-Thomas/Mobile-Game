@@ -1,11 +1,13 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment, useAnimations, useGLTF, useTexture } from '@react-three/drei'
+import { Environment, Html, useAnimations, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
+import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 const ROOM_LIMIT = 4.95
+const GOAL_Z = -3.65
+const BALL_RADIUS = 0.256
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
 const PLAYER_CAPSULE_RADIUS = 0.22
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
@@ -14,6 +16,7 @@ const CAMERA_HEIGHT = 1.55
 const EDGE_TRIGGER_PX = 14
 const CAMERA_DRAG_SENSITIVITY = 0.007
 const SHOW_FLOOR_GRID = false
+const GOAL_POINTS = 10
 
 function dampAngle(current, target, damping, delta) {
   let diff = (target - current + Math.PI) % (Math.PI * 2)
@@ -28,6 +31,22 @@ function clampCameraInPlayableVolume(x, y, z) {
   // Keep camera in main lab volume only (outside the containment room).
   const clampedZ = MathUtils.clamp(z, -4.9, 4.94)
   return { x: clampedX, y: clampedY, z: clampedZ }
+}
+
+function intersectsAabbSphere(px, py, pz, radius, cx, cy, cz, hx, hy, hz) {
+  const dx = Math.max(Math.abs(px - cx) - hx, 0)
+  const dy = Math.max(Math.abs(py - cy) - hy, 0)
+  const dz = Math.max(Math.abs(pz - cz) - hz, 0)
+  return dx * dx + dy * dy + dz * dz <= radius * radius
+}
+
+function collidesWithGoalFrame(nextX, nextY, nextZ) {
+  const r = PLAYER_CAPSULE_RADIUS
+  const hitLeftPost = intersectsAabbSphere(nextX, nextY, nextZ, r, -1.5, 1, GOAL_Z, 0.11, 1, 0.11)
+  const hitRightPost = intersectsAabbSphere(nextX, nextY, nextZ, r, 1.5, 1, GOAL_Z, 0.11, 1, 0.11)
+  const hitCrossbar = intersectsAabbSphere(nextX, nextY, nextZ, r, 0, 2, GOAL_Z, 1.58, 0.11, 0.11)
+  // Keep only frame collision for player to avoid "phantom blocks" inside the goal volume.
+  return hitLeftPost || hitRightPost || hitCrossbar
 }
 
 function useKeyboardInput() {
@@ -266,7 +285,7 @@ function Ball({ ballRef }) {
     return {
       geometry,
       material: picked.material.clone(),
-      scale: 0.64 / maxSide,
+      scale: (BALL_RADIUS * 2) / maxSide,
     }
   }, [ballSkin.scene])
 
@@ -275,14 +294,15 @@ function Ball({ ballRef }) {
       ref={ballRef}
       name="ball"
       colliders={false}
-      position={[0.8, 0.34, -0.8]}
+      position={[0, 3.2, 0]}
       restitution={0.82}
       friction={0.55}
       linearDamping={0.35}
       angularDamping={0.4}
       mass={1}
+      ccd
     >
-      <BallCollider args={[0.32]} />
+      <BallCollider args={[BALL_RADIUS]} />
       <group name="ball">
         {visual && (
           <mesh
@@ -401,9 +421,28 @@ function Dragon({ playerPositionRef }) {
   )
 }
 
-function Goal({ onGoal }) {
+function Goal({ onBallZoneEnter, onBallZoneExit, ballRef }) {
+  const handleGoalSensorEnter = (event) => {
+    const bodyName = event.other.rigidBodyObject?.name
+    const colliderName = event.other.colliderObject?.name
+    if (bodyName === 'ball' || colliderName === 'ball') onBallZoneEnter()
+  }
+
+  const handleGoalSensorExit = (event) => {
+    const bodyName = event.other.rigidBodyObject?.name
+    const colliderName = event.other.colliderObject?.name
+    if (bodyName === 'ball' || colliderName === 'ball') onBallZoneExit()
+  }
+
   return (
-    <group position={[0, 0, -4.38]}>
+    <group position={[0, 0, GOAL_Z]}>
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider args={[0.11, 1, 0.11]} position={[-1.5, 1, 0]} restitution={0.72} friction={0.5} />
+        <CuboidCollider args={[0.11, 1, 0.11]} position={[1.5, 1, 0]} restitution={0.72} friction={0.5} />
+        <CuboidCollider args={[1.58, 0.11, 0.11]} position={[0, 2, 0]} restitution={0.72} friction={0.5} />
+        <CuboidCollider args={[1.5, 1, 0.05]} position={[0, 1, -1.14]} restitution={0.52} friction={0.45} />
+      </RigidBody>
+
       <mesh position={[-1.5, 1, 0]}>
         <boxGeometry args={[0.1, 2, 0.1]} />
         <meshStandardMaterial color="#a5afb9" metalness={0.28} roughness={0.45} />
@@ -440,18 +479,200 @@ function Goal({ onGoal }) {
 
       <RigidBody type="fixed" colliders={false}>
         <CuboidCollider
-          args={[1.45, 0.85, 0.2]}
-          position={[0, 1, -0.28]}
+          args={[1.34, 0.86, 0.44]}
+          position={[0, 1, -0.5]}
           sensor
-          onIntersectionEnter={(event) => {
-            const bodyName = event.other.rigidBodyObject?.name
-            const colliderName = event.other.colliderObject?.name
-            if (bodyName === 'ball' || colliderName === 'ball') {
-              onGoal()
-            }
-          }}
+          onIntersectionEnter={handleGoalSensorEnter}
+          onIntersectionExit={handleGoalSensorExit}
         />
       </RigidBody>
+
+      <GoalNet ballRef={ballRef} />
+    </group>
+  )
+}
+
+function GoalNet({ ballRef }) {
+  const NET_WIDTH = 3.02
+  const NET_HEIGHT = 1.96
+  const NET_DEPTH = 1.28
+  const netRef = useRef()
+  const baseRef = useRef(null)
+  const displacementRef = useRef(null)
+  const velocityRef = useRef(null)
+  const fixedRef = useRef(null)
+  const netGeometry = useMemo(() => {
+    const width = NET_WIDTH
+    const height = NET_HEIGHT
+    const segX = 22
+    const segY = 14
+    const depth = NET_DEPTH
+    const geometry = new PlaneGeometry(width, height, segX, segY)
+    const pos = geometry.attributes.position
+
+    for (let i = 0; i < pos.count; i += 1) {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const yNormalized = (y + height * 0.5) / height
+      const depthFactor = 1 - yNormalized
+
+      // Front edge attached to posts/top bar, bottom goes deeper.
+      let z = -depth * depthFactor
+      // Small natural relaxation to avoid a perfectly straight sheet.
+      z -= Math.sin((x / (width * 0.5)) * Math.PI) * 0.08 * depthFactor
+      z -= (1 - Math.abs(x) / (width * 0.5)) * 0.03 * depthFactor
+
+      pos.setZ(i, z)
+    }
+
+    pos.needsUpdate = true
+    return geometry
+  }, [])
+  const sideGeometry = useMemo(() => {
+    const sideHeight = NET_HEIGHT - 0.08
+    const geometry = new PlaneGeometry(NET_DEPTH, sideHeight, 8, 12)
+    const pos = geometry.attributes.position
+    const halfDepth = NET_DEPTH * 0.5
+    const halfHeight = sideHeight * 0.5
+
+    for (let i = 0; i < pos.count; i += 1) {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const topFactor = 1 - (y + halfHeight) / sideHeight
+      const t = (x + halfDepth) / NET_DEPTH
+
+      // Top is close to the frame, bottom goes deeper, like a real net side.
+      const depth = t * NET_DEPTH * topFactor
+      pos.setX(i, depth)
+      pos.setZ(i, 0)
+    }
+
+    pos.needsUpdate = true
+    return geometry
+  }, [])
+
+  useEffect(() => {
+    if (!netRef.current) return
+    const positions = netRef.current.geometry.attributes.position.array
+    baseRef.current = new Float32Array(positions)
+    displacementRef.current = new Float32Array(positions.length / 3)
+    velocityRef.current = new Float32Array(positions.length / 3)
+    fixedRef.current = new Uint8Array(positions.length / 3)
+
+    const widthHalf = NET_WIDTH * 0.5
+    const heightHalf = NET_HEIGHT * 0.5
+    for (let i = 0; i < fixedRef.current.length; i += 1) {
+      const i3 = i * 3
+      const x = baseRef.current[i3]
+      const y = baseRef.current[i3 + 1]
+      // Keep all borders rigidly attached to the frame.
+      const fixed =
+        Math.abs(x) > widthHalf - 0.0001 ||
+        Math.abs(y) > heightHalf - 0.0001
+      fixedRef.current[i] = fixed ? 1 : 0
+    }
+  }, [])
+
+  useFrame((_, delta) => {
+    if (
+      !netRef.current ||
+      !baseRef.current ||
+      !displacementRef.current ||
+      !velocityRef.current ||
+      !fixedRef.current
+    ) return
+
+    const positions = netRef.current.geometry.attributes.position.array
+    const base = baseRef.current
+    const displacement = displacementRef.current
+    const velocity = velocityRef.current
+    const fixed = fixedRef.current
+    const vertexCount = displacement.length
+
+    const ball = ballRef.current
+    if (ball) {
+      const p = ball.translation()
+      const v = ball.linvel()
+      const vx = p.x
+      const vy = p.y
+      const vzLocal = p.z - GOAL_Z
+      const speed = Math.hypot(v.x, v.y, v.z)
+      const impactRadius = 1.02
+      const impactForce = Math.min(0.22, 0.045 + speed * 0.012)
+
+      for (let i = 0; i < vertexCount; i += 1) {
+        if (fixed[i]) continue
+        const i3 = i * 3
+        const px = base[i3]
+        const py = base[i3 + 1]
+        const pz = base[i3 + 2]
+
+        const dx = px - vx
+        const dy = py - vy
+        const dz = pz - vzLocal
+        const dist = Math.hypot(dx, dy, dz)
+
+        if (dist < impactRadius) {
+          const force = (1 - dist / impactRadius) * impactForce
+          velocity[i] -= force
+        }
+      }
+    }
+
+    const spring = Math.min(1, 7.5 * delta)
+    const damp = Math.max(0.8, 1 - 6.5 * delta)
+
+    for (let i = 0; i < vertexCount; i += 1) {
+      const i3 = i * 3
+      if (fixed[i]) {
+        displacement[i] = 0
+        velocity[i] = 0
+        positions[i3 + 2] = base[i3 + 2]
+        continue
+      }
+      velocity[i] *= damp
+      displacement[i] += velocity[i]
+      displacement[i] += (0 - displacement[i]) * spring
+      positions[i3 + 2] = base[i3 + 2] + displacement[i]
+    }
+
+    netRef.current.geometry.attributes.position.needsUpdate = true
+  })
+
+  return (
+    <group>
+      <mesh ref={netRef} geometry={netGeometry} position={[0, 1, -0.02]}>
+        <meshStandardMaterial
+          color="#f4f8ff"
+          wireframe
+          transparent
+          opacity={0.72}
+          roughness={0.7}
+          metalness={0.04}
+        />
+      </mesh>
+
+      <mesh position={[-1.5, 0.98, -0.01]} rotation={[0, Math.PI / 2, 0]} geometry={sideGeometry}>
+        <meshStandardMaterial
+          color="#f4f8ff"
+          wireframe
+          transparent
+          opacity={0.62}
+          roughness={0.75}
+          metalness={0.03}
+        />
+      </mesh>
+
+      <mesh position={[1.5, 0.98, -0.01]} rotation={[0, Math.PI / 2, 0]} geometry={sideGeometry}>
+        <meshStandardMaterial
+          color="#f4f8ff"
+          wireframe
+          transparent
+          opacity={0.62}
+          roughness={0.75}
+          metalness={0.03}
+        />
+      </mesh>
     </group>
   )
 }
@@ -546,8 +767,10 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
       planarVelocityRef.current.z = 0
     }
 
-    let nextX = playerPosRef.current.x + planarVelocityRef.current.x * delta
-    let nextZ = playerPosRef.current.z + planarVelocityRef.current.z * delta
+    const prevX = playerPosRef.current.x
+    const prevZ = playerPosRef.current.z
+    let nextX = prevX + planarVelocityRef.current.x * delta
+    let nextZ = prevZ + planarVelocityRef.current.z * delta
 
     if (isMoving) {
       const targetYaw = Math.atan2(worldX, worldZ)
@@ -596,6 +819,13 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
       nextY = PLAYER_HEIGHT
       velocityYRef.current = 0
       onGroundRef.current = true
+    }
+
+    if (collidesWithGoalFrame(nextX, nextY, nextZ)) {
+      nextX = prevX
+      nextZ = prevZ
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
     }
 
     playerPosRef.current.x = nextX
@@ -830,7 +1060,31 @@ function ControlsOverlay({ touchRef }) {
 }
 
 function ScoreOverlay({ score }) {
-  return <div className="score">Score {score}</div>
+  return (
+    <div className="score-wrap">
+      <div className="score">
+        <span className="score-label">Score</span>
+        <span className="score-value">{score}</span>
+      </div>
+    </div>
+  )
+}
+
+function ScorePopups({ popups }) {
+  return (
+    <>
+      {popups.map((popup) => (
+        <Html key={popup.id} position={[popup.x, popup.y, popup.z]} center transform sprite>
+          <div
+            className="score-value score-burst-world"
+            style={{ animationDuration: `${popup.duration}ms` }}
+          >
+            +{popup.value}
+          </div>
+        </Html>
+      ))}
+    </>
+  )
 }
 
 function App() {
@@ -847,34 +1101,62 @@ function App() {
   const ballRef = useRef()
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
   const scoreCooldownRef = useRef(false)
+  const respawnTimerRef = useRef(null)
   const [score, setScore] = useState(0)
+  const [scorePopups, setScorePopups] = useState([])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const now = Date.now()
+      setScorePopups((previous) => previous.filter((popup) => now < popup.startAt + popup.duration))
+    }, 120)
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleBallRespawn = () => {
+    const ball = ballRef.current
+    if (!ball) return
+
+    ball.setTranslation({ x: 0, y: 3.2, z: 0 }, true)
+    ball.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    ball.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    scoreCooldownRef.current = false
+  }
 
   const handleGoal = () => {
     if (scoreCooldownRef.current) return
 
     scoreCooldownRef.current = true
-    setScore((current) => current + 1)
+    setScore((current) => current + GOAL_POINTS)
 
     const ball = ballRef.current
-    if (ball) {
-      // Hide immediately, then respawn from the top-center after a short cooldown.
-      ball.setTranslation({ x: 0, y: -10, z: 0 }, true)
-      ball.setLinvel({ x: 0, y: 0, z: 0 }, true)
-      ball.setAngvel({ x: 0, y: 0, z: 0 }, true)
-    }
+    const ballPosition = ball?.translation()
+    setScorePopups((previous) => [
+      ...previous,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        value: GOAL_POINTS,
+        x: ballPosition?.x ?? 0,
+        y: Math.max(0.9, ballPosition?.y ?? 0.9),
+        z: ballPosition?.z ?? GOAL_Z - 0.55,
+        startAt: Date.now(),
+        duration: 620,
+      },
+    ])
 
-    window.setTimeout(() => {
-      if (ball) {
-        ball.setTranslation({ x: 0, y: 3.2, z: 0 }, true)
-        ball.setLinvel({ x: 0, y: 0, z: 0 }, true)
-        ball.setAngvel({ x: 0, y: 0, z: 0 }, true)
-      }
-    }, 650)
-
-    window.setTimeout(() => {
-      scoreCooldownRef.current = false
-    }, 1200)
+    if (respawnTimerRef.current) clearTimeout(respawnTimerRef.current)
+    respawnTimerRef.current = setTimeout(() => {
+      respawnTimerRef.current = null
+      handleBallRespawn()
+    }, 1000)
   }
+
+  const handleBallZoneEnter = () => {
+    if (scoreCooldownRef.current) return
+    handleGoal()
+  }
+
+  const handleBallZoneExit = () => {}
 
   return (
     <main className="app">
@@ -890,8 +1172,9 @@ function App() {
           <PhysicsBounds />
           <GlassContainmentColliders />
           <Ball ballRef={ballRef} />
-          <Goal onGoal={handleGoal} />
+          <Goal onBallZoneEnter={handleBallZoneEnter} onBallZoneExit={handleBallZoneExit} ballRef={ballRef} />
           <Player touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef} />
+          <ScorePopups popups={scorePopups} />
         </Physics>
       </Canvas>
 

@@ -150,20 +150,92 @@ canvas {
   background: rgba(39, 162, 255, 0.95);
 }
 
-.score {
+.score-wrap {
   position: absolute;
   top: 14px;
-  left: 14px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 4;
-  padding: 8px 12px;
-  border-radius: 12px;
-  background: rgba(18, 26, 34, 0.76);
+  pointer-events: none;
+}
+
+.score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(13, 20, 28, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   color: #f8fbff;
-  font-size: 20px;
-  font-weight: 800;
+  font-size: 18px;
+  font-weight: 700;
   letter-spacing: 0.2px;
   pointer-events: none;
   backdrop-filter: blur(6px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+}
+
+.score-label {
+  color: #c9d4df;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  font-size: 12px;
+}
+
+.score-value {
+  color: #ffe56a;
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow:
+    0 0 12px rgba(255, 229, 106, 0.45),
+    0 0 3px rgba(255, 210, 80, 0.9);
+}
+
+.score-bursts {
+  position: absolute;
+  left: 50%;
+  top: 54px;
+  width: 0;
+  height: 0;
+}
+
+.score-burst {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, 0);
+  white-space: nowrap;
+}
+
+.score-burst-world {
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  will-change: transform, opacity;
+  animation-name: score-pop;
+  animation-timing-function: cubic-bezier(0.18, 0.72, 0.2, 1);
+  animation-fill-mode: both;
+}
+
+@keyframes score-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(0.24rem) scale(0.78);
+  }
+  14% {
+    opacity: 1;
+    transform: translateY(-0.06rem) scale(1.2);
+  }
+  58% {
+    opacity: 1;
+    transform: translateY(-0.42rem) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-0.82rem) scale(0.96);
+  }
 }
 
 @media (max-width: 520px) {
@@ -183,6 +255,10 @@ canvas {
   }
 
   .score {
-    font-size: 18px;
+    padding: 8px 12px;
+  }
+
+  .score-value {
+    font-size: 26px;
   }
 }
