@@ -17,6 +17,78 @@ const EDGE_TRIGGER_PX = 14
 const CAMERA_DRAG_SENSITIVITY = 0.007
 const SHOW_FLOOR_GRID = false
 const GOAL_POINTS = 10
+const SKIN_STORAGE_KEY = 'lab_ball_skins_v1'
+const SKIN_STATION_POSITION = { x: -3.5, y: 0.35, z: 1.8 }
+const ENV_STATION_POSITION = { x: 3.5, y: 0.35, z: 1.8 }
+const MAIN_ROOM = { width: 10, depth: 10, height: 5 }
+const FRONT_WALL = { zVisual: 5.05, zCollider: 5.1, thickness: 0.1 }
+const DRAGON_OPENING = { centerX: 0, width: 6, bottomY: 0, height: 3.8 }
+const WALL_REPEAT_X_PER_UNIT = 3.4 / 12
+const WALL_REPEAT_Y_PER_UNIT = 1.9 / 5
+
+const ballSkins = [
+  { id: 'classic', name: 'Classique', price: 0, texture: '/models/ball/textures/ballon-classique.png', defaultUnlocked: true },
+  { id: 'moon', name: 'Lune', price: 100, texture: '/models/ball/textures/ballon-lune.png' },
+  { id: 'mars', name: 'Mars', price: 210, texture: '/models/ball/textures/ballon-mars.png' },
+  { id: 'earth', name: 'Terre', price: 300, texture: '/models/ball/textures/ballon-terre.png' },
+  { id: 'planet-x', name: 'Planete X', price: 150, texture: '/models/ball/textures/ballon-planete-x.png' },
+]
+
+const floorSkins = [
+  {
+    id: 'floor-classic',
+    name: 'Parquet Classique',
+    price: 0,
+    texture: '/textures/wood/parquet-color.png',
+    defaultUnlocked: true,
+  },
+  {
+    id: 'floor-beton',
+    name: 'Beton',
+    price: 130,
+    texture: '/textures/environment/floors/sol-beton.png',
+  },
+  {
+    id: 'floor-parquet-loft',
+    name: 'Parquet Loft',
+    price: 190,
+    texture: '/textures/environment/floors/sol-parquet-01.png',
+  },
+  {
+    id: 'floor-parquet-clair',
+    name: 'Parquet Clair',
+    price: 250,
+    texture: '/textures/environment/floors/sol-parquet-02.png',
+  },
+  {
+    id: 'floor-tomette',
+    name: 'Tomette',
+    price: 320,
+    texture: '/textures/environment/floors/sol-tomette.png',
+  },
+]
+
+const wallSkins = [
+  {
+    id: 'wall-classic',
+    name: 'Peinture Blanche',
+    price: 0,
+    texture: '/textures/environment/walls/mur-paint.png',
+    defaultUnlocked: true,
+  },
+  {
+    id: 'wall-brique-02',
+    name: 'Brique 02',
+    price: 140,
+    texture: '/textures/environment/walls/mur-brique-02.png',
+  },
+  {
+    id: 'wall-briques-01',
+    name: 'Briques 01',
+    price: 210,
+    texture: '/textures/environment/walls/mur-briques-01.png',
+  },
+]
 
 function dampAngle(current, target, damping, delta) {
   let diff = (target - current + Math.PI) % (Math.PI * 2)
@@ -47,6 +119,61 @@ function collidesWithGoalFrame(nextX, nextY, nextZ) {
   const hitCrossbar = intersectsAabbSphere(nextX, nextY, nextZ, r, 0, 2, GOAL_Z, 1.58, 0.11, 0.11)
   // Keep only frame collision for player to avoid "phantom blocks" inside the goal volume.
   return hitLeftPost || hitRightPost || hitCrossbar
+}
+
+function getWallOpeningLayout(wallWidth, wallHeight, opening) {
+  const halfWallWidth = wallWidth * 0.5
+  const halfOpeningWidth = opening.width * 0.5
+  const leftWidth = Math.max(0, halfWallWidth - halfOpeningWidth)
+  const rightWidth = leftWidth
+  const topHeight = Math.max(0, wallHeight - (opening.bottomY + opening.height))
+
+  return {
+    left: {
+      width: leftWidth,
+      x: opening.centerX - halfOpeningWidth - leftWidth * 0.5,
+      y: wallHeight * 0.5,
+      height: wallHeight,
+    },
+    right: {
+      width: rightWidth,
+      x: opening.centerX + halfOpeningWidth + rightWidth * 0.5,
+      y: wallHeight * 0.5,
+      height: wallHeight,
+    },
+    top: {
+      width: opening.width,
+      x: opening.centerX,
+      y: opening.bottomY + opening.height + topHeight * 0.5,
+      height: topHeight,
+    },
+  }
+}
+
+function WallPanel({ texture, uvWidth, uvHeight, position, geometryArgs }) {
+  const panelTexture = useMemo(() => {
+    const next = texture.clone()
+    next.wrapS = RepeatWrapping
+    next.wrapT = RepeatWrapping
+    next.repeat.set(
+      Math.max(0.01, uvWidth * WALL_REPEAT_X_PER_UNIT),
+      Math.max(0.01, uvHeight * WALL_REPEAT_Y_PER_UNIT),
+    )
+    next.colorSpace = SRGBColorSpace
+    next.needsUpdate = true
+    return next
+  }, [texture, uvWidth, uvHeight])
+
+  useEffect(() => {
+    return () => panelTexture.dispose()
+  }, [panelTexture])
+
+  return (
+    <mesh position={position}>
+      <boxGeometry args={geometryArgs} />
+      <meshStandardMaterial map={panelTexture} color="#e6edf6" side={BackSide} />
+    </mesh>
+  )
 }
 
 function useKeyboardInput() {
@@ -94,12 +221,30 @@ function useKeyboardInput() {
   return keysRef
 }
 
-function WhiteRoom() {
-  const floorColorMap = useTexture('/textures/wood/parquet-color.png')
+function WhiteRoom({ floorTexturePath, wallTexturePath }) {
+  const floorColorMap = useTexture(floorTexturePath)
+  const wallColorMap = useTexture(wallTexturePath)
   floorColorMap.wrapS = RepeatWrapping
   floorColorMap.wrapT = RepeatWrapping
   floorColorMap.repeat.set(3.2, 3.2)
   floorColorMap.colorSpace = SRGBColorSpace
+  wallColorMap.wrapS = RepeatWrapping
+  wallColorMap.wrapT = RepeatWrapping
+  wallColorMap.colorSpace = SRGBColorSpace
+  const ceilingTexture = useMemo(() => {
+    const next = wallColorMap.clone()
+    next.wrapS = RepeatWrapping
+    next.wrapT = RepeatWrapping
+    next.repeat.set(
+      Math.max(0.01, MAIN_ROOM.width * WALL_REPEAT_X_PER_UNIT),
+      Math.max(0.01, MAIN_ROOM.depth * WALL_REPEAT_X_PER_UNIT),
+    )
+    next.colorSpace = SRGBColorSpace
+    next.needsUpdate = true
+    return next
+  }, [wallColorMap])
+  useEffect(() => () => ceilingTexture.dispose(), [ceilingTexture])
+  const frontWall = getWallOpeningLayout(MAIN_ROOM.width, MAIN_ROOM.height, DRAGON_OPENING)
 
   return (
     <>
@@ -110,33 +255,51 @@ function WhiteRoom() {
       <hemisphereLight args={['#f7fbff', '#d8dee9', 0.7]} />
       <directionalLight position={[4, 7, 5]} intensity={1.15} color="#ffffff" />
 
-      <mesh position={[-5.05, 2.5, 0]}>
-        <boxGeometry args={[0.1, 5, 12]} />
-        <meshStandardMaterial color="#f8fafc" side={BackSide} />
-      </mesh>
-      <mesh position={[5.05, 2.5, 0]}>
-        <boxGeometry args={[0.1, 5, 12]} />
-        <meshStandardMaterial color="#f8fafc" side={BackSide} />
-      </mesh>
-      <mesh position={[0, 2.5, -5.05]}>
-        <boxGeometry args={[12, 5, 0.1]} />
-        <meshStandardMaterial color="#f8fafc" side={BackSide} />
-      </mesh>
-      <mesh position={[-4.5, 2.5, 5.05]}>
-        <boxGeometry args={[3, 5, 0.1]} />
-        <meshStandardMaterial color="#f8fafc" side={BackSide} />
-      </mesh>
-      <mesh position={[4.5, 2.5, 5.05]}>
-        <boxGeometry args={[3, 5, 0.1]} />
-        <meshStandardMaterial color="#f8fafc" side={BackSide} />
-      </mesh>
-      <mesh position={[0, 3.88, 5.05]}>
-        <boxGeometry args={[6, 2.24, 0.1]} />
-        <meshStandardMaterial color="#f8fafc" side={BackSide} />
-      </mesh>
+      <WallPanel
+        texture={wallColorMap}
+        uvWidth={MAIN_ROOM.depth}
+        uvHeight={5}
+        position={[-5.05, 2.5, 0]}
+        geometryArgs={[0.1, 5, MAIN_ROOM.depth]}
+      />
+      <WallPanel
+        texture={wallColorMap}
+        uvWidth={MAIN_ROOM.depth}
+        uvHeight={5}
+        position={[5.05, 2.5, 0]}
+        geometryArgs={[0.1, 5, MAIN_ROOM.depth]}
+      />
+      <WallPanel
+        texture={wallColorMap}
+        uvWidth={MAIN_ROOM.width}
+        uvHeight={5}
+        position={[0, 2.5, -5.05]}
+        geometryArgs={[MAIN_ROOM.width, 5, 0.1]}
+      />
+      <WallPanel
+        texture={wallColorMap}
+        uvWidth={frontWall.left.width}
+        uvHeight={frontWall.left.height}
+        position={[frontWall.left.x, frontWall.left.y, FRONT_WALL.zVisual]}
+        geometryArgs={[frontWall.left.width, frontWall.left.height, FRONT_WALL.thickness]}
+      />
+      <WallPanel
+        texture={wallColorMap}
+        uvWidth={frontWall.right.width}
+        uvHeight={frontWall.right.height}
+        position={[frontWall.right.x, frontWall.right.y, FRONT_WALL.zVisual]}
+        geometryArgs={[frontWall.right.width, frontWall.right.height, FRONT_WALL.thickness]}
+      />
+      <WallPanel
+        texture={wallColorMap}
+        uvWidth={frontWall.top.width}
+        uvHeight={frontWall.top.height}
+        position={[frontWall.top.x, frontWall.top.y, FRONT_WALL.zVisual]}
+        geometryArgs={[frontWall.top.width, frontWall.top.height, FRONT_WALL.thickness]}
+      />
       <mesh position={[0, 4.98, 0]}>
-        <boxGeometry args={[12, 0.1, 12]} />
-        <meshStandardMaterial color="#f8fafc" side={BackSide} />
+        <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
+        <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
@@ -155,26 +318,23 @@ function WhiteRoom() {
         visible={SHOW_FLOOR_GRID}
       />
 
-      <mesh position={[0, 2.48, -4.9]}>
-        <boxGeometry args={[7, 0.08, 0.08]} />
-        <meshStandardMaterial color="#dce3eb" emissive="#dce3eb" emissiveIntensity={0.25} />
-      </mesh>
-
       <Environment preset="city" />
     </>
   )
 }
 
 function PhysicsBounds() {
+  const frontWall = getWallOpeningLayout(MAIN_ROOM.width, MAIN_ROOM.height, DRAGON_OPENING)
+
   return (
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
       <CuboidCollider args={[0.1, 2.4, 5]} position={[-5.1, 2.2, 0]} />
       <CuboidCollider args={[0.1, 2.4, 5]} position={[5.1, 2.2, 0]} />
       <CuboidCollider args={[5, 2.4, 0.1]} position={[0, 2.2, -5.1]} />
-      <CuboidCollider args={[1, 2.4, 0.1]} position={[-4, 2.2, 5.1]} />
-      <CuboidCollider args={[1, 2.4, 0.1]} position={[4, 2.2, 5.1]} />
-      <CuboidCollider args={[3, 0.7, 0.1]} position={[0, 3.9, 5.1]} />
+      <CuboidCollider args={[frontWall.left.width * 0.5, frontWall.left.height * 0.5, 0.1]} position={[frontWall.left.x, frontWall.left.y, FRONT_WALL.zCollider]} />
+      <CuboidCollider args={[frontWall.right.width * 0.5, frontWall.right.height * 0.5, 0.1]} position={[frontWall.right.x, frontWall.right.y, FRONT_WALL.zCollider]} />
+      <CuboidCollider args={[frontWall.top.width * 0.5, frontWall.top.height * 0.5, 0.1]} position={[frontWall.top.x, frontWall.top.y, FRONT_WALL.zCollider]} />
     </RigidBody>
   )
 }
@@ -249,8 +409,10 @@ function GlassContainmentColliders() {
   )
 }
 
-function Ball({ ballRef }) {
+function Ball({ ballRef, skinTexturePath }) {
   const ballSkin = useGLTF('/models/ball/ballon.glb')
+  const skinTexture = useTexture(skinTexturePath)
+  skinTexture.colorSpace = SRGBColorSpace
   const visual = useMemo(() => {
     const candidates = []
 
@@ -282,12 +444,16 @@ function Ball({ ballRef }) {
 
     geometry.translate(-center.x, -center.y, -center.z)
 
+    const material = picked.material.clone()
+    material.map = skinTexture
+    material.needsUpdate = true
+
     return {
       geometry,
-      material: picked.material.clone(),
+      material,
       scale: (BALL_RADIUS * 2) / maxSide,
     }
-  }, [ballSkin.scene])
+  }, [ballSkin.scene, skinTexture])
 
   return (
     <RigidBody
@@ -1067,12 +1233,212 @@ function ControlsOverlay({ touchRef }) {
   )
 }
 
-function ScoreOverlay({ score }) {
+function CoinsOverlay({ coins }) {
   return (
     <div className="score-wrap">
       <div className="score">
-        <span className="score-label">Score</span>
-        <span className="score-value">{score}</span>
+        <img className="score-coin-icon" src="/ui/coins.png" alt="Pieces" />
+        <span className="score-value">{coins}</span>
+      </div>
+    </div>
+  )
+}
+
+function SkinStation() {
+  return (
+    <group position={[SKIN_STATION_POSITION.x, SKIN_STATION_POSITION.y, SKIN_STATION_POSITION.z]}>
+      <mesh position={[0, -0.32, 0]}>
+        <cylinderGeometry args={[0.6, 0.6, 0.16, 20]} />
+        <meshStandardMaterial color="#d7dde5" />
+      </mesh>
+    </group>
+  )
+}
+
+function EnvironmentStation() {
+  return (
+    <group position={[ENV_STATION_POSITION.x, ENV_STATION_POSITION.y, ENV_STATION_POSITION.z]}>
+      <mesh position={[0, -0.32, 0]}>
+        <cylinderGeometry args={[0.6, 0.6, 0.16, 20]} />
+        <meshStandardMaterial color="#d0d8e3" />
+      </mesh>
+    </group>
+  )
+}
+
+function SkinStationTrigger({ playerPositionRef, onNearChange }) {
+  const wasNearRef = useRef(false)
+
+  useFrame(() => {
+    const p = playerPositionRef.current
+    const d = Math.hypot(p.x - SKIN_STATION_POSITION.x, p.z - SKIN_STATION_POSITION.z)
+    const near = d < 1.45
+    if (near !== wasNearRef.current) {
+      wasNearRef.current = near
+      onNearChange(near)
+    }
+  })
+
+  return null
+}
+
+function EnvironmentStationTrigger({ playerPositionRef, onNearChange }) {
+  const wasNearRef = useRef(false)
+
+  useFrame(() => {
+    const p = playerPositionRef.current
+    const d = Math.hypot(p.x - ENV_STATION_POSITION.x, p.z - ENV_STATION_POSITION.z)
+    const near = d < 1.45
+    if (near !== wasNearRef.current) {
+      wasNearRef.current = near
+      onNearChange(near)
+    }
+  })
+
+  return null
+}
+
+function SkinMenu({
+  open,
+  coins,
+  skins,
+  previewIndex,
+  selectedSkinId,
+  ownedSkinIds,
+  onClose,
+  onPrevious,
+  onNext,
+  onBuy,
+  onSelect,
+}) {
+  if (!open) return null
+
+  const skin = skins[previewIndex]
+  const isOwned = ownedSkinIds.includes(skin.id)
+  const isSelected = selectedSkinId === skin.id
+  const canBuy = coins >= skin.price
+
+  return (
+    <div className="skin-menu-overlay">
+      <div className="skin-menu">
+        <div className="skin-coins">
+          <img src="/ui/coins.png" alt="" aria-hidden="true" />
+          <span>{coins} pieces</span>
+        </div>
+        <div className="skin-title">{skin.name}</div>
+        <div className="skin-preview-wrap">
+          <div
+            className="skin-preview-ball"
+            style={{ backgroundImage: `url(${skin.texture})` }}
+          />
+        </div>
+        <div className="skin-nav">
+          <button type="button" onClick={onPrevious} className="skin-nav-btn">{'<'}</button>
+          <button type="button" onClick={onNext} className="skin-nav-btn">{'>'}</button>
+        </div>
+        {!isOwned && (
+          <button
+            type="button"
+            className="skin-action-btn"
+            onClick={onBuy}
+            disabled={!canBuy}
+          >
+            Acheter - {skin.price}
+          </button>
+        )}
+        {isOwned && !isSelected && (
+          <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
+        )}
+        {isOwned && isSelected && <div className="skin-equipped">Equipe</div>}
+        <button type="button" className="skin-close-btn" onClick={onClose}>Fermer</button>
+      </div>
+    </div>
+  )
+}
+
+function EnvironmentMenu({
+  open,
+  coins,
+  activeTab,
+  onTabChange,
+  floorSkins,
+  wallSkins,
+  previewFloorIndex,
+  previewWallIndex,
+  selectedFloorSkinId,
+  selectedWallSkinId,
+  ownedFloorSkinIds,
+  ownedWallSkinIds,
+  onClose,
+  onPrevious,
+  onNext,
+  onBuy,
+  onSelect,
+}) {
+  if (!open) return null
+
+  const isFloorTab = activeTab === 'floor'
+  const skins = isFloorTab ? floorSkins : wallSkins
+  const previewIndex = isFloorTab ? previewFloorIndex : previewWallIndex
+  const selectedSkinId = isFloorTab ? selectedFloorSkinId : selectedWallSkinId
+  const ownedSkinIds = isFloorTab ? ownedFloorSkinIds : ownedWallSkinIds
+  const skin = skins[previewIndex]
+  const isOwned = ownedSkinIds.includes(skin.id)
+  const isSelected = selectedSkinId === skin.id
+  const canBuy = coins >= skin.price
+
+  return (
+    <div className="skin-menu-overlay">
+      <div className="skin-menu">
+        <div className="skin-coins">
+          <img src="/ui/coins.png" alt="" aria-hidden="true" />
+          <span>{coins} pieces</span>
+        </div>
+        <div className="env-tabs">
+          <button
+            type="button"
+            className={`env-tab-btn ${isFloorTab ? 'active' : ''}`}
+            onClick={() => onTabChange('floor')}
+          >
+            Sol
+          </button>
+          <button
+            type="button"
+            className={`env-tab-btn ${!isFloorTab ? 'active' : ''}`}
+            onClick={() => onTabChange('wall')}
+          >
+            Mur
+          </button>
+        </div>
+        <div className="skin-title">{skin.name}</div>
+        <div className="env-preview-wrap">
+          <div
+            className="env-preview-wall"
+            style={{
+              backgroundImage: `url(${isFloorTab ? wallSkins[previewWallIndex].texture : skin.texture})`,
+            }}
+          />
+          <div
+            className="env-preview-floor"
+            style={{
+              backgroundImage: `url(${isFloorTab ? skin.texture : floorSkins[previewFloorIndex].texture})`,
+            }}
+          />
+        </div>
+        <div className="skin-nav">
+          <button type="button" onClick={onPrevious} className="skin-nav-btn">{'<'}</button>
+          <button type="button" onClick={onNext} className="skin-nav-btn">{'>'}</button>
+        </div>
+        {!isOwned && (
+          <button type="button" className="skin-action-btn" onClick={onBuy} disabled={!canBuy}>
+            Acheter - {skin.price}
+          </button>
+        )}
+        {isOwned && !isSelected && (
+          <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
+        )}
+        {isOwned && isSelected && <div className="skin-equipped">Equipe</div>}
+        <button type="button" className="skin-close-btn" onClick={onClose}>Fermer</button>
       </div>
     </div>
   )
@@ -1126,6 +1492,15 @@ function ScorePopups({ popups }) {
 }
 
 function App() {
+  const isAdminMode = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      return params.get('mode') === 'admin'
+    } catch {
+      return false
+    }
+  }, [])
+
   const touchRef = useRef({
     moveX: 0,
     moveY: 0,
@@ -1141,8 +1516,66 @@ function App() {
   const scoreCooldownRef = useRef(false)
   const respawnTimerRef = useRef(null)
   const outRespawnCooldownRef = useRef(false)
-  const [score, setScore] = useState(0)
   const [scorePopups, setScorePopups] = useState([])
+  const [coins, setCoins] = useState(isAdminMode ? 10000 : 0)
+  const [ownedSkins, setOwnedSkins] = useState(['classic'])
+  const [selectedSkinId, setSelectedSkinId] = useState('classic')
+  const [previewSkinId, setPreviewSkinId] = useState('classic')
+  const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false)
+  const [isNearSkinStation, setIsNearSkinStation] = useState(false)
+  const [environmentTab, setEnvironmentTab] = useState('floor')
+  const [ownedFloorSkins, setOwnedFloorSkins] = useState(['floor-classic'])
+  const [ownedWallSkins, setOwnedWallSkins] = useState(['wall-classic'])
+  const [selectedFloorSkinId, setSelectedFloorSkinId] = useState('floor-classic')
+  const [selectedWallSkinId, setSelectedWallSkinId] = useState('wall-classic')
+  const [previewFloorSkinId, setPreviewFloorSkinId] = useState('floor-classic')
+  const [previewWallSkinId, setPreviewWallSkinId] = useState('wall-classic')
+  const [isEnvironmentMenuOpen, setIsEnvironmentMenuOpen] = useState(false)
+  const [isNearEnvironmentStation, setIsNearEnvironmentStation] = useState(false)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SKIN_STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      // Economy by mode: normal starts at 0, admin uses test wallet.
+      setCoins(isAdminMode ? 10000 : 0)
+      if (Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setOwnedSkins(parsed.ownedSkins)
+      if (typeof parsed.selectedSkinId === 'string') {
+        setSelectedSkinId(parsed.selectedSkinId)
+        setPreviewSkinId(parsed.selectedSkinId)
+      }
+      if (Array.isArray(parsed.ownedFloorSkins) && parsed.ownedFloorSkins.length) {
+        setOwnedFloorSkins(parsed.ownedFloorSkins)
+      }
+      if (Array.isArray(parsed.ownedWallSkins) && parsed.ownedWallSkins.length) {
+        setOwnedWallSkins(parsed.ownedWallSkins)
+      }
+      if (typeof parsed.selectedFloorSkinId === 'string') {
+        setSelectedFloorSkinId(parsed.selectedFloorSkinId)
+        setPreviewFloorSkinId(parsed.selectedFloorSkinId)
+      }
+      if (typeof parsed.selectedWallSkinId === 'string') {
+        setSelectedWallSkinId(parsed.selectedWallSkinId)
+        setPreviewWallSkinId(parsed.selectedWallSkinId)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(
+      SKIN_STORAGE_KEY,
+      JSON.stringify({
+        coins,
+        ownedSkins,
+        selectedSkinId,
+        ownedFloorSkins,
+        ownedWallSkins,
+        selectedFloorSkinId,
+        selectedWallSkinId,
+      }),
+    )
+  }, [coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1150,6 +1583,12 @@ function App() {
       setScorePopups((previous) => previous.filter((popup) => now < popup.startAt + popup.duration))
     }, 120)
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    const preventContextMenu = (event) => event.preventDefault()
+    window.addEventListener('contextmenu', preventContextMenu)
+    return () => window.removeEventListener('contextmenu', preventContextMenu)
   }, [])
 
   const handleBallRespawn = () => {
@@ -1179,7 +1618,7 @@ function App() {
     if (scoreCooldownRef.current) return
 
     scoreCooldownRef.current = true
-    setScore((current) => current + GOAL_POINTS)
+    setCoins((current) => current + GOAL_POINTS)
 
     const ball = ballRef.current
     const ballPosition = ball?.translation()
@@ -1210,34 +1649,182 @@ function App() {
 
   const handleBallZoneExit = () => {}
 
-  return (
+  const previewIndex = Math.max(0, ballSkins.findIndex((skin) => skin.id === previewSkinId))
+  const activeSkinId = isSkinMenuOpen ? previewSkinId : selectedSkinId
+  const activeSkin = ballSkins.find((skin) => skin.id === activeSkinId) || ballSkins[0]
+  const previewFloorIndex = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
+  const previewWallIndex = Math.max(0, wallSkins.findIndex((skin) => skin.id === previewWallSkinId))
+  const activeFloorSkinId = isEnvironmentMenuOpen ? previewFloorSkinId : selectedFloorSkinId
+  const activeWallSkinId = isEnvironmentMenuOpen ? previewWallSkinId : selectedWallSkinId
+  const activeFloorSkin = floorSkins.find((skin) => skin.id === activeFloorSkinId) || floorSkins[0]
+  const activeWallSkin = wallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
+
+  const openSkinMenu = () => {
+    setPreviewSkinId(selectedSkinId)
+    setIsSkinMenuOpen(true)
+  }
+
+  const closeSkinMenu = () => {
+    setPreviewSkinId(selectedSkinId)
+    setIsSkinMenuOpen(false)
+  }
+  const openEnvironmentMenu = () => {
+    setEnvironmentTab('floor')
+    setPreviewFloorSkinId(selectedFloorSkinId)
+    setPreviewWallSkinId(selectedWallSkinId)
+    setIsEnvironmentMenuOpen(true)
+  }
+  const closeEnvironmentMenu = () => {
+    setPreviewFloorSkinId(selectedFloorSkinId)
+    setPreviewWallSkinId(selectedWallSkinId)
+    setIsEnvironmentMenuOpen(false)
+  }
+
+  const goPreview = (direction) => {
+    const current = Math.max(0, ballSkins.findIndex((skin) => skin.id === previewSkinId))
+    const next = (current + direction + ballSkins.length) % ballSkins.length
+    setPreviewSkinId(ballSkins[next].id)
+  }
+  const goEnvironmentPreview = (direction) => {
+    if (environmentTab === 'floor') {
+      const current = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
+      const next = (current + direction + floorSkins.length) % floorSkins.length
+      setPreviewFloorSkinId(floorSkins[next].id)
+      return
+    }
+    const current = Math.max(0, wallSkins.findIndex((skin) => skin.id === previewWallSkinId))
+    const next = (current + direction + wallSkins.length) % wallSkins.length
+    setPreviewWallSkinId(wallSkins[next].id)
+  }
+
+  const buyPreviewSkin = () => {
+    const skin = ballSkins[previewIndex]
+    if (ownedSkins.includes(skin.id)) return
+    if (coins < skin.price) return
+    setCoins((current) => current - skin.price)
+    setOwnedSkins((current) => [...current, skin.id])
+  }
+
+  const selectPreviewSkin = () => {
+    const skin = ballSkins[previewIndex]
+    if (!ownedSkins.includes(skin.id)) return
+    setSelectedSkinId(skin.id)
+    setIsSkinMenuOpen(false)
+  }
+  const buyPreviewEnvironmentSkin = () => {
+    const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : wallSkins[previewWallIndex]
+    const owned = environmentTab === 'floor' ? ownedFloorSkins : ownedWallSkins
+    if (owned.includes(skin.id)) return
+    if (coins < skin.price) return
+    setCoins((current) => current - skin.price)
+    if (environmentTab === 'floor') {
+      setOwnedFloorSkins((current) => [...current, skin.id])
+    } else {
+      setOwnedWallSkins((current) => [...current, skin.id])
+    }
+  }
+  const selectPreviewEnvironmentSkin = () => {
+    if (environmentTab === 'floor') {
+      const skin = floorSkins[previewFloorIndex]
+      if (!ownedFloorSkins.includes(skin.id)) return
+      setSelectedFloorSkinId(skin.id)
+      return
+    }
+    const skin = wallSkins[previewWallIndex]
+    if (!ownedWallSkins.includes(skin.id)) return
+    setSelectedWallSkinId(skin.id)
+  }
+
+  const gameView = (
     <main className="app">
       <Canvas
         dpr={[1, 1.5]}
         camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 40 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
       >
-        <WhiteRoom />
+        <WhiteRoom
+          floorTexturePath={activeFloorSkin.texture}
+          wallTexturePath={activeWallSkin.texture}
+        />
         <Dragon playerPositionRef={playerPositionRef} />
         <GlassContainmentRoom />
+        <SkinStation />
+        <EnvironmentStation />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
-          <Ball ballRef={ballRef} />
+          <Ball ballRef={ballRef} skinTexturePath={activeSkin.texture} />
           <BallRespawnGuard ballRef={ballRef} onOutOfBounds={handleOutOfBoundsRespawn} />
           <Goal onBallZoneEnter={handleBallZoneEnter} onBallZoneExit={handleBallZoneExit} ballRef={ballRef} />
           <Player touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef} />
+          <SkinStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearSkinStation} />
+          <EnvironmentStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearEnvironmentStation} />
           <ScorePopups popups={scorePopups} />
         </Physics>
       </Canvas>
 
       <ControlsOverlay touchRef={touchRef} />
-      <ScoreOverlay score={score} />
+      <CoinsOverlay coins={coins} />
+      {isNearSkinStation && !isSkinMenuOpen && (
+        <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
+          Personnaliser le ballon
+        </button>
+      )}
+      {isNearEnvironmentStation && !isEnvironmentMenuOpen && (
+        <button className="skin-open-btn skin-open-btn-right" type="button" onClick={openEnvironmentMenu}>
+          Personnaliser sol + murs
+        </button>
+      )}
+      <SkinMenu
+        open={isSkinMenuOpen}
+        coins={coins}
+        skins={ballSkins}
+        previewIndex={previewIndex}
+        selectedSkinId={selectedSkinId}
+        ownedSkinIds={ownedSkins}
+        onClose={closeSkinMenu}
+        onPrevious={() => goPreview(-1)}
+        onNext={() => goPreview(1)}
+        onBuy={buyPreviewSkin}
+        onSelect={selectPreviewSkin}
+      />
+      <EnvironmentMenu
+        open={isEnvironmentMenuOpen}
+        coins={coins}
+        activeTab={environmentTab}
+        onTabChange={setEnvironmentTab}
+        floorSkins={floorSkins}
+        wallSkins={wallSkins}
+        previewFloorIndex={previewFloorIndex}
+        previewWallIndex={previewWallIndex}
+        selectedFloorSkinId={selectedFloorSkinId}
+        selectedWallSkinId={selectedWallSkinId}
+        ownedFloorSkinIds={ownedFloorSkins}
+        ownedWallSkinIds={ownedWallSkins}
+        onClose={closeEnvironmentMenu}
+        onPrevious={() => goEnvironmentPreview(-1)}
+        onNext={() => goEnvironmentPreview(1)}
+        onBuy={buyPreviewEnvironmentSkin}
+        onSelect={selectPreviewEnvironmentSkin}
+      />
     </main>
   )
+
+  if (isAdminMode) {
+    return (
+      <div className="admin-viewport">
+        <div className="admin-frame">{gameView}</div>
+      </div>
+    )
+  }
+
+  return gameView
 }
 
 export default App
 
 useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
+ballSkins.forEach((skin) => useTexture.preload(skin.texture))
+floorSkins.forEach((skin) => useTexture.preload(skin.texture))
+wallSkins.forEach((skin) => useTexture.preload(skin.texture))
