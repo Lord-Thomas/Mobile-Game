@@ -141,6 +141,139 @@ canvas {
   pointer-events: none;
 }
 
+.emote-radial {
+  position: absolute;
+  z-index: 4;
+  width: 220px;
+  height: 150px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: emote-radial-in 130ms cubic-bezier(0.18, 0.82, 0.2, 1) both;
+}
+
+.emote-radial::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 190px;
+  height: 118px;
+  transform: translate(-50%, -92%);
+  border-radius: 104px 104px 20px 20px;
+  border: 1px solid rgba(230, 244, 255, 0.2);
+  background:
+    radial-gradient(circle at 50% 100%, rgba(47, 70, 86, 0.08), rgba(13, 20, 28, 0.34) 58%, rgba(13, 20, 28, 0.08) 72%),
+    linear-gradient(to top, rgba(11, 18, 25, 0), rgba(21, 33, 43, 0.48));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 16px 34px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(5px);
+}
+
+.emote-radial::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 64px;
+  transform: translate(-50%, -100%);
+  background: linear-gradient(to top, rgba(92, 199, 255, 0.54), rgba(92, 199, 255, 0));
+}
+
+.emote-choice {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  transform: translate(-50%, -50%) translate(var(--emote-x), var(--emote-y)) scale(0.88);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #f8fbff;
+  background: rgba(13, 20, 28, 0.58);
+  border: 1px solid rgba(245, 250, 255, 0.24);
+  box-shadow:
+    inset 0 0 18px rgba(105, 198, 255, 0.12),
+    0 8px 22px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  animation: emote-choice-in 140ms cubic-bezier(0.18, 0.82, 0.2, 1) 35ms both;
+  transition:
+    background 70ms ease,
+    border-color 70ms ease,
+    box-shadow 70ms ease,
+    color 70ms ease,
+    transform 70ms ease;
+}
+
+.emote-choice.active {
+  background: rgba(63, 188, 255, 0.95);
+  border-color: rgba(245, 252, 255, 0.92);
+  color: #061723;
+  transform: translate(-50%, -50%) translate(var(--emote-x), var(--emote-y)) scale(1.12);
+  box-shadow:
+    0 0 0 6px rgba(72, 190, 255, 0.14),
+    0 0 24px rgba(82, 199, 255, 0.54),
+    0 12px 28px rgba(0, 0, 0, 0.28);
+}
+
+.emote-glyph {
+  font-size: 29px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.emote-deadzone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px dashed rgba(232, 244, 255, 0.22);
+  background: rgba(12, 19, 27, 0.2);
+}
+
+.emote-anchor {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(239, 247, 255, 0.88);
+  box-shadow:
+    0 0 0 8px rgba(70, 186, 255, 0.12),
+    0 0 18px rgba(70, 186, 255, 0.32);
+}
+
+@keyframes emote-radial-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.84);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes emote-choice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.68);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) translate(var(--emote-x), var(--emote-y)) scale(0.88);
+  }
+}
+
 .action-btn {
   position: absolute;
   right: 18px;

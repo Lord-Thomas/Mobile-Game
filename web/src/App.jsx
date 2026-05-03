@@ -1,16 +1,42 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment, Html, useAnimations, useGLTF, useTexture } from '@react-three/drei'
+import { Environment, Html, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
+import { BackSide, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 const ROOM_LIMIT = 4.95
 const GOAL_Z = -3.42
-const BALL_RADIUS = 0.256
+const BALL_RADIUS = 0.138
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
 const PLAYER_CAPSULE_RADIUS = 0.22
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
+const PLAYER_MODEL_SCALE = 0.0129
+const PLAYER_MODEL_VERTICAL_OFFSET = 0.1
+const PLAYER_KICK_DURATION = 1.15
+const PLAYER_KICK_CONTACT_DELAY = 0.43
+const PLAYER_KICK_CONTACT_WINDOW = 0.16
+const PLAYER_KICK_RANGE = 1.05
+const PLAYER_KICK_FRONT_MIN = 0.08
+const PLAYER_KICK_LATERAL_RANGE = 0.55
+const PLAYER_KICK_FOOT_FORWARD_OFFSET = 0.46
+const PLAYER_KICK_FOOT_SIDE_OFFSET = 0.1
+const PLAYER_KICK_FOOT_CONTACT_RADIUS = 0.28
+const PLAYER_JUMP_START_DURATION = 0.62
+const PLAYER_JUMP_LAND_DURATION = 0.38
+const PLAYER_LANDING_PREPARE_DISTANCE = 0.95
+const PLAYER_DEFAULT_ANIMATION_FADE = 0.18
+const PLAYER_LANDING_ANIMATION_FADE = 0.12
+const PLAYER_AIR_ANIMATION_FADE = 0.18
+const PLAYER_JUMP_TO_FALL_ANIMATION_FADE = 0.24
+const PLAYER_WAVE_DURATION = 2.1
+const PLAYER_DANCE_DURATION = 15.97
+const EMOTE_LONG_PRESS_MS = 420
+const EMOTE_CANCEL_DISTANCE = 14
+const EMOTE_MENU_RADIUS = 86
+const EMOTE_MENU_DEADZONE = 26
+const EMOTE_MENU_ARC_START = -Math.PI / 2 - Math.PI / 3
+const EMOTE_MENU_ARC_END = -Math.PI / 2 + Math.PI / 3
 const CAMERA_DISTANCE = 4.6
 const CAMERA_HEIGHT = 1.55
 const EDGE_TRIGGER_PX = 14
@@ -90,6 +116,57 @@ const wallSkins = [
   },
 ]
 
+const emotes = [
+  { id: 'wave', label: 'Salut', glyph: '👋' },
+  { id: 'dance', label: 'Danse', glyph: '♫' },
+]
+
+function getEmoteAngle(index, count) {
+  if (count <= 1) return -Math.PI / 2
+  const t = index / (count - 1)
+  return EMOTE_MENU_ARC_START + t * (EMOTE_MENU_ARC_END - EMOTE_MENU_ARC_START)
+}
+
+function getEmoteSelection(dx, dy) {
+  const distance = Math.hypot(dx, dy)
+  if (distance < EMOTE_MENU_DEADZONE) return null
+
+  if (emotes.length === 1) {
+    return dy < -EMOTE_MENU_DEADZONE ? emotes[0].id : null
+  }
+
+  const angle = Math.atan2(dy, dx)
+  const arcPadding = (EMOTE_MENU_ARC_END - EMOTE_MENU_ARC_START) / Math.max(2, emotes.length - 1) / 2
+  if (angle < EMOTE_MENU_ARC_START - arcPadding || angle > EMOTE_MENU_ARC_END + arcPadding) return null
+
+  let bestIndex = 0
+  let bestDistance = Infinity
+  for (let index = 0; index < emotes.length; index += 1) {
+    const delta = Math.abs(angle - getEmoteAngle(index, emotes.length))
+    if (delta < bestDistance) {
+      bestDistance = delta
+      bestIndex = index
+    }
+  }
+  return emotes[bestIndex].id
+}
+
+function getHipsRestHeight(clip) {
+  const track = clip?.tracks.find((nextTrack) => nextTrack.name === 'mixamorigHips.position')
+  return track ? track.values[1] : null
+}
+
+function lockEmoteHipsHeight(clip, restHeight) {
+  if (restHeight === null) return clip
+  const track = clip.tracks.find((nextTrack) => nextTrack.name === 'mixamorigHips.position')
+  if (!track) return clip
+
+  for (let index = 1; index < track.values.length; index += 3) {
+    track.values[index] = restHeight
+  }
+  return clip
+}
+
 function dampAngle(current, target, damping, delta) {
   let diff = (target - current + Math.PI) % (Math.PI * 2)
   if (diff < 0) diff += Math.PI * 2
@@ -119,6 +196,36 @@ function collidesWithGoalFrame(nextX, nextY, nextZ) {
   const hitCrossbar = intersectsAabbSphere(nextX, nextY, nextZ, r, 0, 2, GOAL_Z, 1.58, 0.11, 0.11)
   // Keep only frame collision for player to avoid "phantom blocks" inside the goal volume.
   return hitLeftPost || hitRightPost || hitCrossbar
+}
+
+function getKickContact({ playerX, playerZ, yaw, ballX, ballZ }) {
+  const forwardX = Math.sin(yaw)
+  const forwardZ = Math.cos(yaw)
+  const rightX = Math.cos(yaw)
+  const rightZ = -Math.sin(yaw)
+  const dx = ballX - playerX
+  const dz = ballZ - playerZ
+  const forwardDistance = dx * forwardX + dz * forwardZ
+  const lateralDistance = dx * rightX + dz * rightZ
+  const footX =
+    playerX +
+    forwardX * PLAYER_KICK_FOOT_FORWARD_OFFSET +
+    rightX * PLAYER_KICK_FOOT_SIDE_OFFSET
+  const footZ =
+    playerZ +
+    forwardZ * PLAYER_KICK_FOOT_FORWARD_OFFSET +
+    rightZ * PLAYER_KICK_FOOT_SIDE_OFFSET
+  const distanceToFoot = Math.hypot(ballX - footX, ballZ - footZ)
+
+  return {
+    forwardX,
+    forwardZ,
+    isInKickArc:
+      forwardDistance > PLAYER_KICK_FRONT_MIN &&
+      forwardDistance < PLAYER_KICK_RANGE &&
+      Math.abs(lateralDistance) < PLAYER_KICK_LATERAL_RANGE,
+    isTouchingFoot: distanceToFoot < PLAYER_KICK_FOOT_CONTACT_RADIUS + BALL_RADIUS,
+  }
 }
 
 function getWallOpeningLayout(wallWidth, wallHeight, opening) {
@@ -858,13 +965,22 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
   const planarVelocityRef = useRef({ x: 0, z: 0 })
   const filteredInputRef = useRef({ x: 0, y: 0 })
   const cameraLookRef = useRef({ x: 0, y: PLAYER_HEIGHT + 0.55, z: 2.2 })
+  const kickUntilRef = useRef(0)
+  const pendingKickRef = useRef(null)
+  const jumpStartUntilRef = useRef(0)
+  const jumpLandUntilRef = useRef(0)
+  const waveUntilRef = useRef(0)
+  const danceUntilRef = useRef(0)
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
+  const wasOnGroundRef = useRef(true)
+  const landingPreparedRef = useRef(false)
+  const [playerMotion, setPlayerMotion] = useState('idle')
   const keyboardRef = useKeyboardInput()
   const { camera } = useThree()
   const { world, rapier } = useRapier()
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!playerBodyRef.current || !visualRef.current) return
 
     const key = keyboardRef.current
@@ -883,11 +999,25 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
       0.35,
     )
 
+    let isEmoting =
+      state.clock.elapsedTime < waveUntilRef.current ||
+      state.clock.elapsedTime < danceUntilRef.current
     const keyboardAxisX = (key.right ? 1 : 0) - (key.left ? 1 : 0)
     const keyboardAxisY = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
+    const controlX = MathUtils.clamp(touch.moveX + keyboardAxisX, -1, 1)
+    const controlY = MathUtils.clamp(touch.moveY + keyboardAxisY, -1, 1)
+    const wantsControlCancel =
+      isEmoting &&
+      (Math.hypot(controlX, controlY) > 0.12 || key.actionQueued || touch.actionQueued)
 
-    const rawX = MathUtils.clamp(touch.moveX + keyboardAxisX, -1, 1)
-    const rawY = MathUtils.clamp(touch.moveY + keyboardAxisY, -1, 1)
+    if (wantsControlCancel) {
+      waveUntilRef.current = 0
+      danceUntilRef.current = 0
+      isEmoting = false
+    }
+
+    const rawX = isEmoting ? 0 : controlX
+    const rawY = isEmoting ? 0 : controlY
     const rawLength = Math.hypot(rawX, rawY)
 
     const moveFilter = 16
@@ -926,7 +1056,8 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
       worldZ /= length
     }
 
-    const speed = 3.2
+    const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
+    const speed = isMoving ? MathUtils.lerp(1.65, 3.4, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) : 0
     const targetVelX = worldX * speed
     const targetVelZ = worldZ * speed
     const planarDamping = 14
@@ -954,33 +1085,70 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
     nextX = MathUtils.clamp(nextX, -ROOM_LIMIT, ROOM_LIMIT)
     nextZ = MathUtils.clamp(nextZ, -ROOM_LIMIT, ROOM_LIMIT)
 
-    const wantsAction = key.actionQueued || touch.actionQueued
-    if (wantsAction) {
+    const wantsEmote = touch.emoteQueued
+    const wantsAction = !isEmoting && (key.actionQueued || touch.actionQueued)
+    if (wantsEmote === 'wave' && onGroundRef.current) {
+      waveUntilRef.current = state.clock.elapsedTime + PLAYER_WAVE_DURATION
+      danceUntilRef.current = 0
+      kickUntilRef.current = 0
+      pendingKickRef.current = null
+      jumpStartUntilRef.current = 0
+      jumpLandUntilRef.current = 0
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
+    } else if (wantsEmote === 'dance' && onGroundRef.current) {
+      danceUntilRef.current = state.clock.elapsedTime + PLAYER_DANCE_DURATION
+      waveUntilRef.current = 0
+      kickUntilRef.current = 0
+      pendingKickRef.current = null
+      jumpStartUntilRef.current = 0
+      jumpLandUntilRef.current = 0
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
+    } else if (wantsAction) {
       const ball = ballRef.current
       if (ball) {
         const ballPos = ball.translation()
-        const dx = ballPos.x - nextX
-        const dz = ballPos.z - nextZ
-        const planarDistance = Math.hypot(dx, dz)
+        const kickContact = getKickContact({
+          playerX: nextX,
+          playerZ: nextZ,
+          yaw: visualRef.current.rotation.y,
+          ballX: ballPos.x,
+          ballZ: ballPos.z,
+        })
 
-        if (planarDistance < 1.4) {
-          const inv = planarDistance > 0.0001 ? 1 / planarDistance : 0
-          ball.applyImpulse(
-            { x: dx * inv * 1.85, y: 0.75, z: dz * inv * 1.85 },
-            true,
-          )
+        if (kickContact.isInKickArc && onGroundRef.current) {
+          const contactAt = state.clock.elapsedTime + PLAYER_KICK_CONTACT_DELAY
+          kickUntilRef.current = state.clock.elapsedTime + PLAYER_KICK_DURATION
+          pendingKickRef.current = {
+            contactAt,
+            expiresAt: contactAt + PLAYER_KICK_CONTACT_WINDOW,
+            fired: false,
+            running: speed > 2.45,
+          }
         } else if (onGroundRef.current) {
           velocityYRef.current = 4.9
           onGroundRef.current = false
+          jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
+          jumpLandUntilRef.current = 0
+          landingPreparedRef.current = false
         }
       } else if (onGroundRef.current) {
         velocityYRef.current = 4.9
         onGroundRef.current = false
+        jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
+        jumpLandUntilRef.current = 0
+        landingPreparedRef.current = false
       }
     }
 
     key.actionQueued = false
     touch.actionQueued = false
+    touch.emoteQueued = null
 
     if (!onGroundRef.current) {
       velocityYRef.current -= 12 * delta
@@ -988,12 +1156,32 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
       velocityYRef.current = 0
     }
     let nextY = onGroundRef.current ? PLAYER_HEIGHT : playerPosRef.current.y + velocityYRef.current * delta
+    const distanceToGround = Math.max(0, nextY - PLAYER_HEIGHT)
+    const shouldPrepareLanding =
+      !onGroundRef.current &&
+      !landingPreparedRef.current &&
+      state.clock.elapsedTime >= jumpStartUntilRef.current &&
+      velocityYRef.current < -1 &&
+      distanceToGround < PLAYER_LANDING_PREPARE_DISTANCE
+
+    if (shouldPrepareLanding) {
+      landingPreparedRef.current = true
+      jumpLandUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_LAND_DURATION
+    }
 
     if (nextY <= PLAYER_HEIGHT) {
       nextY = PLAYER_HEIGHT
       velocityYRef.current = 0
       onGroundRef.current = true
     }
+
+    if (!wasOnGroundRef.current && onGroundRef.current) {
+      if (!landingPreparedRef.current) {
+        jumpLandUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_LAND_DURATION
+      }
+      landingPreparedRef.current = false
+    }
+    wasOnGroundRef.current = onGroundRef.current
 
     if (collidesWithGoalFrame(nextX, nextY, nextZ)) {
       nextX = prevX
@@ -1013,6 +1201,54 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
     if (visualRef.current) {
       visualRef.current.position.set(nextX, nextY, nextZ)
     }
+
+    const pendingKick = pendingKickRef.current
+    if (pendingKick && !pendingKick.fired && state.clock.elapsedTime >= pendingKick.contactAt) {
+      const ball = ballRef.current
+      if (ball && state.clock.elapsedTime <= pendingKick.expiresAt) {
+        const ballPos = ball.translation()
+        const kickContact = getKickContact({
+          playerX: nextX,
+          playerZ: nextZ,
+          yaw: visualRef.current.rotation.y,
+          ballX: ballPos.x,
+          ballZ: ballPos.z,
+        })
+
+        if (kickContact.isInKickArc && kickContact.isTouchingFoot) {
+          const power = pendingKick.running ? 0.22 : 0.17
+          const lift = pendingKick.running ? 0.08 : 0.06
+          ball.applyImpulse(
+            { x: kickContact.forwardX * power, y: lift, z: kickContact.forwardZ * power },
+            true,
+          )
+        }
+      }
+      pendingKick.fired = true
+      pendingKickRef.current = null
+    } else if (pendingKick && state.clock.elapsedTime > pendingKick.expiresAt) {
+      pendingKickRef.current = null
+    }
+
+    const nextMotion =
+      state.clock.elapsedTime < jumpLandUntilRef.current
+        ? 'jumpLand'
+        : !onGroundRef.current && state.clock.elapsedTime < jumpStartUntilRef.current
+          ? 'jumpStart'
+          : !onGroundRef.current
+            ? 'fallingIdle'
+            : state.clock.elapsedTime < waveUntilRef.current
+              ? 'wave'
+              : state.clock.elapsedTime < danceUntilRef.current
+                ? 'dance'
+                : state.clock.elapsedTime < kickUntilRef.current
+                  ? 'kick'
+                  : isMoving
+                    ? speed > 2.45
+                      ? 'run'
+                      : 'walk'
+                    : 'idle'
+    setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
 
     const pitch = touch.cameraPitch
     const horizontalDistance = CAMERA_DISTANCE * Math.cos(pitch)
@@ -1065,20 +1301,127 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
       <group ref={visualRef} position={[0, PLAYER_HEIGHT, 2.2]}>
-        <mesh>
-          <capsuleGeometry args={[0.22, 0.42, 6, 10]} />
-          <meshStandardMaterial color="#27a2ff" roughness={0.5} metalness={0.08} />
-        </mesh>
-        <mesh position={[0, 0.22, 0.22]}>
-          <sphereGeometry args={[0.06, 16, 16]} />
-          <meshStandardMaterial color="#ffffff" />
-        </mesh>
-        <mesh position={[0.11, 0.22, 0.22]}>
-          <sphereGeometry args={[0.06, 16, 16]} />
-          <meshStandardMaterial color="#ffffff" />
-        </mesh>
+        <PlayerAvatar motion={playerMotion} />
       </group>
     </>
+  )
+}
+
+function PlayerAvatar({ motion }) {
+  const model = useFBX('/models/player/player-boy01.fbx')
+  const idle = useFBX('/models/player/player-idle.fbx')
+  const walk = useFBX('/models/player/player-walk.fbx')
+  const run = useFBX('/models/player/player-run.fbx')
+  const kick = useFBX('/models/player/player-kick.fbx')
+  const wave = useFBX('/models/Waving.fbx')
+  const dance = useFBX('/models/Wave Hip Hop Dance.fbx')
+  const jumpStart = useFBX('/models/player/player-jump-start.fbx')
+  const jumpLoop = useFBX('/models/player/player-jump-loop.fbx')
+  const jumpLand = useFBX('/models/player/player-jump-land.fbx')
+  const avatar = useMemo(() => {
+    const next = clone(model)
+    next.visible = false
+    next.traverse((object) => {
+      if (object instanceof Mesh) {
+        object.castShadow = true
+        object.receiveShadow = true
+        object.frustumCulled = false
+      }
+    })
+    return next
+  }, [model])
+
+  const animationClips = useMemo(() => {
+    const hipsRestHeight = getHipsRestHeight(idle.animations[0])
+    const clips = [
+      { source: idle.animations[0], name: 'idle' },
+      { source: walk.animations[0], name: 'walk' },
+      { source: run.animations[0], name: 'run' },
+      { source: kick.animations[0], name: 'kick' },
+      { source: wave.animations[0], name: 'wave' },
+      { source: dance.animations[0], name: 'dance' },
+      { source: jumpStart.animations[0], name: 'jumpStart' },
+      { source: jumpLoop.animations[0], name: 'fallingIdle' },
+      { source: jumpLand.animations[0], name: 'jumpLand' },
+    ]
+
+    return clips
+      .filter(({ source }) => source)
+      .map(({ source, name }) => {
+        const clip = source.clone()
+        clip.name = name
+        if (name === 'wave' || name === 'dance') {
+          lockEmoteHipsHeight(clip, hipsRestHeight)
+        }
+        return clip
+      })
+  }, [idle.animations, walk.animations, run.animations, kick.animations, wave.animations, dance.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations])
+
+  const { actions } = useAnimations(animationClips, avatar)
+  const currentActionRef = useRef(null)
+  const currentMotionRef = useRef(null)
+  const revealFramesRef = useRef(0)
+
+  const playMotion = (nextMotion) => {
+    const nextAction = actions[nextMotion]
+    const previousAction = currentActionRef.current
+    const previousMotion = currentMotionRef.current
+
+    if (!nextAction) return false
+
+    if (previousAction === nextAction) return
+
+    const isOneShot = nextMotion === 'kick' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand'
+    const fadeDuration =
+      previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
+        ? PLAYER_JUMP_TO_FALL_ANIMATION_FADE
+        : nextMotion === 'jumpLand'
+        ? PLAYER_LANDING_ANIMATION_FADE
+        : nextMotion === 'jumpStart' || nextMotion === 'fallingIdle'
+          ? PLAYER_AIR_ANIMATION_FADE
+          : PLAYER_DEFAULT_ANIMATION_FADE
+
+    nextAction
+      .reset()
+      .setLoop(isOneShot ? LoopOnce : LoopRepeat, isOneShot ? 1 : Infinity)
+      .setEffectiveWeight(1)
+      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : 1)
+      .play()
+    nextAction.clampWhenFinished = isOneShot
+
+    if (previousAction) {
+      avatar.visible = true
+      nextAction.crossFadeFrom(previousAction, fadeDuration, false)
+    } else {
+      nextAction.setEffectiveWeight(1)
+      avatar.visible = false
+      revealFramesRef.current = 2
+    }
+
+    currentActionRef.current = nextAction
+    currentMotionRef.current = nextMotion
+    return true
+  }
+
+  useFrame(() => {
+    if (currentMotionRef.current !== motion) {
+      playMotion(motion)
+    }
+
+    if (revealFramesRef.current <= 0) return
+    revealFramesRef.current -= 1
+    if (revealFramesRef.current <= 0 && currentActionRef.current) {
+      avatar.visible = true
+    }
+  })
+
+  return (
+    <primitive
+      object={avatar}
+      position={[0, -PLAYER_HEIGHT + PLAYER_MODEL_VERTICAL_OFFSET, 0]}
+      rotation={[0, 0, 0]}
+      scale={PLAYER_MODEL_SCALE}
+    />
   )
 }
 
@@ -1086,13 +1429,35 @@ function ControlsOverlay({ touchRef }) {
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookLastRef = useRef({ x: 0, y: 0 })
+  const emoteTimerRef = useRef(null)
+  const emotePressRef = useRef({ x: 0, y: 0, cancelled: false })
   const [stickVisual, setStickVisual] = useState({ x: 0, y: 0 })
+  const [emoteMenu, setEmoteMenu] = useState(null)
+  const [activeEmoteId, setActiveEmoteId] = useState(null)
   const [edgeGlow, setEdgeGlow] = useState({
     left: false,
     right: false,
     top: false,
     bottom: false,
   })
+
+  useEffect(() => {
+    return () => {
+      if (emoteTimerRef.current) clearTimeout(emoteTimerRef.current)
+    }
+  }, [])
+
+  const clearEmoteTimer = () => {
+    if (!emoteTimerRef.current) return
+    clearTimeout(emoteTimerRef.current)
+    emoteTimerRef.current = null
+  }
+
+  const closeEmoteMenu = () => {
+    clearEmoteTimer()
+    setEmoteMenu(null)
+    setActiveEmoteId(null)
+  }
 
   const setJoystick = (event) => {
     const zone = event.currentTarget.getBoundingClientRect()
@@ -1140,15 +1505,38 @@ function ControlsOverlay({ touchRef }) {
     lookPointerIdRef.current = event.pointerId
     lookLastRef.current.x = event.clientX
     lookLastRef.current.y = event.clientY
+    emotePressRef.current = { x: event.clientX, y: event.clientY, cancelled: false }
     event.currentTarget.setPointerCapture(event.pointerId)
     touchRef.current.lookActive = true
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
     setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+    clearEmoteTimer()
+    emoteTimerRef.current = window.setTimeout(() => {
+      if (lookPointerIdRef.current !== event.pointerId) return
+      if (emotePressRef.current.cancelled) return
+      touchRef.current.lookActive = false
+      touchRef.current.lookX = 0
+      touchRef.current.lookY = 0
+      setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+      setActiveEmoteId(null)
+      setEmoteMenu({ x: event.clientX, y: event.clientY })
+    }, EMOTE_LONG_PRESS_MS)
   }
 
   const onLookMove = (event) => {
     if (lookPointerIdRef.current !== event.pointerId) return
+    if (emoteMenu) {
+      setActiveEmoteId(getEmoteSelection(event.clientX - emoteMenu.x, event.clientY - emoteMenu.y))
+      return
+    }
+
+    const pressDx = event.clientX - emotePressRef.current.x
+    const pressDy = event.clientY - emotePressRef.current.y
+    if (Math.hypot(pressDx, pressDy) > EMOTE_CANCEL_DISTANCE) {
+      emotePressRef.current.cancelled = true
+      clearEmoteTimer()
+    }
 
     const stepX = event.clientX - lookLastRef.current.x
     const stepY = event.clientY - lookLastRef.current.y
@@ -1182,12 +1570,17 @@ function ControlsOverlay({ touchRef }) {
 
   const onLookUp = (event) => {
     if (lookPointerIdRef.current !== event.pointerId) return
+    const selectedEmoteId = emoteMenu ? activeEmoteId : null
+    closeEmoteMenu()
     lookPointerIdRef.current = null
     touchRef.current.lookActive = false
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
     setEdgeGlow({ left: false, right: false, top: false, bottom: false })
     event.currentTarget.releasePointerCapture(event.pointerId)
+    if (selectedEmoteId) {
+      touchRef.current.emoteQueued = selectedEmoteId
+    }
   }
 
   const triggerAction = () => {
@@ -1207,6 +1600,28 @@ function ControlsOverlay({ touchRef }) {
         <div className={`edge-glow left ${edgeGlow.left ? 'active' : ''}`} />
         <div className={`edge-glow top ${edgeGlow.top ? 'active' : ''}`} />
         <div className={`edge-glow bottom ${edgeGlow.bottom ? 'active' : ''}`} />
+        {emoteMenu && (
+          <div
+            className="emote-radial"
+            style={{ left: emoteMenu.x, top: emoteMenu.y }}
+          >
+            {emotes.map((emote, index) => (
+              <div
+                key={emote.id}
+                className={`emote-choice ${activeEmoteId === emote.id ? 'active' : ''}`}
+                style={{
+                  '--emote-x': `${Math.cos(getEmoteAngle(index, emotes.length)) * EMOTE_MENU_RADIUS}px`,
+                  '--emote-y': `${Math.sin(getEmoteAngle(index, emotes.length)) * EMOTE_MENU_RADIUS}px`,
+                }}
+                aria-label={emote.label}
+              >
+                <span className="emote-glyph">{emote.glyph}</span>
+              </div>
+            ))}
+            <div className="emote-deadzone" />
+            <div className="emote-anchor" />
+          </div>
+        )}
       </div>
 
       <div className="joystick-wrap">
@@ -1510,6 +1925,7 @@ function App() {
     lookY: 0,
     lookActive: false,
     actionQueued: false,
+    emoteQueued: null,
   })
   const ballRef = useRef()
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
@@ -1825,6 +2241,16 @@ export default App
 
 useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
+useFBX.preload('/models/player/player-boy01.fbx')
+useFBX.preload('/models/player/player-idle.fbx')
+useFBX.preload('/models/player/player-walk.fbx')
+useFBX.preload('/models/player/player-run.fbx')
+useFBX.preload('/models/player/player-kick.fbx')
+useFBX.preload('/models/Waving.fbx')
+useFBX.preload('/models/Wave Hip Hop Dance.fbx')
+useFBX.preload('/models/player/player-jump-start.fbx')
+useFBX.preload('/models/player/player-jump-loop.fbx')
+useFBX.preload('/models/player/player-jump-land.fbx')
 ballSkins.forEach((skin) => useTexture.preload(skin.texture))
 floorSkins.forEach((skin) => useTexture.preload(skin.texture))
 wallSkins.forEach((skin) => useTexture.preload(skin.texture))
