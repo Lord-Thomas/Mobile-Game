@@ -4,6 +4,7 @@ import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useR
 import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 
 const ROOM_LIMIT = 4.95
 const GOAL_Z = -3.42
@@ -1812,13 +1813,21 @@ function App() {
 
   if (isAdminMode) {
     return (
-      <div className="admin-viewport">
-        <div className="admin-frame">{gameView}</div>
-      </div>
+      <>
+        <div className="admin-viewport">
+          <div className="admin-frame">{gameView}</div>
+        </div>
+        <Analytics />
+      </>
     )
   }
 
-  return gameView
+  return (
+    <>
+      {gameView}
+      <Analytics />
+    </>
+  )
 }
 
 export default App
