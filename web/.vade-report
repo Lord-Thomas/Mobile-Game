@@ -1,0 +1,50 @@
+# Vercel Web Analytics Installation Report
+
+## Summary
+Successfully installed and configured Vercel Web Analytics for this React + Vite project following the latest official documentation from https://vercel.com/docs/analytics/quickstart.
+
+## Changes Made
+
+### 1. Installed @vercel/analytics Package
+- Added `@vercel/analytics` version 2.0.1 to project dependencies
+- Used npm to install the package (matching the project's package manager)
+- Updated package-lock.json to reflect the new dependency
+
+### 2. Integrated Analytics Component
+Modified `/web/src/App.jsx`:
+- Added import: `import { Analytics } from '@vercel/analytics/react'`
+- Added `<Analytics />` component to both return paths:
+  - Added to the admin mode viewport (wrapped in fragment)
+  - Added to the normal game view (wrapped in fragment)
+- Used React fragments (`<>...</>`) to avoid adding extra DOM elements
+
+### 3. Framework-Specific Implementation
+This project uses React with Vite, so I followed the React/Create React App instructions from the official documentation:
+- Used `@vercel/analytics/react` import path (React-specific)
+- Added the `<Analytics />` component at the root level of the App component
+- Preserved all existing code structure and functionality
+
+### 4. Verification Steps Completed
+✅ Build test passed - Project builds successfully with no errors
+✅ Linter check - No new linting errors introduced by Analytics integration
+✅ Dependencies updated - package.json and package-lock.json properly updated
+✅ Code review - All changes maintain existing code patterns and structure
+
+## Files Modified
+- `/web/package.json` - Added @vercel/analytics dependency
+- `/web/package-lock.json` - Updated with new dependency tree
+- `/web/src/App.jsx` - Added Analytics import and component
+
+## Next Steps
+After deployment to Vercel:
+1. Enable Analytics in the Vercel dashboard for this project
+2. Analytics will start tracking page views automatically
+3. Data will be available in the Vercel Analytics dashboard after users visit the site
+4. Monitor browser network requests for `/_vercel/insights/*` to verify proper integration
+
+## Implementation Notes
+- The Analytics component is lightweight and won't impact performance
+- It's placed at the root level to track all navigation within the app
+- Both admin mode and normal mode are covered by the Analytics integration
+- No configuration options were needed - the component works with default settings
+- The integration follows Vercel's recommended best practices for React applications
