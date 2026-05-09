@@ -1,9 +1,13 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment, Html, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
+import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
+import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
+import { isSupabaseConfigured } from './lib/supabase'
+import { addPlayerCoins, getCurrentUser, loadPlayerProgress, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
+import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 
 const ROOM_LIMIT = 4.95
 const GOAL_Z = -3.42
@@ -13,6 +17,10 @@ const PLAYER_CAPSULE_RADIUS = 0.22
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
 const PLAYER_MODEL_SCALE = 0.0129
 const PLAYER_MODEL_VERTICAL_OFFSET = 0.1
+const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
+const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
+const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
+const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
 const PLAYER_KICK_CONTACT_DELAY = 0.43
 const PLAYER_KICK_CONTACT_WINDOW = 0.16
@@ -31,6 +39,11 @@ const PLAYER_AIR_ANIMATION_FADE = 0.18
 const PLAYER_JUMP_TO_FALL_ANIMATION_FADE = 0.24
 const PLAYER_WAVE_DURATION = 2.1
 const PLAYER_DANCE_DURATION = 15.97
+const PLAYER_POINTING_UP_DURATION = 2.4
+const PLAYER_SIT_DOWN_DURATION = 1.05
+const PLAYER_STAND_UP_DURATION = 1.05
+const PLAYER_SITTING_HEIGHT = 0.34
+const SEAT_INTERACTION_DISTANCE = 1.1
 const EMOTE_LONG_PRESS_MS = 420
 const EMOTE_CANCEL_DISTANCE = 14
 const EMOTE_MENU_RADIUS = 86
@@ -38,19 +51,27 @@ const EMOTE_MENU_DEADZONE = 26
 const EMOTE_MENU_ARC_START = -Math.PI / 2 - Math.PI / 3
 const EMOTE_MENU_ARC_END = -Math.PI / 2 + Math.PI / 3
 const CAMERA_DISTANCE = 4.6
+const CAMERA_MIN_DISTANCE = 0.85
+const CAMERA_MAX_DISTANCE = 8.5
 const CAMERA_HEIGHT = 1.55
 const EDGE_TRIGGER_PX = 14
 const CAMERA_DRAG_SENSITIVITY = 0.007
+const CAMERA_WHEEL_ZOOM_SENSITIVITY = 0.0025
 const SHOW_FLOOR_GRID = false
 const GOAL_POINTS = 10
 const SKIN_STORAGE_KEY = 'lab_ball_skins_v1'
+const LEGACY_STARTER_FURNITURE_IDS = new Set(['sofa_01', 'desk_01', 'office_chair_01', 'plant_01'])
 const SKIN_STATION_POSITION = { x: -3.5, y: 0.35, z: 1.8 }
 const ENV_STATION_POSITION = { x: 3.5, y: 0.35, z: 1.8 }
+const CUSTOM_STATION_POSITION = { x: 0, y: 0.35, z: 3.55 }
+const CUSTOM_ROOM_BOUNDS = { minX: -4.25, maxX: 4.25, minZ: -4.25, maxZ: 4.25 }
+const CUSTOM_GRID_SIZE = 0.25
 const MAIN_ROOM = { width: 10, depth: 10, height: 5 }
 const FRONT_WALL = { zVisual: 5.05, zCollider: 5.1, thickness: 0.1 }
 const DRAGON_OPENING = { centerX: 0, width: 6, bottomY: 0, height: 3.8 }
 const WALL_REPEAT_X_PER_UNIT = 3.4 / 12
 const WALL_REPEAT_Y_PER_UNIT = 1.9 / 5
+const DEFAULT_CEILING_TEXTURE = '/textures/environment/walls/mur-paint.png'
 
 const ballSkins = [
   { id: 'classic', name: 'Classique', price: 0, texture: '/models/ball/textures/ballon-classique.png', defaultUnlocked: true },
@@ -71,26 +92,62 @@ const floorSkins = [
   {
     id: 'floor-beton',
     name: 'Beton',
-    price: 130,
+    price: 65,
     texture: '/textures/environment/floors/sol-beton.png',
   },
   {
     id: 'floor-parquet-loft',
     name: 'Parquet Loft',
-    price: 190,
+    price: 95,
     texture: '/textures/environment/floors/sol-parquet-01.png',
   },
   {
     id: 'floor-parquet-clair',
     name: 'Parquet Clair',
-    price: 250,
+    price: 125,
     texture: '/textures/environment/floors/sol-parquet-02.png',
   },
   {
     id: 'floor-tomette',
     name: 'Tomette',
-    price: 320,
+    price: 160,
     texture: '/textures/environment/floors/sol-tomette.png',
+  },
+  {
+    id: 'floor-damier-doux',
+    name: 'Damier Doux',
+    price: 65,
+    texture: '/textures/environment/floors/sol-damier-doux.png',
+  },
+  {
+    id: 'floor-carreaux-retro',
+    name: 'Carreaux Retro',
+    price: 95,
+    texture: '/textures/environment/floors/sol-carreaux-retro.png',
+  },
+  {
+    id: 'floor-chevron-beurre',
+    name: 'Chevron Beurre',
+    price: 125,
+    texture: '/textures/environment/floors/sol-chevron-beurre.png',
+  },
+  {
+    id: 'floor-peinture-blanche',
+    name: 'Peinture Blanche',
+    price: 50,
+    texture: '/textures/environment/walls/mur-paint.png',
+  },
+  {
+    id: 'floor-brun-mat',
+    name: 'Brun Mat',
+    price: 70,
+    texture: '/textures/environment/walls/mur-brun-mat.png',
+  },
+  {
+    id: 'floor-stuc-beige-doux',
+    name: 'Stuc Beige Doux',
+    price: 105,
+    texture: '/textures/environment/walls/mur-stuc-beige-doux.png',
   },
 ]
 
@@ -105,14 +162,57 @@ const wallSkins = [
   {
     id: 'wall-brique-02',
     name: 'Brique 02',
-    price: 140,
+    price: 70,
     texture: '/textures/environment/walls/mur-brique-02.png',
   },
   {
     id: 'wall-briques-01',
     name: 'Briques 01',
-    price: 210,
+    price: 105,
     texture: '/textures/environment/walls/mur-briques-01.png',
+  },
+  {
+    id: 'wall-brun-mat',
+    name: 'Brun Mat',
+    price: 70,
+    texture: '/textures/environment/walls/mur-brun-mat.png',
+  },
+  {
+    id: 'wall-stuc-beige-doux',
+    name: 'Stuc Beige Doux',
+    price: 105,
+    texture: '/textures/environment/walls/mur-stuc-beige-doux.png',
+  },
+  {
+    id: 'wall-tomette',
+    name: 'Tomette',
+    price: 160,
+    texture: '/textures/environment/floors/sol-tomette.png',
+  },
+  {
+    id: 'wall-damier-doux',
+    name: 'Damier Doux',
+    price: 65,
+    texture: '/textures/environment/floors/sol-damier-doux.png',
+  },
+  {
+    id: 'wall-carreaux-retro',
+    name: 'Carreaux Retro',
+    price: 95,
+    texture: '/textures/environment/floors/sol-carreaux-retro.png',
+  },
+  {
+    id: 'wall-chevron-beurre',
+    name: 'Chevron Beurre',
+    price: 125,
+    texture: '/textures/environment/floors/sol-chevron-beurre.png',
+  },
+  {
+    id: 'wall-fond-vert',
+    name: 'Fond Vert',
+    price: 0,
+    texture: '/textures/environment/walls/Fond%20Vert.png',
+    adminOnly: true,
   },
 ]
 
@@ -120,6 +220,116 @@ const emotes = [
   { id: 'wave', label: 'Salut', glyph: '👋' },
   { id: 'dance', label: 'Danse', glyph: '♫' },
 ]
+
+function snap(value, gridSize = CUSTOM_GRID_SIZE) {
+  return Math.round(value / gridSize) * gridSize
+}
+
+function clampToCustomRoom(x, z) {
+  return [
+    MathUtils.clamp(x, CUSTOM_ROOM_BOUNDS.minX, CUSTOM_ROOM_BOUNDS.maxX),
+    MathUtils.clamp(z, CUSTOM_ROOM_BOUNDS.minZ, CUSTOM_ROOM_BOUNDS.maxZ),
+  ]
+}
+
+function getRotatedGoalCollider(goalObject, localPosition) {
+  const goalPosition = goalObject?.position ?? [0, 0, GOAL_Z]
+  const rotationY = goalObject?.rotationY ?? 0
+  const cos = Math.cos(rotationY)
+  const sin = Math.sin(rotationY)
+  const [localX, localY, localZ] = localPosition
+
+  return {
+    position: [
+      goalPosition[0] + localX * cos + localZ * sin,
+      goalPosition[1] + localY,
+      goalPosition[2] - localX * sin + localZ * cos,
+    ],
+    rotation: [0, rotationY, 0],
+  }
+}
+
+function transformLocalPoint(object, localPosition) {
+  const rotationY = object?.rotationY ?? 0
+  const cos = Math.cos(rotationY)
+  const sin = Math.sin(rotationY)
+  const [localX, localY, localZ] = localPosition
+  const position = object?.position ?? [0, 0, 0]
+
+  return [
+    position[0] + localX * cos + localZ * sin,
+    position[1] + localY,
+    position[2] - localX * sin + localZ * cos,
+  ]
+}
+
+function getSeatWorldData(object, seat) {
+  const basePosition = transformLocalPoint(object, seat.localPosition)
+  const rotationY = (object.rotationY ?? 0) + (seat.localRotationY ?? 0)
+  const seatedForwardOffset = seat.seatedForwardOffset ?? 0
+  const position = [
+    basePosition[0] + Math.sin(rotationY) * seatedForwardOffset,
+    basePosition[1],
+    basePosition[2] + Math.cos(rotationY) * seatedForwardOffset,
+  ]
+  const standUpForwardOffset = seat.standUpForwardOffset ?? seatedForwardOffset
+  const exitPosition = [
+    basePosition[0] + Math.sin(rotationY) * standUpForwardOffset,
+    basePosition[1],
+    basePosition[2] + Math.cos(rotationY) * standUpForwardOffset,
+  ]
+
+  return {
+    id: seat.id,
+    objectId: object.id,
+    position,
+    exitPosition,
+    rotationY,
+    sittingHeight: PLAYER_SITTING_HEIGHT + basePosition[1],
+  }
+}
+
+function getObjectLabel(object) {
+  const catalogItem = objectCatalog[object.objectId]
+  if (catalogItem?.name) return catalogItem.name
+  if (object.type === 'sofa') return 'Canape'
+  if (object.type === 'goal') return 'Cage'
+  return object.type
+}
+
+function getInventoryCards(objects) {
+  const grouped = {}
+
+  objects
+    .filter((object) => object.canStore)
+    .forEach((object) => {
+      const objectId = object.objectId ?? object.type
+      const catalogItem = objectCatalog[objectId]
+      if (!grouped[objectId]) {
+        grouped[objectId] = {
+          objectId,
+          type: object.type,
+          name: getObjectLabel(object),
+          category: catalogItem?.category ?? 'misc',
+          thumbnail: catalogItem?.thumbnail ?? null,
+          total: 0,
+          stored: 0,
+          placed: 0,
+          storedInstanceId: null,
+        }
+      }
+
+      grouped[objectId].total += 1
+      if (object.status === 'stored') {
+        grouped[objectId].stored += 1
+        grouped[objectId].storedInstanceId = grouped[objectId].storedInstanceId ?? object.id
+      } else {
+        grouped[objectId].placed += 1
+      }
+    })
+
+  return Object.values(grouped)
+}
 
 function getEmoteAngle(index, count) {
   if (count <= 1) return -Math.PI / 2
@@ -167,11 +377,31 @@ function lockEmoteHipsHeight(clip, restHeight) {
   return clip
 }
 
+function lockHipsPlanarPosition(clip) {
+  const track = clip?.tracks.find((nextTrack) => nextTrack.name === 'mixamorigHips.position')
+  if (!track) return clip
+
+  const baseX = track.values[0]
+  const baseZ = track.values[2]
+  for (let index = 0; index < track.values.length; index += 3) {
+    track.values[index] = baseX
+    track.values[index + 2] = baseZ
+  }
+  return clip
+}
+
 function dampAngle(current, target, damping, delta) {
   let diff = (target - current + Math.PI) % (Math.PI * 2)
   if (diff < 0) diff += Math.PI * 2
   diff -= Math.PI
   return current + diff * Math.min(1, damping * delta)
+}
+
+function getKeyboardKey(event) {
+  if (typeof event?.key === 'string') return event.key.toLowerCase()
+  if (typeof event?.code !== 'string') return ''
+  if (event.code.startsWith('Key') && event.code.length === 4) return event.code.slice(3).toLowerCase()
+  return event.code.toLowerCase()
 }
 
 function clampCameraInPlayableVolume(x, y, z) {
@@ -189,11 +419,20 @@ function intersectsAabbSphere(px, py, pz, radius, cx, cy, cz, hx, hy, hz) {
   return dx * dx + dy * dy + dz * dz <= radius * radius
 }
 
-function collidesWithGoalFrame(nextX, nextY, nextZ) {
+function collidesWithGoalFrame(nextX, nextY, nextZ, goalObject) {
+  const goalX = goalObject?.position?.[0] ?? 0
+  const goalZ = goalObject?.position?.[2] ?? GOAL_Z
+  const goalRotationY = goalObject?.rotationY ?? 0
+  const dx = nextX - goalX
+  const dz = nextZ - goalZ
+  const cos = Math.cos(goalRotationY)
+  const sin = Math.sin(goalRotationY)
+  const localX = dx * cos - dz * sin
+  const localZ = dx * sin + dz * cos
   const r = PLAYER_CAPSULE_RADIUS
-  const hitLeftPost = intersectsAabbSphere(nextX, nextY, nextZ, r, -1.5, 1, GOAL_Z, 0.11, 1, 0.11)
-  const hitRightPost = intersectsAabbSphere(nextX, nextY, nextZ, r, 1.5, 1, GOAL_Z, 0.11, 1, 0.11)
-  const hitCrossbar = intersectsAabbSphere(nextX, nextY, nextZ, r, 0, 2, GOAL_Z, 1.58, 0.11, 0.11)
+  const hitLeftPost = intersectsAabbSphere(localX, nextY, localZ, r, -1.5, 1, 0, 0.11, 1, 0.11)
+  const hitRightPost = intersectsAabbSphere(localX, nextY, localZ, r, 1.5, 1, 0, 0.11, 1, 0.11)
+  const hitCrossbar = intersectsAabbSphere(localX, nextY, localZ, r, 0, 2, 0, 1.58, 0.11, 0.11)
   // Keep only frame collision for player to avoid "phantom blocks" inside the goal volume.
   return hitLeftPost || hitRightPost || hitCrossbar
 }
@@ -294,7 +533,7 @@ function useKeyboardInput() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      const key = event.key.toLowerCase()
+      const key = getKeyboardKey(event)
 
       if (key === 'z' || key === 'arrowup' || key === 'w') keysRef.current.forward = true
       if (key === 's' || key === 'arrowdown') keysRef.current.back = true
@@ -308,7 +547,7 @@ function useKeyboardInput() {
     }
 
     const onKeyUp = (event) => {
-      const key = event.key.toLowerCase()
+      const key = getKeyboardKey(event)
 
       if (key === 'z' || key === 'arrowup' || key === 'w') keysRef.current.forward = false
       if (key === 's' || key === 'arrowdown') keysRef.current.back = false
@@ -328,9 +567,10 @@ function useKeyboardInput() {
   return keysRef
 }
 
-function WhiteRoom({ floorTexturePath, wallTexturePath }) {
+function WhiteRoom({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling }) {
   const floorColorMap = useTexture(floorTexturePath)
   const wallColorMap = useTexture(wallTexturePath)
+  const ceilingColorMap = useTexture(ceilingTexturePath)
   floorColorMap.wrapS = RepeatWrapping
   floorColorMap.wrapT = RepeatWrapping
   floorColorMap.repeat.set(3.2, 3.2)
@@ -338,8 +578,11 @@ function WhiteRoom({ floorTexturePath, wallTexturePath }) {
   wallColorMap.wrapS = RepeatWrapping
   wallColorMap.wrapT = RepeatWrapping
   wallColorMap.colorSpace = SRGBColorSpace
+  ceilingColorMap.wrapS = RepeatWrapping
+  ceilingColorMap.wrapT = RepeatWrapping
+  ceilingColorMap.colorSpace = SRGBColorSpace
   const ceilingTexture = useMemo(() => {
-    const next = wallColorMap.clone()
+    const next = ceilingColorMap.clone()
     next.wrapS = RepeatWrapping
     next.wrapT = RepeatWrapping
     next.repeat.set(
@@ -349,14 +592,14 @@ function WhiteRoom({ floorTexturePath, wallTexturePath }) {
     next.colorSpace = SRGBColorSpace
     next.needsUpdate = true
     return next
-  }, [wallColorMap])
+  }, [ceilingColorMap])
   useEffect(() => () => ceilingTexture.dispose(), [ceilingTexture])
   const frontWall = getWallOpeningLayout(MAIN_ROOM.width, MAIN_ROOM.height, DRAGON_OPENING)
 
   return (
     <>
       <color attach="background" args={['#eef3f8']} />
-      <fog attach="fog" args={['#eef3f8', 10, 24]} />
+      {!hideCeiling && <fog attach="fog" args={['#eef3f8', 10, 24]} />}
 
       <ambientLight intensity={0.5} />
       <hemisphereLight args={['#f7fbff', '#d8dee9', 0.7]} />
@@ -404,7 +647,7 @@ function WhiteRoom({ floorTexturePath, wallTexturePath }) {
         position={[frontWall.top.x, frontWall.top.y, FRONT_WALL.zVisual]}
         geometryArgs={[frontWall.top.width, frontWall.top.height, FRONT_WALL.thickness]}
       />
-      <mesh position={[0, 4.98, 0]}>
+      <mesh position={[0, 4.98, 0]} visible={!hideCeiling}>
         <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
         <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
       </mesh>
@@ -694,28 +937,9 @@ function Dragon({ playerPositionRef }) {
   )
 }
 
-function Goal({ onBallZoneEnter, onBallZoneExit, ballRef }) {
-  const handleGoalSensorEnter = (event) => {
-    const bodyName = event.other.rigidBodyObject?.name
-    const colliderName = event.other.colliderObject?.name
-    if (bodyName === 'ball' || colliderName === 'ball') onBallZoneEnter()
-  }
-
-  const handleGoalSensorExit = (event) => {
-    const bodyName = event.other.rigidBodyObject?.name
-    const colliderName = event.other.colliderObject?.name
-    if (bodyName === 'ball' || colliderName === 'ball') onBallZoneExit()
-  }
-
+function GoalVisual({ selected = false, ballRef = null, goalObject = null }) {
   return (
-    <group position={[0, 0, GOAL_Z]}>
-      <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[0.11, 1, 0.11]} position={[-1.5, 1, 0]} restitution={0.72} friction={0.5} />
-        <CuboidCollider args={[0.11, 1, 0.11]} position={[1.5, 1, 0]} restitution={0.72} friction={0.5} />
-        <CuboidCollider args={[1.58, 0.11, 0.11]} position={[0, 2, 0]} restitution={0.72} friction={0.5} />
-        <CuboidCollider args={[1.5, 1, 0.05]} position={[0, 1, -1.14]} restitution={0.52} friction={0.45} />
-      </RigidBody>
-
+    <>
       <mesh position={[-1.5, 1, 0]}>
         <boxGeometry args={[0.1, 2, 0.1]} />
         <meshStandardMaterial color="#a5afb9" metalness={0.28} roughness={0.45} />
@@ -750,22 +974,96 @@ function Goal({ onBallZoneEnter, onBallZoneExit, ballRef }) {
         />
       </mesh>
 
-      <RigidBody type="fixed" colliders={false}>
+      {ballRef && goalObject && <GoalNet ballRef={ballRef} goalObject={goalObject} />}
+      {selected && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, -0.45]}>
+          <ringGeometry args={[1.82, 1.9, 42]} />
+          <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
+        </mesh>
+      )}
+    </>
+  )
+}
+
+function Goal({
+  object,
+  mode,
+  selected,
+  onSelect,
+  onStartDragging,
+  onBallZoneEnter,
+  onBallZoneExit,
+  ballRef,
+}) {
+  if (!object || object.status === 'stored') return null
+
+  const goalPosition = object?.position ?? [0, 0, GOAL_Z]
+  const isCustomizeMode = mode === 'customize'
+  const leftPostCollider = getRotatedGoalCollider(object, [-1.5, 1, 0])
+  const rightPostCollider = getRotatedGoalCollider(object, [1.5, 1, 0])
+  const crossbarCollider = getRotatedGoalCollider(object, [0, 2, 0])
+  const backCollider = getRotatedGoalCollider(object, [0, 1, -1.14])
+  const scoreZoneCollider = getRotatedGoalCollider(object, [0, 1, -0.5])
+
+  const handlePointerDown = (event) => {
+    if (!isCustomizeMode || !object?.canMove) return
+    event.stopPropagation()
+    onSelect(object.id)
+    onStartDragging(object.id)
+  }
+
+  const handleGoalSensorEnter = (event) => {
+    const bodyName = event.other.rigidBodyObject?.name
+    const colliderName = event.other.colliderObject?.name
+    if (bodyName === 'ball' || colliderName === 'ball') onBallZoneEnter()
+  }
+
+  const handleGoalSensorExit = (event) => {
+    const bodyName = event.other.rigidBodyObject?.name
+    const colliderName = event.other.colliderObject?.name
+    if (bodyName === 'ball' || colliderName === 'ball') onBallZoneExit()
+  }
+
+  return (
+    <>
+      <RigidBody
+        key={`goal-frame-${goalPosition.join(':')}-${object?.rotationY ?? 0}`}
+        type="fixed"
+        colliders={false}
+      >
+        <CuboidCollider args={[0.11, 1, 0.11]} position={leftPostCollider.position} restitution={0.72} friction={0.5} />
+        <CuboidCollider args={[0.11, 1, 0.11]} position={rightPostCollider.position} restitution={0.72} friction={0.5} />
+        <CuboidCollider args={[1.58, 0.11, 0.11]} position={crossbarCollider.position} rotation={crossbarCollider.rotation} restitution={0.72} friction={0.5} />
+        <CuboidCollider args={[1.5, 1, 0.05]} position={backCollider.position} rotation={backCollider.rotation} restitution={0.52} friction={0.45} />
+      </RigidBody>
+
+      <RigidBody
+        key={`goal-zone-${goalPosition.join(':')}-${object?.rotationY ?? 0}`}
+        type="fixed"
+        colliders={false}
+      >
         <CuboidCollider
           args={[1.34, 0.86, 0.44]}
-          position={[0, 1, -0.5]}
+          position={scoreZoneCollider.position}
+          rotation={scoreZoneCollider.rotation}
           sensor
           onIntersectionEnter={handleGoalSensorEnter}
           onIntersectionExit={handleGoalSensorExit}
         />
       </RigidBody>
 
-      <GoalNet ballRef={ballRef} />
-    </group>
+      <group
+        position={goalPosition}
+        rotation={[0, object?.rotationY ?? 0, 0]}
+        onPointerDown={handlePointerDown}
+      >
+        <GoalVisual selected={selected} ballRef={ballRef} goalObject={object} />
+      </group>
+    </>
   )
 }
 
-function GoalNet({ ballRef }) {
+function GoalNet({ ballRef, goalObject }) {
   const NET_WIDTH = 3.02
   const NET_HEIGHT = 1.96
   const NET_DEPTH = 1.28
@@ -866,9 +1164,16 @@ function GoalNet({ ballRef }) {
     if (ball) {
       const p = ball.translation()
       const v = ball.linvel()
-      const vx = p.x
+      const goalX = goalObject?.position?.[0] ?? 0
+      const goalZ = goalObject?.position?.[2] ?? GOAL_Z
+      const goalRotationY = goalObject?.rotationY ?? 0
+      const dx = p.x - goalX
+      const dz = p.z - goalZ
+      const cos = Math.cos(goalRotationY)
+      const sin = Math.sin(goalRotationY)
+      const vx = dx * cos - dz * sin
       const vy = p.y
-      const vzLocal = p.z - GOAL_Z
+      const vzLocal = dx * sin + dz * cos
       const speed = Math.hypot(v.x, v.y, v.z)
       const impactRadius = 0.9
       const impactForce = Math.min(0.11, 0.016 + speed * 0.0065)
@@ -958,7 +1263,7 @@ function GoalNet({ ballRef }) {
   )
 }
 
-function Player({ touchRef, ballRef, playerPositionRef }) {
+function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seatedState, onSeatedPhaseChange }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
   const playerPosRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
@@ -971,6 +1276,9 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
   const jumpLandUntilRef = useRef(0)
   const waveUntilRef = useRef(0)
   const danceUntilRef = useRef(0)
+  const pointingUpUntilRef = useRef(0)
+  const seatPhaseRef = useRef(null)
+  const seatTimerRef = useRef(0)
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
   const wasOnGroundRef = useRef(true)
@@ -985,6 +1293,121 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
 
     const key = keyboardRef.current
     const touch = touchRef.current
+
+    if (seatedState?.phase) {
+      const seat = seatedState.seat
+      const isStandingUp = seatedState.phase === 'standUp'
+      const target = seat.position
+      const targetYaw = seat.rotationY
+      const cameraYawSpeed = 2.9
+      const cameraPitchSpeed = 2.1
+
+      if (!touch.lookActive) {
+        touch.lookX = 0
+        touch.lookY = 0
+      }
+      touch.cameraYaw -= touch.lookX * cameraYawSpeed * delta
+      touch.cameraPitch = MathUtils.clamp(
+        touch.cameraPitch + touch.lookY * cameraPitchSpeed * delta,
+        -0.8,
+        0.35,
+      )
+
+      if (seatPhaseRef.current !== seatedState.phase) {
+        seatPhaseRef.current = seatedState.phase
+        seatTimerRef.current = 0
+      }
+
+      seatTimerRef.current += delta
+      key.actionQueued = false
+      touch.moveX = 0
+      touch.moveY = 0
+      touch.actionQueued = false
+      touch.emoteQueued = null
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
+      velocityYRef.current = 0
+      onGroundRef.current = true
+
+      const nextX = target[0]
+      const nextY = isStandingUp ? PLAYER_HEIGHT : (seat.sittingHeight ?? PLAYER_SITTING_HEIGHT)
+      const nextZ = target[2]
+      playerPosRef.current.x = nextX
+      playerPosRef.current.y = nextY
+      playerPosRef.current.z = nextZ
+      playerPositionRef.current.x = nextX
+      playerPositionRef.current.y = nextY
+      playerPositionRef.current.z = nextZ
+      playerBodyRef.current.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
+      visualRef.current.position.set(nextX, nextY, nextZ)
+      visualRef.current.rotation.y = targetYaw
+
+      const nextMotion =
+        seatedState.phase === 'sitDown'
+          ? 'sitDown'
+          : seatedState.phase === 'standUp'
+            ? 'standUp'
+            : 'sittingIdle'
+      setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
+
+      if (seatedState.phase === 'sitDown' && seatTimerRef.current >= PLAYER_SIT_DOWN_DURATION) {
+        onSeatedPhaseChange('sitting')
+      }
+      if (seatedState.phase === 'standUp' && seatTimerRef.current >= PLAYER_STAND_UP_DURATION) {
+        playerPosRef.current.x = seat.exitPosition[0]
+        playerPosRef.current.y = PLAYER_HEIGHT
+        playerPosRef.current.z = seat.exitPosition[2]
+        playerPositionRef.current.x = seat.exitPosition[0]
+        playerPositionRef.current.y = PLAYER_HEIGHT
+        playerPositionRef.current.z = seat.exitPosition[2]
+        playerBodyRef.current.setNextKinematicTranslation({
+          x: seat.exitPosition[0],
+          y: PLAYER_HEIGHT,
+          z: seat.exitPosition[2],
+        })
+        visualRef.current.position.set(seat.exitPosition[0], PLAYER_HEIGHT, seat.exitPosition[2])
+        seatPhaseRef.current = null
+        onSeatedPhaseChange(null)
+      }
+
+      cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, nextX, 12, delta)
+      cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, nextY + 0.75, 12, delta)
+      cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, nextZ, 12, delta)
+      const pitch = touch.cameraPitch
+      const cameraDistance = touch.cameraDistance ?? 3
+      const horizontalDistance = cameraDistance * Math.cos(pitch)
+      const seatCameraX = nextX + Math.sin(touch.cameraYaw) * horizontalDistance
+      const seatCameraZ = nextZ + Math.cos(touch.cameraYaw) * horizontalDistance
+      camera.position.x = MathUtils.damp(camera.position.x, seatCameraX, 7, delta)
+      camera.position.y = MathUtils.damp(camera.position.y, nextY + 1.45 + Math.sin(pitch) * cameraDistance, 7, delta)
+      camera.position.z = MathUtils.damp(camera.position.z, seatCameraZ, 7, delta)
+      camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
+      return
+    }
+
+    if (seatPhaseRef.current) {
+      seatPhaseRef.current = null
+      seatTimerRef.current = 0
+    }
+
+    if (mode === 'customize') {
+      key.actionQueued = false
+      touch.moveX = 0
+      touch.moveY = 0
+      touch.lookX = 0
+      touch.lookY = 0
+      touch.lookActive = false
+      touch.actionQueued = false
+      touch.emoteQueued = null
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
+      setPlayerMotion((current) => (current === 'idle' ? current : 'idle'))
+      return
+    }
 
     const cameraYawSpeed = 2.9
     const cameraPitchSpeed = 2.1
@@ -1001,7 +1424,8 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
 
     let isEmoting =
       state.clock.elapsedTime < waveUntilRef.current ||
-      state.clock.elapsedTime < danceUntilRef.current
+      state.clock.elapsedTime < danceUntilRef.current ||
+      state.clock.elapsedTime < pointingUpUntilRef.current
     const keyboardAxisX = (key.right ? 1 : 0) - (key.left ? 1 : 0)
     const keyboardAxisY = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
     const controlX = MathUtils.clamp(touch.moveX + keyboardAxisX, -1, 1)
@@ -1013,6 +1437,7 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
     if (wantsControlCancel) {
       waveUntilRef.current = 0
       danceUntilRef.current = 0
+      pointingUpUntilRef.current = 0
       isEmoting = false
     }
 
@@ -1090,6 +1515,7 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
     if (wantsEmote === 'wave' && onGroundRef.current) {
       waveUntilRef.current = state.clock.elapsedTime + PLAYER_WAVE_DURATION
       danceUntilRef.current = 0
+      pointingUpUntilRef.current = 0
       kickUntilRef.current = 0
       pendingKickRef.current = null
       jumpStartUntilRef.current = 0
@@ -1101,6 +1527,19 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
     } else if (wantsEmote === 'dance' && onGroundRef.current) {
       danceUntilRef.current = state.clock.elapsedTime + PLAYER_DANCE_DURATION
       waveUntilRef.current = 0
+      pointingUpUntilRef.current = 0
+      kickUntilRef.current = 0
+      pendingKickRef.current = null
+      jumpStartUntilRef.current = 0
+      jumpLandUntilRef.current = 0
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
+    } else if (wantsEmote === 'pointingUp' && onGroundRef.current) {
+      pointingUpUntilRef.current = state.clock.elapsedTime + PLAYER_POINTING_UP_DURATION
+      waveUntilRef.current = 0
+      danceUntilRef.current = 0
       kickUntilRef.current = 0
       pendingKickRef.current = null
       jumpStartUntilRef.current = 0
@@ -1183,7 +1622,7 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
     }
     wasOnGroundRef.current = onGroundRef.current
 
-    if (collidesWithGoalFrame(nextX, nextY, nextZ)) {
+    if (collidesWithGoalFrame(nextX, nextY, nextZ, goalObject)) {
       nextX = prevX
       nextZ = prevZ
       planarVelocityRef.current.x = 0
@@ -1241,19 +1680,22 @@ function Player({ touchRef, ballRef, playerPositionRef }) {
               ? 'wave'
               : state.clock.elapsedTime < danceUntilRef.current
                 ? 'dance'
-                : state.clock.elapsedTime < kickUntilRef.current
-                  ? 'kick'
-                  : isMoving
-                    ? speed > 2.45
-                      ? 'run'
-                      : 'walk'
-                    : 'idle'
+                : state.clock.elapsedTime < pointingUpUntilRef.current
+                  ? 'pointingUp'
+                  : state.clock.elapsedTime < kickUntilRef.current
+                    ? 'kick'
+                    : isMoving
+                      ? speed > 2.45
+                        ? 'run'
+                        : 'walk'
+                      : 'idle'
     setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
 
     const pitch = touch.cameraPitch
-    const horizontalDistance = CAMERA_DISTANCE * Math.cos(pitch)
+    const cameraDistance = touch.cameraDistance ?? CAMERA_DISTANCE
+    const horizontalDistance = cameraDistance * Math.cos(pitch)
     const desiredX = nextX + Math.sin(yaw) * horizontalDistance
-    const desiredY = nextY + CAMERA_HEIGHT + Math.sin(pitch) * CAMERA_DISTANCE
+    const desiredY = nextY + CAMERA_HEIGHT + Math.sin(pitch) * cameraDistance
     const desiredZ = nextZ + Math.cos(yaw) * horizontalDistance
 
     let targetX = desiredX
@@ -1315,9 +1757,13 @@ function PlayerAvatar({ motion }) {
   const kick = useFBX('/models/player/player-kick.fbx')
   const wave = useFBX('/models/Waving.fbx')
   const dance = useFBX('/models/Wave Hip Hop Dance.fbx')
+  const pointingUp = useFBX('/models/player/pointing-up.fbx')
   const jumpStart = useFBX('/models/player/player-jump-start.fbx')
   const jumpLoop = useFBX('/models/player/player-jump-loop.fbx')
   const jumpLand = useFBX('/models/player/player-jump-land.fbx')
+  const sitDown = useFBX('/models/player/Stand To Sit.fbx')
+  const sittingIdle = useFBX('/models/player/Sitting Idle.fbx')
+  const standUp = useFBX('/models/player/Stand Up.fbx')
   const avatar = useMemo(() => {
     const next = clone(model)
     next.visible = false
@@ -1340,9 +1786,13 @@ function PlayerAvatar({ motion }) {
       { source: kick.animations[0], name: 'kick' },
       { source: wave.animations[0], name: 'wave' },
       { source: dance.animations[0], name: 'dance' },
+      { source: pointingUp.animations[0], name: 'pointingUp' },
       { source: jumpStart.animations[0], name: 'jumpStart' },
       { source: jumpLoop.animations[0], name: 'fallingIdle' },
       { source: jumpLand.animations[0], name: 'jumpLand' },
+      { source: sitDown.animations[0], name: 'sitDown' },
+      { source: sittingIdle.animations[0], name: 'sittingIdle' },
+      { source: standUp.animations[0], name: 'standUp' },
     ]
 
     return clips
@@ -1350,12 +1800,15 @@ function PlayerAvatar({ motion }) {
       .map(({ source, name }) => {
         const clip = source.clone()
         clip.name = name
-        if (name === 'wave' || name === 'dance') {
+        if (name === 'wave' || name === 'dance' || name === 'pointingUp') {
           lockEmoteHipsHeight(clip, hipsRestHeight)
+        }
+        if (name === 'sitDown' || name === 'sittingIdle' || name === 'standUp') {
+          lockHipsPlanarPosition(clip)
         }
         return clip
       })
-  }, [idle.animations, walk.animations, run.animations, kick.animations, wave.animations, dance.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations])
+  }, [idle.animations, walk.animations, run.animations, kick.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const { actions } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
@@ -1371,10 +1824,12 @@ function PlayerAvatar({ motion }) {
 
     if (previousAction === nextAction) return
 
-    const isOneShot = nextMotion === 'kick' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand'
+    const isOneShot = nextMotion === 'kick' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
     const fadeDuration =
       previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
         ? PLAYER_JUMP_TO_FALL_ANIMATION_FADE
+        : nextMotion === 'sitDown' || nextMotion === 'standUp' || previousMotion === 'sittingIdle'
+          ? 0.12
         : nextMotion === 'jumpLand'
         ? PLAYER_LANDING_ANIMATION_FADE
         : nextMotion === 'jumpStart' || nextMotion === 'fallingIdle'
@@ -1425,7 +1880,7 @@ function PlayerAvatar({ motion }) {
   )
 }
 
-function ControlsOverlay({ touchRef }) {
+function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false }) {
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookLastRef = useRef({ x: 0, y: 0 })
@@ -1583,6 +2038,18 @@ function ControlsOverlay({ touchRef }) {
     }
   }
 
+  const onCameraWheel = (event) => {
+    if (!adminCameraControls) return
+    event.preventDefault()
+    const currentDistance = touchRef.current.cameraDistance ?? CAMERA_DISTANCE
+    const zoomFactor = 1 + event.deltaY * CAMERA_WHEEL_ZOOM_SENSITIVITY
+    touchRef.current.cameraDistance = MathUtils.clamp(
+      currentDistance * zoomFactor,
+      CAMERA_MIN_DISTANCE,
+      CAMERA_MAX_DISTANCE,
+    )
+  }
+
   const triggerAction = () => {
     touchRef.current.actionQueued = true
   }
@@ -1595,12 +2062,13 @@ function ControlsOverlay({ touchRef }) {
         onPointerMove={onLookMove}
         onPointerUp={onLookUp}
         onPointerCancel={onLookUp}
+        onWheel={onCameraWheel}
       >
-        <div className={`edge-glow right ${edgeGlow.right ? 'active' : ''}`} />
-        <div className={`edge-glow left ${edgeGlow.left ? 'active' : ''}`} />
-        <div className={`edge-glow top ${edgeGlow.top ? 'active' : ''}`} />
-        <div className={`edge-glow bottom ${edgeGlow.bottom ? 'active' : ''}`} />
-        {emoteMenu && (
+        {!uiHidden && <div className={`edge-glow right ${edgeGlow.right ? 'active' : ''}`} />}
+        {!uiHidden && <div className={`edge-glow left ${edgeGlow.left ? 'active' : ''}`} />}
+        {!uiHidden && <div className={`edge-glow top ${edgeGlow.top ? 'active' : ''}`} />}
+        {!uiHidden && <div className={`edge-glow bottom ${edgeGlow.bottom ? 'active' : ''}`} />}
+        {!uiHidden && emoteMenu && (
           <div
             className="emote-radial"
             style={{ left: emoteMenu.x, top: emoteMenu.y }}
@@ -1624,26 +2092,30 @@ function ControlsOverlay({ touchRef }) {
         )}
       </div>
 
-      <div className="joystick-wrap">
-        <div
-          className="joystick-zone"
-          onPointerDown={onJoystickDown}
-          onPointerMove={onJoystickMove}
-          onPointerUp={onJoystickUp}
-          onPointerCancel={onJoystickUp}
-        >
+      {!uiHidden && (
+        <div className="joystick-wrap">
           <div
-            className="joystick-thumb"
-            style={{
-              transform: `translate(${stickVisual.x}px, ${stickVisual.y}px)`,
-            }}
-          />
+            className="joystick-zone"
+            onPointerDown={onJoystickDown}
+            onPointerMove={onJoystickMove}
+            onPointerUp={onJoystickUp}
+            onPointerCancel={onJoystickUp}
+          >
+            <div
+              className="joystick-thumb"
+              style={{
+                transform: `translate(${stickVisual.x}px, ${stickVisual.y}px)`,
+              }}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
-      <button className="action-btn" type="button" onPointerDown={triggerAction} aria-label="Action">
-        <span className="action-symbol">{'\u2423'}</span>
-      </button>
+      {!uiHidden && (
+        <button className="action-btn" type="button" onPointerDown={triggerAction} aria-label="Action">
+          <span className="action-symbol">{'\u2423'}</span>
+        </button>
+      )}
     </div>
   )
 }
@@ -1655,6 +2127,124 @@ function CoinsOverlay({ coins }) {
         <img className="score-coin-icon" src="/ui/coins.png" alt="Pieces" />
         <span className="score-value">{coins}</span>
       </div>
+    </div>
+  )
+}
+
+function AccountSyncPanel({
+  configured,
+  user,
+  email,
+  password,
+  displayName,
+  mode,
+  open,
+  message,
+  saveState,
+  onToggle,
+  onEmailChange,
+  onPasswordChange,
+  onDisplayNameChange,
+  onModeChange,
+  onSubmit,
+  onSignOut,
+}) {
+  const isConnected = Boolean(user)
+  const statusText = configured
+    ? isConnected
+      ? 'Compte connecte'
+      : 'Mode invite'
+    : 'Supabase non configure'
+
+  return (
+    <div className={`account-sync ${open ? 'open' : ''}`}>
+      <button className="account-sync-toggle" type="button" onClick={onToggle} aria-label="Compte">
+        <span className={`account-sync-dot ${isConnected ? 'connected' : ''}`} />
+        <span>Compte</span>
+      </button>
+      {open && (
+        <div className="account-sync-panel">
+          <div className="account-sync-status">
+            {statusText}
+            <span>{saveState}</span>
+          </div>
+          {!isConnected && (
+            <p className="account-sync-help">
+              Ta progression invite reste sur cet appareil. Cree un compte pour la sauvegarder en ligne.
+            </p>
+          )}
+          {configured && !isConnected && (
+            <>
+              <div className="account-sync-tabs">
+                <button
+                  type="button"
+                  className={mode === 'signup' ? 'active' : ''}
+                  onClick={() => onModeChange('signup')}
+                >
+                  Creer
+                </button>
+                <button
+                  type="button"
+                  className={mode === 'signin' ? 'active' : ''}
+                  onClick={() => onModeChange('signin')}
+                >
+                  Connexion
+                </button>
+              </div>
+              <form className="account-sync-form" onSubmit={onSubmit}>
+                {mode === 'signup' && (
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(event) => onDisplayNameChange(event.target.value)}
+                    placeholder="Pseudo"
+                    aria-label="Pseudo"
+                    minLength={2}
+                    required
+                  />
+                )}
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => onEmailChange(event.target.value)}
+                  placeholder="Email"
+                  aria-label="Email"
+                  required
+                />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => onPasswordChange(event.target.value)}
+                  placeholder="Mot de passe"
+                  aria-label="Mot de passe"
+                  minLength={8}
+                  required
+                />
+                <button type="submit">
+                  {mode === 'signup' ? 'Creer mon compte' : 'Se connecter'}
+                </button>
+              </form>
+              <div className="account-sync-social">
+                <button type="button" disabled>Google bientot</button>
+                <button type="button" disabled>Apple bientot</button>
+              </div>
+            </>
+          )}
+          {configured && isConnected && (
+            <>
+              <div className="account-sync-help">
+                {displayName || user.email}
+                <br />
+                Progression sauvegardee en ligne.
+              </div>
+              <button className="account-sync-out" type="button" onClick={onSignOut}>
+                Deconnexion
+              </button>
+            </>
+          )}
+          {message && <div className="account-sync-message">{message}</div>}
+        </div>
+      )}
     </div>
   )
 }
@@ -1676,6 +2266,21 @@ function EnvironmentStation() {
       <mesh position={[0, -0.32, 0]}>
         <cylinderGeometry args={[0.6, 0.6, 0.16, 20]} />
         <meshStandardMaterial color="#d0d8e3" />
+      </mesh>
+    </group>
+  )
+}
+
+function CustomizationStation() {
+  return (
+    <group position={[CUSTOM_STATION_POSITION.x, CUSTOM_STATION_POSITION.y, CUSTOM_STATION_POSITION.z]}>
+      <mesh position={[0, -0.32, 0]}>
+        <cylinderGeometry args={[0.68, 0.68, 0.16, 24]} />
+        <meshStandardMaterial color="#c9d8e6" />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.22, 0]}>
+        <ringGeometry args={[0.42, 0.5, 32]} />
+        <meshBasicMaterial color="#f2c14e" />
       </mesh>
     </group>
   )
@@ -1711,6 +2316,531 @@ function EnvironmentStationTrigger({ playerPositionRef, onNearChange }) {
   })
 
   return null
+}
+
+function CustomizationStationTrigger({ playerPositionRef, onNearChange, enabled }) {
+  const wasNearRef = useRef(false)
+
+  useFrame(() => {
+    if (!enabled) {
+      if (wasNearRef.current) {
+        wasNearRef.current = false
+        onNearChange(false)
+      }
+      return
+    }
+
+    const p = playerPositionRef.current
+    const d = Math.hypot(p.x - CUSTOM_STATION_POSITION.x, p.z - CUSTOM_STATION_POSITION.z)
+    const near = d < 1.55
+    if (near !== wasNearRef.current) {
+      wasNearRef.current = near
+      onNearChange(near)
+    }
+  })
+
+  return null
+}
+
+function SeatInteractionTrigger({ playerPositionRef, objects, seatedState, onNearbySeatChange }) {
+  const currentSeatIdRef = useRef(null)
+
+  useFrame(() => {
+    if (seatedState?.phase) {
+      if (currentSeatIdRef.current !== null) {
+        currentSeatIdRef.current = null
+        onNearbySeatChange(null)
+      }
+      return
+    }
+
+    const playerPosition = playerPositionRef.current
+    let nearestSeat = null
+    let nearestDistance = Infinity
+
+    objects.forEach((object) => {
+      object.seats?.forEach((seat) => {
+        const worldSeat = getSeatWorldData(object, seat)
+        const interactionDistance = seat.interactionDistance ?? SEAT_INTERACTION_DISTANCE
+        const distance = Math.hypot(
+          playerPosition.x - worldSeat.position[0],
+          playerPosition.z - worldSeat.position[2],
+        )
+
+        if (distance <= interactionDistance && distance < nearestDistance) {
+          nearestDistance = distance
+          nearestSeat = worldSeat
+        }
+      })
+    })
+
+    const nextSeat = nearestSeat
+    if ((nextSeat?.id ?? null) !== currentSeatIdRef.current) {
+      currentSeatIdRef.current = nextSeat?.id ?? null
+      onNearbySeatChange(nextSeat)
+    }
+  })
+
+  return null
+}
+
+function SeatTargetMarker({ seat }) {
+  if (!seat) return null
+
+  return (
+    <group position={[seat.position[0], 0.58, seat.position[2]]}>
+      <mesh>
+        <sphereGeometry args={[0.08, 16, 12]} />
+        <meshBasicMaterial color="#ffd447" />
+      </mesh>
+      <pointLight intensity={0.5} distance={1.2} color="#ffd447" />
+    </group>
+  )
+}
+
+function CustomizationCamera({ active }) {
+  if (!active) return null
+
+  return (
+    <OrthographicCamera
+      makeDefault
+      position={[0, 18, 0]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      zoom={58}
+      near={0.1}
+      far={60}
+    />
+  )
+}
+
+function SofaModel() {
+  const model = useFBX('/models/placeables/modular-sofa/modular-sofa.fbx')
+  const texture = useTexture('/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG')
+  const sofa = useMemo(() => {
+    const object = clone(model)
+    texture.colorSpace = SRGBColorSpace
+    texture.needsUpdate = true
+
+    object.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+        if (child.material) {
+          child.material = child.material.clone()
+          child.material.map = texture
+          child.material.needsUpdate = true
+        }
+      }
+    })
+
+    object.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(object)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const longestSide = Math.max(size.x, size.z, 0.001)
+    const targetWidth = SOFA_WIDTH_METERS * WORLD_UNITS_PER_METER
+    const scale = targetWidth / longestSide
+
+    return {
+      object,
+      offset: [-center.x, -box.min.y, -center.z],
+      scale,
+    }
+  }, [model, texture])
+
+  return (
+    <group scale={sofa.scale}>
+      <primitive object={sofa.object} position={sofa.offset} />
+    </group>
+  )
+}
+
+function GlbPlaceableModel({ objectId }) {
+  const catalogItem = objectCatalog[objectId]
+  const gltf = useGLTF(catalogItem.modelUrl)
+  const model = useMemo(() => {
+    const object = clone(gltf.scene)
+
+    object.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+      }
+    })
+
+    object.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(object)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const targetWidth = (catalogItem.targetWidthMeters ?? 0) * WORLD_UNITS_PER_METER
+    const targetHeight = (catalogItem.targetHeightMeters ?? 0) * WORLD_UNITS_PER_METER
+    const horizontalSize = Math.max(size.x, size.z, 0.001)
+    const sourceSize = targetHeight > 0 ? Math.max(size.y, 0.001) : horizontalSize
+    const targetSize = targetHeight > 0 ? targetHeight : targetWidth
+    const scale = targetSize > 0 ? targetSize / sourceSize : 1
+
+    return {
+      object,
+      offset: [-center.x, -box.min.y, -center.z],
+      scale,
+    }
+  }, [catalogItem.targetHeightMeters, catalogItem.targetWidthMeters, gltf.scene])
+
+  return (
+    <group scale={model.scale} rotation={[0, catalogItem.modelRotationY ?? 0, 0]}>
+      <primitive object={model.object} position={model.offset} />
+    </group>
+  )
+}
+
+function PlaceableModel({ objectId, type }) {
+  const catalogItem = objectCatalog[objectId]
+  if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
+  if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
+  if (type === 'sofa' || catalogItem?.type === 'sofa') return <SofaModel />
+  return null
+}
+
+function EditableObject({ object, selected, mode, onSelect, onStartDragging }) {
+  const isCustomizeMode = mode === 'customize'
+  const selectionRing = object.type === 'sofa' || object.type === 'desk' ? [1.05, 1.12] : [0.62, 0.68]
+
+  if (object.type === 'goal') return null
+
+  const handlePointerDown = (event) => {
+    if (!isCustomizeMode || !object.canMove) return
+    event.stopPropagation()
+    onSelect(object.id)
+    onStartDragging(object.id)
+  }
+
+  return (
+    <group
+      position={object.position}
+      rotation={[0, object.rotationY, 0]}
+      onPointerDown={handlePointerDown}
+    >
+      <Suspense fallback={null}>
+        <PlaceableModel objectId={object.objectId} type={object.type} />
+      </Suspense>
+      {selected && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
+          <ringGeometry args={[selectionRing[0], selectionRing[1], 36]} />
+          <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
+        </mesh>
+      )}
+    </group>
+  )
+}
+
+function EditableFloor({ mode, draggingObjectId, placingObjectId, placementLocked, onDrag, onLockPlacement, onStopDragging, onClearSelection }) {
+  if (mode !== 'customize') return null
+
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, 0.028, 0]}
+      onPointerMove={(event) => {
+        if (!draggingObjectId && !placingObjectId) return
+        if (placingObjectId && placementLocked) return
+        event.stopPropagation()
+        const [x, z] = clampToCustomRoom(snap(event.point.x), snap(event.point.z))
+        onDrag(draggingObjectId ?? placingObjectId, [x, 0, z])
+      }}
+      onClick={(event) => {
+        if (!placingObjectId || placementLocked) return
+        event.stopPropagation()
+        const [x, z] = clampToCustomRoom(snap(event.point.x), snap(event.point.z))
+        onDrag(placingObjectId, [x, 0, z])
+        onLockPlacement()
+      }}
+      onPointerUp={(event) => {
+        event.stopPropagation()
+        onStopDragging()
+      }}
+      onPointerMissed={() => {
+        onStopDragging()
+        onClearSelection()
+      }}
+    >
+      <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+    </mesh>
+  )
+}
+
+function PlacementPreview({ object, preview }) {
+  if (!object || !preview) return null
+
+  return (
+    <group position={preview.position} rotation={[0, preview.rotationY, 0]}>
+      <group scale={0.96}>
+        <Suspense fallback={null}>
+          <PlaceableModel objectId={object.objectId} type={object.type} />
+        </Suspense>
+      </group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.045, 0]}>
+        <ringGeometry args={[1.08, 1.16, 40]} />
+        <meshBasicMaterial color={preview.isValid ? '#66ff9a' : '#ff5f5f'} transparent opacity={0.92} />
+      </mesh>
+    </group>
+  )
+}
+
+function CustomizationLayer({
+  mode,
+  objects,
+  selectedObjectId,
+  draggingObjectId,
+  placingObjectId,
+  placementPreview,
+  placementLocked,
+  onSelect,
+  onStartDragging,
+  onStopDragging,
+  onUpdatePosition,
+  onUpdatePlacementPreview,
+  onLockPlacement,
+}) {
+  const placedObjects = objects.filter((object) => object.status !== 'stored')
+  const placingObject = objects.find((object) => object.id === placingObjectId)
+
+  return (
+    <>
+      <CustomizationCamera active={mode === 'customize'} />
+      <EditableFloor
+        mode={mode}
+        draggingObjectId={draggingObjectId}
+        placingObjectId={placingObjectId}
+        placementLocked={placementLocked}
+        onDrag={(id, position) => {
+          if (placingObjectId) {
+            onUpdatePlacementPreview(position)
+            return
+          }
+          onUpdatePosition(id, position)
+        }}
+        onStopDragging={onStopDragging}
+        onClearSelection={() => onSelect(null)}
+        onLockPlacement={onLockPlacement}
+      />
+      <gridHelper
+        args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
+        position={[0, 0.032, 0]}
+        visible={mode === 'customize'}
+      />
+      {placedObjects.map((object) => (
+        <EditableObject
+          key={object.id}
+          object={object}
+          selected={selectedObjectId === object.id}
+          mode={mode}
+          onSelect={onSelect}
+          onStartDragging={onStartDragging}
+        />
+      ))}
+      <PlacementPreview object={placingObject} preview={placementPreview} />
+    </>
+  )
+}
+
+function InventoryPreviewIcon({ type }) {
+  return (
+    <div className={`inventory-preview-icon ${type}`}>
+      {type === 'sofa' && (
+        <>
+          <span className="inventory-sofa-back" />
+          <span className="inventory-sofa-seat" />
+          <span className="inventory-sofa-arm left" />
+          <span className="inventory-sofa-arm right" />
+        </>
+      )}
+    </div>
+  )
+}
+
+function InventoryThumbnail({ card }) {
+  const [failed, setFailed] = useState(false)
+
+  if (card.thumbnail && !failed) {
+    return (
+      <img
+        className="inventory-thumbnail-img"
+        src={card.thumbnail}
+        alt=""
+        onError={() => setFailed(true)}
+      />
+    )
+  }
+
+  return <InventoryPreviewIcon type={card.type} />
+}
+
+function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect }) {
+  return (
+    <div className={`object-inventory-sheet ${open ? 'open' : ''}`}>
+      <button className="object-inventory-handle" type="button" onClick={onToggle}>
+        Objets
+      </button>
+      {open && (
+        <div className="object-inventory-content">
+          <div className="object-inventory-header">
+            <h2>Objets</h2>
+            <button type="button" aria-label="Fermer" onClick={onToggle}>×</button>
+          </div>
+          <div className="object-inventory-tabs">
+            <button type="button" className="active">Tous</button>
+            <button type="button">Meubles</button>
+            <button type="button">Lumières</button>
+            <button type="button">Déco</button>
+            <button type="button">Sols</button>
+            <button type="button">Murs</button>
+          </div>
+          <div className="object-inventory-grid">
+            {cards.map((card) => {
+              const isAvailable = card.stored > 0
+              return (
+                <button
+                  key={card.objectId}
+                  type="button"
+                  className={`inventory-card ${!isAvailable ? 'disabled' : ''} ${placingObjectId === card.storedInstanceId ? 'active' : ''}`}
+                  onClick={() => {
+                    if (isAvailable) onSelect(card.storedInstanceId)
+                  }}
+                  disabled={!isAvailable}
+                >
+                  <div className="inventory-card-preview">
+                    <InventoryThumbnail card={card} />
+                    <span className="inventory-card-quantity">x{card.stored}</span>
+                  </div>
+                  <div className="inventory-card-name">{card.name}</div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ThumbnailTool() {
+  const [captures, setCaptures] = useState({})
+  const [busyObjectId, setBusyObjectId] = useState(null)
+  const [toolMessage, setToolMessage] = useState('')
+  const catalogItems = Object.values(objectCatalog)
+  const isThumbnailGeneratable = (item) => {
+    const url = item.thumbnailModelUrl ?? item.modelUrl
+    return ['glb', 'fbx'].includes(url?.split('?')[0].split('.').pop()?.toLowerCase())
+  }
+  const generatableItems = catalogItems.filter(isThumbnailGeneratable)
+  const captureObjectId = useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('capture')
+    } catch {
+      return null
+    }
+  }, [])
+
+  const generateItemThumbnail = async (item) => {
+    const modelUrl = item.thumbnailModelUrl ?? item.modelUrl
+    if (!isThumbnailGeneratable(item)) return
+    setBusyObjectId(item.id)
+    setToolMessage(`Generation de ${item.name}...`)
+    try {
+      const blob = await generateThumbnailBlob({
+        modelUrl,
+        textureUrl: item.thumbnailTextureUrl,
+        rotationY: (item.modelRotationY ?? 0) + (item.thumbnailRotationY ?? 0),
+        margin: item.thumbnailMargin ?? 1.24,
+        view: item.thumbnailView ?? 'front',
+      })
+      const url = URL.createObjectURL(blob)
+      setCaptures((current) => {
+        if (current[item.id]?.url) URL.revokeObjectURL(current[item.id].url)
+        return { ...current, [item.id]: { url, blob } }
+      })
+      setToolMessage(`Miniature prete : ${item.name}`)
+    } catch (error) {
+      setToolMessage(`Generation impossible pour ${item.name}: ${error.message}`)
+    } finally {
+      setBusyObjectId(null)
+    }
+  }
+
+  const generateMissingThumbnails = async () => {
+    for (const item of generatableItems) {
+      if (!captures[item.id]) await generateItemThumbnail(item)
+    }
+    setToolMessage('Generation terminee. Telecharge les miniatures validees en WebP.')
+  }
+
+  const downloadCapture = (objectId) => {
+    const blob = captures[objectId]?.blob
+    if (blob) downloadBlob(blob, `${objectId}.webp`)
+  }
+
+  useEffect(() => {
+    if (!captureObjectId) return
+    const item = objectCatalog[captureObjectId]
+    if (!item || !isThumbnailGeneratable(item)) return
+    generateItemThumbnail(item)
+  }, [captureObjectId])
+
+  if (captureObjectId) {
+    const capture = captures[captureObjectId]
+    return (
+      <main className="thumbnail-capture-page">
+        {capture?.url ? <img src={capture.url} alt="" /> : null}
+      </main>
+    )
+  }
+
+  return (
+    <main className="thumbnail-tool">
+      <div className="thumbnail-tool-panel">
+        <div className="thumbnail-tool-header">
+          <div>
+            <h1>Object thumbnails</h1>
+            <p>Outil dev : genere des WebP carres depuis les GLB. Le jeu charge ensuite seulement les images sauvegardees.</p>
+          </div>
+          <button type="button" onClick={generateMissingThumbnails} disabled={Boolean(busyObjectId)}>
+            Generer les manquantes
+          </button>
+        </div>
+        {toolMessage && <div className="thumbnail-tool-message">{toolMessage}</div>}
+        <div className="thumbnail-tool-grid">
+          {catalogItems.map((item) => (
+            <div className="thumbnail-tool-card" key={item.id}>
+              <div className="thumbnail-tool-preview">
+                {captures[item.id]?.url ? (
+                  <img src={captures[item.id].url} alt="" />
+                ) : item.thumbnail ? (
+                  <img src={item.thumbnail} alt="" />
+                ) : (
+                  <span>Aucune image</span>
+                )}
+              </div>
+              <div className="thumbnail-tool-info">
+                <strong>{item.name}</strong>
+                <span>{isThumbnailGeneratable(item) ? 'Compatible' : 'Miniature manuelle'}</span>
+                <button
+                  type="button"
+                  onClick={() => generateItemThumbnail(item)}
+                  disabled={Boolean(busyObjectId) || !isThumbnailGeneratable(item)}
+                >
+                  {captures[item.id] ? 'Regenerer' : 'Generer'}
+                </button>
+                <button type="button" onClick={() => downloadCapture(item.id)} disabled={!captures[item.id]}>
+                  Télécharger PNG
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  )
 }
 
 function SkinMenu({
@@ -1778,20 +2908,26 @@ function EnvironmentMenu({
   onTabChange,
   floorSkins,
   wallSkins,
+  furnitureItems,
+  furnitureCounts,
   previewFloorIndex,
   previewWallIndex,
   selectedFloorSkinId,
   selectedWallSkinId,
   ownedFloorSkinIds,
   ownedWallSkinIds,
+  applyWallToCeiling,
+  onApplyWallToCeilingChange,
   onClose,
   onPrevious,
   onNext,
   onBuy,
   onSelect,
+  onBuyFurniture,
 }) {
   if (!open) return null
 
+  const isFurnitureTab = activeTab === 'furniture'
   const isFloorTab = activeTab === 'floor'
   const skins = isFloorTab ? floorSkins : wallSkins
   const previewIndex = isFloorTab ? previewFloorIndex : previewWallIndex
@@ -1819,40 +2955,87 @@ function EnvironmentMenu({
           </button>
           <button
             type="button"
-            className={`env-tab-btn ${!isFloorTab ? 'active' : ''}`}
+            className={`env-tab-btn ${activeTab === 'wall' ? 'active' : ''}`}
             onClick={() => onTabChange('wall')}
           >
             Mur
           </button>
-        </div>
-        <div className="skin-title">{skin.name}</div>
-        <div className="env-preview-wrap">
-          <div
-            className="env-preview-wall"
-            style={{
-              backgroundImage: `url(${isFloorTab ? wallSkins[previewWallIndex].texture : skin.texture})`,
-            }}
-          />
-          <div
-            className="env-preview-floor"
-            style={{
-              backgroundImage: `url(${isFloorTab ? skin.texture : floorSkins[previewFloorIndex].texture})`,
-            }}
-          />
-        </div>
-        <div className="skin-nav">
-          <button type="button" onClick={onPrevious} className="skin-nav-btn">{'<'}</button>
-          <button type="button" onClick={onNext} className="skin-nav-btn">{'>'}</button>
-        </div>
-        {!isOwned && (
-          <button type="button" className="skin-action-btn" onClick={onBuy} disabled={!canBuy}>
-            Acheter - {skin.price}
+          <button
+            type="button"
+            className={`env-tab-btn ${isFurnitureTab ? 'active' : ''}`}
+            onClick={() => onTabChange('furniture')}
+          >
+            Meubles
           </button>
+        </div>
+        {isFurnitureTab ? (
+          <>
+            <div className="skin-title">Meubles</div>
+            <div className="furniture-shop-grid">
+              {furnitureItems.map((item) => {
+                const ownedCount = furnitureCounts[item.id] ?? 0
+                const canBuyFurniture = coins >= item.price
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="furniture-shop-card"
+                    onClick={() => onBuyFurniture(item.id)}
+                    disabled={!canBuyFurniture}
+                  >
+                    <div className="furniture-shop-preview">
+                      <img src={item.thumbnail} alt="" />
+                      {ownedCount > 0 && <span className="furniture-owned-badge">x{ownedCount}</span>}
+                    </div>
+                    <span className="furniture-shop-name">{item.name}</span>
+                    <span className="furniture-shop-price">{item.price} pieces</span>
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="skin-title">{skin.name}</div>
+            <div className="env-preview-wrap">
+              <div
+                className="env-preview-wall"
+                style={{
+                  backgroundImage: `url(${isFloorTab ? wallSkins[previewWallIndex].texture : skin.texture})`,
+                }}
+              />
+              <div
+                className="env-preview-floor"
+                style={{
+                  backgroundImage: `url(${isFloorTab ? skin.texture : floorSkins[previewFloorIndex].texture})`,
+                }}
+              />
+            </div>
+            {!isFloorTab && (
+              <label className="env-ceiling-toggle">
+                <input
+                  type="checkbox"
+                  checked={applyWallToCeiling}
+                  onChange={(event) => onApplyWallToCeilingChange(event.target.checked)}
+                />
+                <span>Appliquer au plafond</span>
+              </label>
+            )}
+            <div className="skin-nav">
+              <button type="button" onClick={onPrevious} className="skin-nav-btn">{'<'}</button>
+              <button type="button" onClick={onNext} className="skin-nav-btn">{'>'}</button>
+            </div>
+            {!isOwned && (
+              <button type="button" className="skin-action-btn" onClick={onBuy} disabled={!canBuy}>
+                Acheter - {skin.price}
+              </button>
+            )}
+            {isOwned && !isSelected && (
+              <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
+            )}
+            {isOwned && isSelected && <div className="skin-equipped">Equipe</div>}
+          </>
         )}
-        {isOwned && !isSelected && (
-          <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
-        )}
-        {isOwned && isSelected && <div className="skin-equipped">Equipe</div>}
         <button type="button" className="skin-close-btn" onClick={onClose}>Fermer</button>
       </div>
     </div>
@@ -1907,6 +3090,17 @@ function ScorePopups({ popups }) {
 }
 
 function App() {
+  const isThumbnailTool = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      return params.get('tool') === 'thumbnail'
+    } catch {
+      return false
+    }
+  }, [])
+
+  if (isThumbnailTool) return <ThumbnailTool />
+
   const isAdminMode = useMemo(() => {
     try {
       const params = new URLSearchParams(window.location.search)
@@ -1915,12 +3109,33 @@ function App() {
       return false
     }
   }, [])
+  const isVerticalFrameMode = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const frame = params.get('frame')?.toLowerCase()
+      const format = params.get('format')?.toLowerCase()
+      const aspect = params.get('aspect')?.toLowerCase()
+      return (
+        frame === '9x16' ||
+        frame === '9:16' ||
+        frame === 'vertical' ||
+        format === 'tiktok' ||
+        aspect === '9x16' ||
+        aspect === '9:16'
+      )
+    } catch {
+      return false
+    }
+  }, [])
+  const progressScope = isAdminMode ? 'admin' : 'player'
+  const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
 
   const touchRef = useRef({
     moveX: 0,
     moveY: 0,
     cameraYaw: 0,
     cameraPitch: -0.22,
+    cameraDistance: CAMERA_DISTANCE,
     lookX: 0,
     lookY: 0,
     lookActive: false,
@@ -1946,52 +3161,346 @@ function App() {
   const [selectedWallSkinId, setSelectedWallSkinId] = useState('wall-classic')
   const [previewFloorSkinId, setPreviewFloorSkinId] = useState('floor-classic')
   const [previewWallSkinId, setPreviewWallSkinId] = useState('wall-classic')
+  const [applyWallToCeiling, setApplyWallToCeiling] = useState(false)
   const [isEnvironmentMenuOpen, setIsEnvironmentMenuOpen] = useState(false)
   const [isNearEnvironmentStation, setIsNearEnvironmentStation] = useState(false)
+  const [mode, setMode] = useState('play')
+  const [captureUiHidden, setCaptureUiHidden] = useState(false)
+  const [editableObjects, setEditableObjects] = useState(defaultEditableObjects)
+  const [selectedObjectId, setSelectedObjectId] = useState(null)
+  const [draggingObjectId, setDraggingObjectId] = useState(null)
+  const [placingObjectId, setPlacingObjectId] = useState(null)
+  const [placementLocked, setPlacementLocked] = useState(false)
+  const [placementPreview, setPlacementPreview] = useState(null)
+  const [isObjectInventoryOpen, setIsObjectInventoryOpen] = useState(false)
+  const [isNearCustomizationStation, setIsNearCustomizationStation] = useState(false)
+  const [nearbySeat, setNearbySeat] = useState(null)
+  const [seatedState, setSeatedState] = useState(null)
+  const [authUser, setAuthUser] = useState(null)
+  const [isAccountOpen, setIsAccountOpen] = useState(false)
+  const [authMode, setAuthMode] = useState('signup')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
+  const [cloudSaveState, setCloudSaveState] = useState(isSupabaseConfigured ? 'offline' : 'local')
+  const hasLoadedCloudProgressRef = useRef(false)
+  const skipNextCloudSaveRef = useRef(false)
+  const authUserRef = useRef(null)
+  const latestProgressRef = useRef(null)
+  const cloudSaveTimeoutRef = useRef(null)
+
+  useEffect(() => {
+    if (!isAdminMode && !isVerticalFrameMode) return undefined
+
+    const onKeyDown = (event) => {
+      const key = getKeyboardKey(event)
+      const isDeleteToggle = key === 'delete'
+      const isPointingUp = isAdminMode && key === 'p' && !event.repeat
+      if (!isDeleteToggle && !isPointingUp) return
+      const target = event.target
+      const isTyping =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      if (isTyping) return
+      event.preventDefault()
+      if (isDeleteToggle) {
+        setCaptureUiHidden((current) => !current)
+        return
+      }
+      touchRef.current.emoteQueued = 'pointingUp'
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isAdminMode, isVerticalFrameMode])
+
+  const createCurrentProgressSnapshot = () => ({
+    displayName,
+    coins,
+    ownedSkins,
+    selectedSkinId,
+    ownedFloorSkins,
+    ownedWallSkins,
+    selectedFloorSkinId,
+    selectedWallSkinId,
+    applyWallToCeiling,
+    editableObjects,
+  })
+
+  const resetGuestProgress = () => {
+    setCoins(isAdminMode ? 850 : 0)
+    setOwnedSkins(['classic'])
+    setSelectedSkinId('classic')
+    setPreviewSkinId('classic')
+    setOwnedFloorSkins(['floor-classic'])
+    setOwnedWallSkins(['wall-classic'])
+    setSelectedFloorSkinId('floor-classic')
+    setSelectedWallSkinId('wall-classic')
+    setPreviewFloorSkinId('floor-classic')
+    setPreviewWallSkinId('wall-classic')
+    setApplyWallToCeiling(false)
+    setEditableObjects(defaultEditableObjects)
+    setSelectedObjectId(null)
+    setDraggingObjectId(null)
+    setPlacingObjectId(null)
+    setPlacementLocked(false)
+    setPlacementPreview(null)
+    setIsObjectInventoryOpen(false)
+    setNearbySeat(null)
+    setSeatedState(null)
+  }
+
+  const applyProgressSnapshot = (parsed, { includeCoins = true } = {}) => {
+    if (!parsed) return
+    if (typeof parsed.displayName === 'string') setDisplayName(parsed.displayName)
+    if (includeCoins && typeof parsed.coins === 'number') {
+      setCoins(isAdminMode ? 850 : Math.max(0, parsed.coins))
+    } else if (includeCoins) {
+      setCoins(isAdminMode ? 850 : 0)
+    }
+    if (Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setOwnedSkins(parsed.ownedSkins)
+    if (typeof parsed.selectedSkinId === 'string') {
+      setSelectedSkinId(parsed.selectedSkinId)
+      setPreviewSkinId(parsed.selectedSkinId)
+    }
+
+    const validFloorSkinIds = new Set(floorSkins.map((skin) => skin.id))
+    const validWallSkinIds = new Set(wallSkins.map((skin) => skin.id))
+    const ownedFloorSkinIds = Array.isArray(parsed.ownedFloorSkins)
+      ? ['floor-classic', ...parsed.ownedFloorSkins.filter((id) => validFloorSkinIds.has(id) && id !== 'floor-classic')]
+      : ['floor-classic']
+    const ownedWallSkinIds = Array.isArray(parsed.ownedWallSkins)
+      ? ['wall-classic', ...parsed.ownedWallSkins.filter((id) => validWallSkinIds.has(id) && id !== 'wall-classic')]
+      : ['wall-classic']
+
+    setOwnedFloorSkins(ownedFloorSkinIds)
+    setOwnedWallSkins(ownedWallSkinIds)
+
+    if (typeof parsed.selectedFloorSkinId === 'string' && validFloorSkinIds.has(parsed.selectedFloorSkinId)) {
+      setSelectedFloorSkinId(parsed.selectedFloorSkinId)
+      setPreviewFloorSkinId(parsed.selectedFloorSkinId)
+    }
+    if (typeof parsed.selectedWallSkinId === 'string' && validWallSkinIds.has(parsed.selectedWallSkinId)) {
+      setSelectedWallSkinId(parsed.selectedWallSkinId)
+      setPreviewWallSkinId(parsed.selectedWallSkinId)
+    }
+    if (typeof parsed.applyWallToCeiling === 'boolean') {
+      setApplyWallToCeiling(parsed.applyWallToCeiling)
+    }
+
+    if (Array.isArray(parsed.editableObjects)) {
+      const knownIds = new Set(defaultEditableObjects.map((object) => object.id))
+      const savedObjectsById = new Map(parsed.editableObjects.map((object) => [object?.id, object]))
+      const mergedObjects = defaultEditableObjects.map((baseObject) => {
+        const savedObject = savedObjectsById.get(baseObject.id)
+        if (!savedObject || !knownIds.has(savedObject.id)) return baseObject
+        const position = Array.isArray(savedObject.position) && savedObject.position.length === 3
+          ? savedObject.position
+          : baseObject.position
+        return {
+          ...baseObject,
+          status: savedObject.status === 'stored' && baseObject.canStore ? 'stored' : 'placed',
+          position: savedObject.status === 'stored' && baseObject.canStore
+            ? null
+            : [
+              MathUtils.clamp(Number(position[0]) || baseObject.position[0], CUSTOM_ROOM_BOUNDS.minX, CUSTOM_ROOM_BOUNDS.maxX),
+              baseObject.position[1],
+              MathUtils.clamp(Number(position[2]) || baseObject.position[2], CUSTOM_ROOM_BOUNDS.minZ, CUSTOM_ROOM_BOUNDS.maxZ),
+            ],
+          rotationY: Number.isFinite(savedObject.rotationY) ? savedObject.rotationY : baseObject.rotationY,
+        }
+      })
+      const savedShopObjects = parsed.editableObjects
+        .filter((object) =>
+          object?.id &&
+          !knownIds.has(object.id) &&
+          !LEGACY_STARTER_FURNITURE_IDS.has(object.id) &&
+          shopObjectIds.includes(object.objectId),
+        )
+        .map((object) => {
+          const position = Array.isArray(object.position) && object.position.length === 3
+            ? object.position
+            : null
+          return createEditableObjectInstance(object.objectId, {
+            id: object.id,
+            status: object.status === 'placed' ? 'placed' : 'stored',
+            position: object.status === 'placed' && position
+              ? [
+                MathUtils.clamp(Number(position[0]) || 0, CUSTOM_ROOM_BOUNDS.minX, CUSTOM_ROOM_BOUNDS.maxX),
+                0,
+                MathUtils.clamp(Number(position[2]) || 0, CUSTOM_ROOM_BOUNDS.minZ, CUSTOM_ROOM_BOUNDS.maxZ),
+              ]
+              : null,
+            rotationY: Number.isFinite(object.rotationY) ? object.rotationY : 0,
+          })
+        })
+        .filter(Boolean)
+
+      setEditableObjects([...mergedObjects, ...savedShopObjects])
+    }
+  }
+
+  const saveCurrentProgressToCloud = async () => {
+    if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return false
+    setCloudSaveState('saving')
+    try {
+      await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
+      setCloudSaveState('synced')
+      return true
+    } catch {
+      setCloudSaveState('error')
+      return false
+    }
+  }
+
+  const applyCoinDelta = async (delta) => {
+    const previousCoins = latestProgressRef.current?.coins ?? coins
+    setCoins((current) => Math.max(0, current + delta))
+    if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return true
+
+    try {
+      const nextCoins = await addPlayerCoins(delta, { scope: progressScope })
+      if (typeof nextCoins === 'number') setCoins(Math.max(0, nextCoins))
+      return true
+    } catch {
+      if (delta > 0 || previousCoins + delta >= 0) {
+        try {
+          await savePlayerProgress({
+            ...(latestProgressRef.current ?? createCurrentProgressSnapshot()),
+            coins: Math.max(0, previousCoins + delta),
+          }, { includeCoins: true, scope: progressScope })
+          setCloudSaveState('synced')
+          return true
+        } catch {}
+      }
+      setCoins(previousCoins)
+      setCloudSaveState('error')
+      return false
+    }
+  }
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(SKIN_STORAGE_KEY)
+      const raw = localStorage.getItem(progressStorageKey)
       if (!raw) return
-      const parsed = JSON.parse(raw)
-      // Economy by mode: normal starts at 0, admin uses test wallet.
-      setCoins(isAdminMode ? 850 : 0)
-      if (Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setOwnedSkins(parsed.ownedSkins)
-      if (typeof parsed.selectedSkinId === 'string') {
-        setSelectedSkinId(parsed.selectedSkinId)
-        setPreviewSkinId(parsed.selectedSkinId)
-      }
-      if (Array.isArray(parsed.ownedFloorSkins) && parsed.ownedFloorSkins.length) {
-        setOwnedFloorSkins(parsed.ownedFloorSkins)
-      }
-      if (Array.isArray(parsed.ownedWallSkins) && parsed.ownedWallSkins.length) {
-        setOwnedWallSkins(parsed.ownedWallSkins)
-      }
-      if (typeof parsed.selectedFloorSkinId === 'string') {
-        setSelectedFloorSkinId(parsed.selectedFloorSkinId)
-        setPreviewFloorSkinId(parsed.selectedFloorSkinId)
-      }
-      if (typeof parsed.selectedWallSkinId === 'string') {
-        setSelectedWallSkinId(parsed.selectedWallSkinId)
-        setPreviewWallSkinId(parsed.selectedWallSkinId)
-      }
+      applyProgressSnapshot(JSON.parse(raw))
     } catch {}
-  }, [])
+  }, [progressStorageKey])
 
   useEffect(() => {
+    const snapshot = createCurrentProgressSnapshot()
+    latestProgressRef.current = snapshot
     localStorage.setItem(
-      SKIN_STORAGE_KEY,
-      JSON.stringify({
-        coins,
-        ownedSkins,
-        selectedSkinId,
-        ownedFloorSkins,
-        ownedWallSkins,
-        selectedFloorSkinId,
-        selectedWallSkinId,
-      }),
+      progressStorageKey,
+      JSON.stringify(snapshot),
     )
-  }, [coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId])
+  }, [progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
+
+  useEffect(() => {
+    authUserRef.current = authUser
+  }, [authUser])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return undefined
+
+    let cancelled = false
+
+    const loadCloudProgress = async (user) => {
+      setAuthUser(user)
+      if (!user) {
+        hasLoadedCloudProgressRef.current = false
+        setCloudSaveState('offline')
+        return
+      }
+      setDisplayName(user.user_metadata?.display_name ?? '')
+
+      setCloudSaveState('loading')
+      try {
+        const cloudProgress = await loadPlayerProgress({ scope: progressScope })
+        if (cancelled) return
+        if (cloudProgress) {
+          skipNextCloudSaveRef.current = true
+          applyProgressSnapshot(cloudProgress)
+        } else {
+          await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
+        }
+        hasLoadedCloudProgressRef.current = true
+        setCloudSaveState('synced')
+      } catch {
+        if (!cancelled) setCloudSaveState('error')
+      }
+    }
+
+    getCurrentUser()
+      .then(async (user) => {
+        if (cancelled) return
+        setAuthUser(user)
+        if (!user) {
+          setCloudSaveState('offline')
+          return null
+        }
+        setDisplayName(user.user_metadata?.display_name ?? '')
+        setCloudSaveState('loading')
+        const cloudProgress = await loadPlayerProgress({ scope: progressScope })
+        if (cloudProgress) {
+          skipNextCloudSaveRef.current = true
+          applyProgressSnapshot(cloudProgress)
+        } else {
+          await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
+        }
+        hasLoadedCloudProgressRef.current = true
+        setCloudSaveState('synced')
+        return cloudProgress
+      })
+      .catch(() => {
+        if (!cancelled) setCloudSaveState('offline')
+      })
+
+    const unsubscribe = onAuthStateChange(loadCloudProgress)
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [progressScope])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !authUser || !hasLoadedCloudProgressRef.current) return undefined
+    if (skipNextCloudSaveRef.current) {
+      skipNextCloudSaveRef.current = false
+      return undefined
+    }
+
+    if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
+    setCloudSaveState('saving')
+    cloudSaveTimeoutRef.current = window.setTimeout(() => {
+      savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
+        .then(() => setCloudSaveState('synced'))
+        .catch(() => setCloudSaveState('error'))
+    }, 800)
+
+    return () => {
+      if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
+    }
+  }, [authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
+
+  useEffect(() => {
+    const saveBeforeLeaving = () => {
+      if (document.visibilityState === 'hidden') {
+        saveCurrentProgressToCloud()
+      }
+    }
+    const saveOnPageHide = () => {
+      saveCurrentProgressToCloud()
+    }
+
+    document.addEventListener('visibilitychange', saveBeforeLeaving)
+    window.addEventListener('pagehide', saveOnPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', saveBeforeLeaving)
+      window.removeEventListener('pagehide', saveOnPageHide)
+    }
+  }, [progressScope])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -2034,10 +3543,11 @@ function App() {
     if (scoreCooldownRef.current) return
 
     scoreCooldownRef.current = true
-    setCoins((current) => current + GOAL_POINTS)
+    applyCoinDelta(GOAL_POINTS)
 
     const ball = ballRef.current
     const ballPosition = ball?.translation()
+    const goalPosition = editableObjects.find((object) => object.id === 'goal_01')?.position ?? [0, 0, GOAL_Z]
     setScorePopups((previous) => [
       ...previous,
       {
@@ -2045,7 +3555,7 @@ function App() {
         value: GOAL_POINTS,
         x: ballPosition?.x ?? 0,
         y: Math.max(0.9, ballPosition?.y ?? 0.9),
-        z: ballPosition?.z ?? GOAL_Z - 0.55,
+        z: ballPosition?.z ?? goalPosition[2] - 0.55,
         startAt: Date.now(),
         duration: 620,
       },
@@ -2068,12 +3578,26 @@ function App() {
   const previewIndex = Math.max(0, ballSkins.findIndex((skin) => skin.id === previewSkinId))
   const activeSkinId = isSkinMenuOpen ? previewSkinId : selectedSkinId
   const activeSkin = ballSkins.find((skin) => skin.id === activeSkinId) || ballSkins[0]
+  const availableWallSkins = isAdminMode ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
   const previewFloorIndex = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
-  const previewWallIndex = Math.max(0, wallSkins.findIndex((skin) => skin.id === previewWallSkinId))
+  const previewWallIndex = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
   const activeFloorSkinId = isEnvironmentMenuOpen ? previewFloorSkinId : selectedFloorSkinId
   const activeWallSkinId = isEnvironmentMenuOpen ? previewWallSkinId : selectedWallSkinId
   const activeFloorSkin = floorSkins.find((skin) => skin.id === activeFloorSkinId) || floorSkins[0]
-  const activeWallSkin = wallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
+  const activeWallSkin = availableWallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
+  const activeCeilingTexturePath = applyWallToCeiling ? activeWallSkin.texture : DEFAULT_CEILING_TEXTURE
+  const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
+  const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
+  const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
+  const inventoryCards = getInventoryCards(editableObjects)
+  const showCaptureUi = !(isAdminMode || isVerticalFrameMode) || !captureUiHidden
+  const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
+  const furnitureCounts = editableObjects.reduce((counts, object) => {
+    if (shopObjectIds.includes(object.objectId)) {
+      counts[object.objectId] = (counts[object.objectId] ?? 0) + 1
+    }
+    return counts
+  }, {})
 
   const openSkinMenu = () => {
     setPreviewSkinId(selectedSkinId)
@@ -2108,16 +3632,17 @@ function App() {
       setPreviewFloorSkinId(floorSkins[next].id)
       return
     }
-    const current = Math.max(0, wallSkins.findIndex((skin) => skin.id === previewWallSkinId))
-    const next = (current + direction + wallSkins.length) % wallSkins.length
-    setPreviewWallSkinId(wallSkins[next].id)
+    const current = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
+    const next = (current + direction + availableWallSkins.length) % availableWallSkins.length
+    setPreviewWallSkinId(availableWallSkins[next].id)
   }
 
-  const buyPreviewSkin = () => {
+  const buyPreviewSkin = async () => {
     const skin = ballSkins[previewIndex]
     if (ownedSkins.includes(skin.id)) return
-    if (coins < skin.price) return
-    setCoins((current) => current - skin.price)
+    if (!isAdminMode && coins < skin.price) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
+    if (!paid) return
     setOwnedSkins((current) => [...current, skin.id])
   }
 
@@ -2127,12 +3652,13 @@ function App() {
     setSelectedSkinId(skin.id)
     setIsSkinMenuOpen(false)
   }
-  const buyPreviewEnvironmentSkin = () => {
-    const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : wallSkins[previewWallIndex]
+  const buyPreviewEnvironmentSkin = async () => {
+    const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : availableWallSkins[previewWallIndex]
     const owned = environmentTab === 'floor' ? ownedFloorSkins : ownedWallSkins
     if (owned.includes(skin.id)) return
-    if (coins < skin.price) return
-    setCoins((current) => current - skin.price)
+    if (!isAdminMode && coins < skin.price) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
+    if (!paid) return
     if (environmentTab === 'floor') {
       setOwnedFloorSkins((current) => [...current, skin.id])
     } else {
@@ -2146,9 +3672,206 @@ function App() {
       setSelectedFloorSkinId(skin.id)
       return
     }
-    const skin = wallSkins[previewWallIndex]
+    const skin = availableWallSkins[previewWallIndex]
     if (!ownedWallSkins.includes(skin.id)) return
     setSelectedWallSkinId(skin.id)
+  }
+
+  const buyFurnitureObject = async (objectId) => {
+    const item = objectCatalog[objectId]
+    if (!item || !shopObjectIds.includes(objectId)) return
+    if (!isAdminMode && coins < item.price) return
+    const object = createEditableObjectInstance(objectId)
+    if (!object) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-item.price)
+    if (!paid) return
+    setEditableObjects((current) => [...current, object])
+  }
+
+  const requestSit = () => {
+    if (!nearbySeat || mode !== 'play') return
+    setSeatedState({ phase: 'sitDown', seat: nearbySeat })
+    setNearbySeat(null)
+  }
+
+  const requestStandUp = () => {
+    if (seatedState?.phase !== 'sitting') return
+    setSeatedState({ phase: 'standUp', seat: seatedState.seat })
+  }
+
+  const updateSeatedPhase = (phase) => {
+    setSeatedState((current) => {
+      if (!current) return null
+      if (!phase) return null
+      return { ...current, phase }
+    })
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (getKeyboardKey(event) !== 'e') return
+      if (mode !== 'play') return
+      if (seatedState?.phase === 'sitting') {
+        event.preventDefault()
+        requestStandUp()
+        return
+      }
+      if (nearbySeat && !seatedState?.phase) {
+        event.preventDefault()
+        requestSit()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [mode, nearbySeat, seatedState])
+
+  const openCustomizationMode = () => {
+    setIsSkinMenuOpen(false)
+    setIsEnvironmentMenuOpen(false)
+    setMode('customize')
+    setSelectedObjectId(placedEditableObjects[0]?.id ?? null)
+    setDraggingObjectId(null)
+    setPlacingObjectId(null)
+    setPlacementLocked(false)
+    setPlacementPreview(null)
+    setIsObjectInventoryOpen(false)
+    setNearbySeat(null)
+    setSeatedState(null)
+  }
+
+  const closeCustomizationMode = () => {
+    setMode('play')
+    setSelectedObjectId(null)
+    setDraggingObjectId(null)
+    setPlacingObjectId(null)
+    setPlacementLocked(false)
+    setPlacementPreview(null)
+    setIsObjectInventoryOpen(false)
+    setIsNearCustomizationStation(false)
+  }
+
+  const updateEditableObjectPosition = (id, position) => {
+    setEditableObjects((current) =>
+      current.map((object) => (object.id === id ? { ...object, position } : object)),
+    )
+  }
+
+  const storeSelectedObject = () => {
+    if (!selectedObject?.canStore) return
+    setEditableObjects((current) =>
+      current.map((object) =>
+        object.id === selectedObject.id
+          ? { ...object, status: 'stored', position: null }
+          : object,
+      ),
+    )
+    setSelectedObjectId(null)
+    setDraggingObjectId(null)
+  }
+
+  const beginPlaceObject = (id) => {
+    const object = editableObjects.find((nextObject) => nextObject.id === id)
+    if (!object || object.status !== 'stored') return
+    setSelectedObjectId(null)
+    setDraggingObjectId(null)
+    setPlacingObjectId(id)
+    setPlacementLocked(false)
+    setPlacementPreview({
+      position: [0, 0, 0],
+      rotationY: object.rotationY ?? 0,
+      isValid: true,
+    })
+    setIsObjectInventoryOpen(false)
+  }
+
+  const updatePlacementPreview = (position) => {
+    setPlacementPreview((current) => {
+      if (!current) return current
+      const [x, z] = clampToCustomRoom(position[0], position[2])
+      return {
+        ...current,
+        position: [x, 0, z],
+        isValid: true,
+      }
+    })
+  }
+
+  const confirmPlacement = () => {
+    if (!placingObjectId || !placementPreview?.isValid) return
+    setEditableObjects((current) =>
+      current.map((object) =>
+        object.id === placingObjectId
+          ? {
+            ...object,
+            status: 'placed',
+            position: placementPreview.position,
+            rotationY: placementPreview.rotationY,
+          }
+          : object,
+      ),
+    )
+    setSelectedObjectId(placingObjectId)
+    setPlacingObjectId(null)
+    setPlacementLocked(false)
+    setPlacementPreview(null)
+  }
+
+  const cancelPlacement = () => {
+    setPlacingObjectId(null)
+    setPlacementLocked(false)
+    setPlacementPreview(null)
+  }
+
+  const rotateSelectedObject = (direction) => {
+    const angle = Math.PI / 4
+    if (placingObjectId) {
+      setPlacementPreview((current) => (
+        current ? { ...current, rotationY: current.rotationY + direction * angle } : current
+      ))
+      return
+    }
+    if (!selectedObjectId) return
+    setEditableObjects((current) =>
+      current.map((object) => {
+        if (object.id !== selectedObjectId || !object.canRotate) return object
+        return { ...object, rotationY: object.rotationY + direction * angle }
+      }),
+    )
+  }
+
+  const requestAccountSubmit = async (event) => {
+    event.preventDefault()
+    const email = authEmail.trim()
+    const password = authPassword
+    const pseudo = displayName.trim()
+    if (!email || password.length < 8) return
+    const result = authMode === 'signup'
+      ? await signUpWithPassword({ email, password, displayName: pseudo })
+      : await signInWithPassword({ email, password })
+    const errorMessage = result.error === 'Invalid login credentials'
+      ? 'Email/mot de passe incorrect, ou compte pas encore confirme.'
+      : result.error
+    setAuthMessage(result.ok
+      ? authMode === 'signup'
+        ? result.needsEmailConfirmation
+          ? 'Compte cree. Confirme ton email, ou desactive la confirmation dans Supabase pour le prototype.'
+          : 'Compte cree et connecte.'
+        : 'Connexion reussie.'
+      : `Connexion impossible: ${errorMessage ?? 'erreur inconnue'}`)
+  }
+
+  const requestSignOut = async () => {
+    await saveCurrentProgressToCloud()
+    await signOut()
+    setAuthUser(null)
+    setAuthPassword('')
+    setAuthMessage('')
+    setCloudSaveState('offline')
+    hasLoadedCloudProgressRef.current = false
+    skipNextCloudSaveRef.current = false
+    authUserRef.current = null
+    resetGuestProgress()
   }
 
   const gameView = (
@@ -2161,38 +3884,174 @@ function App() {
         <WhiteRoom
           floorTexturePath={activeFloorSkin.texture}
           wallTexturePath={activeWallSkin.texture}
+          ceilingTexturePath={activeCeilingTexturePath}
+          hideCeiling={mode === 'customize'}
         />
         <Dragon playerPositionRef={playerPositionRef} />
         <GlassContainmentRoom />
         <SkinStation />
         <EnvironmentStation />
+        <CustomizationStation />
+        <CustomizationLayer
+          mode={mode}
+          objects={editableObjects}
+          selectedObjectId={selectedObjectId}
+          draggingObjectId={draggingObjectId}
+          placingObjectId={placingObjectId}
+          placementLocked={placementLocked}
+          placementPreview={placementPreview}
+          onSelect={setSelectedObjectId}
+          onStartDragging={setDraggingObjectId}
+          onStopDragging={() => setDraggingObjectId(null)}
+          onUpdatePosition={updateEditableObjectPosition}
+          onUpdatePlacementPreview={updatePlacementPreview}
+          onLockPlacement={() => setPlacementLocked(true)}
+        />
+        <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
           <Ball ballRef={ballRef} skinTexturePath={activeSkin.texture} />
           <BallRespawnGuard ballRef={ballRef} onOutOfBounds={handleOutOfBoundsRespawn} />
-          <Goal onBallZoneEnter={handleBallZoneEnter} onBallZoneExit={handleBallZoneExit} ballRef={ballRef} />
-          <Player touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef} />
+          <Goal
+            object={goalObject}
+            mode={mode}
+            selected={selectedObjectId === goalObject.id}
+            onSelect={setSelectedObjectId}
+            onStartDragging={setDraggingObjectId}
+            onBallZoneEnter={handleBallZoneEnter}
+            onBallZoneExit={handleBallZoneExit}
+            ballRef={ballRef}
+          />
+          <Player
+            touchRef={touchRef}
+            ballRef={ballRef}
+            playerPositionRef={playerPositionRef}
+            mode={mode}
+            goalObject={goalObject}
+            seatedState={seatedState}
+            onSeatedPhaseChange={updateSeatedPhase}
+          />
           <SkinStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearSkinStation} />
           <EnvironmentStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearEnvironmentStation} />
-          <ScorePopups popups={scorePopups} />
+          <CustomizationStationTrigger
+            playerPositionRef={playerPositionRef}
+            onNearChange={setIsNearCustomizationStation}
+            enabled={mode === 'play'}
+          />
+          <SeatInteractionTrigger
+            playerPositionRef={playerPositionRef}
+            objects={placedEditableObjects}
+            seatedState={seatedState}
+            onNearbySeatChange={setNearbySeat}
+          />
+          {showCaptureUi && <ScorePopups popups={scorePopups} />}
         </Physics>
       </Canvas>
 
-      <ControlsOverlay touchRef={touchRef} />
-      <CoinsOverlay coins={coins} />
-      {isNearSkinStation && !isSkinMenuOpen && (
+      {mode === 'play' && (
+        <ControlsOverlay
+          touchRef={touchRef}
+          adminCameraControls={isAdminMode}
+          uiHidden={!showCaptureUi}
+        />
+      )}
+      {showCaptureUi && <CoinsOverlay coins={coins} />}
+      {showCaptureUi && (
+        <AccountSyncPanel
+          configured={isSupabaseConfigured}
+          user={authUser}
+          email={authEmail}
+          password={authPassword}
+          displayName={displayName}
+          mode={authMode}
+          open={isAccountOpen}
+          message={authMessage}
+          saveState={cloudSaveState}
+          onToggle={() => setIsAccountOpen((current) => !current)}
+          onEmailChange={setAuthEmail}
+          onPasswordChange={setAuthPassword}
+          onDisplayNameChange={setDisplayName}
+          onModeChange={(nextMode) => {
+            setAuthMode(nextMode)
+            setAuthMessage('')
+          }}
+          onSubmit={requestAccountSubmit}
+          onSignOut={requestSignOut}
+        />
+      )}
+      {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
           Personnaliser le ballon
         </button>
       )}
-      {isNearEnvironmentStation && !isEnvironmentMenuOpen && (
+      {showCaptureUi && isNearEnvironmentStation && !isEnvironmentMenuOpen && mode === 'play' && (
         <button className="skin-open-btn skin-open-btn-right" type="button" onClick={openEnvironmentMenu}>
-          Personnaliser sol + murs
+          Boutique
         </button>
       )}
+      {showCaptureUi && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+        <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationMode}>
+          Personnaliser la piece
+        </button>
+      )}
+      {showCaptureUi && nearbySeat && mode === 'play' && !seatedState?.phase && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+        <button className="skin-open-btn seat-open-btn" type="button" onClick={requestSit}>
+          S'asseoir
+        </button>
+      )}
+      {showCaptureUi && seatedState?.phase === 'sitting' && (
+        <button className="skin-open-btn seat-open-btn" type="button" onClick={requestStandUp}>
+          Se relever
+        </button>
+      )}
+      {showCaptureUi && mode === 'customize' && (
+        <div className="customize-ui">
+          <div className="customize-rotation">
+            <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={!selectedObjectId && !placingObjectId}>
+              {'<'}
+            </button>
+            <button type="button" onClick={() => rotateSelectedObject(1)} disabled={!selectedObjectId && !placingObjectId}>
+              {'>'}
+            </button>
+            {selectedObject?.canStore && !placingObjectId && (
+              <button type="button" onClick={storeSelectedObject}>
+                Ranger
+              </button>
+            )}
+          </div>
+          {placingObjectId ? (
+            <div className="customize-placement-actions">
+              <button
+                className="customize-done"
+                type="button"
+                onClick={confirmPlacement}
+                disabled={!placementPreview?.isValid || !placementLocked}
+              >
+                Poser
+              </button>
+              <button className="customize-cancel" type="button" onClick={cancelPlacement}>
+                Annuler
+              </button>
+            </div>
+          ) : (
+            <button className="customize-done" type="button" onClick={closeCustomizationMode}>
+              Valider
+            </button>
+          )}
+        </div>
+      )}
+      {showCaptureUi && mode === 'customize' && (
+        <ObjectInventorySheet
+          open={isObjectInventoryOpen}
+          cards={inventoryCards}
+          placingObjectId={placingObjectId}
+          onToggle={() => setIsObjectInventoryOpen((current) => !current)}
+          onSelect={beginPlaceObject}
+        />
+      )}
       <SkinMenu
-        open={isSkinMenuOpen}
+        open={showCaptureUi && isSkinMenuOpen}
         coins={coins}
         skins={ballSkins}
         previewIndex={previewIndex}
@@ -2205,28 +4064,33 @@ function App() {
         onSelect={selectPreviewSkin}
       />
       <EnvironmentMenu
-        open={isEnvironmentMenuOpen}
+        open={showCaptureUi && isEnvironmentMenuOpen}
         coins={coins}
         activeTab={environmentTab}
         onTabChange={setEnvironmentTab}
         floorSkins={floorSkins}
-        wallSkins={wallSkins}
+        wallSkins={availableWallSkins}
+        furnitureItems={furnitureShopItems}
+        furnitureCounts={furnitureCounts}
         previewFloorIndex={previewFloorIndex}
         previewWallIndex={previewWallIndex}
         selectedFloorSkinId={selectedFloorSkinId}
         selectedWallSkinId={selectedWallSkinId}
         ownedFloorSkinIds={ownedFloorSkins}
         ownedWallSkinIds={ownedWallSkins}
+        applyWallToCeiling={applyWallToCeiling}
+        onApplyWallToCeilingChange={setApplyWallToCeiling}
         onClose={closeEnvironmentMenu}
         onPrevious={() => goEnvironmentPreview(-1)}
         onNext={() => goEnvironmentPreview(1)}
         onBuy={buyPreviewEnvironmentSkin}
         onSelect={selectPreviewEnvironmentSkin}
+        onBuyFurniture={buyFurnitureObject}
       />
     </main>
   )
 
-  if (isAdminMode) {
+  if (isAdminMode || isVerticalFrameMode) {
     return (
       <div className="admin-viewport">
         <div className="admin-frame">{gameView}</div>
@@ -2248,9 +4112,20 @@ useFBX.preload('/models/player/player-run.fbx')
 useFBX.preload('/models/player/player-kick.fbx')
 useFBX.preload('/models/Waving.fbx')
 useFBX.preload('/models/Wave Hip Hop Dance.fbx')
+useFBX.preload('/models/player/pointing-up.fbx')
 useFBX.preload('/models/player/player-jump-start.fbx')
 useFBX.preload('/models/player/player-jump-loop.fbx')
 useFBX.preload('/models/player/player-jump-land.fbx')
+useFBX.preload('/models/player/Stand To Sit.fbx')
+useFBX.preload('/models/player/Sitting Idle.fbx')
+useFBX.preload('/models/player/Stand Up.fbx')
+useFBX.preload('/models/placeables/modular-sofa/modular-sofa.fbx')
+useTexture.preload('/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG')
+Object.values(objectCatalog).forEach((item) => {
+  if (item.modelUrl) useGLTF.preload(item.modelUrl)
+  if (item.thumbnailModelUrl?.endsWith('.fbx')) useFBX.preload(item.thumbnailModelUrl)
+  if (item.thumbnailTextureUrl) useTexture.preload(item.thumbnailTextureUrl)
+})
 ballSkins.forEach((skin) => useTexture.preload(skin.texture))
 floorSkins.forEach((skin) => useTexture.preload(skin.texture))
 wallSkins.forEach((skin) => useTexture.preload(skin.texture))

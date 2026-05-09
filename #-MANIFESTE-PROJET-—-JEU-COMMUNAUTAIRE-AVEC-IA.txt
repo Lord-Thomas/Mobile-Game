@@ -107,6 +107,7 @@ Le jeu commence avec :
 * Prioriser la performance mobile
 * Éviter les systèmes complexes dès le début
 * Garder un code compréhensible et modifiable
+* Ne pas démarrer le serveur local automatiquement : l'utilisateur s'en charge, sauf demande explicite
 
 ---
 

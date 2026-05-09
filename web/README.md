@@ -44,6 +44,29 @@ Build production:
 - Chaque `push` sur `main` declenche un redeploiement automatique en production
 - Chaque `push` sur une autre branche declenche un lien preview
 
+## Sauvegarde joueur Supabase
+
+1. Creer un projet Supabase.
+2. Dans Supabase, ouvrir SQL Editor et executer `supabase/player_progress.sql`.
+3. Copier `web/.env.example` vers `web/.env.local`.
+4. Renseigner:
+
+```bash
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-public-anon-key
+VITE_SUPABASE_REDIRECT_URL=http://127.0.0.1:5173
+```
+
+5. Dans Supabase Auth, ajouter les URL du jeu dans les redirect URLs:
+   - local: `http://127.0.0.1:5173`
+   - mobile local si besoin: `http://IP_DE_TON_PC:5173`
+   - production: URL Vercel du jeu
+6. Dans Supabase Auth > Providers > Email, activer Email/Password.
+   Pour le prototype, desactiver "Confirm email" si tu veux que la creation de compte connecte le joueur directement sans quitter le jeu.
+7. Sur Vercel, ajouter les memes variables d'environnement au projet `web`.
+
+Sans ces variables, le jeu reste en sauvegarde locale.
+
 ## Workflow recommande
 
 - Garde `main` stable
