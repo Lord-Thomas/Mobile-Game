@@ -67,6 +67,8 @@ const CUSTOM_STATION_POSITION = { x: 0, y: 0.35, z: 3.55 }
 const CUSTOM_ROOM_BOUNDS = { minX: -4.25, maxX: 4.25, minZ: -4.25, maxZ: 4.25 }
 const CUSTOM_GRID_SIZE = 0.25
 const CUSTOM_PLACEMENT_RAY_START_Y = 30
+const TV_INTERACTION_DISTANCE = 1.35
+const TV_MENU_EVENT = 'lab-tv-open-menu'
 const MAIN_ROOM = { width: 10, depth: 10, height: 5 }
 const FRONT_WALL = { zVisual: 5.05, zCollider: 5.1, thickness: 0.1 }
 const DRAGON_OPENING = { centerX: 0, width: 6, bottomY: 0, height: 3.8 }
@@ -2414,6 +2416,47 @@ function SeatInteractionTrigger({ playerPositionRef, objects, seatedState, onNea
   return null
 }
 
+function TvInteractionTrigger({ playerPositionRef, objects, enabled, onNearbyTvChange }) {
+  const currentTvIdRef = useRef(null)
+
+  useFrame(() => {
+    if (!enabled) {
+      if (currentTvIdRef.current !== null) {
+        currentTvIdRef.current = null
+        onNearbyTvChange(null)
+      }
+      return
+    }
+
+    const playerPosition = playerPositionRef.current
+    let nearestTv = null
+    let nearestDistance = Infinity
+
+    objects.forEach((object) => {
+      const catalogItem = objectCatalog[object.objectId]
+      if (catalogItem?.type !== 'interactive_tv' || !object.position) return
+
+      const distance = Math.hypot(
+        playerPosition.x - object.position[0],
+        playerPosition.z - object.position[2],
+      )
+
+      if (distance <= TV_INTERACTION_DISTANCE && distance < nearestDistance) {
+        nearestDistance = distance
+        nearestTv = object
+      }
+    })
+
+    const nextTvId = nearestTv?.id ?? null
+    if (nextTvId !== currentTvIdRef.current) {
+      currentTvIdRef.current = nextTvId
+      onNearbyTvChange(nearestTv)
+    }
+  })
+
+  return null
+}
+
 function SeatTargetMarker({ seat }) {
   if (!seat) return null
 
@@ -2584,7 +2627,7 @@ function getNamedScreenInfo(object, offset, screenName = 'TV_SCREEN') {
   }
 }
 
-function InteractiveTvModel({ objectId }) {
+function InteractiveTvModel({ objectId, placedObjectId }) {
   const catalogItem = objectCatalog[objectId]
   const gltf = useGLTF(catalogItem.modelUrl)
   const model = useMemo(() => {
@@ -2632,29 +2675,77 @@ function InteractiveTvModel({ objectId }) {
     <group scale={model.scale} rotation={[0, catalogItem.modelRotationY ?? 0, 0]}>
       <primitive object={model.object} position={model.offset} />
       {model.screenInfo && (
-        <InteractiveTvScreen screenInfo={model.screenInfo} />
+        <InteractiveTvScreen screenInfo={model.screenInfo} tvInstanceId={placedObjectId} />
       )}
     </group>
   )
 }
 
-function PlaceableModel({ objectId, type }) {
+function PlaceableModel({ objectId, type, placedObjectId }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
-  if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} />
+  if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} placedObjectId={placedObjectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
   if (type === 'sofa' || catalogItem?.type === 'sofa') return <SofaModel />
   return null
 }
 
-function InteractiveTvScreen({ screenInfo }) {
+function getYouTubeEmbedUrl(rawUrl) {
+  const value = rawUrl.trim()
+  if (!value) return null
+
+  try {
+    const url = new URL(value.includes('://') ? value : `https://${value}`)
+    const host = url.hostname.replace(/^www\./, '')
+    let videoId = ''
+
+    if (host === 'youtu.be') {
+      videoId = url.pathname.split('/').filter(Boolean)[0] ?? ''
+    } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+      if (url.pathname.startsWith('/watch')) {
+        videoId = url.searchParams.get('v') ?? ''
+      } else if (url.pathname.startsWith('/embed/') || url.pathname.startsWith('/shorts/')) {
+        videoId = url.pathname.split('/').filter(Boolean)[1] ?? ''
+      }
+    }
+
+    if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return null
+
+    const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`)
+    embedUrl.searchParams.set('autoplay', '1')
+    embedUrl.searchParams.set('playsinline', '1')
+    embedUrl.searchParams.set('enablejsapi', '1')
+    if (typeof window !== 'undefined') {
+      embedUrl.searchParams.set('origin', window.location.origin)
+    }
+    return embedUrl.toString()
+  } catch {
+    return null
+  }
+}
+
+function escapeHtmlAttribute(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   const [texture, setTexture] = useState(null)
   const [captureState, setCaptureState] = useState('off')
   const [tvMenuOpen, setTvMenuOpen] = useState(false)
+  const [tvOnlinePanelOpen, setTvOnlinePanelOpen] = useState(false)
+  const [tvOnlineUrl, setTvOnlineUrl] = useState('')
+  const [tvOnlineEmbedUrl, setTvOnlineEmbedUrl] = useState('')
+  const [tvOnlineMessage, setTvOnlineMessage] = useState('')
   const [tvVolume, setTvVolume] = useState(1)
   const [tvPoweredOn, setTvPoweredOn] = useState(true)
+  const [tvPaused, setTvPaused] = useState(false)
   const streamRef = useRef(null)
   const videoRef = useRef(null)
+  const youtubeFrameRef = useRef(null)
   const audioContextRef = useRef(null)
   const audioSourceRef = useRef(null)
   const audioGainRef = useRef(null)
@@ -2743,6 +2834,22 @@ function InteractiveTvScreen({ screenInfo }) {
         console.warn('TV volume setup failed', error)
       }
     }
+  }
+
+  const postYouTubeCommand = (func, args = []) => {
+    const frameWindow = youtubeFrameRef.current?.contentWindow
+    if (!frameWindow) return
+    frameWindow.postMessage(JSON.stringify({
+      event: 'command',
+      func,
+      args,
+    }), 'https://www.youtube.com')
+  }
+
+  const applyYouTubeVolume = (nextVolume) => {
+    const percent = Math.round(MathUtils.clamp(nextVolume, 0, 1) * 100)
+    postYouTubeCommand('setVolume', [percent])
+    postYouTubeCommand(percent <= 0 ? 'mute' : 'unMute')
   }
 
   const drawFittedMedia = (fittedMedia) => {
@@ -2906,6 +3013,7 @@ function InteractiveTvScreen({ screenInfo }) {
       tvMenuElementRef.current?.remove()
       tvMenuElementRef.current = null
       setTvMenuOpen(false)
+      setTvOnlinePanelOpen(false)
       setTexture((currentTexture) => {
         currentTexture?.dispose()
         textureRef.current = null
@@ -2940,6 +3048,19 @@ function InteractiveTvScreen({ screenInfo }) {
   })
 
   useEffect(() => {
+    const handleOpenMenuRequest = (event) => {
+      const requestedObjectId = event.detail?.objectId
+      if (requestedObjectId && tvInstanceId && requestedObjectId !== tvInstanceId) return
+      setTvMenuOpen(true)
+      setTvOnlinePanelOpen(false)
+      setTvOnlineMessage('')
+    }
+
+    window.addEventListener(TV_MENU_EVENT, handleOpenMenuRequest)
+    return () => window.removeEventListener(TV_MENU_EVENT, handleOpenMenuRequest)
+  }, [tvInstanceId])
+
+  useEffect(() => {
     if (!tvMenuOpen) {
       tvMenuElementRef.current?.remove()
       tvMenuElementRef.current = null
@@ -2950,43 +3071,79 @@ function InteractiveTvScreen({ screenInfo }) {
     menu.className = 'tv-control-menu'
     const onActiveClass = tvPoweredOn ? ' is-active' : ''
     const offActiveClass = !tvPoweredOn ? ' is-active' : ''
+    const mediaActiveClass = texture && tvPoweredOn ? ' is-active' : ''
+    const onlineActiveClass = tvOnlineEmbedUrl && tvPoweredOn ? ' is-active' : ''
+    const pauseLabel = tvPaused ? 'Play' : 'Pause'
     menu.innerHTML = `
-      <button type="button" class="${onActiveClass}" data-tv-action="on">On</button>
-      <button type="button" class="${offActiveClass}" data-tv-action="off">Off</button>
-      <button type="button" data-tv-action="change">Changer</button>
-      <button type="button" data-tv-action="volumeDown">Volume -</button>
-      <span class="tv-volume-readout">${Math.round(tvVolume * 100)}%</span>
-      <button type="button" data-tv-action="volumeUp">Volume +</button>
+      <div class="tv-control-row">
+        <button type="button" class="${onActiveClass}" data-tv-action="on">On</button>
+        <button type="button" class="${offActiveClass}" data-tv-action="off">Off</button>
+        <button type="button" data-tv-action="pause">${pauseLabel}</button>
+        <button type="button" class="${mediaActiveClass}" data-tv-action="change">Fichier</button>
+        <button type="button" class="${onlineActiveClass}" data-tv-action="online">Video en ligne</button>
+        <button type="button" data-tv-action="volumeDown">Volume -</button>
+        <span class="tv-volume-readout">${Math.round(tvVolume * 100)}%</span>
+        <button type="button" data-tv-action="volumeUp">Volume +</button>
+        <button type="button" class="tv-menu-close" data-tv-action="close" aria-label="Fermer">×</button>
+      </div>
+      ${tvOnlinePanelOpen ? `
+        <form class="tv-online-form" data-tv-online-form>
+          <input
+            type="url"
+            name="youtubeUrl"
+            value="${escapeHtmlAttribute(tvOnlineUrl)}"
+            placeholder="Lien YouTube"
+            autocomplete="off"
+          />
+          <button type="submit">Lire</button>
+        </form>
+        ${tvOnlineMessage ? `<span class="tv-online-message">${tvOnlineMessage}</span>` : ''}
+      ` : ''}
     `
     const stopMenuEvent = (event) => {
-      event.preventDefault?.()
       event.stopPropagation()
+      if (!event.target?.closest?.('input, form')) {
+        event.preventDefault?.()
+      }
     }
     const handleMenuClick = (event) => {
-      event.preventDefault()
-      event.stopPropagation()
       const action = event.target?.dataset?.tvAction
       if (!action) return
+      event.preventDefault()
+      event.stopPropagation()
       tvMenuCallbacksRef.current[action]?.(event)
+    }
+    const handleMenuSubmit = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const form = event.target
+      if (!form.matches('[data-tv-online-form]')) return
+      const url = form.elements.youtubeUrl?.value ?? ''
+      tvMenuCallbacksRef.current.submitOnline?.(url)
     }
     menu.addEventListener('pointerdown', stopMenuEvent)
     menu.addEventListener('touchend', stopMenuEvent)
     menu.addEventListener('dblclick', stopMenuEvent)
     menu.addEventListener('click', handleMenuClick)
+    menu.addEventListener('submit', handleMenuSubmit)
     document.body.appendChild(menu)
     tvMenuElementRef.current = menu
+    if (tvOnlinePanelOpen) {
+      menu.querySelector('input[name="youtubeUrl"]')?.focus()
+    }
 
     return () => {
       menu.removeEventListener('pointerdown', stopMenuEvent)
       menu.removeEventListener('touchend', stopMenuEvent)
       menu.removeEventListener('dblclick', stopMenuEvent)
       menu.removeEventListener('click', handleMenuClick)
+      menu.removeEventListener('submit', handleMenuSubmit)
       menu.remove()
       if (tvMenuElementRef.current === menu) {
         tvMenuElementRef.current = null
       }
     }
-  }, [tvMenuOpen, tvVolume, tvPoweredOn])
+  }, [texture, tvMenuOpen, tvOnlineEmbedUrl, tvOnlineMessage, tvOnlinePanelOpen, tvOnlineUrl, tvPaused, tvVolume, tvPoweredOn])
 
   if (!screenInfo) return null
 
@@ -3059,12 +3216,34 @@ function InteractiveTvScreen({ screenInfo }) {
       return null
     })
     setTvPoweredOn(true)
+    setTvPaused(false)
     setCaptureState('off')
+  }
+
+  const clearTextureMedia = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    videoRef.current?.pause()
+    videoRef.current = null
+    resetAudioGraph()
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+    fittedMediaRef.current = null
+    soundUnlockPendingRef.current = false
+    setTexture((currentTexture) => {
+      currentTexture?.dispose()
+      textureRef.current = null
+      return null
+    })
+    setTvPaused(false)
   }
 
   const openFilePicker = (event) => {
     event?.stopPropagation?.()
     setTvMenuOpen(false)
+    setTvOnlinePanelOpen(false)
     const input = mobileFileInputRef.current ?? document.createElement('input')
     input.type = 'file'
     input.accept = 'video/*,image/*'
@@ -3099,13 +3278,18 @@ function InteractiveTvScreen({ screenInfo }) {
   const turnTvOff = (event) => {
     event?.stopPropagation?.()
     videoRef.current?.pause()
+    if (tvOnlineEmbedUrl) postYouTubeCommand('pauseVideo')
     setTvPoweredOn(false)
+    setTvPaused(false)
     setTvMenuOpen(true)
   }
 
   const changeTvMedia = async (event) => {
     event?.stopPropagation?.()
     setTvMenuOpen(false)
+    setTvOnlinePanelOpen(false)
+    setTvOnlineEmbedUrl('')
+    setTvOnlineMessage('')
     if (isMobileMediaMode) {
       openFilePicker(event)
       return
@@ -3117,7 +3301,11 @@ function InteractiveTvScreen({ screenInfo }) {
   const changeVolume = (delta) => {
     const nextVolume = MathUtils.clamp(tvVolume + delta, 0, 1)
     setTvVolume(nextVolume)
-    applyVideoVolume(nextVolume)
+    if (tvOnlineEmbedUrl && tvPoweredOn) {
+      applyYouTubeVolume(nextVolume)
+    } else {
+      applyVideoVolume(nextVolume)
+    }
     if (nextVolume > 0) {
       soundUnlockPendingRef.current = false
     }
@@ -3133,10 +3321,48 @@ function InteractiveTvScreen({ screenInfo }) {
     changeVolume(0.1)
   }
 
+  const openOnlinePanel = (event) => {
+    event?.stopPropagation?.()
+    setTvOnlinePanelOpen(true)
+    setTvOnlineMessage('')
+    setTvMenuOpen(true)
+  }
+
+  const submitOnlineVideo = (url) => {
+    const nextUrl = url.trim()
+    const embedUrl = getYouTubeEmbedUrl(nextUrl)
+    setTvOnlineUrl(nextUrl)
+
+    if (!embedUrl) {
+      setTvOnlineMessage('Lien YouTube invalide')
+      setTvOnlinePanelOpen(true)
+      setTvMenuOpen(true)
+      return
+    }
+
+    clearTextureMedia()
+    setTvOnlineEmbedUrl(embedUrl)
+    setTvOnlineMessage('')
+    setTvOnlinePanelOpen(false)
+    setTvPoweredOn(true)
+    setTvPaused(false)
+    setCaptureState('playing')
+    setTvMenuOpen(true)
+  }
+
   const turnTvOn = async (event) => {
     event?.stopPropagation?.()
+    if (tvOnlineEmbedUrl) {
+      setTvPoweredOn(true)
+      setTvPaused(false)
+      postYouTubeCommand('playVideo')
+      applyYouTubeVolume(tvVolume)
+      setTvMenuOpen(true)
+      return
+    }
     if (texture && videoRef.current) {
       setTvPoweredOn(true)
+      setTvPaused(false)
       applyVideoVolume(tvVolume > 0 ? tvVolume : 1)
       await videoRef.current.play().catch((error) => {
         console.warn('TV play failed', error)
@@ -3152,10 +3378,45 @@ function InteractiveTvScreen({ screenInfo }) {
     await startCapture(event)
   }
 
+  const toggleTvPause = async (event) => {
+    event?.stopPropagation?.()
+    if (!tvPoweredOn) return
+    const shouldPause = !tvPaused
+
+    if (tvOnlineEmbedUrl) {
+      postYouTubeCommand(shouldPause ? 'pauseVideo' : 'playVideo')
+      if (!shouldPause) applyYouTubeVolume(tvVolume)
+      setTvPaused(shouldPause)
+      setTvMenuOpen(true)
+      return
+    }
+
+    const video = videoRef.current
+    if (!video) return
+    if (shouldPause) {
+      video.pause()
+    } else {
+      applyVideoVolume(tvVolume)
+      await video.play().catch((error) => {
+        console.warn('TV resume failed', error)
+      })
+    }
+    setTvPaused(shouldPause)
+    setTvMenuOpen(true)
+  }
+
   tvMenuCallbacksRef.current = {
     on: turnTvOn,
     off: turnTvOff,
+    pause: toggleTvPause,
     change: changeTvMedia,
+    online: openOnlinePanel,
+    submitOnline: submitOnlineVideo,
+    close: () => {
+      setTvMenuOpen(false)
+      setTvOnlinePanelOpen(false)
+      setTvOnlineMessage('')
+    },
     volumeDown,
     volumeUp,
   }
@@ -3199,6 +3460,9 @@ function InteractiveTvScreen({ screenInfo }) {
     fittedMediaRef.current = null
     soundUnlockPendingRef.current = false
     setTvMenuOpen(false)
+    setTvOnlineEmbedUrl('')
+    setTvOnlinePanelOpen(false)
+    setTvPaused(false)
     setTvPoweredOn(true)
     setCaptureState('warming')
 
@@ -3242,6 +3506,7 @@ function InteractiveTvScreen({ screenInfo }) {
           return nextTexture
         })
         setTvPoweredOn(true)
+        setTvPaused(false)
         soundUnlockPendingRef.current = isMobileMediaMode
         setCaptureState('playing')
         return
@@ -3266,6 +3531,7 @@ function InteractiveTvScreen({ screenInfo }) {
         return nextTexture
       })
       setTvPoweredOn(true)
+      setTvPaused(false)
       soundUnlockPendingRef.current = false
       setCaptureState('playing')
     } catch (error) {
@@ -3298,6 +3564,10 @@ function InteractiveTvScreen({ screenInfo }) {
 
     setCaptureState('requesting')
     try {
+      setTvOnlineEmbedUrl('')
+      setTvOnlinePanelOpen(false)
+      setTvOnlineMessage('')
+      setTvPaused(false)
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           width: { ideal: 1920 },
@@ -3341,6 +3611,7 @@ function InteractiveTvScreen({ screenInfo }) {
         return nextTexture
       })
       setTvPoweredOn(true)
+      setTvPaused(false)
       setCaptureState('playing')
     } catch (error) {
       console.warn('TV capture failed', error)
@@ -3348,6 +3619,10 @@ function InteractiveTvScreen({ screenInfo }) {
       setCaptureState(error?.name === 'NotAllowedError' ? 'denied' : 'error')
     }
   }
+
+  const showTextureScreen = texture && tvPoweredOn
+  const showOnlineScreen = tvOnlineEmbedUrl && tvPoweredOn
+  const screenHtmlScale = (screenInfo.width * 400) / cssScreenWidth
 
   return (
     <group ref={screenGroupRef} position={screenInfo.position} quaternion={screenInfo.quaternion}>
@@ -3358,18 +3633,51 @@ function InteractiveTvScreen({ screenInfo }) {
           onPointerDown={handleScreenPointerDown}
         >
           <planeGeometry args={[screenInfo.width, screenInfo.height]} />
-          {texture && tvPoweredOn ? (
+          {showTextureScreen ? (
             <meshBasicMaterial
               ref={zOffset > 0 ? materialRef : undefined}
               map={texture}
               toneMapped={false}
               side={zOffset > 0 ? FrontSide : BackSide}
             />
+          ) : showOnlineScreen ? (
+            <meshBasicMaterial color="#020202" toneMapped={false} side={DoubleSide} />
           ) : (
             <meshBasicMaterial map={standbyTexture} toneMapped={false} side={DoubleSide} />
           )}
         </mesh>
       ))}
+      {showOnlineScreen && (
+        <Html
+          transform
+          occlude="blending"
+          center
+          distanceFactor={1}
+          scale={screenHtmlScale}
+          zIndexRange={[1, 0]}
+          position={[0, 0, 0.006]}
+          style={{
+            width: `${cssScreenWidth}px`,
+            height: `${cssScreenHeight}px`,
+            pointerEvents: 'auto',
+          }}
+        >
+          <iframe
+            ref={youtubeFrameRef}
+            className="tv-youtube-frame"
+            width={cssScreenWidth}
+            height={cssScreenHeight}
+            src={tvOnlineEmbedUrl}
+            title="YouTube video"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            onLoad={() => {
+              applyYouTubeVolume(tvVolume)
+              postYouTubeCommand(tvPaused ? 'pauseVideo' : 'playVideo')
+            }}
+          />
+        </Html>
+      )}
     </group>
   )
 }
@@ -3409,7 +3717,7 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
       onPointerDown={handlePointerDown}
     >
       <Suspense fallback={null}>
-        <PlaceableModel objectId={object.objectId} type={object.type} />
+        <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
       </Suspense>
       {selected && (
         <mesh
@@ -3482,7 +3790,7 @@ function PlacementPreview({ object, preview }) {
     <group position={preview.position} rotation={[0, preview.rotationY, 0]}>
       <group scale={0.96}>
         <Suspense fallback={null}>
-          <PlaceableModel objectId={object.objectId} type={object.type} />
+          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
         </Suspense>
       </group>
       <mesh
@@ -4117,6 +4425,7 @@ function App() {
   const [isObjectInventoryOpen, setIsObjectInventoryOpen] = useState(false)
   const [isNearCustomizationStation, setIsNearCustomizationStation] = useState(false)
   const [nearbySeat, setNearbySeat] = useState(null)
+  const [nearbyTv, setNearbyTv] = useState(null)
   const [seatedState, setSeatedState] = useState(null)
   const [authUser, setAuthUser] = useState(null)
   const [isAccountOpen, setIsAccountOpen] = useState(false)
@@ -4641,6 +4950,11 @@ function App() {
     setSeatedState({ phase: 'standUp', seat: seatedState.seat })
   }
 
+  const requestTvMenu = () => {
+    if (!nearbyTv) return
+    window.dispatchEvent(new CustomEvent(TV_MENU_EVENT, { detail: { objectId: nearbyTv.id } }))
+  }
+
   const updateSeatedPhase = (phase) => {
     setSeatedState((current) => {
       if (!current) return null
@@ -4679,6 +4993,7 @@ function App() {
     setPlacementPreview(null)
     setIsObjectInventoryOpen(false)
     setNearbySeat(null)
+    setNearbyTv(null)
     setSeatedState(null)
   }
 
@@ -4887,6 +5202,12 @@ function App() {
             seatedState={seatedState}
             onNearbySeatChange={setNearbySeat}
           />
+          <TvInteractionTrigger
+            playerPositionRef={playerPositionRef}
+            objects={placedEditableObjects}
+            enabled={mode === 'play'}
+            onNearbyTvChange={setNearbyTv}
+          />
           {showCaptureUi && <ScorePopups popups={scorePopups} />}
         </Physics>
       </Canvas>
@@ -4935,6 +5256,11 @@ function App() {
       {showCaptureUi && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationMode}>
           Personnaliser la piece
+        </button>
+      )}
+      {showCaptureUi && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+        <button className="skin-open-btn tv-open-btn" type="button" onClick={requestTvMenu}>
+          Changer la TV
         </button>
       )}
       {showCaptureUi && nearbySeat && mode === 'play' && !seatedState?.phase && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
