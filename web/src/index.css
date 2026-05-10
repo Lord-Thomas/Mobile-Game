@@ -365,6 +365,12 @@ canvas {
     0 0 3px rgba(255, 210, 80, 0.9);
 }
 
+.tv-capture-panel {
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+}
+
 .tv-capture-button {
   width: 360px;
   height: 104px;
@@ -385,6 +391,10 @@ canvas {
 
 .tv-capture-button:active {
   background: rgba(31, 134, 204, 0.94);
+}
+
+.tv-capture-file-input {
+  display: none;
 }
 
 .score-bursts {

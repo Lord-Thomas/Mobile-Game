@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, Box3, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, Quaternion, RepeatWrapping, SRGBColorSpace, Vector3, VideoTexture } from 'three'
+import { BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, Quaternion, RepeatWrapping, SRGBColorSpace, Vector3, VideoTexture } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -2624,6 +2624,11 @@ function InteractiveTvScreen({ screenInfo }) {
   const videoRef = useRef(null)
   const textureRef = useRef(null)
   const materialRef = useRef(null)
+  const objectUrlRef = useRef(null)
+  const isMobileMediaMode = useMemo(() => {
+    if (typeof navigator === 'undefined') return false
+    return /android|iphone|ipad|ipod/i.test(navigator.userAgent) || !navigator.mediaDevices?.getDisplayMedia
+  }, [])
 
   useFrame(() => {
     if (textureRef.current) {
@@ -2640,6 +2645,10 @@ function InteractiveTvScreen({ screenInfo }) {
       streamRef.current = null
       videoRef.current?.pause()
       videoRef.current = null
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current)
+        objectUrlRef.current = null
+      }
       setTexture((currentTexture) => {
         currentTexture?.dispose()
         textureRef.current = null
@@ -2655,6 +2664,10 @@ function InteractiveTvScreen({ screenInfo }) {
     streamRef.current = null
     videoRef.current?.pause()
     videoRef.current = null
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
     setTexture((currentTexture) => {
       currentTexture?.dispose()
       textureRef.current = null
@@ -2663,8 +2676,98 @@ function InteractiveTvScreen({ screenInfo }) {
     setCaptureState('off')
   }
 
+  const handleFileChange = async (event) => {
+    event?.stopPropagation?.()
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    const isVideo = file.type.startsWith('video/')
+    const isImage = file.type.startsWith('image/')
+    if (!isVideo && !isImage) {
+      setCaptureState('error')
+      return
+    }
+
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    videoRef.current?.pause()
+    videoRef.current = null
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+    setCaptureState('warming')
+
+    const url = URL.createObjectURL(file)
+    objectUrlRef.current = url
+
+    try {
+      if (isVideo) {
+        const video = document.createElement('video')
+        video.src = url
+        video.loop = true
+        video.playsInline = true
+        video.muted = true
+        video.autoplay = true
+        videoRef.current = video
+        await video.play()
+        if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+          await new Promise((resolve) => {
+            video.addEventListener('loadeddata', resolve, { once: true })
+          })
+        }
+        const nextTexture = new VideoTexture(video)
+        nextTexture.colorSpace = SRGBColorSpace
+        nextTexture.minFilter = LinearFilter
+        nextTexture.magFilter = LinearFilter
+        nextTexture.generateMipmaps = false
+        nextTexture.needsUpdate = true
+        setTexture((currentTexture) => {
+          currentTexture?.dispose()
+          textureRef.current = nextTexture
+          return nextTexture
+        })
+        setCaptureState('playing')
+        return
+      }
+
+      const image = new Image()
+      await new Promise((resolve, reject) => {
+        image.onload = resolve
+        image.onerror = reject
+        image.src = url
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(image.naturalWidth, 1)
+      canvas.height = Math.max(image.naturalHeight, 1)
+      canvas.getContext('2d')?.drawImage(image, 0, 0)
+      const nextTexture = new CanvasTexture(canvas)
+      nextTexture.colorSpace = SRGBColorSpace
+      nextTexture.minFilter = LinearFilter
+      nextTexture.magFilter = LinearFilter
+      nextTexture.generateMipmaps = false
+      nextTexture.needsUpdate = true
+      setTexture((currentTexture) => {
+        currentTexture?.dispose()
+        textureRef.current = nextTexture
+        return nextTexture
+      })
+      setCaptureState('playing')
+    } catch (error) {
+      console.warn('TV local media failed', error)
+      stopCapture()
+      setCaptureState('error')
+    }
+  }
+
   const startCapture = async (event) => {
     event?.stopPropagation?.()
+    if (isMobileMediaMode) {
+      setCaptureState('mobile')
+      return
+    }
+
     if (!window.isSecureContext) {
       setCaptureState('insecure')
       return
@@ -2738,9 +2841,13 @@ function InteractiveTvScreen({ screenInfo }) {
     warming: 'Image en cours',
     denied: 'Partage refuse',
     insecure: 'HTTPS requis',
+    mobile: 'Photo / Video',
     unsupported: 'Non supporte',
     error: 'Reessayer',
   }[captureState] ?? 'Partager onglet'
+  const cssScreenWidth = 1280
+  const cssScreenHeight = Math.max(1, Math.round(cssScreenWidth * (screenInfo.height / screenInfo.width)))
+  const buttonHtmlScale = (screenInfo.width * 400) / cssScreenWidth
   return (
     <group position={screenInfo.position} quaternion={screenInfo.quaternion}>
       {(texture ? [-0.002, 0.002] : [0]).map((zOffset) => (
@@ -2769,11 +2876,31 @@ function InteractiveTvScreen({ screenInfo }) {
           center
           distanceFactor={1}
           position={[0, 0, 0.01]}
-          scale={screenInfo.width / 7.2}
+          scale={buttonHtmlScale}
         >
-          <button className="tv-capture-button" type="button" onClick={startCapture}>
-            {statusLabel}
-          </button>
+          <div
+            className="tv-capture-panel"
+            style={{
+              width: `${cssScreenWidth}px`,
+              height: `${cssScreenHeight}px`,
+            }}
+          >
+            {isMobileMediaMode ? (
+              <label className="tv-capture-button" onClick={(event) => event.stopPropagation()}>
+                Photo / Video
+                <input
+                  type="file"
+                  accept="video/*,image/*"
+                  className="tv-capture-file-input"
+                  onChange={handleFileChange}
+                />
+              </label>
+            ) : (
+              <button className="tv-capture-button" type="button" onClick={startCapture}>
+                {statusLabel}
+              </button>
+            )}
+          </div>
         </Html>
       )}
     </group>
