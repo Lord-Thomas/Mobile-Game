@@ -245,6 +245,25 @@ export const objectCatalog = {
       frontX: 0.38,
     },
   },
+  pink_sofa: {
+    id: 'pink_sofa',
+    type: 'sofa',
+    name: 'Canape rose',
+    category: 'furniture',
+    modelUrl: '/models/placeables/pink_sofa/model.glb',
+    thumbnail: '/ui/object-thumbnails/pink_sofa.webp',
+    price: 190,
+    targetWidthMeters: 1.55,
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 1.7,
+    thumbnailScale: 0.86,
+    seating: {
+      kind: 'sofa',
+      width: 2.14,
+      seatWidth: 1.07,
+      frontX: 0.38,
+    },
+  },
   red_sofa: {
     id: 'red_sofa',
     type: 'sofa',
@@ -315,6 +334,7 @@ export const defaultEditableObjects = [
 export const shopObjectIds = [
   'modular_sofa',
   'pink_plush_sofa',
+  'pink_sofa',
   'red_sofa',
   'wooden_desk',
   'beige_table',

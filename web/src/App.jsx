@@ -1,9 +1,9 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, Quaternion, RepeatWrapping, SRGBColorSpace, Vector3, VideoTexture } from 'three'
+import { BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, getCurrentUser, loadPlayerProgress, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
@@ -66,6 +66,7 @@ const ENV_STATION_POSITION = { x: 3.5, y: 0.35, z: 1.8 }
 const CUSTOM_STATION_POSITION = { x: 0, y: 0.35, z: 3.55 }
 const CUSTOM_ROOM_BOUNDS = { minX: -4.25, maxX: 4.25, minZ: -4.25, maxZ: 4.25 }
 const CUSTOM_GRID_SIZE = 0.25
+const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const MAIN_ROOM = { width: 10, depth: 10, height: 5 }
 const FRONT_WALL = { zVisual: 5.05, zCollider: 5.1, thickness: 0.1 }
 const DRAGON_OPENING = { centerX: 0, width: 6, bottomY: 0, height: 3.8 }
@@ -215,6 +216,10 @@ const wallSkins = [
     adminOnly: true,
   },
 ]
+
+const placementRaycaster = new Raycaster()
+const placementRayOrigin = new Vector3()
+const placementRayDirection = new Vector3(0, -1, 0)
 
 const emotes = [
   { id: 'wave', label: 'Salut', glyph: '👋' },
@@ -1379,10 +1384,35 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
       const cameraDistance = touch.cameraDistance ?? 3
       const horizontalDistance = cameraDistance * Math.cos(pitch)
       const seatCameraX = nextX + Math.sin(touch.cameraYaw) * horizontalDistance
+      const seatCameraY = nextY + 1.45 + Math.sin(pitch) * cameraDistance
       const seatCameraZ = nextZ + Math.cos(touch.cameraYaw) * horizontalDistance
-      camera.position.x = MathUtils.damp(camera.position.x, seatCameraX, 7, delta)
-      camera.position.y = MathUtils.damp(camera.position.y, nextY + 1.45 + Math.sin(pitch) * cameraDistance, 7, delta)
-      camera.position.z = MathUtils.damp(camera.position.z, seatCameraZ, 7, delta)
+      let targetCameraX = seatCameraX
+      let targetCameraY = seatCameraY
+      let targetCameraZ = seatCameraZ
+
+      const originY = nextY + 0.75
+      const dirX = seatCameraX - nextX
+      const dirY = seatCameraY - originY
+      const dirZ = seatCameraZ - nextZ
+      const rayDistance = Math.hypot(dirX, dirY, dirZ)
+
+      if (rayDistance > 0.001) {
+        const inv = 1 / rayDistance
+        const rayDir = { x: dirX * inv, y: dirY * inv, z: dirZ * inv }
+        const ray = new rapier.Ray({ x: nextX, y: originY, z: nextZ }, rayDir)
+        const hit = world.castRay(ray, rayDistance, true)
+        if (hit && hit.toi < rayDistance) {
+          const safe = Math.max(0.2, hit.toi - 0.14)
+          targetCameraX = nextX + rayDir.x * safe
+          targetCameraY = originY + rayDir.y * safe
+          targetCameraZ = nextZ + rayDir.z * safe
+        }
+      }
+
+      const clampedCamera = clampCameraInPlayableVolume(targetCameraX, targetCameraY, targetCameraZ)
+      camera.position.x = MathUtils.damp(camera.position.x, clampedCamera.x, 7, delta)
+      camera.position.y = MathUtils.damp(camera.position.y, clampedCamera.y, 7, delta)
+      camera.position.z = MathUtils.damp(camera.position.z, clampedCamera.z, 7, delta)
       camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
       return
     }
@@ -2620,17 +2650,235 @@ function PlaceableModel({ objectId, type }) {
 function InteractiveTvScreen({ screenInfo }) {
   const [texture, setTexture] = useState(null)
   const [captureState, setCaptureState] = useState('off')
+  const [tvMenuOpen, setTvMenuOpen] = useState(false)
+  const [tvVolume, setTvVolume] = useState(1)
+  const [tvPoweredOn, setTvPoweredOn] = useState(true)
   const streamRef = useRef(null)
   const videoRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const audioSourceRef = useRef(null)
+  const audioGainRef = useRef(null)
   const textureRef = useRef(null)
   const materialRef = useRef(null)
   const objectUrlRef = useRef(null)
+  const fittedMediaRef = useRef(null)
+  const screenGroupRef = useRef(null)
+  const interactionLockRef = useRef(false)
+  const mobileFileInputRef = useRef(null)
+  const handleFileChangeRef = useRef(null)
+  const fileSelectionKeyRef = useRef('')
+  const soundUnlockPendingRef = useRef(false)
+  const tvMenuElementRef = useRef(null)
+  const tvMenuCallbacksRef = useRef({})
+  const { camera, gl } = useThree()
   const isMobileMediaMode = useMemo(() => {
     if (typeof navigator === 'undefined') return false
     return /android|iphone|ipad|ipod/i.test(navigator.userAgent) || !navigator.mediaDevices?.getDisplayMedia
   }, [])
+  const cssScreenWidth = 1280
+  const cssScreenHeight = Math.max(1, Math.round(cssScreenWidth * ((screenInfo?.height ?? 0.5625) / (screenInfo?.width ?? 1))))
+
+  const resetAudioGraph = () => {
+    audioSourceRef.current?.disconnect()
+    audioGainRef.current?.disconnect()
+    audioSourceRef.current = null
+    audioGainRef.current = null
+  }
+
+  const ensureAudioGraph = (video = videoRef.current) => {
+    if (!video || audioGainRef.current) return audioGainRef.current
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) return null
+    try {
+      const context = audioContextRef.current ?? new AudioContextClass()
+      audioContextRef.current = context
+      const source = context.createMediaElementSource(video)
+      const gain = context.createGain()
+      source.connect(gain)
+      gain.connect(context.destination)
+      audioSourceRef.current = source
+      audioGainRef.current = gain
+      return gain
+    } catch (error) {
+      console.warn('TV audio graph setup failed', error)
+      return null
+    }
+  }
+
+  const applyVideoVolume = (nextVolume) => {
+    const video = videoRef.current
+    if (!video) return
+    const safeVolume = MathUtils.clamp(nextVolume, 0, 1)
+    try {
+      video.muted = safeVolume <= 0
+      const gain = ensureAudioGraph(video)
+      if (gain) {
+        gain.gain.value = safeVolume
+      } else if (!isMobileMediaMode) {
+        video.volume = safeVolume
+      }
+      if (safeVolume > 0) {
+        audioContextRef.current?.resume?.().catch((error) => {
+          console.warn('TV audio context resume failed', error)
+        })
+        video.play().catch((error) => {
+          console.warn('TV audio play failed', error)
+        })
+      }
+    } catch (error) {
+      console.warn('TV volume update failed', error)
+    }
+  }
+
+  const prepareVideoAudio = (video, shouldStartMuted) => {
+    try {
+      video.muted = shouldStartMuted
+    } catch (error) {
+      console.warn('TV muted setup failed', error)
+    }
+    if (!isMobileMediaMode) {
+      try {
+        video.volume = tvVolume
+      } catch (error) {
+        console.warn('TV volume setup failed', error)
+      }
+    }
+  }
+
+  const drawFittedMedia = (fittedMedia) => {
+    const { canvas, context, source, sourceWidth, sourceHeight, texture: fittedTexture } = fittedMedia
+    if (!context) return
+    if (source instanceof HTMLVideoElement && source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
+    const safeSourceWidth = Math.max(sourceWidth, 1)
+    const safeSourceHeight = Math.max(sourceHeight, 1)
+    const canvasAspect = canvas.width / canvas.height
+    const sourceAspect = safeSourceWidth / safeSourceHeight
+    let drawWidth = canvas.width
+    let drawHeight = canvas.height
+
+    if (sourceAspect > canvasAspect) {
+      drawHeight = drawWidth / sourceAspect
+    } else {
+      drawWidth = drawHeight * sourceAspect
+    }
+
+    context.fillStyle = '#000000'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    try {
+      context.drawImage(
+        source,
+        (canvas.width - drawWidth) / 2,
+        (canvas.height - drawHeight) / 2,
+        drawWidth,
+        drawHeight,
+      )
+      fittedTexture.needsUpdate = true
+    } catch (error) {
+      console.warn('TV media draw failed', error)
+    }
+  }
+
+  const getEventClientPoint = (event) => {
+    const touch = event.touches?.[0] ?? event.changedTouches?.[0]
+    if (touch) return { x: touch.clientX, y: touch.clientY }
+    if (Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+      return { x: event.clientX, y: event.clientY }
+    }
+    return null
+  }
+
+  const isPointerInsideScreen = (event) => {
+    const group = screenGroupRef.current
+    if (!group) return false
+    const point = getEventClientPoint(event)
+    if (!point) return false
+
+    group.updateWorldMatrix(true, false)
+    const rect = gl.domElement.getBoundingClientRect()
+    const localCorners = [
+      new Vector3(-screenInfo.width / 2, -screenInfo.height / 2, 0),
+      new Vector3(screenInfo.width / 2, -screenInfo.height / 2, 0),
+      new Vector3(screenInfo.width / 2, screenInfo.height / 2, 0),
+      new Vector3(-screenInfo.width / 2, screenInfo.height / 2, 0),
+    ]
+    const corners = localCorners.map((corner) => {
+      const projected = corner.applyMatrix4(group.matrixWorld).project(camera)
+      return {
+        x: rect.left + ((projected.x + 1) / 2) * rect.width,
+        y: rect.top + ((1 - projected.y) / 2) * rect.height,
+      }
+    })
+    let inside = false
+    for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+      const current = corners[i]
+      const previous = corners[j]
+      const intersects = ((current.y > point.y) !== (previous.y > point.y))
+        && point.x < ((previous.x - current.x) * (point.y - current.y)) / (previous.y - current.y) + current.x
+      if (intersects) inside = !inside
+    }
+    return inside
+  }
+
+  const triggerScreenInteraction = (event) => {
+    event?.stopPropagation?.()
+    if (interactionLockRef.current) return
+    interactionLockRef.current = true
+    window.setTimeout(() => {
+      interactionLockRef.current = false
+    }, 250)
+
+    handleActiveScreenClick(event)
+  }
+
+  const statusLabel = {
+    off: isMobileMediaMode ? 'Touchez pour choisir' : 'Touchez pour allumer',
+    requesting: 'Choisissez un onglet',
+    warming: 'Chargement',
+    denied: 'Partage refuse',
+    insecure: 'HTTPS requis',
+    mobile: 'Touchez pour choisir',
+    unsupported: 'Non supporte',
+    error: 'Reessayer',
+  }[captureState] ?? 'Touchez pour allumer'
+
+  const standbyTexture = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = cssScreenWidth
+    canvas.height = cssScreenHeight
+    const context = canvas.getContext('2d')
+    if (context) {
+      const centerX = canvas.width / 2
+      const centerY = canvas.height / 2
+      context.fillStyle = '#020305'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      const glow = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, canvas.width * 0.55)
+      glow.addColorStop(0, 'rgba(52, 140, 190, 0.2)')
+      glow.addColorStop(0.45, 'rgba(14, 26, 38, 0.5)')
+      glow.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      context.fillStyle = glow
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#f8fbff'
+      context.textAlign = 'center'
+      context.textBaseline = 'middle'
+      context.font = '900 68px Segoe UI, Arial, sans-serif'
+      context.fillText(statusLabel, centerX, centerY)
+      context.fillStyle = 'rgba(248, 251, 255, 0.55)'
+      context.font = '500 30px Segoe UI, Arial, sans-serif'
+      context.fillText(isMobileMediaMode ? 'Photo ou video' : 'Partage d onglet', centerX, centerY + 86)
+    }
+    const nextTexture = new CanvasTexture(canvas)
+    nextTexture.colorSpace = SRGBColorSpace
+    nextTexture.minFilter = LinearFilter
+    nextTexture.magFilter = LinearFilter
+    nextTexture.generateMipmaps = false
+    nextTexture.needsUpdate = true
+    return nextTexture
+  }, [captureState, cssScreenHeight, isMobileMediaMode])
 
   useFrame(() => {
+    if (fittedMediaRef.current?.isVideo) {
+      drawFittedMedia(fittedMediaRef.current)
+    }
     if (textureRef.current) {
       textureRef.current.needsUpdate = true
     }
@@ -2645,10 +2893,19 @@ function InteractiveTvScreen({ screenInfo }) {
       streamRef.current = null
       videoRef.current?.pause()
       videoRef.current = null
+      resetAudioGraph()
+      audioContextRef.current?.close?.()
+      audioContextRef.current = null
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current)
         objectUrlRef.current = null
       }
+      fittedMediaRef.current = null
+      mobileFileInputRef.current?.remove()
+      mobileFileInputRef.current = null
+      tvMenuElementRef.current?.remove()
+      tvMenuElementRef.current = null
+      setTvMenuOpen(false)
       setTexture((currentTexture) => {
         currentTexture?.dispose()
         textureRef.current = null
@@ -2657,35 +2914,276 @@ function InteractiveTvScreen({ screenInfo }) {
     }
   }, [])
 
+  useEffect(() => {
+    return () => {
+      standbyTexture.dispose()
+    }
+  }, [standbyTexture])
+
+  useEffect(() => {
+    const handleDocumentScreenPress = (event) => {
+      if (event.button && event.button !== 0) return
+      if (!isPointerInsideScreen(event)) return
+      if (isMobileMediaMode && event.type === 'pointerdown' && event.pointerType === 'touch') return
+      event.preventDefault?.()
+      triggerScreenInteraction(event)
+    }
+
+    document.addEventListener('pointerdown', handleDocumentScreenPress, { capture: true })
+    document.addEventListener('touchend', handleDocumentScreenPress, { capture: true, passive: false })
+    document.addEventListener('click', handleDocumentScreenPress, { capture: true })
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentScreenPress, { capture: true })
+      document.removeEventListener('touchend', handleDocumentScreenPress, { capture: true })
+      document.removeEventListener('click', handleDocumentScreenPress, { capture: true })
+    }
+  })
+
+  useEffect(() => {
+    if (!tvMenuOpen) {
+      tvMenuElementRef.current?.remove()
+      tvMenuElementRef.current = null
+      return undefined
+    }
+
+    const menu = document.createElement('div')
+    menu.className = 'tv-control-menu'
+    const onActiveClass = tvPoweredOn ? ' is-active' : ''
+    const offActiveClass = !tvPoweredOn ? ' is-active' : ''
+    menu.innerHTML = `
+      <button type="button" class="${onActiveClass}" data-tv-action="on">On</button>
+      <button type="button" class="${offActiveClass}" data-tv-action="off">Off</button>
+      <button type="button" data-tv-action="change">Changer</button>
+      <button type="button" data-tv-action="volumeDown">Volume -</button>
+      <span class="tv-volume-readout">${Math.round(tvVolume * 100)}%</span>
+      <button type="button" data-tv-action="volumeUp">Volume +</button>
+    `
+    const stopMenuEvent = (event) => {
+      event.preventDefault?.()
+      event.stopPropagation()
+    }
+    const handleMenuClick = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const action = event.target?.dataset?.tvAction
+      if (!action) return
+      tvMenuCallbacksRef.current[action]?.(event)
+    }
+    menu.addEventListener('pointerdown', stopMenuEvent)
+    menu.addEventListener('touchend', stopMenuEvent)
+    menu.addEventListener('dblclick', stopMenuEvent)
+    menu.addEventListener('click', handleMenuClick)
+    document.body.appendChild(menu)
+    tvMenuElementRef.current = menu
+
+    return () => {
+      menu.removeEventListener('pointerdown', stopMenuEvent)
+      menu.removeEventListener('touchend', stopMenuEvent)
+      menu.removeEventListener('dblclick', stopMenuEvent)
+      menu.removeEventListener('click', handleMenuClick)
+      menu.remove()
+      if (tvMenuElementRef.current === menu) {
+        tvMenuElementRef.current = null
+      }
+    }
+  }, [tvMenuOpen, tvVolume, tvPoweredOn])
+
   if (!screenInfo) return null
+
+  const createFittedTexture = (source, sourceWidth, sourceHeight, isVideo = false) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = cssScreenWidth
+    canvas.height = cssScreenHeight
+    const context = canvas.getContext('2d')
+    const nextTexture = new CanvasTexture(canvas)
+    nextTexture.colorSpace = SRGBColorSpace
+    nextTexture.minFilter = LinearFilter
+    nextTexture.magFilter = LinearFilter
+    nextTexture.generateMipmaps = false
+    const fittedMedia = {
+      canvas,
+      context,
+      source,
+      sourceWidth,
+      sourceHeight,
+      texture: nextTexture,
+      isVideo,
+    }
+    drawFittedMedia(fittedMedia)
+    fittedMediaRef.current = fittedMedia
+    return nextTexture
+  }
+
+  const waitForVideoReady = (video, eventName, isReady, timeoutMs = 2500) => {
+    if (isReady()) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      let timeoutId = null
+      const cleanup = () => {
+        video.removeEventListener(eventName, handleReady)
+        video.removeEventListener('error', handleError)
+        if (timeoutId) window.clearTimeout(timeoutId)
+      }
+      const handleReady = () => {
+        cleanup()
+        resolve()
+      }
+      const handleError = () => {
+        cleanup()
+        reject(video.error ?? new Error('Video load failed'))
+      }
+      timeoutId = window.setTimeout(() => {
+        cleanup()
+        resolve()
+      }, timeoutMs)
+      video.addEventListener(eventName, handleReady, { once: true })
+      video.addEventListener('error', handleError, { once: true })
+    })
+  }
 
   const stopCapture = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     videoRef.current?.pause()
     videoRef.current = null
+    resetAudioGraph()
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current)
       objectUrlRef.current = null
     }
+    fittedMediaRef.current = null
+    soundUnlockPendingRef.current = false
+    setTvMenuOpen(false)
     setTexture((currentTexture) => {
       currentTexture?.dispose()
       textureRef.current = null
       return null
     })
+    setTvPoweredOn(true)
     setCaptureState('off')
+  }
+
+  const openFilePicker = (event) => {
+    event?.stopPropagation?.()
+    setTvMenuOpen(false)
+    const input = mobileFileInputRef.current ?? document.createElement('input')
+    input.type = 'file'
+    input.accept = 'video/*,image/*'
+    if (!mobileFileInputRef.current) {
+      input.setAttribute('aria-hidden', 'true')
+      input.tabIndex = -1
+      Object.assign(input.style, {
+        position: 'fixed',
+        left: '0',
+        top: '0',
+        width: '1px',
+        height: '1px',
+        opacity: '0',
+        pointerEvents: 'none',
+        zIndex: '-1',
+      })
+      input.addEventListener('change', (changeEvent) => {
+        handleFileChangeRef.current?.(changeEvent)
+      })
+      document.body.appendChild(input)
+      mobileFileInputRef.current = input
+    }
+    input.value = ''
+    input.click()
+  }
+
+  const handleActiveScreenClick = async (event) => {
+    event?.stopPropagation?.()
+    setTvMenuOpen(true)
+  }
+
+  const turnTvOff = (event) => {
+    event?.stopPropagation?.()
+    videoRef.current?.pause()
+    setTvPoweredOn(false)
+    setTvMenuOpen(true)
+  }
+
+  const changeTvMedia = async (event) => {
+    event?.stopPropagation?.()
+    setTvMenuOpen(false)
+    if (isMobileMediaMode) {
+      openFilePicker(event)
+      return
+    }
+    stopCapture()
+    await startCapture(event)
+  }
+
+  const changeVolume = (delta) => {
+    const nextVolume = MathUtils.clamp(tvVolume + delta, 0, 1)
+    setTvVolume(nextVolume)
+    applyVideoVolume(nextVolume)
+    if (nextVolume > 0) {
+      soundUnlockPendingRef.current = false
+    }
+  }
+
+  const volumeDown = (event) => {
+    event?.stopPropagation?.()
+    changeVolume(-0.1)
+  }
+
+  const volumeUp = (event) => {
+    event?.stopPropagation?.()
+    changeVolume(0.1)
+  }
+
+  const turnTvOn = async (event) => {
+    event?.stopPropagation?.()
+    if (texture && videoRef.current) {
+      setTvPoweredOn(true)
+      applyVideoVolume(tvVolume > 0 ? tvVolume : 1)
+      await videoRef.current.play().catch((error) => {
+        console.warn('TV play failed', error)
+      })
+      setTvMenuOpen(true)
+      return
+    }
+    setTvMenuOpen(false)
+    if (isMobileMediaMode) {
+      openFilePicker(event)
+      return
+    }
+    await startCapture(event)
+  }
+
+  tvMenuCallbacksRef.current = {
+    on: turnTvOn,
+    off: turnTvOff,
+    change: changeTvMedia,
+    volumeDown,
+    volumeUp,
+  }
+
+  const handleScreenPointerDown = (event) => {
+    triggerScreenInteraction(event)
   }
 
   const handleFileChange = async (event) => {
     event?.stopPropagation?.()
-    const file = event.target.files?.[0]
-    event.target.value = ''
+    const input = event.target
+    const file = input.files?.[0]
     if (!file) return
+    const selectionKey = `${file.name}-${file.size}-${file.lastModified}`
+    if (fileSelectionKeyRef.current === selectionKey) return
+    fileSelectionKeyRef.current = selectionKey
+    window.setTimeout(() => {
+      if (fileSelectionKeyRef.current === selectionKey) {
+        fileSelectionKeyRef.current = ''
+      }
+    }, 2000)
 
-    const isVideo = file.type.startsWith('video/')
-    const isImage = file.type.startsWith('image/')
+    const fileName = file.name?.toLowerCase() ?? ''
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|ogg)$/i.test(fileName)
+    const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|heic|heif)$/i.test(fileName)
     if (!isVideo && !isImage) {
       setCaptureState('error')
+      input.value = ''
       return
     }
 
@@ -2693,73 +3191,93 @@ function InteractiveTvScreen({ screenInfo }) {
     streamRef.current = null
     videoRef.current?.pause()
     videoRef.current = null
+    resetAudioGraph()
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current)
       objectUrlRef.current = null
     }
+    fittedMediaRef.current = null
+    soundUnlockPendingRef.current = false
+    setTvMenuOpen(false)
+    setTvPoweredOn(true)
     setCaptureState('warming')
-
-    const url = URL.createObjectURL(file)
-    objectUrlRef.current = url
 
     try {
       if (isVideo) {
+        const url = URL.createObjectURL(file)
+        objectUrlRef.current = url
         const video = document.createElement('video')
         video.src = url
         video.loop = true
         video.playsInline = true
-        video.muted = true
+        video.setAttribute('playsinline', 'true')
+        video.setAttribute('webkit-playsinline', 'true')
         video.autoplay = true
+        video.preload = 'auto'
         videoRef.current = video
-        await video.play()
-        if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-          await new Promise((resolve) => {
-            video.addEventListener('loadeddata', resolve, { once: true })
-          })
-        }
-        const nextTexture = new VideoTexture(video)
-        nextTexture.colorSpace = SRGBColorSpace
-        nextTexture.minFilter = LinearFilter
-        nextTexture.magFilter = LinearFilter
-        nextTexture.generateMipmaps = false
-        nextTexture.needsUpdate = true
+        prepareVideoAudio(video, isMobileMediaMode || tvVolume <= 0)
+        video.load()
+        await waitForVideoReady(
+          video,
+          'loadedmetadata',
+          () => video.readyState >= HTMLMediaElement.HAVE_METADATA && video.videoWidth > 0,
+        )
+        await video.play().catch((error) => {
+          console.warn('TV local video autoplay delayed', error)
+        })
+        await waitForVideoReady(
+          video,
+          'loadeddata',
+          () => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA,
+        )
+        const nextTexture = createFittedTexture(
+          video,
+          video.videoWidth || cssScreenWidth,
+          video.videoHeight || cssScreenHeight,
+          true,
+        )
         setTexture((currentTexture) => {
           currentTexture?.dispose()
           textureRef.current = nextTexture
           return nextTexture
         })
+        setTvPoweredOn(true)
+        soundUnlockPendingRef.current = isMobileMediaMode
         setCaptureState('playing')
         return
       }
 
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
       const image = new Image()
       await new Promise((resolve, reject) => {
         image.onload = resolve
         image.onerror = reject
-        image.src = url
+        image.src = dataUrl
       })
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.max(image.naturalWidth, 1)
-      canvas.height = Math.max(image.naturalHeight, 1)
-      canvas.getContext('2d')?.drawImage(image, 0, 0)
-      const nextTexture = new CanvasTexture(canvas)
-      nextTexture.colorSpace = SRGBColorSpace
-      nextTexture.minFilter = LinearFilter
-      nextTexture.magFilter = LinearFilter
-      nextTexture.generateMipmaps = false
-      nextTexture.needsUpdate = true
+      const nextTexture = createFittedTexture(image, image.naturalWidth, image.naturalHeight)
       setTexture((currentTexture) => {
         currentTexture?.dispose()
         textureRef.current = nextTexture
         return nextTexture
       })
+      setTvPoweredOn(true)
+      soundUnlockPendingRef.current = false
       setCaptureState('playing')
     } catch (error) {
       console.warn('TV local media failed', error)
       stopCapture()
       setCaptureState('error')
+    } finally {
+      input.value = ''
     }
   }
+
+  handleFileChangeRef.current = handleFileChange
 
   const startCapture = async (event) => {
     event?.stopPropagation?.()
@@ -2793,8 +3311,8 @@ function InteractiveTvScreen({ screenInfo }) {
       video.srcObject = stream
       video.playsInline = true
       video.autoplay = true
-      video.muted = true
       videoRef.current = video
+      prepareVideoAudio(video, tvVolume <= 0)
 
       stream.getVideoTracks()[0]?.addEventListener('ended', stopCapture, { once: true })
       await video.play()
@@ -2816,17 +3334,13 @@ function InteractiveTvScreen({ screenInfo }) {
         video.addEventListener('loadeddata', resolve, { once: true })
       })
 
-      const nextTexture = new VideoTexture(video)
-      nextTexture.colorSpace = SRGBColorSpace
-      nextTexture.minFilter = LinearFilter
-      nextTexture.magFilter = LinearFilter
-      nextTexture.generateMipmaps = false
-      nextTexture.needsUpdate = true
+      const nextTexture = createFittedTexture(video, video.videoWidth, video.videoHeight, true)
       setTexture((currentTexture) => {
         currentTexture?.dispose()
         textureRef.current = nextTexture
         return nextTexture
       })
+      setTvPoweredOn(true)
       setCaptureState('playing')
     } catch (error) {
       console.warn('TV capture failed', error)
@@ -2835,30 +3349,16 @@ function InteractiveTvScreen({ screenInfo }) {
     }
   }
 
-  const statusLabel = {
-    off: 'Partager onglet',
-    requesting: 'Choisis YouTube',
-    warming: 'Image en cours',
-    denied: 'Partage refuse',
-    insecure: 'HTTPS requis',
-    mobile: 'Photo / Video',
-    unsupported: 'Non supporte',
-    error: 'Reessayer',
-  }[captureState] ?? 'Partager onglet'
-  const cssScreenWidth = 1280
-  const cssScreenHeight = Math.max(1, Math.round(cssScreenWidth * (screenInfo.height / screenInfo.width)))
-  const buttonHtmlScale = (screenInfo.width * 400) / cssScreenWidth
   return (
-    <group position={screenInfo.position} quaternion={screenInfo.quaternion}>
+    <group ref={screenGroupRef} position={screenInfo.position} quaternion={screenInfo.quaternion}>
       {(texture ? [-0.002, 0.002] : [0]).map((zOffset) => (
         <mesh
           key={zOffset}
           position={[0, 0, zOffset]}
-          onClick={texture ? undefined : startCapture}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={handleScreenPointerDown}
         >
           <planeGeometry args={[screenInfo.width, screenInfo.height]} />
-          {texture ? (
+          {texture && tvPoweredOn ? (
             <meshBasicMaterial
               ref={zOffset > 0 ? materialRef : undefined}
               map={texture}
@@ -2866,50 +3366,31 @@ function InteractiveTvScreen({ screenInfo }) {
               side={zOffset > 0 ? FrontSide : BackSide}
             />
           ) : (
-            <meshBasicMaterial color="#020202" side={DoubleSide} />
+            <meshBasicMaterial map={standbyTexture} toneMapped={false} side={DoubleSide} />
           )}
         </mesh>
       ))}
-      {!texture && (
-        <Html
-          transform
-          center
-          distanceFactor={1}
-          position={[0, 0, 0.01]}
-          scale={buttonHtmlScale}
-        >
-          <div
-            className="tv-capture-panel"
-            style={{
-              width: `${cssScreenWidth}px`,
-              height: `${cssScreenHeight}px`,
-            }}
-          >
-            {isMobileMediaMode ? (
-              <label className="tv-capture-button" onClick={(event) => event.stopPropagation()}>
-                Photo / Video
-                <input
-                  type="file"
-                  accept="video/*,image/*"
-                  className="tv-capture-file-input"
-                  onChange={handleFileChange}
-                />
-              </label>
-            ) : (
-              <button className="tv-capture-button" type="button" onClick={startCapture}>
-                {statusLabel}
-              </button>
-            )}
-          </div>
-        </Html>
-      )}
     </group>
   )
 }
 
-function EditableObject({ object, selected, mode, onSelect, onStartDragging }) {
+function EditableObject({ object, selected, mode, onSelect, onStartDragging, onObjectRef }) {
   const isCustomizeMode = mode === 'customize'
   const selectionRing = object.type === 'sofa' || object.type === 'desk' ? [1.05, 1.12] : [0.62, 0.68]
+  const groupRef = useRef(null)
+
+  useEffect(() => {
+    const group = groupRef.current
+    if (!group) return undefined
+
+    group.userData.placedObjectId = object.id
+    group.traverse((child) => {
+      child.userData.placedObjectId = object.id
+    })
+    onObjectRef(object.id, group)
+
+    return () => onObjectRef(object.id, null)
+  }, [object.id, onObjectRef])
 
   if (object.type === 'goal') return null
 
@@ -2922,6 +3403,7 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging }) {
 
   return (
     <group
+      ref={groupRef}
       position={object.position}
       rotation={[0, object.rotationY, 0]}
       onPointerDown={handlePointerDown}
@@ -2930,7 +3412,11 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging }) {
         <PlaceableModel objectId={object.objectId} type={object.type} />
       </Suspense>
       {selected && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, 0.035, 0]}
+          userData={{ ignorePlacementSupport: true, placedObjectId: object.id }}
+        >
           <ringGeometry args={[selectionRing[0], selectionRing[1], 36]} />
           <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
         </mesh>
@@ -2939,8 +3425,23 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging }) {
   )
 }
 
-function EditableFloor({ mode, draggingObjectId, placingObjectId, placementLocked, onDrag, onLockPlacement, onStopDragging, onClearSelection }) {
+function EditableFloor({
+  mode,
+  draggingObjectId,
+  placingObjectId,
+  placementLocked,
+  getPlacementY,
+  onDrag,
+  onLockPlacement,
+  onStopDragging,
+  onClearSelection,
+}) {
   if (mode !== 'customize') return null
+
+  const getSnappedPlacement = (point, objectId) => {
+    const [x, z] = clampToCustomRoom(snap(point.x), snap(point.z))
+    return [x, getPlacementY(x, z, objectId), z]
+  }
 
   return (
     <mesh
@@ -2950,14 +3451,13 @@ function EditableFloor({ mode, draggingObjectId, placingObjectId, placementLocke
         if (!draggingObjectId && !placingObjectId) return
         if (placingObjectId && placementLocked) return
         event.stopPropagation()
-        const [x, z] = clampToCustomRoom(snap(event.point.x), snap(event.point.z))
-        onDrag(draggingObjectId ?? placingObjectId, [x, 0, z])
+        const objectId = draggingObjectId ?? placingObjectId
+        onDrag(objectId, getSnappedPlacement(event.point, objectId))
       }}
       onClick={(event) => {
         if (!placingObjectId || placementLocked) return
         event.stopPropagation()
-        const [x, z] = clampToCustomRoom(snap(event.point.x), snap(event.point.z))
-        onDrag(placingObjectId, [x, 0, z])
+        onDrag(placingObjectId, getSnappedPlacement(event.point, placingObjectId))
         onLockPlacement()
       }}
       onPointerUp={(event) => {
@@ -2985,7 +3485,11 @@ function PlacementPreview({ object, preview }) {
           <PlaceableModel objectId={object.objectId} type={object.type} />
         </Suspense>
       </group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.045, 0]}>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.045, 0]}
+        userData={{ ignorePlacementSupport: true }}
+      >
         <ringGeometry args={[1.08, 1.16, 40]} />
         <meshBasicMaterial color={preview.isValid ? '#66ff9a' : '#ff5f5f'} transparent opacity={0.92} />
       </mesh>
@@ -3010,6 +3514,36 @@ function CustomizationLayer({
 }) {
   const placedObjects = objects.filter((object) => object.status !== 'stored')
   const placingObject = objects.find((object) => object.id === placingObjectId)
+  const placeableRefs = useRef(new Map())
+
+  const registerPlaceableRef = useCallback((id, object3D) => {
+    if (object3D) {
+      placeableRefs.current.set(id, object3D)
+      return
+    }
+    placeableRefs.current.delete(id)
+  }, [])
+
+  const getPlacementY = useCallback((x, z, ignoredObjectId) => {
+    const supportObjects = Array.from(placeableRefs.current.entries())
+      .filter(([id]) => id !== ignoredObjectId)
+      .map(([, object3D]) => object3D)
+
+    if (supportObjects.length === 0) return 0
+
+    supportObjects.forEach((object3D) => object3D.updateMatrixWorld(true))
+    placementRayOrigin.set(x, CUSTOM_PLACEMENT_RAY_START_Y, z)
+    placementRaycaster.set(placementRayOrigin, placementRayDirection)
+
+    const hit = placementRaycaster
+      .intersectObjects(supportObjects, true)
+      .find((intersection) => {
+        const hitObjectId = intersection.object.userData.placedObjectId
+        return !intersection.object.userData.ignorePlacementSupport && hitObjectId !== ignoredObjectId
+      })
+
+    return hit ? hit.point.y : 0
+  }, [])
 
   return (
     <>
@@ -3019,6 +3553,7 @@ function CustomizationLayer({
         draggingObjectId={draggingObjectId}
         placingObjectId={placingObjectId}
         placementLocked={placementLocked}
+        getPlacementY={getPlacementY}
         onDrag={(id, position) => {
           if (placingObjectId) {
             onUpdatePlacementPreview(position)
@@ -3043,6 +3578,7 @@ function CustomizationLayer({
           mode={mode}
           onSelect={onSelect}
           onStartDragging={onStartDragging}
+          onObjectRef={registerPlaceableRef}
         />
       ))}
       <PlacementPreview object={placingObject} preview={placementPreview} />
@@ -3711,7 +4247,7 @@ function App() {
             ? null
             : [
               MathUtils.clamp(Number(position[0]) || baseObject.position[0], CUSTOM_ROOM_BOUNDS.minX, CUSTOM_ROOM_BOUNDS.maxX),
-              baseObject.position[1],
+              Number.isFinite(Number(position[1])) ? Number(position[1]) : baseObject.position[1],
               MathUtils.clamp(Number(position[2]) || baseObject.position[2], CUSTOM_ROOM_BOUNDS.minZ, CUSTOM_ROOM_BOUNDS.maxZ),
             ],
           rotationY: Number.isFinite(savedObject.rotationY) ? savedObject.rotationY : baseObject.rotationY,
@@ -3734,7 +4270,7 @@ function App() {
             position: object.status === 'placed' && position
               ? [
                 MathUtils.clamp(Number(position[0]) || 0, CUSTOM_ROOM_BOUNDS.minX, CUSTOM_ROOM_BOUNDS.maxX),
-                0,
+                Number.isFinite(Number(position[1])) ? Number(position[1]) : 0,
                 MathUtils.clamp(Number(position[2]) || 0, CUSTOM_ROOM_BOUNDS.minZ, CUSTOM_ROOM_BOUNDS.maxZ),
               ]
               : null,
@@ -4197,7 +4733,7 @@ function App() {
       const [x, z] = clampToCustomRoom(position[0], position[2])
       return {
         ...current,
-        position: [x, 0, z],
+        position: [x, Number.isFinite(Number(position[1])) ? Number(position[1]) : 0, z],
         isValid: true,
       }
     })
