@@ -266,8 +266,8 @@ export const objectCatalog = {
   },
   flat_screen_display: {
     id: 'flat_screen_display',
-    type: 'display',
-    name: 'Ecran plat',
+    type: 'interactive_tv',
+    name: 'Tele',
     category: 'electronics',
     modelUrl: '/models/placeables/flat_screen_display/model.glb',
     thumbnail: '/ui/object-thumbnails/flat_screen_display.webp',
@@ -276,6 +276,12 @@ export const objectCatalog = {
     frontAxis: OBJECT_FRONT_AXIS,
     thumbnailRotationY: Math.PI * 1.75,
     thumbnailScale: 0.82,
+    screenName: 'TV_SCREEN',
+    screen: {
+      position: [0.045, 0.78, 0],
+      rotation: [0, Math.PI / 2, 0],
+      size: [1.16, 0.65],
+    },
   },
   monstera_plant: {
     id: 'monstera_plant',

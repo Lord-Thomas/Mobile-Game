@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, Box3, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
+import { BackSide, Box3, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, Quaternion, RepeatWrapping, SRGBColorSpace, Vector3, VideoTexture } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -2493,12 +2493,291 @@ function GlbPlaceableModel({ objectId }) {
   )
 }
 
+function getNamedScreenInfo(object, offset, screenName = 'TV_SCREEN') {
+  const screen = object.getObjectByName(screenName)
+  if (!screen) return null
+
+  object.updateWorldMatrix(true, true)
+  screen.updateWorldMatrix(true, false)
+
+  const position = new Vector3()
+  const quaternion = new Quaternion()
+  const scale = new Vector3()
+  screen.matrixWorld.decompose(position, quaternion, scale)
+
+  let width = 1
+  let height = 0.56
+  let screenQuaternion = quaternion.clone()
+  const screenBox = new Box3().setFromObject(screen)
+  if (!screenBox.isEmpty()) {
+    position.copy(screenBox.getCenter(new Vector3()))
+  }
+
+  if (screen.geometry) {
+    screen.geometry.computeBoundingBox()
+    const size = new Vector3()
+    screen.geometry.boundingBox.getSize(size)
+    const dimensions = [
+      { axis: new Vector3(1, 0, 0).applyQuaternion(quaternion).normalize(), size: Math.abs(size.x * scale.x) },
+      { axis: new Vector3(0, 1, 0).applyQuaternion(quaternion).normalize(), size: Math.abs(size.y * scale.y) },
+      { axis: new Vector3(0, 0, 1).applyQuaternion(quaternion).normalize(), size: Math.abs(size.z * scale.z) },
+    ].sort((a, b) => b.size - a.size)
+    const widthDimension = dimensions[0]
+    const heightDimension = dimensions[1]
+    const normalDimension = dimensions[2]
+    const normalAxis = new Vector3().crossVectors(widthDimension.axis, heightDimension.axis).normalize()
+    if (normalAxis.dot(normalDimension.axis) < 0) normalAxis.negate()
+    const basis = new Matrix4().makeBasis(widthDimension.axis, heightDimension.axis, normalAxis)
+    screenQuaternion = new Quaternion().setFromRotationMatrix(basis)
+    width = Math.max(widthDimension.size, 0.01)
+    height = Math.max(heightDimension.size, 0.01)
+  } else if (!screenBox.isEmpty()) {
+    const worldSize = screenBox.getSize(new Vector3())
+    const dimensions = [worldSize.x, worldSize.y, worldSize.z].sort((a, b) => b - a)
+    width = Math.max(dimensions[0], 0.01)
+    height = Math.max(dimensions[1], 0.01)
+  }
+
+  screen.traverse((child) => {
+    child.visible = false
+  })
+
+  const normal = new Vector3(0, 0, 1).applyQuaternion(screenQuaternion)
+  position.add(new Vector3(offset[0], offset[1], offset[2]))
+  position.add(normal.multiplyScalar(0.008))
+
+  return {
+    position: position.toArray(),
+    quaternion: screenQuaternion,
+    width,
+    height,
+  }
+}
+
+function InteractiveTvModel({ objectId }) {
+  const catalogItem = objectCatalog[objectId]
+  const gltf = useGLTF(catalogItem.modelUrl)
+  const model = useMemo(() => {
+    const object = clone(gltf.scene)
+
+    object.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+      }
+    })
+
+    object.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(object)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const targetWidth = (catalogItem.targetWidthMeters ?? 0) * WORLD_UNITS_PER_METER
+    const horizontalSize = Math.max(size.x, size.z, 0.001)
+    const scale = targetWidth > 0 ? targetWidth / horizontalSize : 1
+    const offset = [-center.x, -box.min.y, -center.z]
+    const namedScreenInfo = getNamedScreenInfo(object, offset, catalogItem.screenName ?? 'TV_SCREEN')
+    const fallbackScreen = catalogItem.screen
+    const fallbackScreenInfo = fallbackScreen
+      ? {
+          position: fallbackScreen.position ?? [0.045, 0.78, 0],
+          quaternion: new Quaternion().setFromEuler(new Euler(
+            fallbackScreen.rotation?.[0] ?? 0,
+            fallbackScreen.rotation?.[1] ?? Math.PI / 2,
+            fallbackScreen.rotation?.[2] ?? 0,
+          )),
+          width: fallbackScreen.size?.[0] ?? 1.16,
+          height: fallbackScreen.size?.[1] ?? 0.65,
+        }
+      : null
+
+    return {
+      object,
+      offset,
+      scale,
+      screenInfo: namedScreenInfo ?? fallbackScreenInfo,
+    }
+  }, [catalogItem.screen, catalogItem.screenName, catalogItem.targetWidthMeters, gltf.scene])
+
+  return (
+    <group scale={model.scale} rotation={[0, catalogItem.modelRotationY ?? 0, 0]}>
+      <primitive object={model.object} position={model.offset} />
+      {model.screenInfo && (
+        <InteractiveTvScreen screenInfo={model.screenInfo} />
+      )}
+    </group>
+  )
+}
+
 function PlaceableModel({ objectId, type }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
+  if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
   if (type === 'sofa' || catalogItem?.type === 'sofa') return <SofaModel />
   return null
+}
+
+function InteractiveTvScreen({ screenInfo }) {
+  const [texture, setTexture] = useState(null)
+  const [captureState, setCaptureState] = useState('off')
+  const streamRef = useRef(null)
+  const videoRef = useRef(null)
+  const textureRef = useRef(null)
+  const materialRef = useRef(null)
+
+  useFrame(() => {
+    if (textureRef.current) {
+      textureRef.current.needsUpdate = true
+    }
+    if (materialRef.current) {
+      materialRef.current.needsUpdate = true
+    }
+  })
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      videoRef.current?.pause()
+      videoRef.current = null
+      setTexture((currentTexture) => {
+        currentTexture?.dispose()
+        textureRef.current = null
+        return null
+      })
+    }
+  }, [])
+
+  if (!screenInfo) return null
+
+  const stopCapture = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    videoRef.current?.pause()
+    videoRef.current = null
+    setTexture((currentTexture) => {
+      currentTexture?.dispose()
+      textureRef.current = null
+      return null
+    })
+    setCaptureState('off')
+  }
+
+  const startCapture = async (event) => {
+    event?.stopPropagation?.()
+    if (!window.isSecureContext) {
+      setCaptureState('insecure')
+      return
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setCaptureState('unsupported')
+      return
+    }
+
+    setCaptureState('requesting')
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30, max: 30 },
+        },
+        audio: true,
+      })
+      streamRef.current = stream
+      const video = document.createElement('video')
+      video.srcObject = stream
+      video.playsInline = true
+      video.autoplay = true
+      video.muted = true
+      videoRef.current = video
+
+      stream.getVideoTracks()[0]?.addEventListener('ended', stopCapture, { once: true })
+      await video.play()
+      if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
+        await new Promise((resolve) => {
+          video.addEventListener('loadedmetadata', resolve, { once: true })
+        })
+      }
+      setCaptureState('warming')
+      await new Promise((resolve) => {
+        if ('requestVideoFrameCallback' in video) {
+          video.requestVideoFrameCallback(() => resolve())
+          return
+        }
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+          resolve()
+          return
+        }
+        video.addEventListener('loadeddata', resolve, { once: true })
+      })
+
+      const nextTexture = new VideoTexture(video)
+      nextTexture.colorSpace = SRGBColorSpace
+      nextTexture.minFilter = LinearFilter
+      nextTexture.magFilter = LinearFilter
+      nextTexture.generateMipmaps = false
+      nextTexture.needsUpdate = true
+      setTexture((currentTexture) => {
+        currentTexture?.dispose()
+        textureRef.current = nextTexture
+        return nextTexture
+      })
+      setCaptureState('playing')
+    } catch (error) {
+      console.warn('TV capture failed', error)
+      stopCapture()
+      setCaptureState(error?.name === 'NotAllowedError' ? 'denied' : 'error')
+    }
+  }
+
+  const statusLabel = {
+    off: 'Partager onglet',
+    requesting: 'Choisis YouTube',
+    warming: 'Image en cours',
+    denied: 'Partage refuse',
+    insecure: 'HTTPS requis',
+    unsupported: 'Non supporte',
+    error: 'Reessayer',
+  }[captureState] ?? 'Partager onglet'
+  return (
+    <group position={screenInfo.position} quaternion={screenInfo.quaternion}>
+      {(texture ? [-0.002, 0.002] : [0]).map((zOffset) => (
+        <mesh
+          key={zOffset}
+          position={[0, 0, zOffset]}
+          onClick={texture ? undefined : startCapture}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <planeGeometry args={[screenInfo.width, screenInfo.height]} />
+          {texture ? (
+            <meshBasicMaterial
+              ref={zOffset > 0 ? materialRef : undefined}
+              map={texture}
+              toneMapped={false}
+              side={zOffset > 0 ? FrontSide : BackSide}
+            />
+          ) : (
+            <meshBasicMaterial color="#020202" side={DoubleSide} />
+          )}
+        </mesh>
+      ))}
+      {!texture && (
+        <Html
+          transform
+          center
+          distanceFactor={1}
+          position={[0, 0, 0.01]}
+          scale={screenInfo.width / 7.2}
+        >
+          <button className="tv-capture-button" type="button" onClick={startCapture}>
+            {statusLabel}
+          </button>
+        </Html>
+      )}
+    </group>
+  )
 }
 
 function EditableObject({ object, selected, mode, onSelect, onStartDragging }) {
