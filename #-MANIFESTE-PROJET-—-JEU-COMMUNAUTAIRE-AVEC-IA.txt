@@ -138,3 +138,87 @@ Lorsque tu proposes du code :
 Créer un jeu entièrement construit par la communauté, avec une évolution visible à travers des itérations successives, tout en restant accessible, performant et jouable sur mobile.
 
 Le projet doit rester simple, fun et évolutif.
+
+---
+
+## Ajouts presents dans le jeu
+
+### Gameplay et camera
+
+* Piece 3D jouable avec sol, murs, plafond, lumiere et ambiance de laboratoire.
+* Joueur controle en vue 3D avec deplacement, saut et controles tactiles.
+* Camera compatible mobile et format vertical.
+* Limites physiques de la piece pour garder le joueur et la camera dans l'espace jouable.
+* Quand le joueur est assis, la camera reste bloquee par les murs et ne peut plus sortir de la piece.
+* But de football deplacable dans le mode personnalisation.
+* Systeme de score et popups visuels quand le ballon entre dans le but.
+* Pieces / monnaie affichees dans l'interface.
+
+### Personnalisation de la piece
+
+* Station de personnalisation accessible en jeu.
+* Mode personnalisation avec vue de dessus.
+* Inventaire d'objets avec placement, selection, rotation, rangement et remise en jeu.
+* Boutique d'objets achetables avec monnaie du jeu.
+* Placement des meubles en X/Z avec calcul automatique du Y.
+* Raycast vertical vers le bas pour poser les objets sur le sol ou sur un autre meuble.
+* Possibilite de poser des objets les uns sur les autres.
+* Exclusion de l'objet en cours de deplacement pendant le raycast pour eviter qu'il se pose sur lui-meme.
+* Sauvegarde de la hauteur Y des objets places.
+
+### Objets et meubles disponibles
+
+* But de football.
+* Canape modulaire.
+* Canape peluche rose.
+* Canape rose (`pink_sofa`).
+* Canape rouge.
+* Bureau en bois.
+* Table beige.
+* Chaise de bureau.
+* Chaise moderne.
+* Chaise orange.
+* Fauteuil oeuf orange.
+* Trone.
+* Tabouret ambre.
+* Television interactive.
+* Plante monstera.
+
+### Television interactive
+
+* Television placable comme objet de personnalisation.
+* Detection de proximite du joueur avec bouton d'interaction "Changer la TV".
+* Menu de controle de la television avec bouton de fermeture.
+* Mode fichier local / capture existant conserve.
+* Mode video en ligne via lien YouTube.
+* Conversion des liens YouTube classiques, `youtu.be`, `embed` et `shorts` vers une URL embed.
+* Integration YouTube via `Html` de Drei avec `occlude="blending"` pour rester dans la scene 3D.
+* Lecture, pause, marche, arret et changement de video.
+* Controle du volume YouTube via l'API postMessage.
+* Iframe cliquable pour conserver les interactions YouTube.
+* Correction du z-index pour garder l'UX du jeu visible au-dessus de la video.
+* Correction du cadrage en format mobile vertical et en mode `?frame=9x16`, basee sur la taille reelle du canvas et non la fenetre entiere.
+
+### Skins et environnement
+
+* Station de skins pour changer l'apparence du ballon.
+* Station d'environnement pour changer les textures du sol et des murs.
+* Option pour appliquer la texture des murs au plafond.
+* Sauvegarde locale de la progression, des skins, de l'environnement et des objets.
+* Synchronisation cloud via Supabase quand la configuration est disponible.
+
+### Assets ajoutes
+
+* Modele `web/public/models/placeables/pink_sofa/model.glb`.
+* Thumbnail `web/public/ui/object-thumbnails/pink_sofa.webp`.
+* Modele television `web/public/models/placeables/flat_screen_display/model.glb`.
+* Thumbnail `web/public/ui/object-thumbnails/flat_screen_display.webp`.
+
+### Notes techniques actuelles
+
+* Projet React + Vite + Three.js + React Three Fiber + Drei.
+* Physique geree avec Rapier.
+* Les objets placables sont declares dans `web/src/gameObjects/placeableObjects.js`.
+* Le gameplay principal et la logique TV sont dans `web/src/App.jsx`.
+* Les styles d'interface et de TV sont dans `web/src/index.css`.
+* Le serveur local ne doit pas etre demarre automatiquement sauf demande explicite de l'utilisateur.

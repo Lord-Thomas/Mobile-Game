@@ -3,7 +3,7 @@ import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, 
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, getCurrentUser, loadPlayerProgress, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
@@ -2762,12 +2762,31 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   const tvMenuElementRef = useRef(null)
   const tvMenuCallbacksRef = useRef({})
   const { camera, gl } = useThree()
+  const [tvViewportKey, setTvViewportKey] = useState('0x0')
   const isMobileMediaMode = useMemo(() => {
     if (typeof navigator === 'undefined') return false
     return /android|iphone|ipad|ipod/i.test(navigator.userAgent) || !navigator.mediaDevices?.getDisplayMedia
   }, [])
   const cssScreenWidth = 1280
   const cssScreenHeight = Math.max(1, Math.round(cssScreenWidth * ((screenInfo?.height ?? 0.5625) / (screenInfo?.width ?? 1))))
+
+  useEffect(() => {
+    const updateViewportKey = () => {
+      const rect = gl.domElement.getBoundingClientRect()
+      const width = Math.round(rect.width)
+      const height = Math.round(rect.height)
+      setTvViewportKey(`${width}x${height}`)
+    }
+
+    updateViewportKey()
+    const observer = new ResizeObserver(updateViewportKey)
+    observer.observe(gl.domElement)
+    window.addEventListener('orientationchange', updateViewportKey)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('orientationchange', updateViewportKey)
+    }
+  }, [gl])
 
   const resetAudioGraph = () => {
     audioSourceRef.current?.disconnect()
@@ -3622,7 +3641,11 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
 
   const showTextureScreen = texture && tvPoweredOn
   const showOnlineScreen = tvOnlineEmbedUrl && tvPoweredOn
-  const screenHtmlScale = (screenInfo.width * 400) / cssScreenWidth
+  const youtubeCssWidth = 640
+  const youtubeCssHeight = Math.max(1, Math.round(youtubeCssWidth * ((screenInfo?.height ?? 0.5625) / (screenInfo?.width ?? 1))))
+  const screenHtmlScale = (screenInfo.width * 400) / youtubeCssWidth
+  const youtubeViewportReady = tvViewportKey !== '0x0'
+  const youtubeFrameKey = `${tvOnlineEmbedUrl}:${tvViewportKey}`
 
   return (
     <group ref={screenGroupRef} position={screenInfo.position} quaternion={screenInfo.quaternion}>
@@ -3647,35 +3670,39 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
           )}
         </mesh>
       ))}
-      {showOnlineScreen && (
+      {showOnlineScreen && youtubeViewportReady && (
         <Html
+          key={youtubeFrameKey}
           transform
           occlude="blending"
           center
-          distanceFactor={1}
-          scale={screenHtmlScale}
+          distanceFactor={screenHtmlScale}
           zIndexRange={[1, 0]}
           position={[0, 0, 0.006]}
           style={{
-            width: `${cssScreenWidth}px`,
-            height: `${cssScreenHeight}px`,
+            width: `${youtubeCssWidth}px`,
+            height: `${youtubeCssHeight}px`,
             pointerEvents: 'auto',
+            overflow: 'hidden',
+            transformOrigin: '50% 50%',
           }}
         >
-          <iframe
-            ref={youtubeFrameRef}
-            className="tv-youtube-frame"
-            width={cssScreenWidth}
-            height={cssScreenHeight}
-            src={tvOnlineEmbedUrl}
-            title="YouTube video"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            onLoad={() => {
-              applyYouTubeVolume(tvVolume)
-              postYouTubeCommand(tvPaused ? 'pauseVideo' : 'playVideo')
-            }}
-          />
+          <div className="tv-youtube-fill">
+            <iframe
+              key={youtubeFrameKey}
+              ref={youtubeFrameRef}
+              className="tv-youtube-frame"
+              src={tvOnlineEmbedUrl}
+              title="YouTube video"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              scrolling="no"
+              onLoad={() => {
+                applyYouTubeVolume(tvVolume)
+                postYouTubeCommand(tvPaused ? 'pauseVideo' : 'playVideo')
+              }}
+            />
+          </div>
         </Html>
       )}
     </group>
@@ -4322,6 +4349,41 @@ function BallRespawnGuard({ ballRef, onOutOfBounds }) {
   return null
 }
 
+function getEvenPixelSize(value) {
+  const rounded = Math.max(2, Math.floor(value))
+  return rounded % 2 === 0 ? rounded : rounded - 1
+}
+
+function useVerticalFrameSize(active) {
+  const [frameSize, setFrameSize] = useState(null)
+
+  useLayoutEffect(() => {
+    if (!active) {
+      setFrameSize(null)
+      return undefined
+    }
+
+    const updateFrameSize = () => {
+      const widthFromHeight = window.innerHeight * (9 / 16)
+      const heightFromWidth = window.innerWidth * (16 / 9)
+      const widthLimited = widthFromHeight <= window.innerWidth
+      const width = getEvenPixelSize(widthLimited ? widthFromHeight : window.innerWidth)
+      const height = getEvenPixelSize(widthLimited ? window.innerHeight : heightFromWidth)
+      setFrameSize({ width, height })
+    }
+
+    updateFrameSize()
+    window.addEventListener('resize', updateFrameSize)
+    window.addEventListener('orientationchange', updateFrameSize)
+    return () => {
+      window.removeEventListener('resize', updateFrameSize)
+      window.removeEventListener('orientationchange', updateFrameSize)
+    }
+  }, [active])
+
+  return frameSize
+}
+
 function ScorePopups({ popups }) {
   return (
     <>
@@ -4379,6 +4441,7 @@ function App() {
   }, [])
   const progressScope = isAdminMode ? 'admin' : 'player'
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
+  const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
 
   const touchRef = useRef({
     moveX: 0,
@@ -5137,6 +5200,7 @@ function App() {
         dpr={[1, 1.5]}
         camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 40 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
+        resize={{ debounce: 0 }}
       >
         <WhiteRoom
           floorTexturePath={activeFloorSkin.texture}
@@ -5361,7 +5425,15 @@ function App() {
   if (isAdminMode || isVerticalFrameMode) {
     return (
       <div className="admin-viewport">
-        <div className="admin-frame">{gameView}</div>
+        <div
+          className="admin-frame"
+          style={verticalFrameSize ? {
+            width: `${verticalFrameSize.width}px`,
+            height: `${verticalFrameSize.height}px`,
+          } : undefined}
+        >
+          {gameView}
+        </div>
       </div>
     )
   }
