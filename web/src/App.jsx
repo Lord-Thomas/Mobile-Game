@@ -11,8 +11,8 @@ import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generate
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import { OUTDOOR_PLAYER_COLLIDERS } from './world/outdoorData'
-import { getRoomBounds, mainRoom, mainToSecondOpening, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { getWallOpeningLayout } from './world/house/wallUtils'
+import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
+import { getWallColliderTransform, getWallSideTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
@@ -67,7 +67,7 @@ const ZONES = {
 }
 const MAIN_ROOM_BOUNDS = getRoomBounds(mainRoom)
 const OUTDOOR_DOOR_POSITION = {
-  x: MAIN_ROOM_BOUNDS.minX + 0.18,
+  x: MAIN_ROOM_BOUNDS.minX,
   y: 1.1,
   z: outsideDoorOpening.centerZ,
 }
@@ -107,13 +107,6 @@ const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const TV_INTERACTION_DISTANCE = 1.35
 const TV_MENU_EVENT = 'lab-tv-open-menu'
 const MAIN_ROOM = { width: mainRoom.size[0], depth: mainRoom.size[2], height: mainRoom.size[1] }
-const FRONT_WALL = { zVisual: 5.05, zCollider: 5.1, thickness: 0.1 }
-const DRAGON_OPENING = {
-  centerX: mainToSecondOpening.centerX,
-  width: mainToSecondOpening.width,
-  bottomY: mainToSecondOpening.bottomY,
-  height: mainToSecondOpening.height,
-}
 const WALL_REPEAT_X_PER_UNIT = 3.4 / 12
 const WALL_REPEAT_Y_PER_UNIT = 1.9 / 5
 const DEFAULT_CEILING_TEXTURE = '/textures/environment/walls/mur-paint.png'
@@ -518,32 +511,6 @@ function getKickContact({ playerX, playerZ, yaw, ballX, ballZ }) {
   }
 }
 
-function WallPanel({ texture, uvWidth, uvHeight, position, geometryArgs }) {
-  const panelTexture = useMemo(() => {
-    const next = texture.clone()
-    next.wrapS = RepeatWrapping
-    next.wrapT = RepeatWrapping
-    next.repeat.set(
-      Math.max(0.01, uvWidth * WALL_REPEAT_X_PER_UNIT),
-      Math.max(0.01, uvHeight * WALL_REPEAT_Y_PER_UNIT),
-    )
-    next.colorSpace = SRGBColorSpace
-    next.needsUpdate = true
-    return next
-  }, [texture, uvWidth, uvHeight])
-
-  useEffect(() => {
-    return () => panelTexture.dispose()
-  }, [panelTexture])
-
-  return (
-    <mesh position={position}>
-      <boxGeometry args={geometryArgs} />
-      <meshStandardMaterial map={panelTexture} color="#e6edf6" side={BackSide} />
-    </mesh>
-  )
-}
-
 function useKeyboardInput() {
   const keysRef = useRef({
     forward: false,
@@ -616,80 +583,10 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
     return next
   }, [ceilingColorMap])
   useEffect(() => () => ceilingTexture.dispose(), [ceilingTexture])
-  const frontWall = getWallOpeningLayout(MAIN_ROOM.width, MAIN_ROOM.height, DRAGON_OPENING)
-  const outsideDoorHalfWidth = outsideDoorOpening.width * 0.5
-  const leftWallMinZ = -MAIN_ROOM.depth * 0.5
-  const leftWallMaxZ = MAIN_ROOM.depth * 0.5
-  const outsideDoorMinZ = outsideDoorOpening.centerZ - outsideDoorHalfWidth
-  const outsideDoorMaxZ = outsideDoorOpening.centerZ + outsideDoorHalfWidth
-  const leftWallBackDepth = Math.max(0, outsideDoorMinZ - leftWallMinZ)
-  const leftWallFrontDepth = Math.max(0, leftWallMaxZ - outsideDoorMaxZ)
-  const outsideDoorTopHeight = Math.max(0, MAIN_ROOM.height - (outsideDoorOpening.bottomY + outsideDoorOpening.height))
 
   return (
     <>
-      {leftWallBackDepth > 0 && (
-        <WallPanel
-          texture={wallColorMap}
-          uvWidth={leftWallBackDepth}
-          uvHeight={MAIN_ROOM.height}
-          position={[-5.05, MAIN_ROOM.height * 0.5, leftWallMinZ + leftWallBackDepth * 0.5]}
-          geometryArgs={[0.1, MAIN_ROOM.height, leftWallBackDepth]}
-        />
-      )}
-      {leftWallFrontDepth > 0 && (
-        <WallPanel
-          texture={wallColorMap}
-          uvWidth={leftWallFrontDepth}
-          uvHeight={MAIN_ROOM.height}
-          position={[-5.05, MAIN_ROOM.height * 0.5, outsideDoorMaxZ + leftWallFrontDepth * 0.5]}
-          geometryArgs={[0.1, MAIN_ROOM.height, leftWallFrontDepth]}
-        />
-      )}
-      {outsideDoorTopHeight > 0 && (
-        <WallPanel
-          texture={wallColorMap}
-          uvWidth={outsideDoorOpening.width}
-          uvHeight={outsideDoorTopHeight}
-          position={[-5.05, outsideDoorOpening.bottomY + outsideDoorOpening.height + outsideDoorTopHeight * 0.5, outsideDoorOpening.centerZ]}
-          geometryArgs={[0.1, outsideDoorTopHeight, outsideDoorOpening.width]}
-        />
-      )}
-      <WallPanel
-        texture={wallColorMap}
-        uvWidth={MAIN_ROOM.depth}
-        uvHeight={MAIN_ROOM.height}
-        position={[5.05, MAIN_ROOM.height * 0.5, 0]}
-        geometryArgs={[0.1, MAIN_ROOM.height, MAIN_ROOM.depth]}
-      />
-      <WallPanel
-        texture={wallColorMap}
-        uvWidth={MAIN_ROOM.width}
-        uvHeight={MAIN_ROOM.height}
-        position={[0, MAIN_ROOM.height * 0.5, -5.05]}
-        geometryArgs={[MAIN_ROOM.width, MAIN_ROOM.height, 0.1]}
-      />
-      <WallPanel
-        texture={wallColorMap}
-        uvWidth={frontWall.left.width}
-        uvHeight={frontWall.left.height}
-        position={[frontWall.left.x, frontWall.left.y, FRONT_WALL.zVisual]}
-        geometryArgs={[frontWall.left.width, frontWall.left.height, FRONT_WALL.thickness]}
-      />
-      <WallPanel
-        texture={wallColorMap}
-        uvWidth={frontWall.right.width}
-        uvHeight={frontWall.right.height}
-        position={[frontWall.right.x, frontWall.right.y, FRONT_WALL.zVisual]}
-        geometryArgs={[frontWall.right.width, frontWall.right.height, FRONT_WALL.thickness]}
-      />
-      <WallPanel
-        texture={wallColorMap}
-        uvWidth={frontWall.top.width}
-        uvHeight={frontWall.top.height}
-        position={[frontWall.top.x, frontWall.top.y, FRONT_WALL.zVisual]}
-        geometryArgs={[frontWall.top.width, frontWall.top.height, FRONT_WALL.thickness]}
-      />
+      <HouseWalls wallTexture={wallColorMap} />
       <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
         <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
         <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
@@ -715,6 +612,160 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
   )
 }
 
+function WallFace({ wall, rect, side, wallTexture }) {
+  const transform = getWallSideTransform(wall, rect, side)
+  const materialColor = side.color ?? '#e6edf6'
+  const repeatedTexture = useMemo(() => {
+    if (side.material !== 'active_wall') return null
+    const next = wallTexture.clone()
+    next.wrapS = RepeatWrapping
+    next.wrapT = RepeatWrapping
+    next.repeat.set(
+      Math.max(0.01, transform.width * WALL_REPEAT_X_PER_UNIT),
+      Math.max(0.01, transform.height * WALL_REPEAT_Y_PER_UNIT),
+    )
+    next.colorSpace = SRGBColorSpace
+    next.needsUpdate = true
+    return next
+  }, [side.material, transform.height, transform.width, wallTexture])
+
+  useEffect(() => {
+    return () => repeatedTexture?.dispose()
+  }, [repeatedTexture])
+
+  return (
+    <mesh position={transform.position} rotation={transform.rotation} receiveShadow>
+      <planeGeometry args={[transform.width, transform.height]} />
+      {side.material === 'active_wall' ? (
+        <meshStandardMaterial map={repeatedTexture} color="#e6edf6" roughness={0.68} metalness={0.03} />
+      ) : (
+        <meshStandardMaterial color={materialColor} roughness={0.78} />
+      )}
+    </mesh>
+  )
+}
+
+function HouseWalls({ wallTexture }) {
+  const walls = houseLayout.walls.filter((wall) => wall.roomId === 'main_room')
+
+  return (
+    <>
+      {walls.flatMap((wall) =>
+        splitWallIntoSolidRects(wall).flatMap((rect) => [
+          <WallFace
+            key={`${rect.id}-side-a`}
+            wall={wall}
+            rect={rect}
+            side={wall.sideA}
+            wallTexture={wallTexture}
+          />,
+          <WallFace
+            key={`${rect.id}-side-b`}
+            wall={wall}
+            rect={rect}
+            side={wall.sideB}
+            wallTexture={wallTexture}
+          />,
+        ]),
+      )}
+      <HouseOpeningReveals walls={walls} />
+      <HouseCornerSeals />
+    </>
+  )
+}
+
+function HouseCornerSeals() {
+  const bounds = getRoomBounds(mainRoom)
+  const thickness = houseLayout.wallThickness
+  const halfThickness = thickness * 0.5
+  const height = mainRoom.size[1]
+  const corners = [
+    [bounds.minX - halfThickness, bounds.minZ - halfThickness],
+    [bounds.maxX + halfThickness, bounds.minZ - halfThickness],
+    [bounds.minX - halfThickness, bounds.maxZ + halfThickness],
+    [bounds.maxX + halfThickness, bounds.maxZ + halfThickness],
+  ]
+
+  return (
+    <>
+      {corners.map(([x, z]) => (
+        <mesh key={`${x}-${z}`} position={[x, height * 0.5, z]} castShadow receiveShadow>
+          <boxGeometry args={[thickness, height, thickness]} />
+          <meshStandardMaterial color="#f3f0e5" roughness={0.78} />
+        </mesh>
+      ))}
+    </>
+  )
+}
+
+function HouseOpeningReveals({ walls }) {
+  return (
+    <>
+      {walls.flatMap((wall) =>
+        (wall.openings ?? []).flatMap((opening) => {
+          const bottom = opening.bottom ?? 0
+          const min = opening.center - opening.width * 0.5
+          const max = opening.center + opening.width * 0.5
+          const centerY = bottom + opening.height * 0.5
+          const topY = bottom + opening.height
+          const topHeight = wall.height - topY
+          const revealColor = '#d8d0c4'
+
+          if (wall.axis === 'x') {
+            const z = wall.constant
+            return [
+              <mesh key={`${wall.id}-${opening.id}-reveal-left`} position={[min, centerY, z]}>
+                <boxGeometry args={[0.05, opening.height, wall.thickness + 0.03]} />
+                <meshStandardMaterial color={revealColor} roughness={0.72} />
+              </mesh>,
+              <mesh key={`${wall.id}-${opening.id}-reveal-right`} position={[max, centerY, z]}>
+                <boxGeometry args={[0.05, opening.height, wall.thickness + 0.03]} />
+                <meshStandardMaterial color={revealColor} roughness={0.72} />
+              </mesh>,
+              topHeight > 0.001 && (
+                <mesh key={`${wall.id}-${opening.id}-reveal-top`} position={[opening.center, topY, z]}>
+                  <boxGeometry args={[opening.width, 0.05, wall.thickness + 0.03]} />
+                  <meshStandardMaterial color={revealColor} roughness={0.72} />
+                </mesh>
+              ),
+              bottom > 0.001 && (
+                <mesh key={`${wall.id}-${opening.id}-reveal-bottom`} position={[opening.center, bottom, z]}>
+                  <boxGeometry args={[opening.width, 0.05, wall.thickness + 0.03]} />
+                  <meshStandardMaterial color={revealColor} roughness={0.72} />
+                </mesh>
+              ),
+            ].filter(Boolean)
+          }
+
+          const x = wall.constant
+          return [
+            <mesh key={`${wall.id}-${opening.id}-reveal-left`} position={[x, centerY, min]}>
+              <boxGeometry args={[wall.thickness + 0.03, opening.height, 0.05]} />
+              <meshStandardMaterial color={revealColor} roughness={0.72} />
+            </mesh>,
+            <mesh key={`${wall.id}-${opening.id}-reveal-right`} position={[x, centerY, max]}>
+              <boxGeometry args={[wall.thickness + 0.03, opening.height, 0.05]} />
+              <meshStandardMaterial color={revealColor} roughness={0.72} />
+            </mesh>,
+            topHeight > 0.001 && (
+              <mesh key={`${wall.id}-${opening.id}-reveal-top`} position={[x, topY, opening.center]}>
+                <boxGeometry args={[wall.thickness + 0.03, 0.05, opening.width]} />
+                <meshStandardMaterial color={revealColor} roughness={0.72} />
+              </mesh>
+            ),
+            bottom > 0.001 && (
+              <mesh key={`${wall.id}-${opening.id}-reveal-bottom`} position={[x, bottom, opening.center]}>
+                <boxGeometry args={[wall.thickness + 0.03, 0.05, opening.width]} />
+                <meshStandardMaterial color={revealColor} roughness={0.72} />
+              </mesh>
+            ),
+          ].filter(Boolean)
+        }),
+      )}
+    </>
+  )
+}
+
 function InteriorLighting({ active, hideCeiling }) {
   if (!active) return null
 
@@ -731,42 +782,21 @@ function InteriorLighting({ active, hideCeiling }) {
 }
 
 function PhysicsBounds() {
-  const frontWall = getWallOpeningLayout(MAIN_ROOM.width, MAIN_ROOM.height, DRAGON_OPENING)
-  const outsideDoorHalfWidth = outsideDoorOpening.width * 0.5
-  const leftWallMinZ = -MAIN_ROOM.depth * 0.5
-  const leftWallMaxZ = MAIN_ROOM.depth * 0.5
-  const outsideDoorMinZ = outsideDoorOpening.centerZ - outsideDoorHalfWidth
-  const outsideDoorMaxZ = outsideDoorOpening.centerZ + outsideDoorHalfWidth
-  const leftWallBackDepth = Math.max(0, outsideDoorMinZ - leftWallMinZ)
-  const leftWallFrontDepth = Math.max(0, leftWallMaxZ - outsideDoorMaxZ)
-  const outsideDoorTopHeight = Math.max(0, MAIN_ROOM.height - (outsideDoorOpening.bottomY + outsideDoorOpening.height))
+  const wallSegments = houseLayout.walls
+    .filter((wall) => wall.roomId === 'main_room')
+    .flatMap((wall) =>
+      splitWallIntoSolidRects(wall).map((rect) => ({
+        id: rect.id,
+        ...getWallColliderTransform(wall, rect),
+      })),
+    )
 
   return (
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
-      {leftWallBackDepth > 0 && (
-        <CuboidCollider
-          args={[0.1, MAIN_ROOM.height * 0.5, leftWallBackDepth * 0.5]}
-          position={[-5.1, MAIN_ROOM.height * 0.5, leftWallMinZ + leftWallBackDepth * 0.5]}
-        />
-      )}
-      {leftWallFrontDepth > 0 && (
-        <CuboidCollider
-          args={[0.1, MAIN_ROOM.height * 0.5, leftWallFrontDepth * 0.5]}
-          position={[-5.1, MAIN_ROOM.height * 0.5, outsideDoorMaxZ + leftWallFrontDepth * 0.5]}
-        />
-      )}
-      {outsideDoorTopHeight > 0 && (
-        <CuboidCollider
-          args={[0.1, outsideDoorTopHeight * 0.5, outsideDoorOpening.width * 0.5]}
-          position={[-5.1, outsideDoorOpening.bottomY + outsideDoorOpening.height + outsideDoorTopHeight * 0.5, outsideDoorOpening.centerZ]}
-        />
-      )}
-      <CuboidCollider args={[0.1, 2.4, 5]} position={[5.1, 2.2, 0]} />
-      <CuboidCollider args={[5, 2.4, 0.1]} position={[0, 2.2, -5.1]} />
-      <CuboidCollider args={[frontWall.left.width * 0.5, frontWall.left.height * 0.5, 0.1]} position={[frontWall.left.x, frontWall.left.y, FRONT_WALL.zCollider]} />
-      <CuboidCollider args={[frontWall.right.width * 0.5, frontWall.right.height * 0.5, 0.1]} position={[frontWall.right.x, frontWall.right.y, FRONT_WALL.zCollider]} />
-      <CuboidCollider args={[frontWall.top.width * 0.5, frontWall.top.height * 0.5, 0.1]} position={[frontWall.top.x, frontWall.top.y, FRONT_WALL.zCollider]} />
+      {wallSegments.map((segment) => (
+        <CuboidCollider key={segment.id} args={segment.args} position={segment.position} />
+      ))}
     </RigidBody>
   )
 }
@@ -2470,19 +2500,19 @@ function CustomizationStation() {
 }
 
 function OutdoorDoor() {
+  const doorWidth = outsideDoorOpening.width
+  const doorHeight = outsideDoorOpening.height
+  const doorY = (outsideDoorOpening.bottomY ?? 0) + doorHeight * 0.5
+
   return (
     <group position={[OUTDOOR_DOOR_POSITION.x, 0, OUTDOOR_DOOR_POSITION.z]} rotation={[0, Math.PI / 2, 0]}>
-      <mesh position={[0, 1.1, 0.02]}>
-        <planeGeometry args={[1.08, 2.2]} />
-        <meshStandardMaterial color="#8b5a3d" roughness={0.66} />
+      <mesh position={[0, doorY, 0.02]}>
+        <planeGeometry args={[doorWidth, doorHeight]} />
+        <meshStandardMaterial color="#8b5a3d" roughness={0.66} side={DoubleSide} />
       </mesh>
-      <mesh position={[0.35, 1.1, 0.11]}>
+      <mesh position={[doorWidth * 0.34, doorY, 0.06]}>
         <sphereGeometry args={[0.055, 12, 8]} />
         <meshStandardMaterial color="#f1c45b" metalness={0.25} roughness={0.35} />
-      </mesh>
-      <mesh position={[0, 2.25, 0.03]}>
-        <boxGeometry args={[1.28, 0.16, 0.16]} />
-        <meshStandardMaterial color="#4a5660" roughness={0.58} />
       </mesh>
     </group>
   )

@@ -88,19 +88,13 @@ function HouseExteriorDetails() {
   const secondBounds = getRoomBounds(secondRoom)
   const doorX = mainBounds.minX - EXTERIOR_SURFACE_OFFSET - 0.01
   const doorZ = outsideDoorOpening.centerZ
+  const doorHeight = outsideDoorOpening.height
 
   return (
     <group>
-      <ExteriorSurface
-        position={[doorX, 1.05, doorZ]}
-        rotation={[0, -Math.PI / 2, 0]}
-        width={1.18}
-        height={2.1}
-        color="#7d543d"
-      />
-      <mesh position={[doorX - 0.08, 1.16, doorZ + 0.35]}>
-        <sphereGeometry args={[0.055, 12, 8]} />
-        <meshStandardMaterial color="#f6d46b" emissive="#d99f35" emissiveIntensity={0.25} />
+      <mesh position={[doorX - 0.02, (outsideDoorOpening.bottomY ?? 0) + doorHeight + 0.08, doorZ]}>
+        <boxGeometry args={[0.16, 0.16, outsideDoorOpening.width + 0.18]} />
+        <meshStandardMaterial color="#4a5660" roughness={0.58} />
       </mesh>
       {[
         { position: [-2.55, 1.9, mainBounds.minZ - EXTERIOR_SURFACE_OFFSET - 0.01], rotation: [0, Math.PI, 0] },
@@ -120,7 +114,7 @@ function HouseExteriorDetails() {
 function HouseExteriorShell({ visible = true }) {
   return (
     <group visible={visible}>
-      {houseLayout.rooms.map((room) => (
+      {houseLayout.rooms.filter((room) => room.id !== mainRoom.id).map((room) => (
         <RoomExterior key={room.id} room={room} />
       ))}
       <HouseExteriorDetails />

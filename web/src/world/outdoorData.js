@@ -1,15 +1,74 @@
 import { getHouseFootprintColliders } from './house/houseLayout'
+import { roadLayout } from './roads/roadLayout'
+import { getRoadLotTransform } from './roads/roadGeometry'
 
 export const PLAYER_PLOT_SIZE = 32
 export const OUTDOOR_WORLD_SIZE = 80
 export const OUTDOOR_HALF_SIZE = OUTDOOR_WORLD_SIZE / 2
+export const MAIN_ROAD_Z = 22
+export const ROAD_WIDTH = roadLayout.mainRoad.width
+const SIDEWALK_WIDTH = 1.1
+const FRONT_GARDEN_DEPTH = 5.8
+const LOT_SETBACK = ROAD_WIDTH * 0.5 + SIDEWALK_WIDTH + FRONT_GARDEN_DEPTH
 
-export const NEIGHBOR_HOUSES = [
-  { position: [-24, 0, 22], color: '#ff8a80', roof: '#7b3f35', rotationY: 0.18 },
-  { position: [24, 0, 24], color: '#80d8ff', roof: '#37474f', rotationY: -0.14 },
-  { position: [-31, 0, 34], color: '#ffd180', roof: '#5d4037', rotationY: 0.28 },
-  { position: [31, 0, 35], color: '#ccff90', roof: '#5d4037', rotationY: -0.24 },
+const neighborHouseSlots = [
+  {
+    id: 'neighbor_coral',
+    t: 0.08,
+    side: -1,
+    color: '#ff8a80',
+    trim: '#7b3f35',
+    size: [5.8, 3.2, 4.8],
+    lotSize: [12, 11],
+    doorWall: 'north',
+  },
+  {
+    id: 'neighbor_blue',
+    t: 0.28,
+    side: 1,
+    color: '#80d8ff',
+    trim: '#37474f',
+    size: [6.2, 3.4, 5.1],
+    lotSize: [12.5, 11],
+    doorWall: 'south',
+  },
+  {
+    id: 'neighbor_amber',
+    t: 0.66,
+    side: 1,
+    color: '#ffd180',
+    trim: '#5d4037',
+    size: [5.2, 3, 4.4],
+    lotSize: [12, 10.5],
+    doorWall: 'south',
+  },
+  {
+    id: 'neighbor_green',
+    t: 0.86,
+    side: 1,
+    color: '#ccff90',
+    trim: '#5d4037',
+    size: [6.4, 3.2, 4.8],
+    lotSize: [12.5, 11],
+    doorWall: 'south',
+  },
 ]
+
+export const NEIGHBOR_HOUSES = neighborHouseSlots.map((slot) => {
+  const transform = getRoadLotTransform({
+    road: roadLayout.mainRoad,
+    t: slot.t,
+    side: slot.side,
+    setback: LOT_SETBACK,
+  })
+
+  return {
+    ...slot,
+    position: transform.position,
+    rotationY: transform.rotationY,
+    roadPosition: transform.roadPosition,
+  }
+})
 
 export const FOREST_TREES = [
   [-37, -34, 1.1], [-31, -38, 0.85], [-22, -36, 1], [-12, -39, 0.9], [0, -37, 1.05],
@@ -25,8 +84,8 @@ export const OUTDOOR_PLAYER_COLLIDERS = [
   ...NEIGHBOR_HOUSES.map((house) => ({
     x: house.position[0],
     z: house.position[2],
-    hx: 3.7,
-    hz: 3.2,
+    hx: house.size[0] * 0.5 + 0.45,
+    hz: house.size[2] * 0.5 + 0.45,
   })),
   ...FOREST_TREES
     .filter(([x, z]) => Math.abs(x) > 34 || Math.abs(z) > 34)

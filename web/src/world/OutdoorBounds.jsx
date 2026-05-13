@@ -20,7 +20,11 @@ function OutdoorBounds({ includeHouseFootprint = true }) {
         )
       })}
       {NEIGHBOR_HOUSES.map((house) => (
-        <CuboidCollider key={`${house.position[0]}-${house.position[2]}`} args={[2.85, 1.5, 2.35]} position={[house.position[0], 1.5, house.position[2]]} />
+        <CuboidCollider
+          key={`${house.position[0]}-${house.position[2]}`}
+          args={[house.size[0] * 0.5, house.size[1] * 0.5, house.size[2] * 0.5]}
+          position={[house.position[0], house.size[1] * 0.5, house.position[2]]}
+        />
       ))}
       {FOREST_TREES.filter(([x, z]) => Math.abs(x) > 34 || Math.abs(z) > 34).map(([x, z, scale]) => (
         <CuboidCollider key={`tree-${x}-${z}`} args={[0.24 * scale, 0.8 * scale, 0.24 * scale]} position={[x, 0.8 * scale, z]} />

@@ -1,18 +1,40 @@
+import { useEffect, useMemo } from 'react'
+import { DoubleSide } from 'three'
+import { roadLayout } from './roads/roadLayout'
+import { createRoadGeometry } from './roads/roadGeometry'
+import OutdoorSurfaceMaterial from './OutdoorSurfaceMaterial'
+
+function RoadMesh({ road, color = '#58616a', yOffset = 0.02, segments = 80 }) {
+  const geometry = useMemo(
+    () => createRoadGeometry(road.points, road.width, segments, yOffset),
+    [road.points, road.width, segments, yOffset],
+  )
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  return (
+    <mesh geometry={geometry} receiveShadow>
+      <OutdoorSurfaceMaterial
+        colorMap="/textures/outdoor/asphalt-clean-basecolor-512.jpg"
+        repeat={[1, 1]}
+        color={color}
+        roughness={0.78}
+        side={DoubleSide}
+      />
+    </mesh>
+  )
+}
+
+function RoadCenterLine({ road }) {
+  const lineRoad = useMemo(() => ({ ...road, width: 0.16 }), [road])
+  return <RoadMesh road={lineRoad} color="#f1e7b7" yOffset={0.028} segments={80} />
+}
+
 function Road() {
   return (
     <group>
-      <mesh position={[0, -0.018, 23]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[78, 6]} />
-        <meshStandardMaterial color="#58616a" roughness={0.74} />
-      </mesh>
-      <mesh position={[0, -0.01, 23]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[74, 0.18]} />
-        <meshStandardMaterial color="#f1e7b7" roughness={0.7} />
-      </mesh>
-      <mesh position={[35, -0.017, 28]} rotation={[-Math.PI / 2, 0, -0.56]}>
-        <planeGeometry args={[24, 5.8]} />
-        <meshStandardMaterial color="#58616a" roughness={0.74} />
-      </mesh>
+      <RoadMesh road={roadLayout.mainRoad} segments={96} />
+      <RoadCenterLine road={roadLayout.mainRoad} />
     </group>
   )
 }
