@@ -570,6 +570,11 @@ canvas {
   background: rgba(32, 42, 50, 0.9);
 }
 
+.outdoor-open-btn {
+  bottom: 154px;
+  background: rgba(29, 58, 47, 0.92);
+}
+
 .seat-open-btn {
   bottom: 154px;
   background: rgba(24, 36, 45, 0.92);
@@ -589,6 +594,20 @@ canvas {
   justify-content: space-between;
   gap: 14px;
   pointer-events: none;
+}
+
+.zone-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: #071016;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.zone-fade.active {
+  opacity: 1;
 }
 
 .customize-rotation {

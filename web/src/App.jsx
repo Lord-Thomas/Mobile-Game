@@ -8,6 +8,12 @@ import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, sh
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, getCurrentUser, loadPlayerProgress, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
+import OutdoorNeighborhood from './world/OutdoorNeighborhood'
+import OutdoorBounds from './world/OutdoorBounds'
+import { OUTDOOR_PLAYER_COLLIDERS } from './world/outdoorData'
+import { getRoomBounds, mainRoom, mainToSecondOpening, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
+import { getWallOpeningLayout } from './world/house/wallUtils'
+import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
 const GOAL_Z = -3.42
@@ -54,6 +60,37 @@ const CAMERA_DISTANCE = 4.6
 const CAMERA_MIN_DISTANCE = 0.85
 const CAMERA_MAX_DISTANCE = 8.5
 const CAMERA_HEIGHT = 1.55
+const ZONES = {
+  interior: 'interior',
+  secondRoom: 'secondRoom',
+  outside: 'outside',
+}
+const MAIN_ROOM_BOUNDS = getRoomBounds(mainRoom)
+const OUTDOOR_DOOR_POSITION = {
+  x: MAIN_ROOM_BOUNDS.minX + 0.18,
+  y: 1.1,
+  z: outsideDoorOpening.centerZ,
+}
+const OUTDOOR_ENTRY_POSITION = {
+  x: MAIN_ROOM_BOUNDS.minX - 2.2,
+  y: 0.35,
+  z: outsideDoorOpening.centerZ,
+}
+const PLAYER_SPAWNS = {
+  interior: [0, PLAYER_HEIGHT, 2.2],
+  outside: [OUTDOOR_ENTRY_POSITION.x, PLAYER_HEIGHT, OUTDOOR_ENTRY_POSITION.z],
+}
+const DOOR_INTERACTION_DISTANCE = 1.25
+const PLAY_AREA_LIMITS = {
+  interior: { minX: -ROOM_LIMIT, maxX: ROOM_LIMIT, minZ: -ROOM_LIMIT, maxZ: ROOM_LIMIT },
+  secondRoom: { minX: -ROOM_LIMIT, maxX: ROOM_LIMIT, minZ: -ROOM_LIMIT, maxZ: ROOM_LIMIT },
+  outside: { minX: -38, maxX: 38, minZ: -38, maxZ: 38 },
+}
+const CAMERA_SETTINGS = {
+  interior: { distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, minY: 0.35, maxY: 4.7 },
+  secondRoom: { distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, minY: 0.35, maxY: 4.7 },
+  outside: { distance: 6.5, height: 2.2, minY: 0.55, maxY: 14 },
+}
 const EDGE_TRIGGER_PX = 14
 const CAMERA_DRAG_SENSITIVITY = 0.007
 const CAMERA_WHEEL_ZOOM_SENSITIVITY = 0.0025
@@ -69,9 +106,14 @@ const CUSTOM_GRID_SIZE = 0.25
 const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const TV_INTERACTION_DISTANCE = 1.35
 const TV_MENU_EVENT = 'lab-tv-open-menu'
-const MAIN_ROOM = { width: 10, depth: 10, height: 5 }
+const MAIN_ROOM = { width: mainRoom.size[0], depth: mainRoom.size[2], height: mainRoom.size[1] }
 const FRONT_WALL = { zVisual: 5.05, zCollider: 5.1, thickness: 0.1 }
-const DRAGON_OPENING = { centerX: 0, width: 6, bottomY: 0, height: 3.8 }
+const DRAGON_OPENING = {
+  centerX: mainToSecondOpening.centerX,
+  width: mainToSecondOpening.width,
+  bottomY: mainToSecondOpening.bottomY,
+  height: mainToSecondOpening.height,
+}
 const WALL_REPEAT_X_PER_UNIT = 3.4 / 12
 const WALL_REPEAT_Y_PER_UNIT = 1.9 / 5
 const DEFAULT_CEILING_TEXTURE = '/textures/environment/walls/mur-paint.png'
@@ -411,11 +453,13 @@ function getKeyboardKey(event) {
   return event.code.toLowerCase()
 }
 
-function clampCameraInPlayableVolume(x, y, z) {
-  const clampedX = MathUtils.clamp(x, -4.9, 4.9)
-  const clampedY = MathUtils.clamp(y, 0.35, 4.7)
-  // Keep camera in main lab volume only (outside the containment room).
-  const clampedZ = MathUtils.clamp(z, -4.9, 4.94)
+function clampCameraInPlayableVolume(x, y, z, currentZone = ZONES.interior) {
+  const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
+  const settings = CAMERA_SETTINGS[currentZone] ?? CAMERA_SETTINGS.interior
+  const zMax = currentZone === ZONES.interior || currentZone === ZONES.secondRoom ? 4.94 : limits.maxZ
+  const clampedX = MathUtils.clamp(x, limits.minX, limits.maxX)
+  const clampedY = MathUtils.clamp(y, settings.minY, settings.maxY)
+  const clampedZ = MathUtils.clamp(z, limits.minZ, zMax)
   return { x: clampedX, y: clampedY, z: clampedZ }
 }
 
@@ -471,35 +515,6 @@ function getKickContact({ playerX, playerZ, yaw, ballX, ballZ }) {
       forwardDistance < PLAYER_KICK_RANGE &&
       Math.abs(lateralDistance) < PLAYER_KICK_LATERAL_RANGE,
     isTouchingFoot: distanceToFoot < PLAYER_KICK_FOOT_CONTACT_RADIUS + BALL_RADIUS,
-  }
-}
-
-function getWallOpeningLayout(wallWidth, wallHeight, opening) {
-  const halfWallWidth = wallWidth * 0.5
-  const halfOpeningWidth = opening.width * 0.5
-  const leftWidth = Math.max(0, halfWallWidth - halfOpeningWidth)
-  const rightWidth = leftWidth
-  const topHeight = Math.max(0, wallHeight - (opening.bottomY + opening.height))
-
-  return {
-    left: {
-      width: leftWidth,
-      x: opening.centerX - halfOpeningWidth - leftWidth * 0.5,
-      y: wallHeight * 0.5,
-      height: wallHeight,
-    },
-    right: {
-      width: rightWidth,
-      x: opening.centerX + halfOpeningWidth + rightWidth * 0.5,
-      y: wallHeight * 0.5,
-      height: wallHeight,
-    },
-    top: {
-      width: opening.width,
-      x: opening.centerX,
-      y: opening.bottomY + opening.height + topHeight * 0.5,
-      height: topHeight,
-    },
   }
 }
 
@@ -574,7 +589,7 @@ function useKeyboardInput() {
   return keysRef
 }
 
-function WhiteRoom({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling }) {
+function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling }) {
   const floorColorMap = useTexture(floorTexturePath)
   const wallColorMap = useTexture(wallTexturePath)
   const ceilingColorMap = useTexture(ceilingTexturePath)
@@ -602,36 +617,57 @@ function WhiteRoom({ floorTexturePath, wallTexturePath, ceilingTexturePath, hide
   }, [ceilingColorMap])
   useEffect(() => () => ceilingTexture.dispose(), [ceilingTexture])
   const frontWall = getWallOpeningLayout(MAIN_ROOM.width, MAIN_ROOM.height, DRAGON_OPENING)
+  const outsideDoorHalfWidth = outsideDoorOpening.width * 0.5
+  const leftWallMinZ = -MAIN_ROOM.depth * 0.5
+  const leftWallMaxZ = MAIN_ROOM.depth * 0.5
+  const outsideDoorMinZ = outsideDoorOpening.centerZ - outsideDoorHalfWidth
+  const outsideDoorMaxZ = outsideDoorOpening.centerZ + outsideDoorHalfWidth
+  const leftWallBackDepth = Math.max(0, outsideDoorMinZ - leftWallMinZ)
+  const leftWallFrontDepth = Math.max(0, leftWallMaxZ - outsideDoorMaxZ)
+  const outsideDoorTopHeight = Math.max(0, MAIN_ROOM.height - (outsideDoorOpening.bottomY + outsideDoorOpening.height))
 
   return (
     <>
-      <color attach="background" args={['#eef3f8']} />
-      {!hideCeiling && <fog attach="fog" args={['#eef3f8', 10, 24]} />}
-
-      <ambientLight intensity={0.5} />
-      <hemisphereLight args={['#f7fbff', '#d8dee9', 0.7]} />
-      <directionalLight position={[4, 7, 5]} intensity={1.15} color="#ffffff" />
-
+      {leftWallBackDepth > 0 && (
+        <WallPanel
+          texture={wallColorMap}
+          uvWidth={leftWallBackDepth}
+          uvHeight={MAIN_ROOM.height}
+          position={[-5.05, MAIN_ROOM.height * 0.5, leftWallMinZ + leftWallBackDepth * 0.5]}
+          geometryArgs={[0.1, MAIN_ROOM.height, leftWallBackDepth]}
+        />
+      )}
+      {leftWallFrontDepth > 0 && (
+        <WallPanel
+          texture={wallColorMap}
+          uvWidth={leftWallFrontDepth}
+          uvHeight={MAIN_ROOM.height}
+          position={[-5.05, MAIN_ROOM.height * 0.5, outsideDoorMaxZ + leftWallFrontDepth * 0.5]}
+          geometryArgs={[0.1, MAIN_ROOM.height, leftWallFrontDepth]}
+        />
+      )}
+      {outsideDoorTopHeight > 0 && (
+        <WallPanel
+          texture={wallColorMap}
+          uvWidth={outsideDoorOpening.width}
+          uvHeight={outsideDoorTopHeight}
+          position={[-5.05, outsideDoorOpening.bottomY + outsideDoorOpening.height + outsideDoorTopHeight * 0.5, outsideDoorOpening.centerZ]}
+          geometryArgs={[0.1, outsideDoorTopHeight, outsideDoorOpening.width]}
+        />
+      )}
       <WallPanel
         texture={wallColorMap}
         uvWidth={MAIN_ROOM.depth}
-        uvHeight={5}
-        position={[-5.05, 2.5, 0]}
-        geometryArgs={[0.1, 5, MAIN_ROOM.depth]}
-      />
-      <WallPanel
-        texture={wallColorMap}
-        uvWidth={MAIN_ROOM.depth}
-        uvHeight={5}
-        position={[5.05, 2.5, 0]}
-        geometryArgs={[0.1, 5, MAIN_ROOM.depth]}
+        uvHeight={MAIN_ROOM.height}
+        position={[5.05, MAIN_ROOM.height * 0.5, 0]}
+        geometryArgs={[0.1, MAIN_ROOM.height, MAIN_ROOM.depth]}
       />
       <WallPanel
         texture={wallColorMap}
         uvWidth={MAIN_ROOM.width}
-        uvHeight={5}
-        position={[0, 2.5, -5.05]}
-        geometryArgs={[MAIN_ROOM.width, 5, 0.1]}
+        uvHeight={MAIN_ROOM.height}
+        position={[0, MAIN_ROOM.height * 0.5, -5.05]}
+        geometryArgs={[MAIN_ROOM.width, MAIN_ROOM.height, 0.1]}
       />
       <WallPanel
         texture={wallColorMap}
@@ -654,13 +690,13 @@ function WhiteRoom({ floorTexturePath, wallTexturePath, ceilingTexturePath, hide
         position={[frontWall.top.x, frontWall.top.y, FRONT_WALL.zVisual]}
         geometryArgs={[frontWall.top.width, frontWall.top.height, FRONT_WALL.thickness]}
       />
-      <mesh position={[0, 4.98, 0]} visible={!hideCeiling}>
+      <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
         <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
         <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-        <planeGeometry args={[10, 10]} />
+        <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
         <meshStandardMaterial
           map={floorColorMap}
           roughness={0.66}
@@ -675,6 +711,20 @@ function WhiteRoom({ floorTexturePath, wallTexturePath, ceilingTexturePath, hide
         visible={SHOW_FLOOR_GRID}
       />
 
+    </>
+  )
+}
+
+function InteriorLighting({ active, hideCeiling }) {
+  if (!active) return null
+
+  return (
+    <>
+      <color attach="background" args={['#eef3f8']} />
+      {!hideCeiling && <fog attach="fog" args={['#eef3f8', 10, 24]} />}
+      <ambientLight intensity={0.5} />
+      <hemisphereLight args={['#f7fbff', '#d8dee9', 0.7]} />
+      <directionalLight position={[4, 7, 5]} intensity={1.15} color="#ffffff" />
       <Environment preset="city" />
     </>
   )
@@ -682,11 +732,36 @@ function WhiteRoom({ floorTexturePath, wallTexturePath, ceilingTexturePath, hide
 
 function PhysicsBounds() {
   const frontWall = getWallOpeningLayout(MAIN_ROOM.width, MAIN_ROOM.height, DRAGON_OPENING)
+  const outsideDoorHalfWidth = outsideDoorOpening.width * 0.5
+  const leftWallMinZ = -MAIN_ROOM.depth * 0.5
+  const leftWallMaxZ = MAIN_ROOM.depth * 0.5
+  const outsideDoorMinZ = outsideDoorOpening.centerZ - outsideDoorHalfWidth
+  const outsideDoorMaxZ = outsideDoorOpening.centerZ + outsideDoorHalfWidth
+  const leftWallBackDepth = Math.max(0, outsideDoorMinZ - leftWallMinZ)
+  const leftWallFrontDepth = Math.max(0, leftWallMaxZ - outsideDoorMaxZ)
+  const outsideDoorTopHeight = Math.max(0, MAIN_ROOM.height - (outsideDoorOpening.bottomY + outsideDoorOpening.height))
 
   return (
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
-      <CuboidCollider args={[0.1, 2.4, 5]} position={[-5.1, 2.2, 0]} />
+      {leftWallBackDepth > 0 && (
+        <CuboidCollider
+          args={[0.1, MAIN_ROOM.height * 0.5, leftWallBackDepth * 0.5]}
+          position={[-5.1, MAIN_ROOM.height * 0.5, leftWallMinZ + leftWallBackDepth * 0.5]}
+        />
+      )}
+      {leftWallFrontDepth > 0 && (
+        <CuboidCollider
+          args={[0.1, MAIN_ROOM.height * 0.5, leftWallFrontDepth * 0.5]}
+          position={[-5.1, MAIN_ROOM.height * 0.5, outsideDoorMaxZ + leftWallFrontDepth * 0.5]}
+        />
+      )}
+      {outsideDoorTopHeight > 0 && (
+        <CuboidCollider
+          args={[0.1, outsideDoorTopHeight * 0.5, outsideDoorOpening.width * 0.5]}
+          position={[-5.1, outsideDoorOpening.bottomY + outsideDoorOpening.height + outsideDoorTopHeight * 0.5, outsideDoorOpening.centerZ]}
+        />
+      )}
       <CuboidCollider args={[0.1, 2.4, 5]} position={[5.1, 2.2, 0]} />
       <CuboidCollider args={[5, 2.4, 0.1]} position={[0, 2.2, -5.1]} />
       <CuboidCollider args={[frontWall.left.width * 0.5, frontWall.left.height * 0.5, 0.1]} position={[frontWall.left.x, frontWall.left.y, FRONT_WALL.zCollider]} />
@@ -697,28 +772,32 @@ function PhysicsBounds() {
 }
 
 function GlassContainmentRoom() {
+  const [roomWidth, roomHeight, roomDepth] = secondRoom.size
+  const halfWidth = roomWidth * 0.5
+  const halfDepth = roomDepth * 0.5
+
   return (
-    <group position={[0, 0, 7.03]}>
+    <group position={secondRoom.position}>
       <mesh position={[0, 0.012, 0]}>
-        <boxGeometry args={[6, 0.05, 4]} />
+        <boxGeometry args={[roomWidth, 0.05, roomDepth]} />
         <meshStandardMaterial color="#d4dbe3" />
       </mesh>
 
-      <mesh position={[0, 1.9, 1.98]}>
-        <boxGeometry args={[6, 3.8, 0.1]} />
-        <meshStandardMaterial color="#edf1f5" />
+      <mesh position={[0, roomHeight * 0.5, halfDepth - 0.02]}>
+        <boxGeometry args={[roomWidth, roomHeight, 0.1]} />
+        <meshStandardMaterial color="#edf1f5" side={BackSide} />
       </mesh>
-      <mesh position={[-3, 1.9, 0]}>
-        <boxGeometry args={[0.1, 3.8, 4]} />
-        <meshStandardMaterial color="#edf1f5" />
+      <mesh position={[-halfWidth, roomHeight * 0.5, 0]}>
+        <boxGeometry args={[0.1, roomHeight, roomDepth]} />
+        <meshStandardMaterial color="#edf1f5" side={BackSide} />
       </mesh>
-      <mesh position={[3, 1.9, 0]}>
-        <boxGeometry args={[0.1, 3.8, 4]} />
-        <meshStandardMaterial color="#edf1f5" />
+      <mesh position={[halfWidth, roomHeight * 0.5, 0]}>
+        <boxGeometry args={[0.1, roomHeight, roomDepth]} />
+        <meshStandardMaterial color="#edf1f5" side={BackSide} />
       </mesh>
 
-      <mesh position={[0, 1.9, -1.98]}>
-        <boxGeometry args={[6, 3.8, 0.06]} />
+      <mesh position={[0, roomHeight * 0.5, -halfDepth + 0.02]}>
+        <boxGeometry args={[roomWidth, roomHeight, 0.06]} />
         <meshPhysicalMaterial
           color="#bfefff"
           transparent
@@ -730,38 +809,45 @@ function GlassContainmentRoom() {
           ior={1.5}
           reflectivity={0.8}
           envMapIntensity={1.35}
+          side={BackSide}
         />
       </mesh>
 
-      <mesh position={[0, 3.83, -1.945]}>
-        <boxGeometry args={[6.12, 0.06, 0.06]} />
+      <mesh position={[0, roomHeight + 0.03, -halfDepth + 0.055]}>
+        <boxGeometry args={[roomWidth + 0.12, 0.06, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
-      <mesh position={[0, -0.03, -1.945]}>
-        <boxGeometry args={[6.12, 0.06, 0.06]} />
+      <mesh position={[0, -0.03, -halfDepth + 0.055]}>
+        <boxGeometry args={[roomWidth + 0.12, 0.06, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
-      <mesh position={[-3.03, 1.9, -1.945]}>
-        <boxGeometry args={[0.06, 3.92, 0.06]} />
+      <mesh position={[-halfWidth - 0.03, roomHeight * 0.5, -halfDepth + 0.055]}>
+        <boxGeometry args={[0.06, roomHeight + 0.12, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
-      <mesh position={[3.03, 1.9, -1.945]}>
-        <boxGeometry args={[0.06, 3.92, 0.06]} />
+      <mesh position={[halfWidth + 0.03, roomHeight * 0.5, -halfDepth + 0.055]}>
+        <boxGeometry args={[0.06, roomHeight + 0.12, 0.06]} />
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
 
-      <pointLight position={[0, 3.2, 0.05]} intensity={1.45} color="#bfefff" />
+      <pointLight position={[0, roomHeight - 0.6, 0.05]} intensity={1.45} color="#bfefff" />
     </group>
   )
 }
 
 function GlassContainmentColliders() {
+  const [roomWidth, roomHeight, roomDepth] = secondRoom.size
+  const halfWidth = roomWidth * 0.5
+  const halfDepth = roomDepth * 0.5
+  const halfHeight = roomHeight * 0.5
+  const [, , roomZ] = secondRoom.position
+
   return (
     <RigidBody type="fixed" colliders={false}>
-      <CuboidCollider args={[3, 1.9, 0.06]} position={[0, 1.9, 5.05]} />
-      <CuboidCollider args={[0.05, 1.9, 2]} position={[-3, 1.9, 7.03]} />
-      <CuboidCollider args={[0.05, 1.9, 2]} position={[3, 1.9, 7.03]} />
-      <CuboidCollider args={[3, 1.9, 0.05]} position={[0, 1.9, 9.01]} />
+      <CuboidCollider args={[halfWidth, halfHeight, 0.06]} position={[0, halfHeight, roomZ - halfDepth + 0.02]} />
+      <CuboidCollider args={[0.05, halfHeight, halfDepth]} position={[-halfWidth, halfHeight, roomZ]} />
+      <CuboidCollider args={[0.05, halfHeight, halfDepth]} position={[halfWidth, halfHeight, roomZ]} />
+      <CuboidCollider args={[halfWidth, halfHeight, 0.05]} position={[0, halfHeight, roomZ + halfDepth - 0.02]} />
     </RigidBody>
   )
 }
@@ -1270,7 +1356,17 @@ function GoalNet({ ballRef, goalObject }) {
   )
 }
 
-function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seatedState, onSeatedPhaseChange }) {
+function Player({
+  touchRef,
+  ballRef,
+  playerPositionRef,
+  mode,
+  currentZone,
+  spawnRequest,
+  goalObject,
+  seatedState,
+  onSeatedPhaseChange,
+}) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
   const playerPosRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
@@ -1290,10 +1386,53 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
   const onGroundRef = useRef(true)
   const wasOnGroundRef = useRef(true)
   const landingPreparedRef = useRef(false)
+  const [isPlayerVisible, setIsPlayerVisible] = useState(true)
   const [playerMotion, setPlayerMotion] = useState('idle')
   const keyboardRef = useKeyboardInput()
   const { camera } = useThree()
   const { world, rapier } = useRapier()
+
+  useEffect(() => {
+    if (!spawnRequest) return
+    const [x, y, z] = spawnRequest.position
+    playerPosRef.current.x = x
+    playerPosRef.current.y = y
+    playerPosRef.current.z = z
+    playerPositionRef.current.x = x
+    playerPositionRef.current.y = y
+    playerPositionRef.current.z = z
+    planarVelocityRef.current.x = 0
+    planarVelocityRef.current.z = 0
+    filteredInputRef.current.x = 0
+    filteredInputRef.current.y = 0
+    velocityYRef.current = 0
+    onGroundRef.current = true
+    wasOnGroundRef.current = true
+    playerBodyRef.current?.setNextKinematicTranslation({ x, y, z })
+    visualRef.current?.position.set(x, y, z)
+    cameraLookRef.current.x = x
+    cameraLookRef.current.y = y + 0.55
+    cameraLookRef.current.z = z
+  }, [spawnRequest, playerPositionRef])
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+      if (getKeyboardKey(event) !== '=' && event.code !== 'Equal') return
+
+      const target = event.target
+      const isTyping =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      if (isTyping) return
+
+      event.preventDefault()
+      setIsPlayerVisible((current) => !current)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useFrame((state, delta) => {
     if (!playerBodyRef.current || !visualRef.current) return
@@ -1411,7 +1550,7 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
         }
       }
 
-      const clampedCamera = clampCameraInPlayableVolume(targetCameraX, targetCameraY, targetCameraZ)
+      const clampedCamera = clampCameraInPlayableVolume(targetCameraX, targetCameraY, targetCameraZ, currentZone)
       camera.position.x = MathUtils.damp(camera.position.x, clampedCamera.x, 7, delta)
       camera.position.y = MathUtils.damp(camera.position.y, clampedCamera.y, 7, delta)
       camera.position.z = MathUtils.damp(camera.position.z, clampedCamera.z, 7, delta)
@@ -1539,8 +1678,9 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
       visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 12, delta)
     }
 
-    nextX = MathUtils.clamp(nextX, -ROOM_LIMIT, ROOM_LIMIT)
-    nextZ = MathUtils.clamp(nextZ, -ROOM_LIMIT, ROOM_LIMIT)
+    const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
+    nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
+    nextZ = MathUtils.clamp(nextZ, limits.minZ, limits.maxZ)
 
     const wantsEmote = touch.emoteQueued
     const wantsAction = !isEmoting && (key.actionQueued || touch.actionQueued)
@@ -1581,7 +1721,7 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
     } else if (wantsAction) {
-      const ball = ballRef.current
+      const ball = currentZone === ZONES.outside ? null : ballRef.current
       if (ball) {
         const ballPos = ball.translation()
         const kickContact = getKickContact({
@@ -1654,7 +1794,17 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
     }
     wasOnGroundRef.current = onGroundRef.current
 
-    if (collidesWithGoalFrame(nextX, nextY, nextZ, goalObject)) {
+    if (
+      currentZone !== ZONES.outside &&
+      collidesWithGoalFrame(nextX, nextY, nextZ, goalObject)
+    ) {
+      nextX = prevX
+      nextZ = prevZ
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+    }
+
+    if (currentZone === ZONES.outside && collidesWithOutdoorObstacle(nextX, nextZ)) {
       nextX = prevX
       nextZ = prevZ
       planarVelocityRef.current.x = 0
@@ -1724,10 +1874,11 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
     setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
 
     const pitch = touch.cameraPitch
-    const cameraDistance = touch.cameraDistance ?? CAMERA_DISTANCE
+    const cameraSettings = CAMERA_SETTINGS[currentZone] ?? CAMERA_SETTINGS.interior
+    const cameraDistance = touch.cameraDistance ?? cameraSettings.distance
     const horizontalDistance = cameraDistance * Math.cos(pitch)
     const desiredX = nextX + Math.sin(yaw) * horizontalDistance
-    const desiredY = nextY + CAMERA_HEIGHT + Math.sin(pitch) * cameraDistance
+    const desiredY = nextY + cameraSettings.height + Math.sin(pitch) * cameraDistance
     const desiredZ = nextZ + Math.cos(yaw) * horizontalDistance
 
     let targetX = desiredX
@@ -1753,7 +1904,7 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
       }
     }
 
-    const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ)
+    const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ, currentZone)
     camera.position.x = MathUtils.damp(camera.position.x, clampedTarget.x, 12, delta)
     camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, 12, delta)
     camera.position.z = MathUtils.damp(camera.position.z, clampedTarget.z, 12, delta)
@@ -1770,11 +1921,11 @@ function Player({ touchRef, ballRef, playerPositionRef, mode, goalObject, seated
         ref={playerBodyRef}
         type="kinematicPosition"
         colliders={false}
-        position={[0, PLAYER_HEIGHT, 2.2]}
+        position={PLAYER_SPAWNS.interior}
       >
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
-      <group ref={visualRef} position={[0, PLAYER_HEIGHT, 2.2]}>
+      <group ref={visualRef} position={PLAYER_SPAWNS.interior} visible={isPlayerVisible}>
         <PlayerAvatar motion={playerMotion} />
       </group>
     </>
@@ -2318,6 +2469,41 @@ function CustomizationStation() {
   )
 }
 
+function OutdoorDoor() {
+  return (
+    <group position={[OUTDOOR_DOOR_POSITION.x, 0, OUTDOOR_DOOR_POSITION.z]} rotation={[0, Math.PI / 2, 0]}>
+      <mesh position={[0, 1.1, 0.02]}>
+        <planeGeometry args={[1.08, 2.2]} />
+        <meshStandardMaterial color="#8b5a3d" roughness={0.66} />
+      </mesh>
+      <mesh position={[0.35, 1.1, 0.11]}>
+        <sphereGeometry args={[0.055, 12, 8]} />
+        <meshStandardMaterial color="#f1c45b" metalness={0.25} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, 2.25, 0.03]}>
+        <boxGeometry args={[1.28, 0.16, 0.16]} />
+        <meshStandardMaterial color="#4a5660" roughness={0.58} />
+      </mesh>
+    </group>
+  )
+}
+
+function OutdoorDoorTrigger({ playerPositionRef, currentZone, onNearChange }) {
+  const wasNearRef = useRef(false)
+
+  useFrame(() => {
+    const p = playerPositionRef.current
+    const target = currentZone === ZONES.outside ? OUTDOOR_ENTRY_POSITION : OUTDOOR_DOOR_POSITION
+    const near = Math.hypot(p.x - target.x, p.z - target.z) < DOOR_INTERACTION_DISTANCE
+    if (near !== wasNearRef.current) {
+      wasNearRef.current = near
+      onNearChange(near)
+    }
+  })
+
+  return null
+}
+
 function SkinStationTrigger({ playerPositionRef, onNearChange }) {
   const wasNearRef = useRef(false)
 
@@ -2690,35 +2876,135 @@ function PlaceableModel({ objectId, type, placedObjectId }) {
   return null
 }
 
-function getYouTubeEmbedUrl(rawUrl) {
+function getTwitchParentHost() {
+  if (typeof window === 'undefined') return 'localhost'
+  return window.location.hostname || 'localhost'
+}
+
+function collidesWithOutdoorObstacle(nextX, nextZ) {
+  return OUTDOOR_PLAYER_COLLIDERS.some((collider) =>
+    intersectsAabbSphere(
+      nextX,
+      PLAYER_HEIGHT,
+      nextZ,
+      PLAYER_CAPSULE_RADIUS,
+      collider.x,
+      PLAYER_HEIGHT,
+      collider.z,
+      collider.hx,
+      0.6,
+      collider.hz,
+    ),
+  )
+}
+
+function getTwitchParentHosts() {
+  const hosts = new Set([getTwitchParentHost(), 'localhost', '127.0.0.1'])
+
+  try {
+    const topHost = window.top?.location?.hostname
+    if (topHost) hosts.add(topHost)
+  } catch {}
+
+  return [...hosts].filter(Boolean)
+}
+
+function appendTwitchParents(embedUrl) {
+  getTwitchParentHosts().forEach((parent) => {
+    embedUrl.searchParams.append('parent', parent)
+  })
+}
+
+function getYouTubeEmbedUrl(url, host) {
+  let videoId = ''
+
+  if (host === 'youtu.be') {
+    videoId = url.pathname.split('/').filter(Boolean)[0] ?? ''
+  } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+    if (url.pathname.startsWith('/watch')) {
+      videoId = url.searchParams.get('v') ?? ''
+    } else if (url.pathname.startsWith('/embed/') || url.pathname.startsWith('/shorts/')) {
+      videoId = url.pathname.split('/').filter(Boolean)[1] ?? ''
+    }
+  }
+
+  if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return null
+
+  const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`)
+  embedUrl.searchParams.set('autoplay', '1')
+  embedUrl.searchParams.set('playsinline', '1')
+  embedUrl.searchParams.set('enablejsapi', '1')
+  if (typeof window !== 'undefined') {
+    embedUrl.searchParams.set('origin', window.location.origin)
+  }
+  return { url: embedUrl.toString(), platform: 'youtube' }
+}
+
+function getTwitchEmbedUrl(url, host) {
+  const pathParts = url.pathname.split('/').filter(Boolean)
+
+  if (host === 'clips.twitch.tv') {
+    const clipSlug = pathParts[0] ?? ''
+    if (!/^[a-zA-Z0-9_-]+$/.test(clipSlug)) return null
+    const embedUrl = new URL('https://clips.twitch.tv/embed')
+    embedUrl.searchParams.set('clip', clipSlug)
+    appendTwitchParents(embedUrl)
+    embedUrl.searchParams.set('autoplay', 'true')
+    return { url: embedUrl.toString(), platform: 'twitch' }
+  }
+
+  if (host !== 'twitch.tv' && host !== 'm.twitch.tv') return null
+
+  const clipIndex = pathParts.indexOf('clip')
+  if (clipIndex >= 0) {
+    const clipSlug = pathParts[clipIndex + 1] ?? ''
+    if (!/^[a-zA-Z0-9_-]+$/.test(clipSlug)) return null
+    const embedUrl = new URL('https://clips.twitch.tv/embed')
+    embedUrl.searchParams.set('clip', clipSlug)
+    appendTwitchParents(embedUrl)
+    embedUrl.searchParams.set('autoplay', 'true')
+    return { url: embedUrl.toString(), platform: 'twitch' }
+  }
+
+  if (pathParts[0] === 'videos') {
+    const videoId = pathParts[1] ?? ''
+    if (!/^\d+$/.test(videoId)) return null
+    const embedUrl = new URL('https://player.twitch.tv/')
+    embedUrl.searchParams.set('video', `v${videoId}`)
+    appendTwitchParents(embedUrl)
+    embedUrl.searchParams.set('autoplay', 'true')
+    return { url: embedUrl.toString(), platform: 'twitch' }
+  }
+
+  const channel = pathParts[0] ?? ''
+  if (!/^[a-zA-Z0-9_]{3,25}$/.test(channel)) return null
+  const embedUrl = new URL('https://player.twitch.tv/')
+  embedUrl.searchParams.set('channel', channel)
+  appendTwitchParents(embedUrl)
+  embedUrl.searchParams.set('autoplay', 'true')
+  return { url: embedUrl.toString(), platform: 'twitch' }
+}
+
+function getTikTokEmbedUrl(url, host) {
+  if (host !== 'tiktok.com' && host !== 'm.tiktok.com') return null
+  const videoId = url.pathname.split('/').filter(Boolean).find((part) => /^\d{10,}$/.test(part)) ?? ''
+  if (!videoId) return null
+  const embedUrl = new URL(`https://www.tiktok.com/player/v1/${videoId}`)
+  embedUrl.searchParams.set('autoplay', '1')
+  embedUrl.searchParams.set('controls', '1')
+  embedUrl.searchParams.set('volume_control', '1')
+  embedUrl.searchParams.set('muted', '0')
+  return { url: embedUrl.toString(), platform: 'tiktok' }
+}
+
+function getOnlineVideoEmbedUrl(rawUrl) {
   const value = rawUrl.trim()
   if (!value) return null
 
   try {
     const url = new URL(value.includes('://') ? value : `https://${value}`)
     const host = url.hostname.replace(/^www\./, '')
-    let videoId = ''
-
-    if (host === 'youtu.be') {
-      videoId = url.pathname.split('/').filter(Boolean)[0] ?? ''
-    } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
-      if (url.pathname.startsWith('/watch')) {
-        videoId = url.searchParams.get('v') ?? ''
-      } else if (url.pathname.startsWith('/embed/') || url.pathname.startsWith('/shorts/')) {
-        videoId = url.pathname.split('/').filter(Boolean)[1] ?? ''
-      }
-    }
-
-    if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return null
-
-    const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`)
-    embedUrl.searchParams.set('autoplay', '1')
-    embedUrl.searchParams.set('playsinline', '1')
-    embedUrl.searchParams.set('enablejsapi', '1')
-    if (typeof window !== 'undefined') {
-      embedUrl.searchParams.set('origin', window.location.origin)
-    }
-    return embedUrl.toString()
+    return getYouTubeEmbedUrl(url, host) ?? getTwitchEmbedUrl(url, host) ?? getTikTokEmbedUrl(url, host)
   } catch {
     return null
   }
@@ -2739,6 +3025,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   const [tvOnlinePanelOpen, setTvOnlinePanelOpen] = useState(false)
   const [tvOnlineUrl, setTvOnlineUrl] = useState('')
   const [tvOnlineEmbedUrl, setTvOnlineEmbedUrl] = useState('')
+  const [tvOnlinePlatform, setTvOnlinePlatform] = useState('')
   const [tvOnlineMessage, setTvOnlineMessage] = useState('')
   const [tvVolume, setTvVolume] = useState(1)
   const [tvPoweredOn, setTvPoweredOn] = useState(true)
@@ -2761,6 +3048,9 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   const soundUnlockPendingRef = useRef(false)
   const tvMenuElementRef = useRef(null)
   const tvMenuCallbacksRef = useRef({})
+  const tvOnlinePlatformRef = useRef('')
+  const tvVolumeRef = useRef(1)
+  const tvPausedRef = useRef(false)
   const { camera, gl } = useThree()
   const [tvViewportKey, setTvViewportKey] = useState('0x0')
   const isMobileMediaMode = useMemo(() => {
@@ -2769,6 +3059,18 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   }, [])
   const cssScreenWidth = 1280
   const cssScreenHeight = Math.max(1, Math.round(cssScreenWidth * ((screenInfo?.height ?? 0.5625) / (screenInfo?.width ?? 1))))
+
+  useEffect(() => {
+    tvOnlinePlatformRef.current = tvOnlinePlatform
+  }, [tvOnlinePlatform])
+
+  useEffect(() => {
+    tvVolumeRef.current = tvVolume
+  }, [tvVolume])
+
+  useEffect(() => {
+    tvPausedRef.current = tvPaused
+  }, [tvPaused])
 
   useEffect(() => {
     const updateViewportKey = () => {
@@ -2814,6 +3116,36 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
       return null
     }
   }
+
+  useEffect(() => {
+    const handleTikTokMessage = (event) => {
+      const data = typeof event.data === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(event.data)
+            } catch {
+              return null
+            }
+          })()
+        : event.data
+
+      if (!data?.['x-tiktok-player'] || tvOnlinePlatformRef.current !== 'tiktok') return
+
+      if (data.type === 'onPlayerReady' && tvVolumeRef.current > 0 && !tvPausedRef.current) {
+        window.setTimeout(() => {
+          unmuteTikTok()
+          postTikTokCommand('play')
+        }, 100)
+      }
+
+      if (data.type === 'onMute' && data.value === true && tvVolumeRef.current > 0 && !tvPausedRef.current) {
+        window.setTimeout(unmuteTikTok, 100)
+      }
+    }
+
+    window.addEventListener('message', handleTikTokMessage)
+    return () => window.removeEventListener('message', handleTikTokMessage)
+  }, [])
 
   const applyVideoVolume = (nextVolume) => {
     const video = videoRef.current
@@ -2869,6 +3201,58 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     const percent = Math.round(MathUtils.clamp(nextVolume, 0, 1) * 100)
     postYouTubeCommand('setVolume', [percent])
     postYouTubeCommand(percent <= 0 ? 'mute' : 'unMute')
+  }
+
+  const postTikTokCommand = (type, value) => {
+    const frameWindow = youtubeFrameRef.current?.contentWindow
+    if (!frameWindow) return
+    const message = {
+      type,
+      value: value ?? null,
+      'x-tiktok-player': true,
+    }
+    const serializedMessage = JSON.stringify(message)
+    frameWindow.postMessage(message, '*')
+    frameWindow.postMessage(message, 'https://www.tiktok.com')
+    frameWindow.postMessage(serializedMessage, '*')
+    frameWindow.postMessage(serializedMessage, 'https://www.tiktok.com')
+    window.setTimeout(() => {
+      const delayedWindow = youtubeFrameRef.current?.contentWindow
+      delayedWindow?.postMessage(message, '*')
+      delayedWindow?.postMessage(message, 'https://www.tiktok.com')
+      delayedWindow?.postMessage(serializedMessage, '*')
+      delayedWindow?.postMessage(serializedMessage, 'https://www.tiktok.com')
+    }, 250)
+  }
+
+  const unmuteTikTok = () => {
+    postTikTokCommand('unMute')
+    postTikTokCommand('unmute')
+  }
+
+  const restartTikTokPlayback = () => {
+    if (!tvOnlineEmbedUrl) return
+    try {
+      const nextUrl = new URL(tvOnlineEmbedUrl)
+      nextUrl.searchParams.set('autoplay', '1')
+      nextUrl.searchParams.set('muted', '0')
+      nextUrl.searchParams.set('playRequest', `${Date.now()}`)
+      setTvOnlineEmbedUrl(nextUrl.toString())
+    } catch {}
+  }
+
+  const applyOnlineVideoVolume = (nextVolume) => {
+    if (tvOnlinePlatform === 'youtube') {
+      applyYouTubeVolume(nextVolume)
+      return
+    }
+    if (tvOnlinePlatform === 'tiktok') {
+      if (nextVolume <= 0) {
+        postTikTokCommand('mute')
+      } else {
+        unmuteTikTok()
+      }
+    }
   }
 
   const drawFittedMedia = (fittedMedia) => {
@@ -3111,7 +3495,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
             type="url"
             name="youtubeUrl"
             value="${escapeHtmlAttribute(tvOnlineUrl)}"
-            placeholder="Lien YouTube"
+            placeholder="Lien video YouTube / TikTok / Twitch"
             autocomplete="off"
           />
           <button type="submit">Lire</button>
@@ -3162,7 +3546,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
         tvMenuElementRef.current = null
       }
     }
-  }, [texture, tvMenuOpen, tvOnlineEmbedUrl, tvOnlineMessage, tvOnlinePanelOpen, tvOnlineUrl, tvPaused, tvVolume, tvPoweredOn])
+  }, [texture, tvMenuOpen, tvOnlineEmbedUrl, tvOnlineMessage, tvOnlinePanelOpen, tvOnlinePlatform, tvOnlineUrl, tvPaused, tvVolume, tvPoweredOn])
 
   if (!screenInfo) return null
 
@@ -3297,7 +3681,8 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   const turnTvOff = (event) => {
     event?.stopPropagation?.()
     videoRef.current?.pause()
-    if (tvOnlineEmbedUrl) postYouTubeCommand('pauseVideo')
+    if (tvOnlinePlatform === 'youtube') postYouTubeCommand('pauseVideo')
+    if (tvOnlinePlatform === 'tiktok') postTikTokCommand('pause')
     setTvPoweredOn(false)
     setTvPaused(false)
     setTvMenuOpen(true)
@@ -3308,6 +3693,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     setTvMenuOpen(false)
     setTvOnlinePanelOpen(false)
     setTvOnlineEmbedUrl('')
+    setTvOnlinePlatform('')
     setTvOnlineMessage('')
     if (isMobileMediaMode) {
       openFilePicker(event)
@@ -3321,7 +3707,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     const nextVolume = MathUtils.clamp(tvVolume + delta, 0, 1)
     setTvVolume(nextVolume)
     if (tvOnlineEmbedUrl && tvPoweredOn) {
-      applyYouTubeVolume(nextVolume)
+      applyOnlineVideoVolume(nextVolume)
     } else {
       applyVideoVolume(nextVolume)
     }
@@ -3349,18 +3735,19 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
 
   const submitOnlineVideo = (url) => {
     const nextUrl = url.trim()
-    const embedUrl = getYouTubeEmbedUrl(nextUrl)
+    const embed = getOnlineVideoEmbedUrl(nextUrl)
     setTvOnlineUrl(nextUrl)
 
-    if (!embedUrl) {
-      setTvOnlineMessage('Lien YouTube invalide')
+    if (!embed) {
+      setTvOnlineMessage('Lien video invalide')
       setTvOnlinePanelOpen(true)
       setTvMenuOpen(true)
       return
     }
 
     clearTextureMedia()
-    setTvOnlineEmbedUrl(embedUrl)
+    setTvOnlineEmbedUrl(embed.url)
+    setTvOnlinePlatform(embed.platform)
     setTvOnlineMessage('')
     setTvOnlinePanelOpen(false)
     setTvPoweredOn(true)
@@ -3374,8 +3761,14 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     if (tvOnlineEmbedUrl) {
       setTvPoweredOn(true)
       setTvPaused(false)
-      postYouTubeCommand('playVideo')
-      applyYouTubeVolume(tvVolume)
+      if (tvOnlinePlatform === 'youtube') {
+        postYouTubeCommand('playVideo')
+        applyYouTubeVolume(tvVolume)
+      }
+    if (tvOnlinePlatform === 'tiktok') {
+      unmuteTikTok()
+      postTikTokCommand('play')
+    }
       setTvMenuOpen(true)
       return
     }
@@ -3403,8 +3796,16 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     const shouldPause = !tvPaused
 
     if (tvOnlineEmbedUrl) {
-      postYouTubeCommand(shouldPause ? 'pauseVideo' : 'playVideo')
-      if (!shouldPause) applyYouTubeVolume(tvVolume)
+      if (tvOnlinePlatform === 'youtube') {
+        postYouTubeCommand(shouldPause ? 'pauseVideo' : 'playVideo')
+        if (!shouldPause) applyYouTubeVolume(tvVolume)
+      }
+      if (tvOnlinePlatform === 'tiktok') {
+        postTikTokCommand(shouldPause ? 'pause' : 'play')
+        if (!shouldPause) {
+          unmuteTikTok()
+        }
+      }
       setTvPaused(shouldPause)
       setTvMenuOpen(true)
       return
@@ -3480,6 +3881,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     soundUnlockPendingRef.current = false
     setTvMenuOpen(false)
     setTvOnlineEmbedUrl('')
+    setTvOnlinePlatform('')
     setTvOnlinePanelOpen(false)
     setTvPaused(false)
     setTvPoweredOn(true)
@@ -3584,6 +3986,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     setCaptureState('requesting')
     try {
       setTvOnlineEmbedUrl('')
+      setTvOnlinePlatform('')
       setTvOnlinePanelOpen(false)
       setTvOnlineMessage('')
       setTvPaused(false)
@@ -3693,13 +4096,23 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
               ref={youtubeFrameRef}
               className="tv-youtube-frame"
               src={tvOnlineEmbedUrl}
-              title="YouTube video"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              title="Video en ligne"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               scrolling="no"
               onLoad={() => {
-                applyYouTubeVolume(tvVolume)
-                postYouTubeCommand(tvPaused ? 'pauseVideo' : 'playVideo')
+                if (tvOnlinePlatform === 'youtube') {
+                  applyYouTubeVolume(tvVolume)
+                  postYouTubeCommand(tvPaused ? 'pauseVideo' : 'playVideo')
+                }
+                if (tvOnlinePlatform === 'tiktok') {
+                  if (tvPaused) {
+                    postTikTokCommand('pause')
+                  } else {
+                    if (tvVolume > 0) unmuteTikTok()
+                    postTikTokCommand('play')
+                  }
+                }
               }}
             />
           </div>
@@ -4478,6 +4891,9 @@ function App() {
   const [isEnvironmentMenuOpen, setIsEnvironmentMenuOpen] = useState(false)
   const [isNearEnvironmentStation, setIsNearEnvironmentStation] = useState(false)
   const [mode, setMode] = useState('play')
+  const [currentZone, setCurrentZone] = useState(ZONES.interior)
+  const [zoneFadeActive, setZoneFadeActive] = useState(false)
+  const [spawnRequest, setSpawnRequest] = useState(null)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
   const [editableObjects, setEditableObjects] = useState(defaultEditableObjects)
   const [selectedObjectId, setSelectedObjectId] = useState(null)
@@ -4487,6 +4903,7 @@ function App() {
   const [placementPreview, setPlacementPreview] = useState(null)
   const [isObjectInventoryOpen, setIsObjectInventoryOpen] = useState(false)
   const [isNearCustomizationStation, setIsNearCustomizationStation] = useState(false)
+  const [isNearOutdoorDoor, setIsNearOutdoorDoor] = useState(false)
   const [nearbySeat, setNearbySeat] = useState(null)
   const [nearbyTv, setNearbyTv] = useState(null)
   const [seatedState, setSeatedState] = useState(null)
@@ -5018,6 +5435,41 @@ function App() {
     window.dispatchEvent(new CustomEvent(TV_MENU_EVENT, { detail: { objectId: nearbyTv.id } }))
   }
 
+  const transitionToZone = (nextZone) => {
+    if (zoneFadeActive || currentZone === nextZone) return
+    setZoneFadeActive(true)
+    setIsNearOutdoorDoor(false)
+    setIsNearSkinStation(false)
+    setIsNearEnvironmentStation(false)
+    setIsNearCustomizationStation(false)
+    setNearbySeat(null)
+    setNearbyTv(null)
+    setSeatedState(null)
+    setMode('play')
+    setIsSkinMenuOpen(false)
+    setIsEnvironmentMenuOpen(false)
+    setSelectedObjectId(null)
+    setDraggingObjectId(null)
+    setPlacingObjectId(null)
+    setPlacementLocked(false)
+    setPlacementPreview(null)
+    window.setTimeout(() => {
+      const spawn = PLAYER_SPAWNS[nextZone] ?? PLAYER_SPAWNS.interior
+      setCurrentZone(nextZone)
+      setSpawnRequest({ zone: nextZone, position: spawn, token: Date.now() })
+      touchRef.current.moveX = 0
+      touchRef.current.moveY = 0
+      touchRef.current.lookX = 0
+      touchRef.current.lookY = 0
+      touchRef.current.cameraDistance = CAMERA_SETTINGS[nextZone]?.distance ?? CAMERA_DISTANCE
+      window.setTimeout(() => setZoneFadeActive(false), 180)
+    }, 180)
+  }
+
+  const requestOutdoorTransition = () => {
+    transitionToZone(currentZone === ZONES.outside ? ZONES.interior : ZONES.outside)
+  }
+
   const updateSeatedPhase = (phase) => {
     setSeatedState((current) => {
       if (!current) return null
@@ -5030,6 +5482,11 @@ function App() {
     const onKeyDown = (event) => {
       if (getKeyboardKey(event) !== 'e') return
       if (mode !== 'play') return
+      if (isNearOutdoorDoor) {
+        event.preventDefault()
+        requestOutdoorTransition()
+        return
+      }
       if (seatedState?.phase === 'sitting') {
         event.preventDefault()
         requestStandUp()
@@ -5043,7 +5500,7 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [mode, nearbySeat, seatedState])
+  }, [mode, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive])
 
   const openCustomizationMode = () => {
     setIsSkinMenuOpen(false)
@@ -5198,80 +5655,103 @@ function App() {
     <main className="app">
       <Canvas
         dpr={[1, 1.5]}
-        camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 40 }}
+        camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 130 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
         resize={{ debounce: 0 }}
       >
-        <WhiteRoom
-          floorTexturePath={activeFloorSkin.texture}
-          wallTexturePath={activeWallSkin.texture}
-          ceilingTexturePath={activeCeilingTexturePath}
-          hideCeiling={mode === 'customize'}
-        />
-        <Dragon playerPositionRef={playerPositionRef} />
-        <GlassContainmentRoom />
-        <SkinStation />
-        <EnvironmentStation />
-        <CustomizationStation />
-        <CustomizationLayer
-          mode={mode}
-          objects={editableObjects}
-          selectedObjectId={selectedObjectId}
-          draggingObjectId={draggingObjectId}
-          placingObjectId={placingObjectId}
-          placementLocked={placementLocked}
-          placementPreview={placementPreview}
-          onSelect={setSelectedObjectId}
-          onStartDragging={setDraggingObjectId}
-          onStopDragging={() => setDraggingObjectId(null)}
-          onUpdatePosition={updateEditableObjectPosition}
-          onUpdatePlacementPreview={updatePlacementPreview}
-          onLockPlacement={() => setPlacementLocked(true)}
-        />
-        <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
+        <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} />
+        <PlayerHouse exteriorVisible>
+          <group>
+            <HouseInterior
+              floorTexturePath={activeFloorSkin.texture}
+              wallTexturePath={activeWallSkin.texture}
+              ceilingTexturePath={activeCeilingTexturePath}
+              hideCeiling={mode === 'customize'}
+            />
+            <Dragon playerPositionRef={playerPositionRef} />
+            <GlassContainmentRoom />
+            <OutdoorDoor />
+            <SkinStation />
+            <EnvironmentStation />
+            <CustomizationStation />
+            <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
+          </group>
+          <CustomizationLayer
+            mode={currentZone === ZONES.outside ? 'play' : mode}
+            objects={editableObjects}
+            selectedObjectId={selectedObjectId}
+            draggingObjectId={draggingObjectId}
+            placingObjectId={placingObjectId}
+            placementLocked={placementLocked}
+            placementPreview={placementPreview}
+            onSelect={setSelectedObjectId}
+            onStartDragging={setDraggingObjectId}
+            onStopDragging={() => setDraggingObjectId(null)}
+            onUpdatePosition={updateEditableObjectPosition}
+            onUpdatePlacementPreview={updatePlacementPreview}
+            onLockPlacement={() => setPlacementLocked(true)}
+          />
+        </PlayerHouse>
+        <OutdoorNeighborhood lightingActive={currentZone === ZONES.outside} />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
-          <Ball ballRef={ballRef} skinTexturePath={activeSkin.texture} />
-          <BallRespawnGuard ballRef={ballRef} onOutOfBounds={handleOutOfBoundsRespawn} />
-          <Goal
-            object={goalObject}
-            mode={mode}
-            selected={selectedObjectId === goalObject.id}
-            onSelect={setSelectedObjectId}
-            onStartDragging={setDraggingObjectId}
-            onBallZoneEnter={handleBallZoneEnter}
-            onBallZoneExit={handleBallZoneExit}
-            ballRef={ballRef}
-          />
+          <OutdoorBounds includeHouseFootprint={false} />
+          {currentZone !== ZONES.outside && (
+            <>
+            <Ball ballRef={ballRef} skinTexturePath={activeSkin.texture} />
+            <BallRespawnGuard ballRef={ballRef} onOutOfBounds={handleOutOfBoundsRespawn} />
+            <Goal
+              object={goalObject}
+              mode={mode}
+              selected={selectedObjectId === goalObject.id}
+              onSelect={setSelectedObjectId}
+              onStartDragging={setDraggingObjectId}
+              onBallZoneEnter={handleBallZoneEnter}
+              onBallZoneExit={handleBallZoneExit}
+              ballRef={ballRef}
+            />
+            </>
+          )}
           <Player
             touchRef={touchRef}
             ballRef={ballRef}
             playerPositionRef={playerPositionRef}
             mode={mode}
+            currentZone={currentZone}
+            spawnRequest={spawnRequest}
             goalObject={goalObject}
             seatedState={seatedState}
             onSeatedPhaseChange={updateSeatedPhase}
           />
-          <SkinStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearSkinStation} />
-          <EnvironmentStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearEnvironmentStation} />
-          <CustomizationStationTrigger
+          <OutdoorDoorTrigger
             playerPositionRef={playerPositionRef}
-            onNearChange={setIsNearCustomizationStation}
-            enabled={mode === 'play'}
+            currentZone={currentZone}
+            onNearChange={setIsNearOutdoorDoor}
           />
-          <SeatInteractionTrigger
-            playerPositionRef={playerPositionRef}
-            objects={placedEditableObjects}
-            seatedState={seatedState}
-            onNearbySeatChange={setNearbySeat}
-          />
-          <TvInteractionTrigger
-            playerPositionRef={playerPositionRef}
-            objects={placedEditableObjects}
-            enabled={mode === 'play'}
-            onNearbyTvChange={setNearbyTv}
-          />
+          {currentZone !== ZONES.outside && (
+            <>
+              <SkinStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearSkinStation} />
+              <EnvironmentStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearEnvironmentStation} />
+              <CustomizationStationTrigger
+                playerPositionRef={playerPositionRef}
+                onNearChange={setIsNearCustomizationStation}
+                enabled={mode === 'play'}
+              />
+              <SeatInteractionTrigger
+                playerPositionRef={playerPositionRef}
+                objects={placedEditableObjects}
+                seatedState={seatedState}
+                onNearbySeatChange={setNearbySeat}
+              />
+              <TvInteractionTrigger
+                playerPositionRef={playerPositionRef}
+                objects={placedEditableObjects}
+                enabled={mode === 'play'}
+                onNearbyTvChange={setNearbyTv}
+              />
+            </>
+          )}
           {showCaptureUi && <ScorePopups popups={scorePopups} />}
         </Physics>
       </Canvas>
@@ -5307,24 +5787,29 @@ function App() {
           onSignOut={requestSignOut}
         />
       )}
-      {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
+      {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+        <button className="skin-open-btn outdoor-open-btn" type="button" onClick={requestOutdoorTransition}>
+          {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
+        </button>
+      )}
+      {showCaptureUi && currentZone !== ZONES.outside && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
           Personnaliser le ballon
         </button>
       )}
-      {showCaptureUi && isNearEnvironmentStation && !isEnvironmentMenuOpen && mode === 'play' && (
+      {showCaptureUi && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && mode === 'play' && (
         <button className="skin-open-btn skin-open-btn-right" type="button" onClick={openEnvironmentMenu}>
           Boutique
         </button>
       )}
-      {showCaptureUi && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && currentZone !== ZONES.outside && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationMode}>
           Personnaliser la piece
         </button>
       )}
       {showCaptureUi && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <button className="skin-open-btn tv-open-btn" type="button" onClick={requestTvMenu}>
-          Changer la TV
+          TV
         </button>
       )}
       {showCaptureUi && nearbySeat && mode === 'play' && !seatedState?.phase && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
@@ -5337,7 +5822,7 @@ function App() {
           Se relever
         </button>
       )}
-      {showCaptureUi && mode === 'customize' && (
+      {showCaptureUi && currentZone !== ZONES.outside && mode === 'customize' && (
         <div className="customize-ui">
           <div className="customize-rotation">
             <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={!selectedObjectId && !placingObjectId}>
@@ -5373,7 +5858,7 @@ function App() {
           )}
         </div>
       )}
-      {showCaptureUi && mode === 'customize' && (
+      {showCaptureUi && currentZone !== ZONES.outside && mode === 'customize' && (
         <ObjectInventorySheet
           open={isObjectInventoryOpen}
           cards={inventoryCards}
@@ -5419,6 +5904,7 @@ function App() {
         onSelect={selectPreviewEnvironmentSkin}
         onBuyFurniture={buyFurnitureObject}
       />
+      <div className={`zone-fade${zoneFadeActive ? ' active' : ''}`} />
     </main>
   )
 
