@@ -204,7 +204,7 @@ function NaturalTerrainMaterial() {
       normalScale={new Vector2(0.34, 0.34)}
       color="#ffffff"
       emissive="#3c7010"
-      emissiveIntensity={0.15}
+      emissiveIntensity={0.07}
       roughness={0.88}
       onBeforeCompile={handleBeforeCompile}
     />

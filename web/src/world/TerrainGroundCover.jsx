@@ -17,6 +17,10 @@ const GRASS_AREA_MAX = 36
 const GRASS_GRID_STEP = 0.13
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_ROWS_PER_IDLE_BATCH = 14
+const DISTANT_GRASS_AREA_MIN = -86
+const DISTANT_GRASS_AREA_MAX = 86
+const DISTANT_GRASS_GRID_STEP = 1.05
+const DISTANT_GRASS_ROWS_PER_IDLE_BATCH = 10
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
 const grassBottomColor = new Color('#638b0f')
 const grassMiddleColor = new Color('#6f970e')
@@ -109,6 +113,15 @@ function seededRandom(seed) {
   return MathUtils.euclideanModulo(Math.sin(seed * 12.9898) * 43758.5453, 1)
 }
 
+function clamp01(value) {
+  return Math.min(1, Math.max(0, value))
+}
+
+function smoothstep(edge0, edge1, value) {
+  const t = clamp01((value - edge0) / (edge1 - edge0))
+  return t * t * (3 - 2 * t)
+}
+
 function getTerrainSlope(x, z) {
   const step = 0.25
   const h = getTerrainHeight(x, z)
@@ -126,6 +139,15 @@ function makeRockInstance(x, z, seed) {
   }
 }
 
+function makeDistantGrassInstance(x, z, seed) {
+  return {
+    position: [x, getTerrainHeight(x, z) + 0.035, z],
+    rotation: [0, (seededRandom(seed + 18) - 0.5) * Math.PI * 2, 0],
+    scale: 0.16 + seededRandom(seed + 9) * 0.11,
+    colorShift: seededRandom(seed + 41),
+  }
+}
+
 function makeGrassInstance(x, z, seed) {
   const scaleRange = grassPlacementSettings.maxScale - grassPlacementSettings.minScale
   const slope = getTerrainSlope(x, z)
@@ -139,6 +161,21 @@ function makeGrassInstance(x, z, seed) {
   }
 }
 
+function getDistantGrassDensity(x, z, seed) {
+  const maxAxis = Math.max(Math.abs(x), Math.abs(z))
+  if (maxAxis < 34 || maxAxis > 88) return 0
+
+  const nearFade = smoothstep(34, 48, maxAxis)
+  const farFade = 1 - smoothstep(78, 90, maxAxis)
+  const clumpNoise = seededRandom(Math.floor(x * 0.19) * 131 + Math.floor(z * 0.19) * 197)
+  const openPatch = smoothstep(0.18, 0.82, clumpNoise)
+  const slope = getTerrainSlope(x, z)
+  const slopeFade = 1 - smoothstep(0.24, 0.58, slope)
+  const mountainFade = 1 - smoothstep(62, 90, maxAxis) * 0.35
+
+  return 0.14 * nearFade * farFade * openPatch * slopeFade * mountainFade * (0.72 + seededRandom(seed + 71) * 0.28)
+}
+
 function pushGrassRow(grass, xi) {
   for (let zi = GRASS_AREA_MIN; zi <= GRASS_AREA_MAX; zi += GRASS_GRID_STEP) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
@@ -149,6 +186,17 @@ function pushGrassRow(grass, xi) {
       Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9) * GRASS_DENSITY_MULTIPLIER,
     )
     if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
+  }
+}
+
+function pushDistantGrassRow(grass, xi) {
+  for (let zi = DISTANT_GRASS_AREA_MIN; zi <= DISTANT_GRASS_AREA_MAX; zi += DISTANT_GRASS_GRID_STEP) {
+    const seed = (xi + 119) * 89 + (zi + 97) * 149
+    const x = xi + (seededRandom(seed) - 0.5) * 1.35
+    const z = zi + (seededRandom(seed + 5) - 0.5) * 1.35
+    if (seededRandom(seed + 19) < getDistantGrassDensity(x, z, seed)) {
+      grass.push(makeDistantGrassInstance(x, z, seed))
+    }
   }
 }
 
@@ -247,6 +295,8 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
   useFrame((state) => {
     const shader = materialRef.current?.userData.shader
     if (!shader) return
+    // R3F shader uniforms are intentionally mutated once per frame.
+    // eslint-disable-next-line react-hooks/immutability
     shader.uniforms.uTime.value = state.clock.elapsedTime
     const playerPosition = playerPositionRef?.current
     if (playerPosition) {
@@ -270,14 +320,18 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
 }
 
 function GrassLayer({ items, playerPositionRef }) {
-  const texture = useTexture(GRASS_TEXTURE)
+  const baseTexture = useTexture(GRASS_TEXTURE)
   const geometry = useMemo(() => createGrassCardGeometry(), [])
   const ref = useRef()
 
-  useMemo(() => {
-    texture.colorSpace = SRGBColorSpace
-    texture.needsUpdate = true
-  }, [texture])
+  const texture = useMemo(() => {
+    const nextTexture = baseTexture.clone()
+    nextTexture.colorSpace = SRGBColorSpace
+    nextTexture.needsUpdate = true
+    return nextTexture
+  }, [baseTexture])
+
+  useEffect(() => () => texture.dispose(), [texture])
 
   useLayoutEffect(() => {
     items.forEach((grass, index) => {
@@ -300,6 +354,7 @@ function GrassLayer({ items, playerPositionRef }) {
 function TerrainGroundCover({ playerPositionRef }) {
   const rocks = useMemo(() => createRockCover(), [])
   const [grass, setGrass] = useState(null)
+  const [distantGrass, setDistantGrass] = useState(null)
   const ref = useRef()
 
   useEffect(() => {
@@ -352,6 +407,56 @@ function TerrainGroundCover({ playerPositionRef }) {
     }
   }, [grass])
 
+  useEffect(() => {
+    if (distantGrass) return undefined
+
+    let cancelled = false
+    const nextGrass = []
+    let xi = DISTANT_GRASS_AREA_MIN
+    let timeoutId = null
+    let idleId = null
+
+    const schedule = (callback) => {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        idleId = window.requestIdleCallback(callback, { timeout: 90 })
+        return
+      }
+      timeoutId = window.setTimeout(() => callback(), 0)
+    }
+
+    const runBatch = (deadline) => {
+      let rows = 0
+
+      while (
+        xi <= DISTANT_GRASS_AREA_MAX
+        && rows < DISTANT_GRASS_ROWS_PER_IDLE_BATCH
+        && (!deadline || deadline.timeRemaining() > 2)
+      ) {
+        pushDistantGrassRow(nextGrass, xi)
+        xi += DISTANT_GRASS_GRID_STEP
+        rows += 1
+      }
+
+      if (cancelled) return
+
+      if (xi <= DISTANT_GRASS_AREA_MAX) {
+        schedule(runBatch)
+      } else {
+        setDistantGrass(nextGrass)
+      }
+    }
+
+    schedule(runBatch)
+
+    return () => {
+      cancelled = true
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+      if (idleId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [distantGrass])
+
   useLayoutEffect(() => {
     rocks.forEach((rock, index) => {
       dummy.position.set(...rock.position)
@@ -365,6 +470,7 @@ function TerrainGroundCover({ playerPositionRef }) {
 
   return (
     <group>
+      {distantGrass && <GrassLayer items={distantGrass} playerPositionRef={playerPositionRef} />}
       {grass && <GrassLayer items={grass} playerPositionRef={playerPositionRef} />}
       <instancedMesh ref={ref} args={[undefined, undefined, rocks.length]} frustumCulled>
         <dodecahedronGeometry args={[0.48, 0]} />

@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
+import { ACESFilmicToneMapping, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFSoftShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -673,31 +673,6 @@ function HouseWalls({ wallTexture }) {
         ]),
       )}
       <HouseOpeningReveals walls={walls} />
-      <HouseCornerSeals />
-    </>
-  )
-}
-
-function HouseCornerSeals() {
-  const bounds = getRoomBounds(mainRoom)
-  const thickness = houseLayout.wallThickness
-  const halfThickness = thickness * 0.5
-  const height = mainRoom.size[1]
-  const corners = [
-    [bounds.minX - halfThickness, bounds.minZ - halfThickness],
-    [bounds.maxX + halfThickness, bounds.minZ - halfThickness],
-    [bounds.minX - halfThickness, bounds.maxZ + halfThickness],
-    [bounds.maxX + halfThickness, bounds.maxZ + halfThickness],
-  ]
-
-  return (
-    <>
-      {corners.map(([x, z]) => (
-        <mesh key={`${x}-${z}`} position={[x, height * 0.5, z]} castShadow receiveShadow>
-          <boxGeometry args={[thickness, height, thickness]} />
-          <meshStandardMaterial color="#f3f0e5" roughness={0.78} />
-        </mesh>
-      ))}
     </>
   )
 }
@@ -5738,12 +5713,18 @@ function App() {
     <main className="app">
       <Canvas
         dpr={renderSettings.dpr}
-        camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 130 }}
+        camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 240 }}
+        shadows={{ enabled: true, type: PCFSoftShadowMap }}
         gl={{
           antialias: renderSettings.antialias,
           powerPreference: 'high-performance',
           stencil: false,
           depth: true,
+        }}
+        onCreated={({ gl }) => {
+          gl.outputColorSpace = SRGBColorSpace
+          gl.toneMapping = ACESFilmicToneMapping
+          gl.toneMappingExposure = 1.04
         }}
         resize={{ debounce: 80 }}
       >

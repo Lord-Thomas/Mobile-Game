@@ -2,16 +2,19 @@ import { CuboidCollider, HeightfieldCollider, RigidBody } from '@react-three/rap
 import { useEffect, useMemo } from 'react'
 import { OUTDOOR_HALF_SIZE } from './outdoorData'
 import { houseLayout } from './house/houseLayout'
-import { createTerrainGeometry, getHeightfieldArgs } from './terrain/terrainGeometry'
+import { TERRAIN_COLLIDER_SEGMENTS, TERRAIN_COLLIDER_SIZE, createTerrainGeometry, getHeightfieldArgs } from './terrain/terrainGeometry'
 
 function OutdoorBounds({ includeHouseFootprint = true }) {
-  const terrain = useMemo(() => createTerrainGeometry(), [])
+  const terrain = useMemo(() => createTerrainGeometry({
+    size: TERRAIN_COLLIDER_SIZE,
+    segments: TERRAIN_COLLIDER_SEGMENTS,
+  }), [])
 
   useEffect(() => () => terrain.geometry.dispose(), [terrain.geometry])
 
   return (
     <RigidBody type="fixed" colliders={false}>
-      <HeightfieldCollider args={getHeightfieldArgs(terrain.heights)} />
+      <HeightfieldCollider args={getHeightfieldArgs(terrain)} />
       <CuboidCollider args={[0.45, 2.2, OUTDOOR_HALF_SIZE]} position={[-OUTDOOR_HALF_SIZE, 1.9, 0]} />
       <CuboidCollider args={[0.45, 2.2, OUTDOOR_HALF_SIZE]} position={[OUTDOOR_HALF_SIZE, 1.9, 0]} />
       <CuboidCollider args={[OUTDOOR_HALF_SIZE, 2.2, 0.45]} position={[0, 1.9, -OUTDOOR_HALF_SIZE]} />

@@ -4,9 +4,11 @@ import { OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
 
-export const TERRAIN_SEGMENTS = 96
-export const TERRAIN_SIZE = OUTDOOR_WORLD_SIZE
-export const TERRAIN_HALF_SIZE = TERRAIN_SIZE * 0.5
+export const TERRAIN_COLLIDER_SEGMENTS = 96
+export const TERRAIN_VISUAL_SEGMENTS = 176
+export const TERRAIN_COLLIDER_SIZE = OUTDOOR_WORLD_SIZE
+export const TERRAIN_VISUAL_SIZE = 188
+export const TERRAIN_HALF_SIZE = TERRAIN_VISUAL_SIZE * 0.5
 
 const terrainSettings = {
   height: {
@@ -14,6 +16,9 @@ const terrainSettings = {
     gardenMultiplier: 0.58,
     borderMultiplier: 1.45,
     borderLift: 0.9,
+    distantMultiplier: 2.1,
+    distantLift: 1.7,
+    mountainLift: 3.2,
   },
   noise: {
     macroScale: 0.012,
@@ -75,22 +80,35 @@ function naturalHeight(x, z) {
   const maxAxis = Math.max(Math.abs(x), Math.abs(z))
   const playableBlend = smoothstep(15, 30, maxAxis)
   const borderBlend = smoothstep(
-    TERRAIN_HALF_SIZE * terrainSettings.border.start,
-    TERRAIN_HALF_SIZE * terrainSettings.border.end,
+    OUTDOOR_WORLD_SIZE * 0.5 * terrainSettings.border.start,
+    OUTDOOR_WORLD_SIZE * 0.5 * terrainSettings.border.end,
     maxAxis,
   )
+  const distantBlend = smoothstep(42, 88, maxAxis)
+  const mountainMask = smoothstep(58, 92, maxAxis)
+  const ridgeNoise = Math.max(
+    0,
+    layeredWaveNoise(x - 17.8, z + 31.4, 0.024) * 0.72 +
+      layeredWaveNoise(x + 46.2, z - 9.1, 0.041) * 0.28,
+  )
   const reliefMultiplier = mix(
-    mix(terrainSettings.height.playableMultiplier, terrainSettings.height.gardenMultiplier, playableBlend),
-    terrainSettings.height.borderMultiplier,
-    borderBlend,
+    mix(
+      mix(terrainSettings.height.playableMultiplier, terrainSettings.height.gardenMultiplier, playableBlend),
+      terrainSettings.height.borderMultiplier,
+      borderBlend,
+    ),
+    terrainSettings.height.distantMultiplier,
+    distantBlend,
   )
   const noiseHeight =
     layeredWaveNoise(x, z, terrainSettings.noise.macroScale) * terrainSettings.noise.macroAmplitude +
     layeredWaveNoise(x + 19.3, z - 11.7, terrainSettings.noise.mediumScale) * terrainSettings.noise.mediumAmplitude +
     layeredWaveNoise(x - 7.5, z + 23.1, terrainSettings.noise.detailScale) * terrainSettings.noise.detailAmplitude
   const borderLift = borderBlend * borderBlend * terrainSettings.height.borderLift
+  const distantLift = distantBlend * distantBlend * terrainSettings.height.distantLift
+  const mountainLift = ridgeNoise * mountainMask * terrainSettings.height.mountainLift
 
-  return noiseHeight * reliefMultiplier + borderLift
+  return noiseHeight * reliefMultiplier + borderLift + distantLift + mountainLift
 }
 
 function distanceToPolylineSamples(x, z, samples) {
@@ -154,7 +172,7 @@ function getPlayerPathMask(x, z) {
   return Math.max(vertical, horizontal)
 }
 
-function getNeighborPathMask(x, z) {
+function getNeighborPathMask() {
   return 0
 }
 
@@ -202,38 +220,42 @@ export function getTerrainHeight(x, z) {
   return height
 }
 
-export function getHeightfieldArgs(heights) {
+export function getHeightfieldArgs(terrain) {
   return [
-    TERRAIN_SEGMENTS,
-    TERRAIN_SEGMENTS,
-    heights,
-    { x: TERRAIN_SIZE, y: 1, z: TERRAIN_SIZE },
+    terrain.segments,
+    terrain.segments,
+    terrain.heights,
+    { x: terrain.size, y: 1, z: terrain.size },
   ]
 }
 
-export function createTerrainGeometry() {
+export function createTerrainGeometry({
+  size = TERRAIN_VISUAL_SIZE,
+  segments = TERRAIN_VISUAL_SEGMENTS,
+} = {}) {
   const positions = []
   const uvs = []
   const indices = []
   const heights = []
-  const step = TERRAIN_SIZE / TERRAIN_SEGMENTS
+  const halfSize = size * 0.5
+  const step = size / segments
 
-  for (let zIndex = 0; zIndex <= TERRAIN_SEGMENTS; zIndex += 1) {
-    const z = -TERRAIN_HALF_SIZE + zIndex * step
-    for (let xIndex = 0; xIndex <= TERRAIN_SEGMENTS; xIndex += 1) {
-      const x = -TERRAIN_HALF_SIZE + xIndex * step
+  for (let zIndex = 0; zIndex <= segments; zIndex += 1) {
+    const z = -halfSize + zIndex * step
+    for (let xIndex = 0; xIndex <= segments; xIndex += 1) {
+      const x = -halfSize + xIndex * step
       const y = getTerrainHeight(x, z)
       positions.push(x, y, z)
-      uvs.push(xIndex / TERRAIN_SEGMENTS, zIndex / TERRAIN_SEGMENTS)
+      uvs.push(xIndex / segments, zIndex / segments)
       heights.push(y)
     }
   }
 
-  for (let zIndex = 0; zIndex < TERRAIN_SEGMENTS; zIndex += 1) {
-    for (let xIndex = 0; xIndex < TERRAIN_SEGMENTS; xIndex += 1) {
-      const a = zIndex * (TERRAIN_SEGMENTS + 1) + xIndex
+  for (let zIndex = 0; zIndex < segments; zIndex += 1) {
+    for (let xIndex = 0; xIndex < segments; xIndex += 1) {
+      const a = zIndex * (segments + 1) + xIndex
       const b = a + 1
-      const c = a + TERRAIN_SEGMENTS + 1
+      const c = a + segments + 1
       const d = c + 1
       indices.push(a, c, b)
       indices.push(b, c, d)
@@ -249,6 +271,8 @@ export function createTerrainGeometry() {
   return {
     geometry,
     heights,
+    segments,
+    size,
     vertices: new Float32Array(positions),
     indices: new Uint32Array(indices),
   }
