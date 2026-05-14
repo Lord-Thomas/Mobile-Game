@@ -13,7 +13,9 @@ function OutdoorGround() {
         <OutdoorSurfaceMaterial
           colorMap="/textures/outdoor/grass-patchy-basecolor-512.jpg"
           repeat={[7, 7]}
-          color="#9fbf7b"
+          color="#f0f8d0"
+          emissive="#6f970e"
+          emissiveIntensity={0.22}
           roughness={0.9}
         />
       </mesh>

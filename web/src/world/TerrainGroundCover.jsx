@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTexture } from '@react-three/drei'
 import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, MathUtils, Object3D, SRGBColorSpace, Vector3 } from 'three'
 import { getTerrainHeight } from './terrain/terrainGeometry'
@@ -11,21 +11,15 @@ const grassPlacementSettings = {
   minScale: 0.18,
   maxScale: 0.3,
 }
-const GRASS_TEXTURE = '/textures/outdoor/grass-001.png'
-const grassTintLow = new Color('#f4ffe8')
-const grassTintMid = new Color('#ffffff')
-const grassTintHigh = new Color('#fbfff0')
-
-function hashNoise(x, z) {
-  const value = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453
-  return value - Math.floor(value)
-}
-
-function getGrassTintFromNoise(x, z) {
-  const n = hashNoise(Math.floor(x * 0.08), Math.floor(z * 0.08))
-  if (n < 0.5) return grassTintLow.clone().lerp(grassTintMid, n / 0.5)
-  return grassTintMid.clone().lerp(grassTintHigh, (n - 0.5) / 0.5)
-}
+const GRASS_AREA_MIN = -36
+const GRASS_AREA_MAX = 36
+const GRASS_GRID_STEP = 0.13
+const GRASS_DENSITY_MULTIPLIER = 9.5
+const GRASS_ROWS_PER_IDLE_BATCH = 14
+const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
+const grassBottomColor = new Color('#526f18')
+const grassMiddleColor = new Color('#6f970e')
+const grassTopColor = new Color('#a4c83b')
 
 function softenGrassNormals(geometry, upStrength = 0.65) {
   if (!geometry.attributes.normal) geometry.computeVertexNormals()
@@ -51,6 +45,7 @@ function createGrassCardGeometry() {
   const cardAngles = [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]
   const positions = []
   const uvs = []
+  const colors = []
   const indices = []
 
   cardAngles.forEach((angle, cardIndex) => {
@@ -67,6 +62,11 @@ function createGrassCardGeometry() {
     corners.forEach(([x, y, z, u, v]) => {
       positions.push(x * cos - z * sin, y, x * sin + z * cos)
       uvs.push(u, v)
+      const verticalT = MathUtils.clamp(y / height, 0, 1)
+      const color = verticalT < 0.55
+        ? grassBottomColor.clone().lerp(grassMiddleColor, verticalT / 0.55)
+        : grassMiddleColor.clone().lerp(grassTopColor, (verticalT - 0.55) / 0.45)
+      colors.push(color.r, color.g, color.b)
     })
 
     indices.push(base, base + 1, base + 2)
@@ -76,6 +76,7 @@ function createGrassCardGeometry() {
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
   geometry.setIndex(indices)
   geometry.computeVertexNormals()
   softenGrassNormals(geometry, 0.65)
@@ -105,19 +106,21 @@ function makeGrassInstance(x, z, seed) {
   }
 }
 
-function createGroundCover() {
-  const grass = []
-  const rocks = []
-
-  for (let xi = -36; xi <= 36; xi += 0.13) {
-    for (let zi = -36; zi <= 36; zi += 0.13) {
-      const seed = (xi + 61) * 197 + (zi + 43) * 137
-      const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
-      const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
-      const density = Math.min(1, Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9) * 9.5)
-      if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
-    }
+function pushGrassRow(grass, xi) {
+  for (let zi = GRASS_AREA_MIN; zi <= GRASS_AREA_MAX; zi += GRASS_GRID_STEP) {
+    const seed = (xi + 61) * 197 + (zi + 43) * 137
+    const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
+    const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
+    const density = Math.min(
+      1,
+      Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9) * GRASS_DENSITY_MULTIPLIER,
+    )
+    if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
   }
+}
+
+function createRockCover() {
+  const rocks = []
 
   for (let xi = -36; xi <= 36; xi += 2) {
     for (let zi = -36; zi <= 36; zi += 2) {
@@ -132,7 +135,7 @@ function createGroundCover() {
     }
   }
 
-  return { grass, rocks }
+  return rocks
 }
 
 function GrassLayer({ items }) {
@@ -152,25 +155,19 @@ function GrassLayer({ items }) {
       dummy.scale.setScalar(grass.scale)
       dummy.updateMatrix()
       ref.current.setMatrixAt(index, dummy.matrix)
-      ref.current.setColorAt(index, getGrassTintFromNoise(grass.position[0], grass.position[2]))
     })
     ref.current.instanceMatrix.needsUpdate = true
-    if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true
   }, [items])
 
   return (
     <instancedMesh ref={ref} args={[geometry, undefined, items.length]} frustumCulled>
-      <meshStandardMaterial
+      <meshBasicMaterial
         map={texture}
         alphaTest={0.45}
+        side={DoubleSide}
         transparent={false}
         depthWrite
-        side={DoubleSide}
         color="#ffffff"
-        roughness={1}
-        emissive="#ffffff"
-        emissiveMap={texture}
-        emissiveIntensity={0.42}
         vertexColors
       />
     </instancedMesh>
@@ -178,8 +175,59 @@ function GrassLayer({ items }) {
 }
 
 function TerrainGroundCover() {
-  const { grass, rocks } = useMemo(() => createGroundCover(), [])
+  const rocks = useMemo(() => createRockCover(), [])
+  const [grass, setGrass] = useState(null)
   const ref = useRef()
+
+  useEffect(() => {
+    if (grass) return undefined
+
+    let cancelled = false
+    const nextGrass = []
+    let xi = GRASS_AREA_MIN
+    let timeoutId = null
+    let idleId = null
+
+    const schedule = (callback) => {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        idleId = window.requestIdleCallback(callback, { timeout: 80 })
+        return
+      }
+      timeoutId = window.setTimeout(() => callback(), 0)
+    }
+
+    const runBatch = (deadline) => {
+      let rows = 0
+
+      while (
+        xi <= GRASS_AREA_MAX
+        && rows < GRASS_ROWS_PER_IDLE_BATCH
+        && (!deadline || deadline.timeRemaining() > 2)
+      ) {
+        pushGrassRow(nextGrass, xi)
+        xi += GRASS_GRID_STEP
+        rows += 1
+      }
+
+      if (cancelled) return
+
+      if (xi <= GRASS_AREA_MAX) {
+        schedule(runBatch)
+      } else {
+        setGrass(nextGrass)
+      }
+    }
+
+    schedule(runBatch)
+
+    return () => {
+      cancelled = true
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+      if (idleId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [grass])
 
   useLayoutEffect(() => {
     rocks.forEach((rock, index) => {
@@ -194,7 +242,7 @@ function TerrainGroundCover() {
 
   return (
     <group>
-      <GrassLayer items={grass} />
+      {grass && <GrassLayer items={grass} />}
       <instancedMesh ref={ref} args={[undefined, undefined, rocks.length]} frustumCulled>
         <dodecahedronGeometry args={[0.48, 0]} />
         <meshBasicMaterial color="#9d9688" />

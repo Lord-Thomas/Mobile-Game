@@ -17,6 +17,8 @@ function OutdoorSurfaceMaterial({
   colorMap,
   repeat = [1, 1],
   color = '#ffffff',
+  emissive = '#000000',
+  emissiveIntensity = 0,
   roughness = 0.85,
   side,
 }) {
@@ -37,6 +39,8 @@ function OutdoorSurfaceMaterial({
     <meshStandardMaterial
       map={map}
       color={color}
+      emissive={emissive}
+      emissiveIntensity={emissiveIntensity}
       roughness={roughness}
       side={side}
     />
