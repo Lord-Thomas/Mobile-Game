@@ -1,6 +1,15 @@
 import { useTexture } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import { RepeatWrapping, SRGBColorSpace, Vector2 } from 'three'
+import { createRoadCurve } from './roads/roadGeometry'
+import { roadLayout } from './roads/roadLayout'
+
+const ROAD_SHADER_SAMPLES = 20
+const _roadCurve = createRoadCurve(roadLayout.mainRoad.points)
+const roadShaderPoints = Array.from({ length: ROAD_SHADER_SAMPLES }, (_, i) => {
+  const pt = _roadCurve.getPointAt(i / (ROAD_SHADER_SAMPLES - 1))
+  return new Vector2(pt.x, pt.z)
+})
 
 const SURFACE_TEXTURES = [
   '/textures/outdoor/grass-patchy-basecolor-512.jpg',
@@ -32,6 +41,7 @@ function NaturalTerrainMaterial() {
     shader.uniforms.uDirtMap = { value: dirtMap }
     shader.uniforms.uGrassNormalMap = { value: grassNormalMap }
     shader.uniforms.uDirtNormalMap = { value: dirtNormalMap }
+    shader.uniforms.uRoadPoints = { value: roadShaderPoints }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -94,12 +104,14 @@ function NaturalTerrainMaterial() {
         return length(p - (a + ab * t));
       }
 
+      uniform vec2 uRoadPoints[20];
+
       float naturalRoadDistance(vec2 p) {
-        float distanceToRoad = naturalSegmentDistance(p, vec2(-38.0, 17.0), vec2(-22.0, 20.0));
-        distanceToRoad = min(distanceToRoad, naturalSegmentDistance(p, vec2(-22.0, 20.0), vec2(0.0, 22.0)));
-        distanceToRoad = min(distanceToRoad, naturalSegmentDistance(p, vec2(0.0, 22.0), vec2(20.0, 21.0)));
-        distanceToRoad = min(distanceToRoad, naturalSegmentDistance(p, vec2(20.0, 21.0), vec2(38.0, 18.0)));
-        return distanceToRoad;
+        float minDist = 1e6;
+        for (int i = 0; i < 19; i++) {
+          minDist = min(minDist, naturalSegmentDistance(p, uRoadPoints[i], uRoadPoints[i + 1]));
+        }
+        return minDist;
       }
 
       float naturalRectDistance(vec2 p, vec2 center, vec2 halfSize) {
@@ -112,16 +124,14 @@ function NaturalTerrainMaterial() {
         float detailNoise = naturalNoise(worldPosition * 0.83) * 2.0 - 1.0;
 
         float roadDistance = naturalRoadDistance(worldPosition);
-        float roadShoulder = 1.0 - smoothstep(2.75 + edgeNoise * 0.32, 6.3 + edgeNoise * 0.75, roadDistance);
-        float roadCoreFade = smoothstep(2.15, 3.25, roadDistance);
-        roadShoulder *= roadCoreFade;
+        float roadShoulder = 1.0 - smoothstep(2.6 + edgeNoise * 0.22, 4.4 + edgeNoise * 0.42, roadDistance);
 
         float pathVertical = naturalRectDistance(worldPosition, vec2(-6.05, 9.325), vec2(1.35, 11.575));
         float pathHorizontal = naturalRectDistance(worldPosition, vec2(-5.525, -2.25), vec2(0.525, 1.22));
         float pathDistance = min(pathVertical, pathHorizontal);
-        float path = 1.0 - smoothstep(0.15 + edgeNoise * 0.18, 2.05 + edgeNoise * 0.5, pathDistance);
+        float path = 1.0 - smoothstep(0.1 + edgeNoise * 0.14, 1.2 + edgeNoise * 0.32, pathDistance);
 
-        float houseEdge = 1.0 - smoothstep(0.0, 2.4, abs(naturalRectDistance(worldPosition, vec2(0.0, 0.0), vec2(5.45, 5.45))));
+        float houseEdge = 1.0 - smoothstep(edgeNoise * 0.06, 0.9 + edgeNoise * 0.16, abs(naturalRectDistance(worldPosition, vec2(0.0, 0.0), vec2(5.45, 5.45))));
         float wildPatch = smoothstep(0.46, 0.78, naturalNoise(worldPosition * 0.115 + vec2(4.7, -2.1))) * 0.24;
         float drySpeckle = smoothstep(0.62, 0.92, naturalNoise(worldPosition * 1.7)) * 0.08;
 
@@ -139,7 +149,26 @@ function NaturalTerrainMaterial() {
       float naturalDirt = naturalSurfaceDirtWeight(naturalUv);
       vec4 naturalGrassColor = naturalTextureNoTile(uGrassMap, naturalUv * 0.155);
       vec4 naturalDirtColor = naturalTextureNoTile(uDirtMap, naturalUv * 0.18);
-      vec3 naturalColor = mix(naturalGrassColor.rgb, naturalDirtColor.rgb, naturalDirt);
+
+      // Grade grass toward blade palette: vivid warm greens (linear: ~#9fd442 mid, #d8f050 highlight)
+      float grassLum = dot(naturalGrassColor.rgb, vec3(0.299, 0.587, 0.114));
+      vec3 grassTarget = vec3(0.34, 0.66, 0.06);
+      vec3 grassGraded = mix(
+        naturalGrassColor.rgb,
+        grassTarget * clamp(grassLum * 3.5 + 0.12, 0.0, 0.95),
+        0.60
+      );
+
+      // Grade dirt toward warm amber-ochre: harmonious earth tones under green (linear: ~#b87a30)
+      float dirtLum = dot(naturalDirtColor.rgb, vec3(0.299, 0.587, 0.114));
+      vec3 dirtTarget = vec3(0.49, 0.20, 0.03);
+      vec3 dirtGraded = mix(
+        naturalDirtColor.rgb,
+        dirtTarget * clamp(dirtLum * 2.5 + 0.08, 0.0, 0.90),
+        0.50
+      );
+
+      vec3 naturalColor = mix(grassGraded, dirtGraded, naturalDirt);
       diffuseColor *= vec4(naturalColor, 1.0);
       `,
     )
@@ -173,10 +202,10 @@ function NaturalTerrainMaterial() {
       map={grassMap}
       normalMap={grassNormalMap}
       normalScale={new Vector2(0.34, 0.34)}
-      color="#eef7cf"
-      emissive="#607e13"
-      emissiveIntensity={0.12}
-      roughness={0.92}
+      color="#ffffff"
+      emissive="#3c7010"
+      emissiveIntensity={0.15}
+      roughness={0.88}
       onBeforeCompile={handleBeforeCompile}
     />
   )

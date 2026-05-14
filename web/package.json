@@ -11,6 +11,7 @@
     "thumbnails": "vite --host 127.0.0.1 --port 5173 --open /?tool=thumbnail"
   },
   "dependencies": {
+    "@dgreenheck/ez-tree": "^1.1.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.0",
     "@react-three/rapier": "^2.2.0",

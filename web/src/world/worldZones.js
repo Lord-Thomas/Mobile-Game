@@ -50,16 +50,6 @@ function distanceToSamples(x, z, samples = roadSamples) {
   return minDistance
 }
 
-function isInsideRotatedRect(x, z, center, size, rotationY = 0, margin = 0) {
-  const dx = x - center[0]
-  const dz = z - center[2]
-  const cos = Math.cos(-rotationY)
-  const sin = Math.sin(-rotationY)
-  const localX = dx * cos - dz * sin
-  const localZ = dx * sin + dz * cos
-  return Math.abs(localX) < size[0] * 0.5 + margin && Math.abs(localZ) < size[1] * 0.5 + margin
-}
-
 function isInsideAxisRect(x, z, centerX, centerZ, width, depth, margin = 0) {
   return Math.abs(x - centerX) < width * 0.5 + margin && Math.abs(z - centerZ) < depth * 0.5 + margin
 }
@@ -143,7 +133,7 @@ export function getZoneDensity(type, x, z) {
     const plotCore = smoothstep(-2.4, 4.2, distanceInsidePlot)
     const plotFeather = 1 - smoothstep(1.8, 8.5, distanceOutsidePlot)
     const pathFade = smoothstep(0.55, 3.8, pathDistance)
-    const roadFade = smoothstep(ROAD_WIDTH * 0.5 + 0.7, ROAD_WIDTH * 0.5 + 6.5, roadDistance)
+    const roadFade = smoothstep(ROAD_WIDTH * 0.5 + 1.6, ROAD_WIDTH * 0.5 + 4.0, roadDistance)
     const base = zone === WORLD_ZONES.LAWN
       ? 0.58
       : zone === WORLD_ZONES.PLOT_FLAT_AREA
@@ -154,7 +144,7 @@ export function getZoneDensity(type, x, z) {
 
   if (type === 'tall_grass') {
     if (zone === WORLD_ZONES.FOREST_EDGE) return 0.78
-    if (zone === WORLD_ZONES.WILD_GRASS) return 0.42 * smoothstep(ROAD_WIDTH * 0.5 + 3, ROAD_WIDTH * 0.5 + 8, roadDistance)
+    if (zone === WORLD_ZONES.WILD_GRASS) return 0.42 * smoothstep(ROAD_WIDTH * 0.5 + 1.8, ROAD_WIDTH * 0.5 + 4.5, roadDistance)
     if (zone === WORLD_ZONES.PLOT_FLAT_AREA) return 0.12
     return 0
   }
@@ -173,6 +163,12 @@ export function canPlaceObject(type, x, z) {
   const zone = getZoneAt(x, z)
   if ([WORLD_ZONES.NO_SPAWN, WORLD_ZONES.HOUSE, WORLD_ZONES.ROAD, WORLD_ZONES.PATH].includes(zone)) return false
 
+  if (type === 'authored_tree') {
+    return [WORLD_ZONES.LAWN, WORLD_ZONES.PLOT_FLAT_AREA, WORLD_ZONES.WILD_GRASS, WORLD_ZONES.FOREST_EDGE].includes(zone)
+      && getDistanceToPath(x, z) > 2
+      && getDistanceToRoad(x, z) > ROAD_WIDTH * 0.5 + 2.4
+  }
+
   if (type === 'lawn_blade') return zone === WORLD_ZONES.LAWN && getDistanceToPath(x, z) > 0.9
   if (type === 'tall_grass') return getZoneDensity(type, x, z) > 0 && getDistanceToPath(x, z) > 1.4
   if (type === 'rock') return getZoneDensity(type, x, z) > 0 && getDistanceToPath(x, z) > 1.2
@@ -180,6 +176,6 @@ export function canPlaceObject(type, x, z) {
   return false
 }
 
-export function getForestInfluence(x, z) {
+export function getForestInfluence() {
   return 0
 }

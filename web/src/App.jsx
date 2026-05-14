@@ -11,6 +11,7 @@ import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generate
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import { OUTDOOR_PLAYER_COLLIDERS } from './world/outdoorData'
+import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, getWallSideTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import PlayerHouse from './world/house/PlayerHouse'
@@ -1799,8 +1800,11 @@ function Player({
     } else {
       velocityYRef.current = 0
     }
-    let nextY = onGroundRef.current ? PLAYER_HEIGHT : playerPosRef.current.y + velocityYRef.current * delta
-    const distanceToGround = Math.max(0, nextY - PLAYER_HEIGHT)
+    const floorY = currentZone === ZONES.outside
+      ? getTerrainHeight(nextX, nextZ) + PLAYER_HEIGHT
+      : PLAYER_HEIGHT
+    let nextY = onGroundRef.current ? floorY : playerPosRef.current.y + velocityYRef.current * delta
+    const distanceToGround = Math.max(0, nextY - floorY)
     const shouldPrepareLanding =
       !onGroundRef.current &&
       !landingPreparedRef.current &&
@@ -1813,8 +1817,8 @@ function Player({
       jumpLandUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_LAND_DURATION
     }
 
-    if (nextY <= PLAYER_HEIGHT) {
-      nextY = PLAYER_HEIGHT
+    if (nextY <= floorY) {
+      nextY = floorY
       velocityYRef.current = 0
       onGroundRef.current = true
     }

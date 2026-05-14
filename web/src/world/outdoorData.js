@@ -79,6 +79,60 @@ export const FOREST_TREES = [
   [-28, -31, 0.75], [28, -29, 0.78], [29, 31, 0.82], [-28, 27, 0.8],
 ]
 
+export const AUTHORED_TREES = [
+  {
+    id: 'player_plot_ash_medium_01',
+    colliderRadius: 0.55,
+    placement: {
+      rule: 'authored_tree',
+      area: 'player_plot_lawn',
+      x: 8.6,
+      z: 12.2,
+    },
+    config: {
+      preset: 'Ash Medium',
+      seed: 717902,
+      position: {
+        x: 8.6,
+        y: -0.4,
+        z: 12.2,
+      },
+      rotationY: 0,
+      scale: 0.12,
+      snapToGround: true,
+      bark: {
+        tint: 14207690,
+      },
+      branch: {
+        levels: null,
+        trunkLength: null,
+        trunkRadius: null,
+        firstBranchAngle: null,
+        secondBranchAngle: null,
+        trunkChildren: null,
+        branchChildren: null,
+        trunkGnarliness: null,
+        forceStrength: null,
+      },
+      leaves: {
+        tint: 15657192,
+        size: 5.5,
+        count: 55,
+        start: 0.42,
+        sizeVariance: null,
+        alphaTest: null,
+        normalMode: 'generated',
+        normalStrength: 0.78,
+        colorMode: 'gameGrass',
+        colorVariation: 0.34,
+        hueShift: 0.03,
+        saturation: 0.98,
+        brightness: 1,
+      },
+    },
+  },
+]
+
 export const OUTDOOR_PLAYER_COLLIDERS = [
   ...getHouseFootprintColliders(),
   ...NEIGHBOR_HOUSES.map((house) => ({
@@ -90,4 +144,10 @@ export const OUTDOOR_PLAYER_COLLIDERS = [
   ...FOREST_TREES
     .filter(([x, z]) => Math.abs(x) > 34 || Math.abs(z) > 34)
     .map(([x, z, scale]) => ({ x, z, hx: 0.28 * scale, hz: 0.28 * scale })),
+  ...AUTHORED_TREES.map(({ config, colliderRadius }) => ({
+    x: config.position.x,
+    z: config.position.z,
+    hx: colliderRadius,
+    hz: colliderRadius,
+  })),
 ]

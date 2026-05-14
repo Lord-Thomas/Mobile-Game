@@ -4,8 +4,10 @@ import PlayerPlot from './PlayerPlot'
 import Road from './Road'
 import TerrainGroundCover from './TerrainGroundCover'
 import DistantScenery from './DistantScenery'
+import ProceduralTree from './trees/ProceduralTree'
+import { AUTHORED_TREES } from './outdoorData'
 
-function OutdoorLighting({ active }) {
+export function OutdoorLighting({ active }) {
   if (!active) return null
 
   return (
@@ -20,7 +22,7 @@ function OutdoorLighting({ active }) {
   )
 }
 
-function OutdoorNeighborhood({ lightingActive = true, playerPositionRef }) {
+function OutdoorNeighborhood({ lightingActive = true, playerPositionRef, showAuthoredTrees = true }) {
   return (
     <>
       <OutdoorLighting active={lightingActive} />
@@ -28,6 +30,9 @@ function OutdoorNeighborhood({ lightingActive = true, playerPositionRef }) {
       <DistantScenery />
       <PlayerPlot />
       <Road />
+      {showAuthoredTrees && AUTHORED_TREES.map((tree) => (
+        <ProceduralTree key={tree.id} config={tree.config} />
+      ))}
       <TerrainGroundCover playerPositionRef={playerPositionRef} />
     </>
   )

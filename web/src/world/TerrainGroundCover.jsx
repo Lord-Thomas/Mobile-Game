@@ -109,6 +109,14 @@ function seededRandom(seed) {
   return MathUtils.euclideanModulo(Math.sin(seed * 12.9898) * 43758.5453, 1)
 }
 
+function getTerrainSlope(x, z) {
+  const step = 0.25
+  const h = getTerrainHeight(x, z)
+  const dx = (getTerrainHeight(x + step, z) - h) / step
+  const dz = (getTerrainHeight(x, z + step) - h) / step
+  return Math.sqrt(dx * dx + dz * dz)
+}
+
 function makeRockInstance(x, z, seed) {
   return {
     position: [x, getTerrainHeight(x, z) + 0.03, z],
@@ -120,8 +128,11 @@ function makeRockInstance(x, z, seed) {
 
 function makeGrassInstance(x, z, seed) {
   const scaleRange = grassPlacementSettings.maxScale - grassPlacementSettings.minScale
+  const slope = getTerrainSlope(x, z)
+  // Lift blades on slopes so they don't embed into the terrain face
+  const slopeLift = slope * 0.5
   return {
-    position: [x, getTerrainHeight(x, z) + 0.032, z],
+    position: [x, getTerrainHeight(x, z) + 0.032 + slopeLift, z],
     rotation: [0, (seededRandom(seed + 18) - 0.5) * grassPlacementSettings.rotationRandomness * 2, 0],
     scale: grassPlacementSettings.minScale + seededRandom(seed + 9) * scaleRange,
     colorShift: seededRandom(seed + 41),
