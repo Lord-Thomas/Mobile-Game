@@ -181,7 +181,7 @@ function NeighborPath({ door, roadPosition, housePosition, rotationY }) {
   if (pathLength < 0.2) return null
 
   return (
-    <mesh position={[pathCenterX, -0.012, pathCenterZ]} rotation={[-Math.PI / 2, 0, pathAngle]}>
+    <mesh position={[pathCenterX, 0.032, pathCenterZ]} rotation={[-Math.PI / 2, 0, pathAngle]}>
       <planeGeometry args={[1.2, pathLength]} />
       <OutdoorSurfaceMaterial
         colorMap="/textures/outdoor/dirt-ground-basecolor-512.jpg"
@@ -196,7 +196,7 @@ function NeighborPath({ door, roadPosition, housePosition, rotationY }) {
 function NeighborLot({ lotSize }) {
   return (
     <group>
-      <mesh position={[0, -0.022, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.024, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={lotSize} />
         <OutdoorSurfaceMaterial
           colorMap="/textures/outdoor/grass-patchy-basecolor-512.jpg"

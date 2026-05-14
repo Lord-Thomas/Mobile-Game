@@ -26,11 +26,11 @@ function PlayerPlot() {
 
   return (
     <group>
-      <mesh position={[pathX, -0.014, pathCenterZ]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[pathX, 0.034, pathCenterZ]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[2.2, pathLength]} />
         <DirtMaterial repeat={[1, Math.max(1, pathLength / 4)]} />
       </mesh>
-      <mesh position={[(pathX + mainBounds.minX) * 0.5, -0.013, pathStartZ]} rotation={[-Math.PI / 2, 0, Math.PI / 2]}>
+      <mesh position={[(pathX + mainBounds.minX) * 0.5, 0.035, pathStartZ]} rotation={[-Math.PI / 2, 0, Math.PI / 2]}>
         <planeGeometry args={[2.2, Math.abs(pathX - mainBounds.minX)]} />
         <DirtMaterial repeat={[1, 1]} />
       </mesh>
@@ -52,7 +52,7 @@ function PlayerPlot() {
       ))}
 
       {[-12.5, 10.5].map((x) => (
-        <mesh key={`flower-${x}`} position={[x, -0.006, 9.2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh key={`flower-${x}`} position={[x, 0.04, 9.2]} rotation={[-Math.PI / 2, 0, 0]}>
           <circleGeometry args={[0.34, 12]} />
           <meshStandardMaterial color={x < 0 ? '#f9d36a' : '#f28fb4'} roughness={0.78} />
         </mesh>

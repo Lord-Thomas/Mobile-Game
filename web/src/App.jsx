@@ -26,6 +26,9 @@ const PLAYER_MODEL_VERTICAL_OFFSET = 0.1
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
+const MAX_RENDER_DPR = 1.5
+const MIN_RENDER_DPR = 1
+const TARGET_MAX_RENDER_PIXELS = 1_650_000
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
 const PLAYER_KICK_CONTACT_DELAY = 0.43
@@ -4844,6 +4847,51 @@ function ScorePopups({ popups }) {
   )
 }
 
+function getViewportRenderSettings() {
+  if (typeof window === 'undefined') {
+    return { dpr: 1, antialias: false }
+  }
+
+  const width = Math.max(1, window.innerWidth || 1)
+  const height = Math.max(1, window.innerHeight || 1)
+  const nativeDpr = Math.min(MAX_RENDER_DPR, Math.max(MIN_RENDER_DPR, window.devicePixelRatio || 1))
+  const viewportPixels = width * height
+  const pixelCappedDpr = Math.sqrt(TARGET_MAX_RENDER_PIXELS / viewportPixels)
+  const dpr = MathUtils.clamp(pixelCappedDpr, MIN_RENDER_DPR, nativeDpr)
+
+  return {
+    dpr: Number(dpr.toFixed(2)),
+    antialias: dpr <= 1.15,
+  }
+}
+
+function useViewportRenderSettings() {
+  const [settings, setSettings] = useState(() => getViewportRenderSettings())
+
+  useEffect(() => {
+    let frame = null
+    const update = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        setSettings((current) => {
+          const next = getViewportRenderSettings()
+          return current.dpr === next.dpr && current.antialias === next.antialias ? current : next
+        })
+      })
+    }
+
+    window.addEventListener('resize', update)
+    window.addEventListener('orientationchange', update)
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener('resize', update)
+      window.removeEventListener('orientationchange', update)
+    }
+  }, [])
+
+  return settings
+}
+
 function App() {
   const isThumbnailTool = useMemo(() => {
     try {
@@ -4885,6 +4933,7 @@ function App() {
   const progressScope = isAdminMode ? 'admin' : 'player'
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
+  const renderSettings = useViewportRenderSettings()
 
   const touchRef = useRef({
     moveX: 0,
@@ -5684,10 +5733,15 @@ function App() {
   const gameView = (
     <main className="app">
       <Canvas
-        dpr={[1, 1.5]}
+        dpr={renderSettings.dpr}
         camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 130 }}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
-        resize={{ debounce: 0 }}
+        gl={{
+          antialias: renderSettings.antialias,
+          powerPreference: 'high-performance',
+          stencil: false,
+          depth: true,
+        }}
+        resize={{ debounce: 80 }}
       >
         <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} />
         <PlayerHouse exteriorVisible>

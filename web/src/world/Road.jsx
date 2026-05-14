@@ -3,10 +3,11 @@ import { DoubleSide } from 'three'
 import { roadLayout } from './roads/roadLayout'
 import { createRoadGeometry } from './roads/roadGeometry'
 import OutdoorSurfaceMaterial from './OutdoorSurfaceMaterial'
+import { getTerrainHeight } from './terrain/terrainGeometry'
 
-function RoadMesh({ road, color = '#58616a', yOffset = 0.02, segments = 80 }) {
+function RoadMesh({ road, color = '#58616a', yOffset = 0.028, segments = 80 }) {
   const geometry = useMemo(
-    () => createRoadGeometry(road.points, road.width, segments, yOffset),
+    () => createRoadGeometry(road.points, road.width, segments, yOffset, getTerrainHeight),
     [road.points, road.width, segments, yOffset],
   )
 
@@ -27,7 +28,7 @@ function RoadMesh({ road, color = '#58616a', yOffset = 0.02, segments = 80 }) {
 
 function RoadCenterLine({ road }) {
   const lineRoad = useMemo(() => ({ ...road, width: 0.16 }), [road])
-  return <RoadMesh road={lineRoad} color="#f1e7b7" yOffset={0.028} segments={80} />
+  return <RoadMesh road={lineRoad} color="#f1e7b7" yOffset={0.036} segments={80} />
 }
 
 function Road() {

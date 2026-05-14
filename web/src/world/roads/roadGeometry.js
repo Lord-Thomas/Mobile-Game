@@ -32,7 +32,7 @@ export function getRoadLotTransform({ road, t, side, setback, lateralOffset = 0 
   }
 }
 
-export function createRoadGeometry(points, width = 5, segments = 72, yOffset = 0.02) {
+export function createRoadGeometry(points, width = 5, segments = 72, yOffset = 0.02, getHeight = null) {
   const curve = createRoadCurve(points)
 
   const positions = []
@@ -52,9 +52,11 @@ export function createRoadGeometry(points, width = 5, segments = 72, yOffset = 0
 
     const left = point.clone().add(perpendicular.clone().multiplyScalar(width * 0.5))
     const right = point.clone().add(perpendicular.clone().multiplyScalar(-width * 0.5))
+    const leftY = getHeight ? getHeight(left.x, left.z) : left.y
+    const rightY = getHeight ? getHeight(right.x, right.z) : right.y
 
-    positions.push(left.x, left.y + yOffset, left.z)
-    positions.push(right.x, right.y + yOffset, right.z)
+    positions.push(left.x, leftY + yOffset, left.z)
+    positions.push(right.x, rightY + yOffset, right.z)
     uvs.push(0, distance / 6)
     uvs.push(1, distance / 6)
 
