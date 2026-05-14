@@ -5776,7 +5776,7 @@ function App() {
             onLockPlacement={() => setPlacementLocked(true)}
           />
         </PlayerHouse>
-        <OutdoorNeighborhood lightingActive={currentZone === ZONES.outside} />
+        <OutdoorNeighborhood lightingActive={currentZone === ZONES.outside} playerPositionRef={playerPositionRef} />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />

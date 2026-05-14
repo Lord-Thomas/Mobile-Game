@@ -1,0 +1,185 @@
+import { useTexture } from '@react-three/drei'
+import { useEffect, useMemo, useRef } from 'react'
+import { RepeatWrapping, SRGBColorSpace, Vector2 } from 'three'
+
+const SURFACE_TEXTURES = [
+  '/textures/outdoor/grass-patchy-basecolor-512.jpg',
+  '/textures/outdoor/dirt-ground-basecolor-512.jpg',
+  '/textures/outdoor/grass-patchy-normal.png',
+  '/textures/outdoor/dirt-ground-normal.jpg',
+]
+
+function configureTexture(texture, colorSpace = null) {
+  texture.wrapS = RepeatWrapping
+  texture.wrapT = RepeatWrapping
+  if (colorSpace) texture.colorSpace = colorSpace
+  texture.needsUpdate = true
+}
+
+function NaturalTerrainMaterial() {
+  const materialRef = useRef()
+  const [grassMap, dirtMap, grassNormalMap, dirtNormalMap] = useTexture(SURFACE_TEXTURES)
+
+  useMemo(() => {
+    configureTexture(grassMap, SRGBColorSpace)
+    configureTexture(dirtMap, SRGBColorSpace)
+    configureTexture(grassNormalMap)
+    configureTexture(dirtNormalMap)
+  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap])
+
+  const handleBeforeCompile = useMemo(() => (shader) => {
+    shader.uniforms.uGrassMap = { value: grassMap }
+    shader.uniforms.uDirtMap = { value: dirtMap }
+    shader.uniforms.uGrassNormalMap = { value: grassNormalMap }
+    shader.uniforms.uDirtNormalMap = { value: dirtNormalMap }
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `
+      #include <common>
+      varying vec3 vNaturalWorldPosition;
+      `,
+    )
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <worldpos_vertex>',
+      `
+      #include <worldpos_vertex>
+      vNaturalWorldPosition = worldPosition.xyz;
+      `,
+    )
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `
+      #include <common>
+      uniform sampler2D uGrassMap;
+      uniform sampler2D uDirtMap;
+      uniform sampler2D uGrassNormalMap;
+      uniform sampler2D uDirtNormalMap;
+      varying vec3 vNaturalWorldPosition;
+
+      float naturalHash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      float naturalNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(naturalHash(i), naturalHash(i + vec2(1.0, 0.0)), u.x),
+          mix(naturalHash(i + vec2(0.0, 1.0)), naturalHash(i + vec2(1.0, 1.0)), u.x),
+          u.y
+        );
+      }
+
+      vec4 naturalTextureNoTile(sampler2D tex, vec2 uv) {
+        float k = naturalNoise(uv * 0.11);
+        float l = k * 8.0;
+        float ia = floor(l);
+        float ib = ia + 1.0;
+        float f = fract(l);
+        vec2 offA = sin(vec2(3.0, 7.0) * ia) * 0.42;
+        vec2 offB = sin(vec2(3.0, 7.0) * ib) * 0.42;
+        vec4 colorA = texture2D(tex, uv + offA);
+        vec4 colorB = texture2D(tex, uv + offB);
+        float blend = smoothstep(0.2, 0.8, f - 0.08 * dot(colorA.rgb - colorB.rgb, vec3(0.333)));
+        return mix(colorA, colorB, blend);
+      }
+
+      float naturalSegmentDistance(vec2 p, vec2 a, vec2 b) {
+        vec2 ab = b - a;
+        float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+        return length(p - (a + ab * t));
+      }
+
+      float naturalRoadDistance(vec2 p) {
+        float distanceToRoad = naturalSegmentDistance(p, vec2(-38.0, 17.0), vec2(-22.0, 20.0));
+        distanceToRoad = min(distanceToRoad, naturalSegmentDistance(p, vec2(-22.0, 20.0), vec2(0.0, 22.0)));
+        distanceToRoad = min(distanceToRoad, naturalSegmentDistance(p, vec2(0.0, 22.0), vec2(20.0, 21.0)));
+        distanceToRoad = min(distanceToRoad, naturalSegmentDistance(p, vec2(20.0, 21.0), vec2(38.0, 18.0)));
+        return distanceToRoad;
+      }
+
+      float naturalRectDistance(vec2 p, vec2 center, vec2 halfSize) {
+        vec2 q = abs(p - center) - halfSize;
+        return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+      }
+
+      float naturalSurfaceDirtWeight(vec2 worldPosition) {
+        float edgeNoise = naturalNoise(worldPosition * 0.34) * 2.0 - 1.0;
+        float detailNoise = naturalNoise(worldPosition * 0.83) * 2.0 - 1.0;
+
+        float roadDistance = naturalRoadDistance(worldPosition);
+        float roadShoulder = 1.0 - smoothstep(2.75 + edgeNoise * 0.32, 6.3 + edgeNoise * 0.75, roadDistance);
+        float roadCoreFade = smoothstep(2.15, 3.25, roadDistance);
+        roadShoulder *= roadCoreFade;
+
+        float pathVertical = naturalRectDistance(worldPosition, vec2(-6.05, 9.325), vec2(1.35, 11.575));
+        float pathHorizontal = naturalRectDistance(worldPosition, vec2(-5.525, -2.25), vec2(0.525, 1.22));
+        float pathDistance = min(pathVertical, pathHorizontal);
+        float path = 1.0 - smoothstep(0.15 + edgeNoise * 0.18, 2.05 + edgeNoise * 0.5, pathDistance);
+
+        float houseEdge = 1.0 - smoothstep(0.0, 2.4, abs(naturalRectDistance(worldPosition, vec2(0.0, 0.0), vec2(5.45, 5.45))));
+        float wildPatch = smoothstep(0.46, 0.78, naturalNoise(worldPosition * 0.115 + vec2(4.7, -2.1))) * 0.24;
+        float drySpeckle = smoothstep(0.62, 0.92, naturalNoise(worldPosition * 1.7)) * 0.08;
+
+        float dirt = max(max(path, roadShoulder), max(houseEdge * 0.38, wildPatch + drySpeckle));
+        dirt += detailNoise * 0.045;
+        return clamp(dirt, 0.0, 1.0);
+      }
+      `,
+    )
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `
+      vec2 naturalUv = vNaturalWorldPosition.xz;
+      float naturalDirt = naturalSurfaceDirtWeight(naturalUv);
+      vec4 naturalGrassColor = naturalTextureNoTile(uGrassMap, naturalUv * 0.155);
+      vec4 naturalDirtColor = naturalTextureNoTile(uDirtMap, naturalUv * 0.18);
+      vec3 naturalColor = mix(naturalGrassColor.rgb, naturalDirtColor.rgb, naturalDirt);
+      diffuseColor *= vec4(naturalColor, 1.0);
+      `,
+    )
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <normal_fragment_maps>',
+      `
+      #ifdef USE_NORMALMAP_TANGENTSPACE
+        vec2 naturalNormalUv = vNaturalWorldPosition.xz;
+        float naturalNormalDirt = naturalSurfaceDirtWeight(naturalNormalUv);
+        vec3 naturalGrassNormal = naturalTextureNoTile(uGrassNormalMap, naturalNormalUv * 0.155).xyz * 2.0 - 1.0;
+        vec3 naturalDirtNormal = naturalTextureNoTile(uDirtNormalMap, naturalNormalUv * 0.18).xyz * 2.0 - 1.0;
+        vec3 mapN = normalize(mix(naturalGrassNormal, naturalDirtNormal, naturalNormalDirt));
+        mapN.xy *= normalScale;
+        normal = normalize(tbn * mapN);
+      #endif
+      `,
+    )
+
+    materialRef.current.userData.shader = shader
+  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap])
+
+  useEffect(() => {
+    const material = materialRef.current
+    if (material) material.needsUpdate = true
+  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap])
+
+  return (
+    <meshStandardMaterial
+      ref={materialRef}
+      map={grassMap}
+      normalMap={grassNormalMap}
+      normalScale={new Vector2(0.34, 0.34)}
+      color="#eef7cf"
+      emissive="#607e13"
+      emissiveIntensity={0.12}
+      roughness={0.92}
+      onBeforeCompile={handleBeforeCompile}
+    />
+  )
+}
+
+export default NaturalTerrainMaterial

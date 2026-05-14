@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTexture } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, MathUtils, Object3D, SRGBColorSpace, Vector3 } from 'three'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 import { canPlaceObject, getZoneDensity } from './worldZones'
@@ -17,9 +18,22 @@ const GRASS_GRID_STEP = 0.13
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_ROWS_PER_IDLE_BATCH = 14
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
-const grassBottomColor = new Color('#526f18')
+const grassBottomColor = new Color('#638b0f')
 const grassMiddleColor = new Color('#6f970e')
-const grassTopColor = new Color('#a4c83b')
+const grassTopColor = new Color('#8aac22')
+const GRASS_CARD_HEIGHT = 0.78
+const GRASS_VERTICAL_SEGMENTS = 4
+const grassWindSettings = {
+  strength: 0.13,
+  speed: 1.05,
+  scale: 0.34,
+  directionX: 0.86,
+  directionZ: 0.5,
+}
+const grassInteractionSettings = {
+  radius: 0.85,
+  strength: 0.82,
+}
 
 function softenGrassNormals(geometry, upStrength = 0.65) {
   if (!geometry.attributes.normal) geometry.computeVertexNormals()
@@ -41,7 +55,7 @@ function softenGrassNormals(geometry, upStrength = 0.65) {
 
 function createGrassCardGeometry() {
   const width = 1.08
-  const height = 0.78
+  const height = GRASS_CARD_HEIGHT
   const cardAngles = [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]
   const positions = []
   const uvs = []
@@ -51,26 +65,34 @@ function createGrassCardGeometry() {
   cardAngles.forEach((angle, cardIndex) => {
     const cos = Math.cos(angle)
     const sin = Math.sin(angle)
-    const base = cardIndex * 4
-    const corners = [
-      [-width * 0.5, 0, 0, 0, 0],
-      [width * 0.5, 0, 0, 1, 0],
-      [-width * 0.5, height, 0, 0, 1],
-      [width * 0.5, height, 0, 1, 1],
-    ]
+    const base = cardIndex * (GRASS_VERTICAL_SEGMENTS + 1) * 2
 
-    corners.forEach(([x, y, z, u, v]) => {
-      positions.push(x * cos - z * sin, y, x * sin + z * cos)
-      uvs.push(u, v)
-      const verticalT = MathUtils.clamp(y / height, 0, 1)
-      const color = verticalT < 0.55
-        ? grassBottomColor.clone().lerp(grassMiddleColor, verticalT / 0.55)
-        : grassMiddleColor.clone().lerp(grassTopColor, (verticalT - 0.55) / 0.45)
-      colors.push(color.r, color.g, color.b)
-    })
+    for (let row = 0; row <= GRASS_VERTICAL_SEGMENTS; row += 1) {
+      const verticalT = row / GRASS_VERTICAL_SEGMENTS
+      const y = height * verticalT
+      const v = verticalT
 
-    indices.push(base, base + 1, base + 2)
-    indices.push(base + 1, base + 3, base + 2)
+      ;[
+        [-width * 0.5, 0],
+        [width * 0.5, 1],
+      ].forEach(([x, u]) => {
+        positions.push(x * cos, y, x * sin)
+        uvs.push(u, v)
+        const color = verticalT < 0.55
+          ? grassBottomColor.clone().lerp(grassMiddleColor, verticalT / 0.55)
+          : grassMiddleColor.clone().lerp(grassTopColor, (verticalT - 0.55) / 0.45)
+        colors.push(color.r, color.g, color.b)
+      })
+    }
+
+    for (let row = 0; row < GRASS_VERTICAL_SEGMENTS; row += 1) {
+      const a = base + row * 2
+      const b = a + 1
+      const c = a + 2
+      const d = a + 3
+      indices.push(a, b, c)
+      indices.push(b, d, c)
+    }
   })
 
   const geometry = new BufferGeometry()
@@ -138,7 +160,105 @@ function createRockCover() {
   return rocks
 }
 
-function GrassLayer({ items }) {
+function GrassWindMaterial({ texture, playerPositionRef }) {
+  const materialRef = useRef()
+
+  const handleBeforeCompile = useMemo(() => (shader) => {
+    shader.uniforms.uTime = { value: 0 }
+    shader.uniforms.uPlayerPosition = { value: new Vector3(9999, 0, 9999) }
+    shader.uniforms.uBladeHeight = { value: GRASS_CARD_HEIGHT }
+    shader.uniforms.uWindStrength = { value: grassWindSettings.strength }
+    shader.uniforms.uWindSpeed = { value: grassWindSettings.speed }
+    shader.uniforms.uWindScale = { value: grassWindSettings.scale }
+    shader.uniforms.uInteractionRadius = { value: grassInteractionSettings.radius }
+    shader.uniforms.uInteractionStrength = { value: grassInteractionSettings.strength }
+    shader.uniforms.uWindDirection = {
+      value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
+    }
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `
+      #include <common>
+
+      uniform float uTime;
+      uniform float uBladeHeight;
+      uniform float uWindStrength;
+      uniform float uWindSpeed;
+      uniform float uWindScale;
+      uniform float uInteractionRadius;
+      uniform float uInteractionStrength;
+      uniform vec3 uPlayerPosition;
+      uniform vec3 uWindDirection;
+      `,
+    )
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `
+      #include <begin_vertex>
+
+      float heightFactor = clamp(position.y / uBladeHeight, 0.0, 1.0);
+      heightFactor = heightFactor * heightFactor;
+
+      #ifdef USE_INSTANCING
+        vec3 grassOrigin = vec3(instanceMatrix[3].x, instanceMatrix[3].y, instanceMatrix[3].z);
+      #else
+        vec3 grassOrigin = vec3(0.0);
+      #endif
+
+      float travel = dot(grassOrigin.xz, uWindDirection.xz) * uWindScale;
+      float cross = dot(grassOrigin.xz, vec2(-uWindDirection.z, uWindDirection.x)) * 0.06;
+      float windPhase = uTime * uWindSpeed - travel + cross;
+      float mainWave = 0.5 + 0.5 * sin(windPhase);
+      float detailWave = 0.5 + 0.5 * sin(windPhase * 2.37 + grassOrigin.x * 0.11 + grassOrigin.z * 0.07);
+      float wind = 0.18 + 0.82 * mix(mainWave, detailWave, 0.16);
+
+      transformed.x += uWindDirection.x * wind * uWindStrength * heightFactor;
+      transformed.z += uWindDirection.z * wind * uWindStrength * heightFactor;
+
+      vec2 fromPlayer = grassOrigin.xz - uPlayerPosition.xz;
+      float playerDistance = length(fromPlayer);
+      float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
+
+      if (playerDistance > 0.0001) {
+        vec2 pushDirection = normalize(fromPlayer);
+        transformed.x += pushDirection.x * uInteractionStrength * playerInfluence;
+        transformed.z += pushDirection.y * uInteractionStrength * playerInfluence;
+        transformed.y -= uInteractionStrength * 0.06 * playerInfluence;
+      }
+      `,
+    )
+
+    materialRef.current.userData.shader = shader
+  }, [])
+
+  useFrame((state) => {
+    const shader = materialRef.current?.userData.shader
+    if (!shader) return
+    shader.uniforms.uTime.value = state.clock.elapsedTime
+    const playerPosition = playerPositionRef?.current
+    if (playerPosition) {
+      shader.uniforms.uPlayerPosition.value.set(playerPosition.x, playerPosition.y, playerPosition.z)
+    }
+  })
+
+  return (
+    <meshBasicMaterial
+      ref={materialRef}
+      map={texture}
+      alphaTest={0.45}
+      side={DoubleSide}
+      transparent={false}
+      depthWrite
+      color="#ffffff"
+      vertexColors
+      onBeforeCompile={handleBeforeCompile}
+    />
+  )
+}
+
+function GrassLayer({ items, playerPositionRef }) {
   const texture = useTexture(GRASS_TEXTURE)
   const geometry = useMemo(() => createGrassCardGeometry(), [])
   const ref = useRef()
@@ -161,20 +281,12 @@ function GrassLayer({ items }) {
 
   return (
     <instancedMesh ref={ref} args={[geometry, undefined, items.length]} frustumCulled>
-      <meshBasicMaterial
-        map={texture}
-        alphaTest={0.45}
-        side={DoubleSide}
-        transparent={false}
-        depthWrite
-        color="#ffffff"
-        vertexColors
-      />
+      <GrassWindMaterial texture={texture} playerPositionRef={playerPositionRef} />
     </instancedMesh>
   )
 }
 
-function TerrainGroundCover() {
+function TerrainGroundCover({ playerPositionRef }) {
   const rocks = useMemo(() => createRockCover(), [])
   const [grass, setGrass] = useState(null)
   const ref = useRef()
@@ -242,7 +354,7 @@ function TerrainGroundCover() {
 
   return (
     <group>
-      {grass && <GrassLayer items={grass} />}
+      {grass && <GrassLayer items={grass} playerPositionRef={playerPositionRef} />}
       <instancedMesh ref={ref} args={[undefined, undefined, rocks.length]} frustumCulled>
         <dodecahedronGeometry args={[0.48, 0]} />
         <meshBasicMaterial color="#9d9688" />

@@ -20,7 +20,7 @@ function OutdoorLighting({ active }) {
   )
 }
 
-function OutdoorNeighborhood({ lightingActive = true }) {
+function OutdoorNeighborhood({ lightingActive = true, playerPositionRef }) {
   return (
     <>
       <OutdoorLighting active={lightingActive} />
@@ -28,7 +28,7 @@ function OutdoorNeighborhood({ lightingActive = true }) {
       <DistantScenery />
       <PlayerPlot />
       <Road />
-      <TerrainGroundCover />
+      <TerrainGroundCover playerPositionRef={playerPositionRef} />
     </>
   )
 }
