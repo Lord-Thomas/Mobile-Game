@@ -7,6 +7,7 @@ import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, i
 import { ROAD_WIDTH } from './outdoorData'
 
 const dummy = new Object3D()
+const _cameraForward = new Vector3()
 const grassPlacementSettings = {
   rotationRandomness: Math.PI,
   positionJitter: 0.45,
@@ -31,7 +32,7 @@ const grassBottomColor = new Color('#638b0f')
 const grassMiddleColor = new Color('#6f970e')
 const grassTopColor = new Color('#8aac22')
 const GRASS_CARD_HEIGHT = 0.78
-const GRASS_VERTICAL_SEGMENTS = 4
+const GRASS_VERTICAL_SEGMENTS = 2
 const GRASS_FULL_DENSITY_RADIUS = 10
 const GRASS_THINNING_RADIUS = 52
 const GRASS_MIN_KEEP_PROBABILITY = 0.05
@@ -300,6 +301,8 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
     shader.uniforms.uWindDirection = {
       value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
     }
+    shader.uniforms.uCameraForward = { value: new Vector3(0, 0, -1) }
+    shader.uniforms.uCameraAngleMinDensity = { value: 0.3 }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -318,6 +321,8 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
       uniform float uMinKeepProbability;
       uniform vec3 uPlayerPosition;
       uniform vec3 uWindDirection;
+      uniform vec3 uCameraForward;
+      uniform float uCameraAngleMinDensity;
 
       float grassHash(vec2 value) {
         return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
@@ -360,6 +365,15 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
         1.0
       );
       float keepProbability = mix(1.0, uMinKeepProbability, thinningT);
+
+      // Camera-angle density: blades behind the camera are progressively thinned.
+      // Only kicks in for distant grass (smooth fade 8→20 units), so nearby grass is unaffected.
+      float cameraDistFade = smoothstep(8.0, 20.0, playerDistance);
+      vec2 toGrassNorm = fromPlayer / max(playerDistance, 0.0001);
+      float cameraDot = dot(toGrassNorm, uCameraForward.xz);
+      float cameraAngleFactor = smoothstep(-0.8, 0.2, cameraDot);
+      keepProbability *= mix(1.0, mix(uCameraAngleMinDensity, 1.0, cameraAngleFactor), cameraDistFade);
+
       float keep = step(grassHash(grassOrigin.xz), keepProbability);
       transformed.y -= (1.0 - keep) * 1000.0;
       float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
@@ -386,6 +400,10 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
     if (playerPosition) {
       shader.uniforms.uPlayerPosition.value.set(playerPosition.x, playerPosition.y, playerPosition.z)
     }
+    _cameraForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion)
+    _cameraForward.y = 0
+    if (_cameraForward.lengthSq() > 0.0001) _cameraForward.normalize()
+    shader.uniforms.uCameraForward.value.copy(_cameraForward)
   })
 
   return (
