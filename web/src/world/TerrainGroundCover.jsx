@@ -69,44 +69,39 @@ function softenGrassNormals(geometry, upStrength = 0.65) {
 function createGrassCardGeometry() {
   const width = 1.08
   const height = GRASS_CARD_HEIGHT
-  const cardAngles = [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]
   const positions = []
   const uvs = []
   const colors = []
   const indices = []
 
-  cardAngles.forEach((angle, cardIndex) => {
-    const cos = Math.cos(angle)
-    const sin = Math.sin(angle)
-    const base = cardIndex * (GRASS_VERTICAL_SEGMENTS + 1) * 2
+  // Single card along the X axis — the vertex shader rotates it toward the camera each frame
+  // (cylindrical billboard: always face the camera horizontally, stays vertical like real grass)
+  for (let row = 0; row <= GRASS_VERTICAL_SEGMENTS; row += 1) {
+    const verticalT = row / GRASS_VERTICAL_SEGMENTS
+    const y = height * verticalT
+    const v = verticalT
 
-    for (let row = 0; row <= GRASS_VERTICAL_SEGMENTS; row += 1) {
-      const verticalT = row / GRASS_VERTICAL_SEGMENTS
-      const y = height * verticalT
-      const v = verticalT
+    ;[
+      [-width * 0.5, 0],
+      [width * 0.5, 1],
+    ].forEach(([x, u]) => {
+      positions.push(x, y, 0)
+      uvs.push(u, v)
+      const color = verticalT < 0.55
+        ? grassBottomColor.clone().lerp(grassMiddleColor, verticalT / 0.55)
+        : grassMiddleColor.clone().lerp(grassTopColor, (verticalT - 0.55) / 0.45)
+      colors.push(color.r, color.g, color.b)
+    })
+  }
 
-      ;[
-        [-width * 0.5, 0],
-        [width * 0.5, 1],
-      ].forEach(([x, u]) => {
-        positions.push(x * cos, y, x * sin)
-        uvs.push(u, v)
-        const color = verticalT < 0.55
-          ? grassBottomColor.clone().lerp(grassMiddleColor, verticalT / 0.55)
-          : grassMiddleColor.clone().lerp(grassTopColor, (verticalT - 0.55) / 0.45)
-        colors.push(color.r, color.g, color.b)
-      })
-    }
-
-    for (let row = 0; row < GRASS_VERTICAL_SEGMENTS; row += 1) {
-      const a = base + row * 2
-      const b = a + 1
-      const c = a + 2
-      const d = a + 3
-      indices.push(a, b, c)
-      indices.push(b, d, c)
-    }
-  })
+  for (let row = 0; row < GRASS_VERTICAL_SEGMENTS; row += 1) {
+    const a = row * 2
+    const b = a + 1
+    const c = a + 2
+    const d = a + 3
+    indices.push(a, b, c)
+    indices.push(b, d, c)
+  }
 
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
@@ -335,6 +330,14 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
       `
       #include <begin_vertex>
 
+      // Cylindrical billboard: rotate the card to face the camera around the Y axis.
+      // position.x holds the horizontal half-width offset; we redirect it along the
+      // camera's perpendicular so the blade always shows its face, never its edge.
+      vec2 camRight = vec2(-uCameraForward.z, uCameraForward.x);
+      float localX = transformed.x;
+      transformed.x = localX * camRight.x;
+      transformed.z = localX * camRight.y;
+
       float heightFactor = clamp(position.y / uBladeHeight, 0.0, 1.0);
       heightFactor = heightFactor * heightFactor;
 
@@ -438,7 +441,7 @@ function GrassLayer({ items, playerPositionRef, visible = true }) {
   useLayoutEffect(() => {
     items.forEach((grass, index) => {
       dummy.position.set(...grass.position)
-      dummy.rotation.set(...grass.rotation)
+      dummy.rotation.set(0, 0, 0)
       dummy.scale.setScalar(grass.scale)
       dummy.updateMatrix()
       ref.current.setMatrixAt(index, dummy.matrix)
