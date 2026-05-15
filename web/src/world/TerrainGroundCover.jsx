@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, MathUtils, Object3D, SRGBColorSpace, Vector3 } from 'three'
+import { BufferGeometry, Color, Float32BufferAttribute, FrontSide, MathUtils, Object3D, SRGBColorSpace, Vector3 } from 'three'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 import { canPlaceObject, getZoneDensity } from './worldZones'
 
@@ -328,7 +328,7 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
       ref={materialRef}
       map={texture}
       alphaTest={0.45}
-      side={DoubleSide}
+      side={FrontSide}
       transparent={false}
       depthWrite
       color="#ffffff"

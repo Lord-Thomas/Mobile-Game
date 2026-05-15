@@ -1,5 +1,5 @@
 import { Tree } from '@dgreenheck/ez-tree'
-import { BufferAttribute, Box3, Color, DoubleSide, Float32BufferAttribute, MeshBasicMaterial, Vector3 } from 'three'
+import { BufferAttribute, Box3, Color, Float32BufferAttribute, FrontSide, MeshBasicMaterial, Vector3 } from 'three'
 
 const leafBottomColor = new Color('#638b0f')
 const leafMiddleColor = new Color('#6f970e')
@@ -241,7 +241,7 @@ function stylizeLeafColors(tree, config) {
     name: 'stylized-leaves',
     map: alphaTexture,
     alphaTest: material.alphaTest ?? 0.5,
-    side: DoubleSide,
+    side: FrontSide,
     transparent: false,
     depthWrite: true,
     color: '#ffffff',
