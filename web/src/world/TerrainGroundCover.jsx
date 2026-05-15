@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { BufferGeometry, Color, Float32BufferAttribute, FrontSide, MathUtils, Object3D, SRGBColorSpace, Vector3 } from 'three'
+import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, MathUtils, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
 import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
@@ -26,7 +26,15 @@ const GRASS_CHUNK_ROWS_PER_IDLE_BATCH = 96
 const GRASS_CHUNK_MIN_ROWS_PER_BATCH = 20
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 8
 const GRASS_BOOTSTRAP_CHUNK_COUNT = 9999
-const MAX_GRASS_INSTANCES = 1_200_000
+// Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
+// frustum-culls entire quadrants when they fall outside the camera view.
+const QUADRANTS = [
+  { id: 'ne', minX: 0,               maxX: TERRAIN_HALF_SIZE,  minZ: 0,               maxZ: TERRAIN_HALF_SIZE },
+  { id: 'nw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: 0,               maxZ: TERRAIN_HALF_SIZE },
+  { id: 'se', minX: 0,               maxX: TERRAIN_HALF_SIZE,  minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
+  { id: 'sw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
+]
+const MAX_QUADRANT_INSTANCES = 350_000
 const DISTANT_GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const DISTANT_GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const DISTANT_GRASS_GRID_STEP = 0.72
@@ -36,7 +44,7 @@ const grassBottomColor = new Color('#638b0f')
 const grassMiddleColor = new Color('#6f970e')
 const grassTopColor = new Color('#8aac22')
 const GRASS_CARD_HEIGHT = 0.78
-const GRASS_VERTICAL_SEGMENTS = 2
+const GRASS_VERTICAL_SEGMENTS = 1
 const GRASS_FULL_DENSITY_RADIUS = 10
 const GRASS_THINNING_RADIUS = 52
 const GRASS_MIN_KEEP_PROBABILITY = 0.05
@@ -227,6 +235,12 @@ function getGrassChunkIndex(value) {
 
 function getGrassChunkKey(chunkX, chunkZ) {
   return `${chunkX}:${chunkZ}`
+}
+
+function getChunkQuadrantIndex(chunkX, chunkZ) {
+  const centerX = (chunkX + 0.5) * GRASS_CHUNK_SIZE
+  const centerZ = (chunkZ + 0.5) * GRASS_CHUNK_SIZE
+  return (centerX >= 0 ? 0 : 1) + (centerZ >= 0 ? 0 : 2)
 }
 
 function getGrassChunkStep(chunkX, chunkZ) {
@@ -426,12 +440,13 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
   const activeGrassChunkJobRef = useRef(null)
   const residentGrassKeysRef = useRef(new Set())
 
-  // Single instancedMesh for all grass — avoids 1000+ draw calls and useFrame callbacks
-  const grassMeshRef = useRef()
+  // 4 quadrant instancedMeshes — each has a correct bounding box so Three.js can
+  // frustum-cull entire quadrants that fall outside the camera view (4 draw calls).
+  const grassMeshRefs = useRef([null, null, null, null])
   const shaderRef = useRef(null)
-  const writtenChunkKeysRef = useRef(new Set())
+  const writtenChunkKeysRefs = useRef([new Set(), new Set(), new Set(), new Set()])
   const writtenDistantGrassRef = useRef(false)
-  const nextGrassOffsetRef = useRef(0)
+  const nextGrassOffsetRefs = useRef([0, 0, 0, 0])
 
   const baseTexture = useTexture(GRASS_TEXTURE)
   const grassTexture = useMemo(() => {
@@ -442,8 +457,35 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
   }, [baseTexture])
   useEffect(() => () => grassTexture.dispose(), [grassTexture])
 
-  const grassGeometry = useMemo(() => createGrassCardGeometry(), [])
-  const handleBeforeCompile = useMemo(() => buildGrassHandleBeforeCompile(shaderRef), [])
+  const grassBaseGeometry = useMemo(() => createGrassCardGeometry(), [])
+
+  // One geometry clone per quadrant — each carries its own bounding sphere so
+  // Three.js frustum-culls correctly (the blade geometry alone is too small to cull by).
+  const grassGeometries = useMemo(() => QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
+    const geo = grassBaseGeometry.clone()
+    const cx = (minX + maxX) / 2
+    const cz = (minZ + maxZ) / 2
+    const radius = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 6
+    geo.boundingBox = new Box3(new Vector3(minX, -2, minZ), new Vector3(maxX, 5, maxZ))
+    geo.boundingSphere = new Sphere(new Vector3(cx, 1.5, cz), radius)
+    return geo
+  }), [grassBaseGeometry])
+
+  // One shared material for all 4 quadrants — single shader compilation, single uniform set.
+  const grassMaterial = useMemo(() => {
+    const mat = new MeshBasicMaterial({
+      map: grassTexture,
+      alphaTest: 0.45,
+      side: FrontSide,
+      transparent: false,
+      depthWrite: true,
+      color: 0xffffff,
+      vertexColors: true,
+    })
+    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shaderRef)
+    return mat
+  }, [grassTexture])
+  useEffect(() => () => grassMaterial.dispose(), [grassMaterial])
 
   const publishGrassDebugStats = () => {
     if (typeof window === 'undefined') return
@@ -629,47 +671,59 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
     shader.uniforms.uCameraForward.value.copy(_cameraForward)
   })
 
-  // Write newly built chunks into the shared buffer (incremental — only new chunks each call)
+  // Write newly built chunks into the correct quadrant buffer (incremental — only new chunks).
   useLayoutEffect(() => {
-    const mesh = grassMeshRef.current
-    if (!mesh) return
-    let written = false
+    const meshes = grassMeshRefs.current
+    let dirtyQuadrants = 0
     Object.entries(grassChunks).forEach(([key, items]) => {
-      if (writtenChunkKeysRef.current.has(key)) return
+      const [cx, cz] = key.split(':').map(Number)
+      const qi = getChunkQuadrantIndex(cx, cz)
+      if (writtenChunkKeysRefs.current[qi].has(key)) return
+      const mesh = meshes[qi]
+      if (!mesh) return
       items.forEach((grass) => {
-        if (nextGrassOffsetRef.current >= MAX_GRASS_INSTANCES) return
+        if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
         dummy.position.set(...grass.position)
         dummy.rotation.set(0, 0, 0)
         dummy.scale.setScalar(grass.scale)
         dummy.updateMatrix()
-        dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRef.current * 16)
-        nextGrassOffsetRef.current += 1
+        dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
+        nextGrassOffsetRefs.current[qi] += 1
       })
-      writtenChunkKeysRef.current.add(key)
-      written = true
+      writtenChunkKeysRefs.current[qi].add(key)
+      dirtyQuadrants |= 1 << qi
     })
-    if (written) {
-      mesh.count = nextGrassOffsetRef.current
-      mesh.instanceMatrix.needsUpdate = true
+    if (dirtyQuadrants) {
+      meshes.forEach((mesh, qi) => {
+        if (!(dirtyQuadrants & (1 << qi)) || !mesh) return
+        mesh.count = nextGrassOffsetRefs.current[qi]
+        mesh.instanceMatrix.needsUpdate = true
+      })
     }
   }, [grassChunks])
 
-  // Write distant grass into the shared buffer (once)
+  // Write distant grass into the correct quadrant buffers (once)
   useLayoutEffect(() => {
-    const mesh = grassMeshRef.current
-    if (!mesh || !distantGrass || writtenDistantGrassRef.current) return
+    const meshes = grassMeshRefs.current
+    if (!distantGrass || writtenDistantGrassRef.current) return
     distantGrass.forEach((grass) => {
-      if (nextGrassOffsetRef.current >= MAX_GRASS_INSTANCES) return
+      const [x, , z] = grass.position
+      const qi = (x >= 0 ? 0 : 1) + (z >= 0 ? 0 : 2)
+      const mesh = meshes[qi]
+      if (!mesh || nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
       dummy.position.set(...grass.position)
       dummy.rotation.set(0, 0, 0)
       dummy.scale.setScalar(grass.scale)
       dummy.updateMatrix()
-      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRef.current * 16)
-      nextGrassOffsetRef.current += 1
+      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
+      nextGrassOffsetRefs.current[qi] += 1
     })
     writtenDistantGrassRef.current = true
-    grassMeshRef.current.count = nextGrassOffsetRef.current
-    grassMeshRef.current.instanceMatrix.needsUpdate = true
+    meshes.forEach((mesh, qi) => {
+      if (!mesh) return
+      mesh.count = nextGrassOffsetRefs.current[qi]
+      mesh.instanceMatrix.needsUpdate = true
+    })
   }, [distantGrass])
 
   useEffect(() => () => {
@@ -741,23 +795,15 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
 
   return (
     <group visible={active} userData={{ debugCategory: 'grass' }}>
-      <instancedMesh
-        ref={grassMeshRef}
-        args={[grassGeometry, undefined, MAX_GRASS_INSTANCES]}
-        frustumCulled={false}
-        userData={{ debugCategory: 'grass-mesh' }}
-      >
-        <meshBasicMaterial
-          map={grassTexture}
-          alphaTest={0.45}
-          side={FrontSide}
-          transparent={false}
-          depthWrite
-          color="#ffffff"
-          vertexColors
-          onBeforeCompile={handleBeforeCompile}
+      {QUADRANTS.map((quadrant, qi) => (
+        <instancedMesh
+          key={quadrant.id}
+          ref={(el) => { grassMeshRefs.current[qi] = el }}
+          args={[grassGeometries[qi], grassMaterial, MAX_QUADRANT_INSTANCES]}
+          frustumCulled
+          userData={{ debugCategory: 'grass-mesh' }}
         />
-      </instancedMesh>
+      ))}
       <instancedMesh
         ref={ref}
         args={[undefined, undefined, rocks.length]}
