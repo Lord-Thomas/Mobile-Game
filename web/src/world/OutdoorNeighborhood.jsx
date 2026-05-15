@@ -68,12 +68,13 @@ function OutdoorNeighborhood({
   showTerrain = true,
   showSky = true,
   castShadows = true,
+  showPlayerPlot = false,
 }) {
   return (
     <group userData={{ debugCategory: 'outdoor' }}>
       <OutdoorLighting active={lightingActive} showSky={showSky} castShadows={castShadows} />
       {showTerrain && <OutdoorGround />}
-      <PlayerPlot />
+      {showPlayerPlot && <PlayerPlot />}
       <Road />
       {NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />

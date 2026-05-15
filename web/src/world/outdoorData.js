@@ -21,8 +21,10 @@ const neighborHouseSlots = [
     color: '#ff8a80',
     trim: '#7b3f35',
     size: [5.8, 3.2, 4.8],
-    lotSize: [12, 11],
     doorWall: 'north',
+    parts: [
+      { id: 'main', offset: [0, 0], size: [5.8, 3.2, 4.8], doorWall: 'north' },
+    ],
   },
   {
     id: 'neighbor_blue',
@@ -31,8 +33,11 @@ const neighborHouseSlots = [
     color: '#80d8ff',
     trim: '#37474f',
     size: [6.2, 3.4, 5.1],
-    lotSize: [12.5, 11],
     doorWall: 'south',
+    parts: [
+      { id: 'main', offset: [0, 0], size: [6.2, 3.4, 5.1], doorWall: 'south' },
+      { id: 'annex', offset: [4.35, 0.55], size: [2.7, 2.8, 3.6] },
+    ],
   },
   {
     id: 'neighbor_amber',
@@ -41,8 +46,11 @@ const neighborHouseSlots = [
     color: '#ffd180',
     trim: '#5d4037',
     size: [5.2, 3, 4.4],
-    lotSize: [12, 10.5],
     doorWall: 'south',
+    parts: [
+      { id: 'main', offset: [0, 0], size: [5.2, 3, 4.4], doorWall: 'south' },
+      { id: 'rear_room', offset: [-0.9, 3.45], size: [3.8, 2.8, 2.7] },
+    ],
   },
   {
     id: 'neighbor_green',
@@ -51,8 +59,11 @@ const neighborHouseSlots = [
     color: '#ccff90',
     trim: '#5d4037',
     size: [6.4, 3.2, 4.8],
-    lotSize: [12.5, 11],
     doorWall: 'south',
+    parts: [
+      { id: 'main', offset: [0, 0], size: [6.4, 3.2, 4.8], doorWall: 'south' },
+      { id: 'side_room', offset: [-4.25, -0.35], size: [2.5, 2.9, 3.4] },
+    ],
   },
 ]
 
@@ -71,6 +82,10 @@ export const NEIGHBOR_HOUSES = neighborHouseSlots.map((slot) => {
     roadPosition: transform.roadPosition,
   }
 })
+
+export function getNeighborHouseParts(house) {
+  return house.parts ?? [{ id: 'main', offset: [0, 0], size: house.size, doorWall: house.doorWall }]
+}
 
 export const FOREST_TREES = [
   [-37, -34, 1.1], [-31, -38, 0.85], [-22, -36, 1], [-12, -39, 0.9], [0, -37, 1.05],
@@ -189,12 +204,17 @@ export const DISTANT_TREES = createTreeEntries(distantTreePlacements, false)
 
 export const OUTDOOR_PLAYER_COLLIDERS = [
   ...getHouseFootprintColliders(),
-  ...NEIGHBOR_HOUSES.map((house) => ({
-    x: house.position[0],
-    z: house.position[2],
-    hx: house.size[0] * 0.5 + 0.45,
-    hz: house.size[2] * 0.5 + 0.45,
-  })),
+  ...NEIGHBOR_HOUSES.flatMap((house) => {
+    const cos = Math.cos(house.rotationY)
+    const sin = Math.sin(house.rotationY)
+
+    return getNeighborHouseParts(house).map((part) => ({
+      x: house.position[0] + part.offset[0] * cos - part.offset[1] * sin,
+      z: house.position[2] + part.offset[0] * sin + part.offset[1] * cos,
+      hx: part.size[0] * 0.5 + 0.45,
+      hz: part.size[2] * 0.5 + 0.45,
+    }))
+  }),
   ...AUTHORED_TREES.map(({ config, colliderRadius }) => ({
     x: config.position.x,
     z: config.position.z,

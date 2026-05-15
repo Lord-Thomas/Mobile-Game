@@ -1,6 +1,6 @@
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { getRoomBounds, houseLayout } from '../house/houseLayout'
-import { NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
+import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
 
@@ -196,19 +196,29 @@ function getNeighborHousePadHeightAt(x, z) {
   let targetHeight = 0
 
   NEIGHBOR_HOUSES.forEach((house) => {
-    const mask = softRectMask(
-      x,
-      z,
-      house.position,
-      [house.size[0] + 1.4, house.size[2] + 1.4],
-      house.rotationY,
-      2.4,
-    )
+    const cos = Math.cos(house.rotationY)
+    const sin = Math.sin(house.rotationY)
 
-    if (mask > strongestMask) {
-      strongestMask = mask
-      targetHeight = getNeighborHousePadHeight(house)
-    }
+    getNeighborHouseParts(house).forEach((part) => {
+      const center = [
+        house.position[0] + part.offset[0] * cos - part.offset[1] * sin,
+        0,
+        house.position[2] + part.offset[0] * sin + part.offset[1] * cos,
+      ]
+      const mask = softRectMask(
+        x,
+        z,
+        center,
+        [part.size[0] + 1.4, part.size[2] + 1.4],
+        house.rotationY,
+        2.4,
+      )
+
+      if (mask > strongestMask) {
+        strongestMask = mask
+        targetHeight = getNeighborHousePadHeight(house)
+      }
+    })
   })
 
   return { mask: strongestMask, targetHeight }

@@ -14,6 +14,7 @@ import { OUTDOOR_PLAYER_COLLIDERS } from './world/outdoorData'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
+import GableRoof from './world/house/GableRoof'
 import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
@@ -606,6 +607,30 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
         <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
         <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
       </mesh>
+      <mesh position={[secondRoom.position[0], secondRoom.size[1] - 0.02, secondRoom.position[2]]} visible={!hideCeiling}>
+        <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
+        <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
+      </mesh>
+      <GableRoof
+        width={MAIN_ROOM.width}
+        depth={MAIN_ROOM.depth}
+        baseY={MAIN_ROOM.height + 0.04}
+        pitch={32}
+        overhang={0.42}
+        thickness={0.14}
+        color="#8b4c3f"
+      />
+      <group position={secondRoom.position}>
+        <GableRoof
+          width={secondRoom.size[0]}
+          depth={secondRoom.size[2]}
+          baseY={secondRoom.size[1] + 0.04}
+          pitch={28}
+          overhang={0.34}
+          thickness={0.12}
+          color="#8b4c3f"
+        />
+      </group>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
@@ -5076,6 +5101,7 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
           ['shadows', 'Ombres'],
           ['house', 'Maison'],
           ['player', 'Joueur'],
+          ['plot', 'Parcelle'],
         ].map(([key, label]) => (
           <button
             className={toggles[key] ? 'is-active' : ''}
@@ -5211,6 +5237,7 @@ function App() {
     shadows: true,
     house: true,
     player: true,
+    plot: false,
   })
   const showGpuWarning = Boolean(rendererInfo && isWeakRenderer(rendererInfo) && !gpuWarningDismissed)
 
@@ -6074,6 +6101,7 @@ function App() {
           showTerrain={!isDebugMode || debugToggles.terrain}
           showSky={!isDebugMode || debugToggles.sky}
           castShadows={!isDebugMode || debugToggles.shadows}
+          showPlayerPlot={isDebugMode && debugToggles.plot}
         />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />

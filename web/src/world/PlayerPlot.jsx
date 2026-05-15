@@ -1,35 +1,42 @@
-import { getRoomBounds, mainRoom } from './house/houseLayout'
+import { PLAYER_PLOT_SIZE } from './outdoorData'
 
 function PlayerPlot() {
-  const fenceColor = '#e8d7ad'
-  const mainBounds = getRoomBounds(mainRoom)
-  const pathX = mainBounds.minX - 1.05
-  const gateMinX = pathX - 1.2
-  const gateMaxX = pathX + 1.2
+  const halfSize = PLAYER_PLOT_SIZE * 0.5
+  const dashLength = 0.72
+  const dashGap = 0.42
+  const dashY = 0.19
+  const dashCenters = []
+  const perimeterLength = PLAYER_PLOT_SIZE
+
+  for (let offset = -halfSize + dashLength * 0.5; offset <= halfSize - dashLength * 0.5; offset += dashLength + dashGap) {
+    dashCenters.push(offset)
+  }
 
   return (
-    <group>
-      {[-16, 16].map((x) => (
-        <mesh key={`plot-side-${x}`} position={[x, 0.33, 0]}>
-          <boxGeometry args={[0.18, 0.66, 21]} />
-          <meshStandardMaterial color={fenceColor} roughness={0.72} />
-        </mesh>
-      ))}
-      {[
-        { center: (-16 + gateMinX) * 0.5, width: gateMinX + 16 },
-        { center: (gateMaxX + 16) * 0.5, width: 16 - gateMaxX },
-      ].filter((segment) => segment.width > 0.2).map((segment) => (
-        <mesh key={`front-fence-${segment.center}`} position={[segment.center, 0.33, 16]}>
-          <boxGeometry args={[segment.width, 0.66, 0.18]} />
-          <meshStandardMaterial color={fenceColor} roughness={0.72} />
-        </mesh>
-      ))}
-
-      {[-12.5, 10.5].map((x) => (
-        <mesh key={`flower-${x}`} position={[x, 0.04, 9.2]} rotation={[-Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[0.34, 12]} />
-          <meshStandardMaterial color={x < 0 ? '#f9d36a' : '#f28fb4'} roughness={0.78} />
-        </mesh>
+    <group userData={{ debugCategory: 'plot' }}>
+      <mesh position={[0, 0.046, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[perimeterLength, perimeterLength]} />
+        <meshStandardMaterial color="#ffffff" transparent opacity={0.16} roughness={0.9} depthWrite={false} />
+      </mesh>
+      {dashCenters.map((offset) => (
+        <group key={`plot-dash-${offset}`}>
+          <mesh position={[offset, dashY, halfSize]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+            <planeGeometry args={[dashLength, 0.12]} />
+            <meshStandardMaterial color="#ffffff" transparent opacity={0.92} roughness={0.9} depthWrite={false} />
+          </mesh>
+          <mesh position={[offset, dashY, -halfSize]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={10}>
+            <planeGeometry args={[dashLength, 0.12]} />
+            <meshStandardMaterial color="#ffffff" transparent opacity={0.92} roughness={0.9} depthWrite={false} />
+          </mesh>
+          <mesh position={[halfSize, dashY, offset]} rotation={[-Math.PI / 2, 0, Math.PI / 2]} renderOrder={10}>
+            <planeGeometry args={[dashLength, 0.12]} />
+            <meshStandardMaterial color="#ffffff" transparent opacity={0.92} roughness={0.9} depthWrite={false} />
+          </mesh>
+          <mesh position={[-halfSize, dashY, offset]} rotation={[-Math.PI / 2, 0, Math.PI / 2]} renderOrder={10}>
+            <planeGeometry args={[dashLength, 0.12]} />
+            <meshStandardMaterial color="#ffffff" transparent opacity={0.92} roughness={0.9} depthWrite={false} />
+          </mesh>
+        </group>
       ))}
     </group>
   )

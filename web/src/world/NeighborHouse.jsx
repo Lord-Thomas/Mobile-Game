@@ -2,6 +2,7 @@ import { useTexture } from '@react-three/drei'
 import { DoubleSide, RepeatWrapping, SRGBColorSpace } from 'three'
 import { useEffect, useMemo } from 'react'
 import { getWallColliderTransform, getWallPointAt, splitWallIntoSolidRects } from './house/wallUtils'
+import GableRoof from './house/GableRoof'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const WALL_THICKNESS = 0.18
@@ -255,18 +256,16 @@ function NeighborDoor({ door }) {
   )
 }
 
-function NeighborHouse({ position, color, trim, rotationY = 0, size, doorWall }) {
+function HouseVolume({ id, offset = [0, 0], size, doorWall, color, trim, exteriorTexture }) {
   const walls = createNeighborWalls({ size, color, trim, doorWall })
   const door = getDoorData(walls)
-  const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   const [width, height, depth] = size
-  const terrainY = getTerrainHeight(position[0], position[2])
 
   return (
-    <group position={[position[0], terrainY, position[2]]} rotation={[0, rotationY, 0]}>
+    <group position={[offset[0], 0, offset[1]]}>
       {walls.flatMap((wall) =>
         splitWallIntoSolidRects(wall).map((rect) => (
-          <WallVolume key={rect.id} wall={wall} rect={rect} exteriorTexture={exteriorTexture} />
+          <WallVolume key={`${id}-${rect.id}`} wall={wall} rect={rect} exteriorTexture={exteriorTexture} />
         )),
       )}
       <OpeningReveals walls={walls} />
@@ -275,6 +274,38 @@ function NeighborHouse({ position, color, trim, rotationY = 0, size, doorWall })
         <boxGeometry args={[width + 0.12, 0.12, depth + 0.12]} />
         <meshStandardMaterial color={trim} roughness={0.8} />
       </mesh>
+      <GableRoof
+        width={width}
+        depth={depth}
+        baseY={height + 0.1}
+        pitch={width >= depth ? 30 : 34}
+        overhang={0.32}
+        thickness={0.12}
+        color={trim}
+      />
+    </group>
+  )
+}
+
+function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, doorWall }) {
+  const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
+  const terrainY = getTerrainHeight(position[0], position[2])
+  const volumes = parts ?? [{ id: 'main', offset: [0, 0], size, doorWall }]
+
+  return (
+    <group position={[position[0], terrainY, position[2]]} rotation={[0, rotationY, 0]}>
+      {volumes.map((part) => (
+        <HouseVolume
+          key={part.id}
+          id={part.id}
+          offset={part.offset}
+          size={part.size}
+          doorWall={part.doorWall}
+          color={color}
+          trim={trim}
+          exteriorTexture={exteriorTexture}
+        />
+      ))}
     </group>
   )
 }
