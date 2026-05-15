@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Color, Float32BufferAttribute, FrontSide, MathUtils, Object3D, SRGBColorSpace, Vector3 } from 'three'
-import { getTerrainHeight } from './terrain/terrainGeometry'
-import { canPlaceObject, getZoneDensity } from './worldZones'
+import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
+import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
+import { ROAD_WIDTH } from './outdoorData'
 
 const dummy = new Object3D()
 const grassPlacementSettings = {
@@ -12,17 +13,18 @@ const grassPlacementSettings = {
   minScale: 0.18,
   maxScale: 0.3,
 }
-const GRASS_AREA_MIN = -72
-const GRASS_AREA_MAX = 72
+const GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
+const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const GRASS_GRID_STEP = 0.13
 const GRASS_DENSITY_MULTIPLIER = 9.5
-const GRASS_CHUNK_SIZE = 12
-const ACTIVE_GRASS_CHUNK_RADIUS = 2
-const PRELOAD_GRASS_CHUNK_RADIUS = 4
-const GRASS_CHUNK_ROWS_PER_IDLE_BATCH = 10
-const DISTANT_GRASS_AREA_MIN = -86
-const DISTANT_GRASS_AREA_MAX = 86
-const DISTANT_GRASS_GRID_STEP = 1.05
+const GRASS_CHUNK_SIZE = 6
+const GRASS_CHUNK_ROWS_PER_IDLE_BATCH = 96
+const GRASS_CHUNK_MIN_ROWS_PER_BATCH = 20
+const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 8
+const GRASS_BOOTSTRAP_CHUNK_COUNT = 9
+const DISTANT_GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
+const DISTANT_GRASS_AREA_MAX = TERRAIN_HALF_SIZE
+const DISTANT_GRASS_GRID_STEP = 0.72
 const DISTANT_GRASS_ROWS_PER_IDLE_BATCH = 10
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
 const grassBottomColor = new Color('#638b0f')
@@ -30,6 +32,9 @@ const grassMiddleColor = new Color('#6f970e')
 const grassTopColor = new Color('#8aac22')
 const GRASS_CARD_HEIGHT = 0.78
 const GRASS_VERTICAL_SEGMENTS = 4
+const GRASS_FULL_DENSITY_RADIUS = 10
+const GRASS_THINNING_RADIUS = 52
+const GRASS_MIN_KEEP_PROBABILITY = 0.05
 const grassWindSettings = {
   strength: 0.13,
   speed: 1.05,
@@ -166,17 +171,20 @@ function makeGrassInstance(x, z, seed) {
 
 function getDistantGrassDensity(x, z, seed) {
   const maxAxis = Math.max(Math.abs(x), Math.abs(z))
-  if (maxAxis < 34 || maxAxis > 88) return 0
+  if (maxAxis > TERRAIN_HALF_SIZE) return 0
 
-  const nearFade = smoothstep(34, 48, maxAxis)
-  const farFade = 1 - smoothstep(78, 90, maxAxis)
+  const farFade = 1 - smoothstep(TERRAIN_HALF_SIZE - 12, TERRAIN_HALF_SIZE, maxAxis)
   const clumpNoise = seededRandom(Math.floor(x * 0.19) * 131 + Math.floor(z * 0.19) * 197)
-  const openPatch = smoothstep(0.18, 0.82, clumpNoise)
+  const clumpVariation = 0.78 + smoothstep(0.18, 0.82, clumpNoise) * 0.22
   const slope = getTerrainSlope(x, z)
   const slopeFade = 1 - smoothstep(0.24, 0.58, slope)
   const mountainFade = 1 - smoothstep(62, 90, maxAxis) * 0.35
+  const visualDensity = getVisualGrassDensity(x, z)
 
-  return 0.14 * nearFade * farFade * openPatch * slopeFade * mountainFade * (0.72 + seededRandom(seed + 71) * 0.28)
+  return Math.max(
+    0.08,
+    visualDensity * 1.2,
+  ) * farFade * clumpVariation * slopeFade * mountainFade * (0.82 + seededRandom(seed + 71) * 0.18)
 }
 
 function pushGrassRow(grass, xi, minZ, maxZ) {
@@ -184,12 +192,25 @@ function pushGrassRow(grass, xi, minZ, maxZ) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
     const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
-    const density = Math.min(
-      1,
-      Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9) * GRASS_DENSITY_MULTIPLIER,
-    )
+    const gameplayDensity = Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9)
+    const visualDensity = getVisualGrassDensity(x, z)
+    const density = Math.min(1, Math.max(gameplayDensity, visualDensity) * GRASS_DENSITY_MULTIPLIER)
     if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
   }
+}
+
+function getVisualGrassDensity(x, z) {
+  if (isInsideHouseFootprint(x, z, 0.9)) return 0
+
+  const roadDistance = getDistanceToRoad(x, z)
+  const pathDistance = getDistanceToPath(x, z)
+  const roadFade = smoothstep(ROAD_WIDTH * 0.5 + 1.1, ROAD_WIDTH * 0.5 + 4.2, roadDistance)
+  const pathFade = smoothstep(0.7, 3.6, pathDistance)
+  const maxAxis = Math.max(Math.abs(x), Math.abs(z))
+  const terrainEdgeFade = 1 - smoothstep(TERRAIN_HALF_SIZE - 4, TERRAIN_HALF_SIZE, maxAxis)
+  const outsidePlayableBoost = smoothstep(34, 44, maxAxis)
+
+  return 0.18 * roadFade * pathFade * terrainEdgeFade * (0.72 + outsidePlayableBoost * 0.28)
 }
 
 function getGrassChunkBounds(chunkX, chunkZ) {
@@ -206,6 +227,29 @@ function getGrassChunkIndex(value) {
 
 function getGrassChunkKey(chunkX, chunkZ) {
   return `${chunkX}:${chunkZ}`
+}
+
+function getAllGrassChunkKeys() {
+  const keys = []
+  const minChunkX = getGrassChunkIndex(GRASS_AREA_MIN)
+  const maxChunkX = getGrassChunkIndex(GRASS_AREA_MAX)
+  const minChunkZ = getGrassChunkIndex(GRASS_AREA_MIN)
+  const maxChunkZ = getGrassChunkIndex(GRASS_AREA_MAX)
+
+  for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
+    for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ += 1) {
+      const bounds = getGrassChunkBounds(chunkX, chunkZ)
+      if (bounds.maxX < bounds.minX || bounds.maxZ < bounds.minZ) continue
+      keys.push(getGrassChunkKey(chunkX, chunkZ))
+    }
+  }
+
+  return keys
+}
+
+function getGrassChunkDistance(key, centerChunkX, centerChunkZ) {
+  const [chunkX, chunkZ] = key.split(':').map(Number)
+  return Math.max(Math.abs(chunkX - centerChunkX), Math.abs(chunkZ - centerChunkZ))
 }
 
 function pushDistantGrassRow(grass, xi) {
@@ -250,6 +294,9 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
     shader.uniforms.uWindScale = { value: grassWindSettings.scale }
     shader.uniforms.uInteractionRadius = { value: grassInteractionSettings.radius }
     shader.uniforms.uInteractionStrength = { value: grassInteractionSettings.strength }
+    shader.uniforms.uFullDensityRadius = { value: GRASS_FULL_DENSITY_RADIUS }
+    shader.uniforms.uThinningRadius = { value: GRASS_THINNING_RADIUS }
+    shader.uniforms.uMinKeepProbability = { value: GRASS_MIN_KEEP_PROBABILITY }
     shader.uniforms.uWindDirection = {
       value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
     }
@@ -266,8 +313,15 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
       uniform float uWindScale;
       uniform float uInteractionRadius;
       uniform float uInteractionStrength;
+      uniform float uFullDensityRadius;
+      uniform float uThinningRadius;
+      uniform float uMinKeepProbability;
       uniform vec3 uPlayerPosition;
       uniform vec3 uWindDirection;
+
+      float grassHash(vec2 value) {
+        return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
       `,
     )
 
@@ -297,6 +351,17 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
 
       vec2 fromPlayer = grassOrigin.xz - uPlayerPosition.xz;
       float playerDistance = length(fromPlayer);
+      float distanceSq = dot(fromPlayer, fromPlayer);
+      float fullDensityRadiusSq = uFullDensityRadius * uFullDensityRadius;
+      float thinningRadiusSq = uThinningRadius * uThinningRadius;
+      float thinningT = clamp(
+        (distanceSq - fullDensityRadiusSq) / max(thinningRadiusSq - fullDensityRadiusSq, 0.0001),
+        0.0,
+        1.0
+      );
+      float keepProbability = mix(1.0, uMinKeepProbability, thinningT);
+      float keep = step(grassHash(grassOrigin.xz), keepProbability);
+      transformed.y -= (1.0 - keep) * 1000.0;
       float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
 
       if (playerDistance > 0.0001) {
@@ -375,6 +440,7 @@ function GrassLayer({ items, playerPositionRef, visible = true }) {
 
 function TerrainGroundCover({ playerPositionRef, active = true }) {
   const rocks = useMemo(() => createRockCover(), [])
+  const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
   const [grassChunks, setGrassChunks] = useState({})
   const [distantGrass, setDistantGrass] = useState(null)
   const ref = useRef()
@@ -384,58 +450,89 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
   const grassChunkQueueRef = useRef([])
   const grassChunkTimerRef = useRef(null)
   const activeGrassChunkJobRef = useRef(null)
-  const visibleGrassKeysRef = useRef(new Set())
   const residentGrassKeysRef = useRef(new Set())
+
+  const publishGrassDebugStats = () => {
+    if (typeof window === 'undefined') return
+    const completedChunks = grassChunkCacheRef.current.size
+    const mountedChunks = Object.keys(grassChunks).length
+    let completedBlades = 0
+    grassChunkCacheRef.current.forEach((items) => {
+      completedBlades += items.length
+    })
+    window.__grassDebug = {
+      queuedChunks: grassChunkQueueRef.current.length,
+      pendingChunks: pendingGrassChunksRef.current.size,
+      activeChunk: activeGrassChunkJobRef.current?.key ?? null,
+      completedChunks,
+      mountedChunks,
+      completedBlades,
+    }
+  }
 
   const scheduleGrassChunkBuild = () => {
     if (grassChunkTimerRef.current !== null || grassChunkQueueRef.current.length === 0) return
 
     const run = (deadline) => {
       grassChunkTimerRef.current = null
-      if (!activeGrassChunkJobRef.current) {
-        const nextKey = grassChunkQueueRef.current.shift()
-        if (!nextKey) return
-        const [chunkX, chunkZ] = nextKey.split(':').map(Number)
-        const bounds = getGrassChunkBounds(chunkX, chunkZ)
-        activeGrassChunkJobRef.current = {
-          key: nextKey,
-          grass: [],
-          xi: bounds.minX,
-          ...bounds,
-        }
-      }
-
-      const job = activeGrassChunkJobRef.current
       let rows = 0
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0
+
       while (
-        job.xi <= job.maxX
-        && rows < GRASS_CHUNK_ROWS_PER_IDLE_BATCH
-        && (!deadline || deadline.timeRemaining() > 2)
+        rows < GRASS_CHUNK_ROWS_PER_IDLE_BATCH
+        && (
+          rows < GRASS_CHUNK_MIN_ROWS_PER_BATCH
+          || !deadline
+          || deadline.didTimeout
+          || deadline.timeRemaining() > 2
+        )
+        && (
+          typeof performance === 'undefined'
+          || rows < GRASS_CHUNK_MIN_ROWS_PER_BATCH
+          || performance.now() - startedAt < GRASS_CHUNK_BUILD_TIME_BUDGET_MS
+        )
       ) {
+        if (!activeGrassChunkJobRef.current) {
+          const nextKey = grassChunkQueueRef.current.shift()
+          if (!nextKey) break
+          const [chunkX, chunkZ] = nextKey.split(':').map(Number)
+          const bounds = getGrassChunkBounds(chunkX, chunkZ)
+          activeGrassChunkJobRef.current = {
+            key: nextKey,
+            grass: [],
+            xi: bounds.minX,
+            ...bounds,
+          }
+        }
+
+        const job = activeGrassChunkJobRef.current
         pushGrassRow(job.grass, job.xi, job.minZ, job.maxZ)
         job.xi += GRASS_GRID_STEP
         rows += 1
+
+        if (job.xi > job.maxX) {
+          grassChunkCacheRef.current.set(job.key, job.grass)
+          pendingGrassChunksRef.current.delete(job.key)
+          activeGrassChunkJobRef.current = null
+
+          setGrassChunks((current) => (
+            current[job.key]
+              ? current
+              : residentGrassKeysRef.current.has(job.key)
+                ? { ...current, [job.key]: job.grass }
+                : current
+          ))
+        }
       }
 
-      if (job.xi > job.maxX) {
-        grassChunkCacheRef.current.set(job.key, job.grass)
-        pendingGrassChunksRef.current.delete(job.key)
-        activeGrassChunkJobRef.current = null
-
-        setGrassChunks((current) => (
-          current[job.key]
-            ? current
-            : residentGrassKeysRef.current.has(job.key)
-              ? { ...current, [job.key]: job.grass }
-              : current
-        ))
-      }
-
+      publishGrassDebugStats()
       scheduleGrassChunkBuild()
     }
 
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      grassChunkTimerRef.current = window.requestIdleCallback(run, { timeout: 48 })
+    const shouldBootstrap = grassChunkCacheRef.current.size < GRASS_BOOTSTRAP_CHUNK_COUNT
+
+    if (!shouldBootstrap && typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      grassChunkTimerRef.current = window.requestIdleCallback(run, { timeout: 16 })
       return
     }
 
@@ -445,9 +542,12 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
   useEffect(() => {
     activeGrassCenterRef.current = null
 
-    if (active) return
+    if (active) {
+      residentGrassKeysRef.current = new Set(allGrassChunkKeys)
+      publishGrassDebugStats()
+      return
+    }
 
-    visibleGrassKeysRef.current = new Set()
     residentGrassKeysRef.current = new Set()
     grassChunkQueueRef.current = []
     pendingGrassChunksRef.current.clear()
@@ -458,7 +558,9 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
       window.clearTimeout(grassChunkTimerRef.current)
       grassChunkTimerRef.current = null
     }
-  }, [active])
+
+    publishGrassDebugStats()
+  }, [active, allGrassChunkKeys])
 
   useFrame(() => {
     if (!active) return
@@ -471,67 +573,37 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
     const nextCenterKey = getGrassChunkKey(centerChunkX, centerChunkZ)
     if (activeGrassCenterRef.current === nextCenterKey) return
     activeGrassCenterRef.current = nextCenterKey
-    const visibleKeys = new Set()
-    const preloadKeys = new Set()
-
-    for (let offsetX = -PRELOAD_GRASS_CHUNK_RADIUS; offsetX <= PRELOAD_GRASS_CHUNK_RADIUS; offsetX += 1) {
-      for (let offsetZ = -PRELOAD_GRASS_CHUNK_RADIUS; offsetZ <= PRELOAD_GRASS_CHUNK_RADIUS; offsetZ += 1) {
-        const chunkX = centerChunkX + offsetX
-        const chunkZ = centerChunkZ + offsetZ
-        const minX = chunkX * GRASS_CHUNK_SIZE
-        const minZ = chunkZ * GRASS_CHUNK_SIZE
-        if (minX > GRASS_AREA_MAX || minX + GRASS_CHUNK_SIZE < GRASS_AREA_MIN) continue
-        if (minZ > GRASS_AREA_MAX || minZ + GRASS_CHUNK_SIZE < GRASS_AREA_MIN) continue
-        const key = getGrassChunkKey(chunkX, chunkZ)
-        preloadKeys.add(key)
-        if (
-          Math.abs(offsetX) <= ACTIVE_GRASS_CHUNK_RADIUS
-          && Math.abs(offsetZ) <= ACTIVE_GRASS_CHUNK_RADIUS
-        ) {
-          visibleKeys.add(key)
-        }
-      }
-    }
-
-    visibleGrassKeysRef.current = visibleKeys
-    residentGrassKeysRef.current = preloadKeys
+    residentGrassKeysRef.current = new Set(allGrassChunkKeys)
 
     setGrassChunks((current) => {
       const next = { ...current }
 
-      preloadKeys.forEach((key) => {
+      allGrassChunkKeys.forEach((key) => {
         const cached = grassChunkCacheRef.current.get(key)
         if (cached) next[key] = cached
-      })
-
-      Object.keys(next).forEach((key) => {
-        if (!preloadKeys.has(key)) delete next[key]
       })
 
       return next
     })
 
-    const visibleKeysByPriority = [...visibleKeys].sort((leftKey, rightKey) => {
-      const [leftX, leftZ] = leftKey.split(':').map(Number)
-      const [rightX, rightZ] = rightKey.split(':').map(Number)
-      const leftDistance = Math.max(Math.abs(leftX - centerChunkX), Math.abs(leftZ - centerChunkZ))
-      const rightDistance = Math.max(Math.abs(rightX - centerChunkX), Math.abs(rightZ - centerChunkZ))
-      return leftDistance - rightDistance
+    allGrassChunkKeys.forEach((key) => {
+      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
+      pendingGrassChunksRef.current.add(key)
+      grassChunkQueueRef.current.push(key)
     })
 
-    visibleKeysByPriority.forEach((key) => {
-      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
-      pendingGrassChunksRef.current.add(key)
-      grassChunkQueueRef.current.push(key)
-    })
-    preloadKeys.forEach((key) => {
-      if (visibleKeys.has(key)) return
-      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
-      pendingGrassChunksRef.current.add(key)
-      grassChunkQueueRef.current.push(key)
-    })
+    grassChunkQueueRef.current.sort((leftKey, rightKey) => (
+      getGrassChunkDistance(leftKey, centerChunkX, centerChunkZ)
+      - getGrassChunkDistance(rightKey, centerChunkX, centerChunkZ)
+    ))
+
+    publishGrassDebugStats()
     scheduleGrassChunkBuild()
   })
+
+  useEffect(() => {
+    publishGrassDebugStats()
+  }, [grassChunks])
 
   useEffect(() => () => {
     if (grassChunkTimerRef.current === null || typeof window === 'undefined') return
@@ -562,7 +634,7 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
       while (
         xi <= DISTANT_GRASS_AREA_MAX
         && rows < DISTANT_GRASS_ROWS_PER_IDLE_BATCH
-        && (!deadline || deadline.timeRemaining() > 2)
+        && (!deadline || deadline.didTimeout || deadline.timeRemaining() > 2 || rows === 0)
       ) {
         pushDistantGrassRow(nextGrass, xi)
         xi += DISTANT_GRASS_GRID_STEP
@@ -610,7 +682,6 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
           key={key}
           items={items}
           playerPositionRef={playerPositionRef}
-          visible={visibleGrassKeysRef.current.has(key)}
         />
       ))}
       <instancedMesh

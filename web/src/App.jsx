@@ -5026,6 +5026,7 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo }) {
       drawingBufferWidth: drawingBufferRef.current.x,
       drawingBufferHeight: drawingBufferRef.current.y,
       trianglesByCategory,
+      grassDebug: typeof window !== 'undefined' ? window.__grassDebug ?? null : null,
     })
 
     elapsedRef.current = 0
@@ -5053,6 +5054,16 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
   const triangleRows = Object.entries(stats.trianglesByCategory ?? {})
     .sort((left, right) => right[1] - left[1])
     .map(([label, value]) => [label, value.toLocaleString('fr-FR')])
+  const grassRows = stats.grassDebug
+    ? [
+        ['G queue', stats.grassDebug.queuedChunks.toLocaleString('fr-FR')],
+        ['G pending', stats.grassDebug.pendingChunks.toLocaleString('fr-FR')],
+        ['G active', stats.grassDebug.activeChunk ?? '-'],
+        ['G done', stats.grassDebug.completedChunks.toLocaleString('fr-FR')],
+        ['G mounted', stats.grassDebug.mountedChunks.toLocaleString('fr-FR')],
+        ['G blades', stats.grassDebug.completedBlades.toLocaleString('fr-FR')],
+      ]
+    : []
 
   return (
     <aside className="render-stats" aria-label="Statistiques de rendu">
@@ -5083,6 +5094,13 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
         </div>
       ))}
       <div className="render-stats-divider" />
+      {grassRows.map(([label, value]) => (
+        <div className="render-stats-row" key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+      {grassRows.length > 0 && <div className="render-stats-divider" />}
       {triangleRows.map(([label, value]) => (
         <div className="render-stats-row" key={label}>
           <span>{label}</span>
