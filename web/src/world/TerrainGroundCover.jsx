@@ -357,6 +357,13 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
       transformed.x += uWindDirection.x * wind * uWindStrength * heightFactor;
       transformed.z += uWindDirection.z * wind * uWindStrength * heightFactor;
 
+      // Tip lean: each blade leans in a unique seeded direction so tips scatter
+      // outward in all directions — fills gaps between blades when viewed from above.
+      float tiltT = clamp(position.y / uBladeHeight, 0.0, 1.0);
+      float leanAngle = grassHash(grassOrigin.xz + vec2(3.7, 1.9)) * 6.28318;
+      transformed.x += cos(leanAngle) * tiltT * 0.6;
+      transformed.z += sin(leanAngle) * tiltT * 0.6;
+
       vec2 fromPlayer = grassOrigin.xz - uPlayerPosition.xz;
       float playerDistance = length(fromPlayer);
       float distanceSq = dot(fromPlayer, fromPlayer);
