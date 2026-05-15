@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Matrix4, Object3D } from 'three'
 import { getTerrainHeight } from '../terrain/terrainGeometry'
-import { createProceduralTree } from './proceduralTreeConfig'
+import { createProceduralTree, treeLeafWindUniforms } from './proceduralTreeConfig'
 import { GAME_TREE_LIBRARY } from './treeLibrary'
 
 const dummy = new Object3D()
@@ -67,19 +67,11 @@ function InstancedTreePart({ part, placements }) {
 }
 
 function InstancedTreeVariant({ variantId, placements, animated }) {
-  const treeRef = useRef(null)
   const variant = GAME_TREE_LIBRARY[variantId] ?? GAME_TREE_LIBRARY.ashMedium
-  const tree = useMemo(() => createProceduralTree(variant.config), [variant])
+  const tree = useMemo(() => createProceduralTree(variant.config, animated), [variant, animated])
   const parts = useMemo(() => collectRenderableParts(tree), [tree])
 
-  useEffect(() => {
-    treeRef.current = tree
-    return () => disposeTree(tree)
-  }, [tree])
-
-  useFrame(({ clock }) => {
-    if (animated) treeRef.current?.update(clock.getElapsedTime())
-  })
+  useEffect(() => () => disposeTree(tree), [tree])
 
   return parts.map((part, index) => (
     <InstancedTreePart
@@ -99,6 +91,12 @@ function InstancedTreeBatch({ trees, animated = true }) {
     })
     return [...next.entries()]
   }, [trees])
+
+  // Single useFrame for all animated variants — updates the shared uniform object once,
+  // which propagates instantly to every leaf shader without re-uploading any geometry.
+  useFrame(({ clock }) => {
+    if (animated) treeLeafWindUniforms.uTime.value = clock.getElapsedTime()
+  })
 
   return (
     <group userData={{ debugCategory: 'trees' }}>

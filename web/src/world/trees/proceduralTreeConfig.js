@@ -1,6 +1,17 @@
 import { Tree } from '@dgreenheck/ez-tree'
 import { BufferAttribute, Box3, Color, Float32BufferAttribute, FrontSide, MeshBasicMaterial, Vector3 } from 'three'
 
+// Shared uniform objects — all animated leaf shaders reference these same objects.
+// Updating .value once per frame updates every tree variant simultaneously.
+export const treeLeafWindUniforms = {
+  uTime: { value: 0 },
+  uWindDirection: { value: new Vector3(0.86, 0, 0.5).normalize() },
+  uWindStrength: { value: 1.1 },
+  uWindSpeed: { value: 0.55 },
+  uWindScale: { value: 0.038 },
+  uTreeHeight: { value: 52.0 },
+}
+
 const leafBottomColor = new Color('#638b0f')
 const leafMiddleColor = new Color('#6f970e')
 const leafTopColor = new Color('#8aac22')
@@ -204,7 +215,7 @@ function applyLeafColorGrade(color, config) {
   )
 }
 
-function stylizeLeafColors(tree, config) {
+function stylizeLeafColors(tree, config, animated = false) {
   const { colorMode, colorVariation } = config.leaves
   const geometry = tree.leavesMesh?.geometry
   const material = tree.leavesMesh?.material
@@ -258,13 +269,63 @@ function stylizeLeafColors(tree, config) {
       #endif
       `,
     )
+
+    if (!animated) return
+
+    // Wind animation — all animated variants share the same uniform objects so one
+    // treeLeafWindUniforms.uTime.value update per frame moves every tree's leaves.
+    shader.uniforms.uTime = treeLeafWindUniforms.uTime
+    shader.uniforms.uWindDirection = treeLeafWindUniforms.uWindDirection
+    shader.uniforms.uWindStrength = treeLeafWindUniforms.uWindStrength
+    shader.uniforms.uWindSpeed = treeLeafWindUniforms.uWindSpeed
+    shader.uniforms.uWindScale = treeLeafWindUniforms.uWindScale
+    shader.uniforms.uTreeHeight = treeLeafWindUniforms.uTreeHeight
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+      uniform float uTime;
+      uniform vec3 uWindDirection;
+      uniform float uWindStrength;
+      uniform float uWindSpeed;
+      uniform float uWindScale;
+      uniform float uTreeHeight;
+      `,
+    )
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+
+      #ifdef USE_INSTANCING
+        vec3 treeOrigin = vec3(instanceMatrix[3].x, instanceMatrix[3].y, instanceMatrix[3].z);
+      #else
+        vec3 treeOrigin = vec3(0.0);
+      #endif
+
+      // Height factor: leaves at the top of the canopy sway more than those at the base.
+      float heightFactor = clamp(position.y / uTreeHeight, 0.0, 1.0);
+      heightFactor = heightFactor * heightFactor;
+
+      // Phase offset per tree (from world position) so neighbouring trees don't sway in sync.
+      float travel = dot(treeOrigin.xz, uWindDirection.xz) * uWindScale;
+      float windPhase = uTime * uWindSpeed - travel;
+
+      float mainSway = sin(windPhase);
+      float leafRustle = sin(windPhase * 2.37 + position.x * 0.07 + position.z * 0.05) * 0.28;
+      float sway = mainSway + leafRustle;
+
+      transformed.x += uWindDirection.x * sway * uWindStrength * heightFactor;
+      transformed.z += uWindDirection.z * sway * uWindStrength * heightFactor;
+      `,
+    )
   }
 
   material.dispose()
   tree.leavesMesh.material = stylizedMaterial
 }
 
-export function createProceduralTree(config) {
+export function createProceduralTree(config, animated = true) {
   const normalized = normalizeTreeConfig(config)
   const tree = new Tree()
 
@@ -276,7 +337,7 @@ export function createProceduralTree(config) {
   applyTreeOptionOverrides(tree.options, normalized)
   tree.generate()
   stylizeLeafNormals(tree, normalized)
-  stylizeLeafColors(tree, normalized)
+  stylizeLeafColors(tree, normalized, animated)
 
   return tree
 }
