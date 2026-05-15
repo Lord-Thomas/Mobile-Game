@@ -213,6 +213,7 @@ export const OUTDOOR_PLAYER_COLLIDERS = [
       z: house.position[2] + part.offset[0] * sin + part.offset[1] * cos,
       hx: part.size[0] * 0.5 + 0.45,
       hz: part.size[2] * 0.5 + 0.45,
+      rotationY: house.rotationY,
     }))
   }),
   ...AUTHORED_TREES.map(({ config, colliderRadius }) => ({

@@ -619,6 +619,7 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
         overhang={0.42}
         thickness={0.14}
         color="#8b4c3f"
+        gableColor={EXTERIOR_WALL_COLOR}
       />
       <group position={secondRoom.position}>
         <GableRoof
@@ -629,6 +630,7 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
           overhang={0.34}
           thickness={0.12}
           color="#8b4c3f"
+          gableColor={EXTERIOR_WALL_COLOR}
         />
       </group>
 
@@ -2948,20 +2950,28 @@ function getTwitchParentHost() {
 }
 
 function collidesWithOutdoorObstacle(nextX, nextZ) {
-  return OUTDOOR_PLAYER_COLLIDERS.some((collider) =>
-    intersectsAabbSphere(
-      nextX,
+  return OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
+    const rotationY = collider.rotationY ?? 0
+    const dx = nextX - collider.x
+    const dz = nextZ - collider.z
+    const cos = Math.cos(-rotationY)
+    const sin = Math.sin(-rotationY)
+    const localX = dx * cos - dz * sin
+    const localZ = dx * sin + dz * cos
+
+    return intersectsAabbSphere(
+      localX,
       PLAYER_HEIGHT,
-      nextZ,
+      localZ,
       PLAYER_CAPSULE_RADIUS,
-      collider.x,
+      0,
       PLAYER_HEIGHT,
-      collider.z,
+      0,
       collider.hx,
       0.6,
       collider.hz,
-    ),
-  )
+    )
+  })
 }
 
 function getTwitchParentHosts() {

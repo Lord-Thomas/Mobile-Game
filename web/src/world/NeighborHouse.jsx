@@ -3,79 +3,12 @@ import { DoubleSide, RepeatWrapping, SRGBColorSpace } from 'three'
 import { useEffect, useMemo } from 'react'
 import { getWallColliderTransform, getWallPointAt, splitWallIntoSolidRects } from './house/wallUtils'
 import GableRoof from './house/GableRoof'
+import { createNeighborFloorplan } from './house/neighborFloorplan'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
-const WALL_THICKNESS = 0.18
 const EXTERIOR_WALL_TEXTURE = '/textures/environment/walls/mur-paint.png'
 const WALL_REPEAT_X_PER_UNIT = 0.18
 const WALL_REPEAT_Y_PER_UNIT = 0.18
-
-function createNeighborWalls({ size, color, trim, doorWall }) {
-  const [width, height, depth] = size
-  const halfWidth = width * 0.5
-  const halfDepth = depth * 0.5
-  const doorWidth = 1.05
-  const doorHeight = 2.15
-  const corners = {
-    southwest: { x: -halfWidth, z: -halfDepth },
-    southeast: { x: halfWidth, z: -halfDepth },
-    northwest: { x: -halfWidth, z: halfDepth },
-    northeast: { x: halfWidth, z: halfDepth },
-  }
-
-  const walls = [
-    {
-      id: 'west',
-      startCorner: corners.northwest,
-      endCorner: corners.southwest,
-      sideA: { normal: [1, 0, 0], color: '#ece7df' },
-      sideB: { type: 'outside', normal: [-1, 0, 0], color },
-    },
-    {
-      id: 'east',
-      startCorner: corners.southeast,
-      endCorner: corners.northeast,
-      sideA: { normal: [-1, 0, 0], color: '#ece7df' },
-      sideB: { type: 'outside', normal: [1, 0, 0], color },
-    },
-    {
-      id: 'south',
-      startCorner: corners.southwest,
-      endCorner: corners.southeast,
-      sideA: { normal: [0, 0, 1], color: '#ece7df' },
-      sideB: { type: 'outside', normal: [0, 0, -1], color },
-    },
-    {
-      id: 'north',
-      startCorner: corners.northeast,
-      endCorner: corners.northwest,
-      sideA: { normal: [0, 0, -1], color: '#ece7df' },
-      sideB: { type: 'outside', normal: [0, 0, 1], color },
-    },
-  ]
-
-  return walls.map((wall) => {
-    const dx = wall.endCorner.x - wall.startCorner.x
-    const dz = wall.endCorner.z - wall.startCorner.z
-    const length = Math.hypot(dx, dz)
-    const isHorizontal = Math.abs(dx) >= Math.abs(dz)
-
-    return {
-      ...wall,
-      axis: isHorizontal ? 'x' : 'z',
-      constant: isHorizontal ? wall.startCorner.z : wall.startCorner.x,
-      from: isHorizontal ? wall.startCorner.x : wall.startCorner.z,
-      to: isHorizontal ? wall.endCorner.x : wall.endCorner.z,
-      length,
-      height,
-      thickness: WALL_THICKNESS,
-      trim,
-      openings: wall.id === doorWall
-        ? [{ id: 'front_door', type: 'door', center: length * 0.5, width: doorWidth, bottom: 0, height: doorHeight }]
-        : [],
-    }
-  })
-}
 
 function getWallMaterialSlots(wall) {
   const slots = [null, null, null, null, null, null]
@@ -256,13 +189,14 @@ function NeighborDoor({ door }) {
   )
 }
 
-function HouseVolume({ id, offset = [0, 0], size, doorWall, color, trim, exteriorTexture }) {
-  const walls = createNeighborWalls({ size, color, trim, doorWall })
+function HouseVolume({ id, room, walls, exteriorTexture, trim }) {
   const door = getDoorData(walls)
-  const [width, height, depth] = size
+  const [width, height, depth] = room.size
+  const hasSharedXWall = walls.some((wall) => wall.axis === 'z' && wall.length < depth - 0.001)
+  const hasSharedZWall = walls.some((wall) => wall.axis === 'x' && wall.length < width - 0.001)
 
   return (
-    <group position={[offset[0], 0, offset[1]]}>
+    <>
       {walls.flatMap((wall) =>
         splitWallIntoSolidRects(wall).map((rect) => (
           <WallVolume key={`${id}-${rect.id}`} wall={wall} rect={rect} exteriorTexture={exteriorTexture} />
@@ -270,38 +204,41 @@ function HouseVolume({ id, offset = [0, 0], size, doorWall, color, trim, exterio
       )}
       <OpeningReveals walls={walls} />
       <NeighborDoor door={door} />
-      <mesh position={[0, height + 0.02, 0]}>
+      <mesh position={[room.position[0], height + 0.02, room.position[2]]}>
         <boxGeometry args={[width + 0.12, 0.12, depth + 0.12]} />
         <meshStandardMaterial color={trim} roughness={0.8} />
       </mesh>
-      <GableRoof
-        width={width}
-        depth={depth}
-        baseY={height + 0.1}
-        pitch={width >= depth ? 30 : 34}
-        overhang={0.32}
-        thickness={0.12}
-        color={trim}
-      />
-    </group>
+      <group position={room.position}>
+        <GableRoof
+          width={width}
+          depth={depth}
+          baseY={height + 0.1}
+          pitch={width >= depth ? 30 : 34}
+          overhang={0.32}
+          overhangX={hasSharedXWall ? 0.08 : 0.32}
+          overhangZ={hasSharedZWall ? 0.08 : 0.32}
+          thickness={0.12}
+          color={trim}
+          gableColor={walls[0]?.sideB?.color ?? '#f3f0e5'}
+        />
+      </group>
+    </>
   )
 }
 
 function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, doorWall }) {
   const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   const terrainY = getTerrainHeight(position[0], position[2])
-  const volumes = parts ?? [{ id: 'main', offset: [0, 0], size, doorWall }]
+  const floorplan = useMemo(() => createNeighborFloorplan({ parts, size, doorWall, color, trim }), [color, doorWall, parts, size, trim])
 
   return (
     <group position={[position[0], terrainY, position[2]]} rotation={[0, rotationY, 0]}>
-      {volumes.map((part) => (
+      {floorplan.rooms.map((room) => (
         <HouseVolume
-          key={part.id}
-          id={part.id}
-          offset={part.offset}
-          size={part.size}
-          doorWall={part.doorWall}
-          color={color}
+          key={room.id}
+          id={room.id}
+          room={room}
+          walls={floorplan.walls.filter((wall) => wall.roomId === room.id)}
           trim={trim}
           exteriorTexture={exteriorTexture}
         />
