@@ -1,9 +1,6 @@
-import HouseExteriorShell from './HouseExteriorShell'
-
-function PlayerHouse({ exteriorVisible = true, children }) {
+function PlayerHouse({ children }) {
   return (
     <group name="PlayerHouse">
-      <HouseExteriorShell visible={exteriorVisible} />
       {children}
     </group>
   )

@@ -3,7 +3,7 @@ import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, 
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { ACESFilmicToneMapping, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFSoftShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, getCurrentUser, loadPlayerProgress, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
@@ -13,7 +13,7 @@ import OutdoorBounds from './world/OutdoorBounds'
 import { OUTDOOR_PLAYER_COLLIDERS } from './world/outdoorData'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { getWallColliderTransform, getWallSideTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
+import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
@@ -28,8 +28,17 @@ const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
 const MAX_RENDER_DPR = 1.5
-const MIN_RENDER_DPR = 1
-const TARGET_MAX_RENDER_PIXELS = 1_650_000
+const MIN_RENDER_DPR = 0.45
+const TARGET_MAX_RENDER_PIXELS = 1_450_000
+const MIN_DYNAMIC_RENDER_SCALE = 0.82
+const MAX_DYNAMIC_RENDER_SCALE = 1
+const LOW_FPS_THRESHOLD = 48
+const HIGH_FPS_THRESHOLD = 57
+const FPS_SAMPLE_WINDOW_SECONDS = 2
+const RENDER_SCALE_STEP = 0.05
+const BASE_CAMERA_VERTICAL_FOV = 52
+const MAX_CAMERA_HORIZONTAL_FOV = 72
+const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
 const PLAYER_KICK_CONTACT_DELAY = 0.43
@@ -114,6 +123,8 @@ const MAIN_ROOM = { width: mainRoom.size[0], depth: mainRoom.size[2], height: ma
 const WALL_REPEAT_X_PER_UNIT = 3.4 / 12
 const WALL_REPEAT_Y_PER_UNIT = 1.9 / 5
 const DEFAULT_CEILING_TEXTURE = '/textures/environment/walls/mur-paint.png'
+const EXTERIOR_WALL_TEXTURE = '/textures/environment/walls/mur-paint.png'
+const EXTERIOR_WALL_COLOR = '#f3ead6'
 
 const ballSkins = [
   { id: 'classic', name: 'Classique', price: 0, texture: '/models/ball/textures/ballon-classique.png', defaultUnlocked: true },
@@ -616,61 +627,126 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
   )
 }
 
-function WallFace({ wall, rect, side, wallTexture }) {
-  const transform = getWallSideTransform(wall, rect, side)
-  const materialColor = side.color ?? '#e6edf6'
+function WallBlockMaterial({ attach, side, width, height, wallTexture, exteriorTexture, capColor = '#d8d0c4' }) {
+  const materialColor = side?.color ?? capColor
+  const sideMaterial = side?.material
+  const isExterior = side?.type === 'outside'
   const repeatedTexture = useMemo(() => {
-    if (side.material !== 'active_wall') return null
-    const next = wallTexture.clone()
+    if (!side) return null
+    const sourceTexture = isExterior ? exteriorTexture : wallTexture
+    if (!isExterior && sideMaterial !== 'active_wall') return null
+    const next = sourceTexture.clone()
     next.wrapS = RepeatWrapping
     next.wrapT = RepeatWrapping
     next.repeat.set(
-      Math.max(0.01, transform.width * WALL_REPEAT_X_PER_UNIT),
-      Math.max(0.01, transform.height * WALL_REPEAT_Y_PER_UNIT),
+      Math.max(0.01, width * WALL_REPEAT_X_PER_UNIT),
+      Math.max(0.01, height * WALL_REPEAT_Y_PER_UNIT),
     )
     next.colorSpace = SRGBColorSpace
     next.needsUpdate = true
     return next
-  }, [side.material, transform.height, transform.width, wallTexture])
+  }, [exteriorTexture, height, isExterior, side, sideMaterial, wallTexture, width])
 
   useEffect(() => {
     return () => repeatedTexture?.dispose()
   }, [repeatedTexture])
 
+  if (isExterior) {
+    return (
+      <meshStandardMaterial
+        attach={attach}
+        map={repeatedTexture}
+        color={EXTERIOR_WALL_COLOR}
+        roughness={0.82}
+        polygonOffset
+        polygonOffsetFactor={-1}
+        polygonOffsetUnits={-1}
+      />
+    )
+  }
+
+  if (sideMaterial === 'active_wall') {
+    return (
+      <meshStandardMaterial
+        attach={attach}
+        map={repeatedTexture}
+        color="#e6edf6"
+        roughness={0.68}
+        metalness={0.03}
+        polygonOffset
+        polygonOffsetFactor={-0.5}
+        polygonOffsetUnits={-0.5}
+      />
+    )
+  }
+
+  return <meshStandardMaterial attach={attach} color={materialColor} roughness={0.78} />
+}
+
+function getWallMaterialSlots(wall) {
+  const slots = [null, null, null, null, null, null]
+  const dx = wall.endCorner.x - wall.startCorner.x
+  const dz = wall.endCorner.z - wall.startCorner.z
+  const length = Math.hypot(dx, dz) || 1
+  const leftNormal = [-dz / length, 0, dx / length]
+
+  ;[wall.sideA, wall.sideB].forEach((side) => {
+    const sideDot = side.normal[0] * leftNormal[0] + side.normal[2] * leftNormal[2]
+    if (sideDot >= 0) slots[4] = side
+    if (sideDot < 0) slots[5] = side
+  })
+
+  return slots
+}
+
+function WallVolume({ wall, rect, wallTexture, exteriorTexture }) {
+  const transform = getWallColliderTransform(wall, rect)
+  const materialSlots = useMemo(() => getWallMaterialSlots(wall), [wall])
+  const args = [
+    transform.args[0] * 2,
+    transform.args[1] * 2,
+    transform.args[2] * 2,
+  ]
+  const textureWidth = transform.renderWidth ?? rect.width
+  const textureHeight = rect.height
+  const hasExterior = materialSlots.some((side) => side?.type === 'outside')
+  const capColor = hasExterior ? EXTERIOR_WALL_COLOR : '#d8d0c4'
+
   return (
-    <mesh position={transform.position} rotation={transform.rotation} receiveShadow>
-      <planeGeometry args={[transform.width, transform.height]} />
-      {side.material === 'active_wall' ? (
-        <meshStandardMaterial map={repeatedTexture} color="#e6edf6" roughness={0.68} metalness={0.03} />
-      ) : (
-        <meshStandardMaterial color={materialColor} roughness={0.78} />
-      )}
+    <mesh position={transform.position} rotation={transform.rotation} castShadow receiveShadow>
+      <boxGeometry args={args} />
+      {materialSlots.map((side, index) => (
+        <WallBlockMaterial
+          key={`${rect.id}-material-${index}`}
+          attach={`material-${index}`}
+          side={side}
+          width={textureWidth}
+          height={textureHeight}
+          wallTexture={wallTexture}
+          exteriorTexture={exteriorTexture}
+          capColor={capColor}
+        />
+      ))}
     </mesh>
   )
 }
 
 function HouseWalls({ wallTexture }) {
-  const walls = houseLayout.walls.filter((wall) => wall.roomId === 'main_room')
+  const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
+  const walls = houseLayout.walls
 
   return (
     <>
       {walls.flatMap((wall) =>
-        splitWallIntoSolidRects(wall).flatMap((rect) => [
-          <WallFace
-            key={`${rect.id}-side-a`}
+        splitWallIntoSolidRects(wall).map((rect) => (
+          <WallVolume
+            key={rect.id}
             wall={wall}
             rect={rect}
-            side={wall.sideA}
             wallTexture={wallTexture}
-          />,
-          <WallFace
-            key={`${rect.id}-side-b`}
-            wall={wall}
-            rect={rect}
-            side={wall.sideB}
-            wallTexture={wallTexture}
-          />,
-        ]),
+            exteriorTexture={exteriorTexture}
+          />
+        )),
       )}
       <HouseOpeningReveals walls={walls} />
     </>
@@ -678,66 +754,36 @@ function HouseWalls({ wallTexture }) {
 }
 
 function HouseOpeningReveals({ walls }) {
+  const revealColor = '#d8d0c4'
+
+  const makeReveal = (wall, key, center, y, width, height) => {
+    const transform = getWallColliderTransform(wall, { center, y, width, height })
+    return (
+      <mesh key={key} position={transform.position} rotation={transform.rotation}>
+        <boxGeometry args={[width, height, wall.thickness + 0.03]} />
+        <meshStandardMaterial color={revealColor} roughness={0.72} />
+      </mesh>
+    )
+  }
+
   return (
     <>
       {walls.flatMap((wall) =>
         (wall.openings ?? []).flatMap((opening) => {
+          const wallBottom = wall.bottom ?? wall.bottomY ?? 0
           const bottom = opening.bottom ?? 0
           const min = opening.center - opening.width * 0.5
           const max = opening.center + opening.width * 0.5
-          const centerY = bottom + opening.height * 0.5
-          const topY = bottom + opening.height
-          const topHeight = wall.height - topY
-          const revealColor = '#d8d0c4'
+          const centerY = wallBottom + bottom + opening.height * 0.5
+          const topY = wallBottom + bottom + opening.height
+          const topHeight = wall.height - (bottom + opening.height)
+          const bottomRevealY = wallBottom + bottom
 
-          if (wall.axis === 'x') {
-            const z = wall.constant
-            return [
-              <mesh key={`${wall.id}-${opening.id}-reveal-left`} position={[min, centerY, z]}>
-                <boxGeometry args={[0.05, opening.height, wall.thickness + 0.03]} />
-                <meshStandardMaterial color={revealColor} roughness={0.72} />
-              </mesh>,
-              <mesh key={`${wall.id}-${opening.id}-reveal-right`} position={[max, centerY, z]}>
-                <boxGeometry args={[0.05, opening.height, wall.thickness + 0.03]} />
-                <meshStandardMaterial color={revealColor} roughness={0.72} />
-              </mesh>,
-              topHeight > 0.001 && (
-                <mesh key={`${wall.id}-${opening.id}-reveal-top`} position={[opening.center, topY, z]}>
-                  <boxGeometry args={[opening.width, 0.05, wall.thickness + 0.03]} />
-                  <meshStandardMaterial color={revealColor} roughness={0.72} />
-                </mesh>
-              ),
-              bottom > 0.001 && (
-                <mesh key={`${wall.id}-${opening.id}-reveal-bottom`} position={[opening.center, bottom, z]}>
-                  <boxGeometry args={[opening.width, 0.05, wall.thickness + 0.03]} />
-                  <meshStandardMaterial color={revealColor} roughness={0.72} />
-                </mesh>
-              ),
-            ].filter(Boolean)
-          }
-
-          const x = wall.constant
           return [
-            <mesh key={`${wall.id}-${opening.id}-reveal-left`} position={[x, centerY, min]}>
-              <boxGeometry args={[wall.thickness + 0.03, opening.height, 0.05]} />
-              <meshStandardMaterial color={revealColor} roughness={0.72} />
-            </mesh>,
-            <mesh key={`${wall.id}-${opening.id}-reveal-right`} position={[x, centerY, max]}>
-              <boxGeometry args={[wall.thickness + 0.03, opening.height, 0.05]} />
-              <meshStandardMaterial color={revealColor} roughness={0.72} />
-            </mesh>,
-            topHeight > 0.001 && (
-              <mesh key={`${wall.id}-${opening.id}-reveal-top`} position={[x, topY, opening.center]}>
-                <boxGeometry args={[wall.thickness + 0.03, 0.05, opening.width]} />
-                <meshStandardMaterial color={revealColor} roughness={0.72} />
-              </mesh>
-            ),
-            bottom > 0.001 && (
-              <mesh key={`${wall.id}-${opening.id}-reveal-bottom`} position={[x, bottom, opening.center]}>
-                <boxGeometry args={[wall.thickness + 0.03, 0.05, opening.width]} />
-                <meshStandardMaterial color={revealColor} roughness={0.72} />
-              </mesh>
-            ),
+            makeReveal(wall, `${wall.id}-${opening.id}-reveal-left`, min, centerY, 0.05, opening.height),
+            makeReveal(wall, `${wall.id}-${opening.id}-reveal-right`, max, centerY, 0.05, opening.height),
+            topHeight > 0.001 && makeReveal(wall, `${wall.id}-${opening.id}-reveal-top`, opening.center, topY, opening.width, 0.05),
+            bottom > 0.001 && makeReveal(wall, `${wall.id}-${opening.id}-reveal-bottom`, opening.center, bottomRevealY, opening.width, 0.05),
           ].filter(Boolean)
         }),
       )}
@@ -762,7 +808,6 @@ function InteriorLighting({ active, hideCeiling }) {
 
 function PhysicsBounds() {
   const wallSegments = houseLayout.walls
-    .filter((wall) => wall.roomId === 'main_room')
     .flatMap((wall) =>
       splitWallIntoSolidRects(wall).map((rect) => ({
         id: rect.id,
@@ -774,7 +819,7 @@ function PhysicsBounds() {
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
       {wallSegments.map((segment) => (
-        <CuboidCollider key={segment.id} args={segment.args} position={segment.position} />
+        <CuboidCollider key={segment.id} args={segment.args} position={segment.position} rotation={segment.rotation} />
       ))}
     </RigidBody>
   )
@@ -790,19 +835,6 @@ function GlassContainmentRoom() {
       <mesh position={[0, 0.012, 0]}>
         <boxGeometry args={[roomWidth, 0.05, roomDepth]} />
         <meshStandardMaterial color="#d4dbe3" />
-      </mesh>
-
-      <mesh position={[0, roomHeight * 0.5, halfDepth - 0.02]}>
-        <boxGeometry args={[roomWidth, roomHeight, 0.1]} />
-        <meshStandardMaterial color="#edf1f5" side={BackSide} />
-      </mesh>
-      <mesh position={[-halfWidth, roomHeight * 0.5, 0]}>
-        <boxGeometry args={[0.1, roomHeight, roomDepth]} />
-        <meshStandardMaterial color="#edf1f5" side={BackSide} />
-      </mesh>
-      <mesh position={[halfWidth, roomHeight * 0.5, 0]}>
-        <boxGeometry args={[0.1, roomHeight, roomDepth]} />
-        <meshStandardMaterial color="#edf1f5" side={BackSide} />
       </mesh>
 
       <mesh position={[0, roomHeight * 0.5, -halfDepth + 0.02]}>
@@ -854,9 +886,6 @@ function GlassContainmentColliders() {
   return (
     <RigidBody type="fixed" colliders={false}>
       <CuboidCollider args={[halfWidth, halfHeight, 0.06]} position={[0, halfHeight, roomZ - halfDepth + 0.02]} />
-      <CuboidCollider args={[0.05, halfHeight, halfDepth]} position={[-halfWidth, halfHeight, roomZ]} />
-      <CuboidCollider args={[0.05, halfHeight, halfDepth]} position={[halfWidth, halfHeight, roomZ]} />
-      <CuboidCollider args={[halfWidth, halfHeight, 0.05]} position={[0, halfHeight, roomZ + halfDepth - 0.02]} />
     </RigidBody>
   )
 }
@@ -3401,12 +3430,6 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
     if (fittedMediaRef.current?.isVideo) {
       drawFittedMedia(fittedMediaRef.current)
     }
-    if (textureRef.current) {
-      textureRef.current.needsUpdate = true
-    }
-    if (materialRef.current) {
-      materialRef.current.needsUpdate = true
-    }
   })
 
   useEffect(() => {
@@ -4426,7 +4449,7 @@ function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect
   )
 }
 
-function ThumbnailTool() {
+function LegacyThumbnailTool() {
   const [captures, setCaptures] = useState({})
   const [busyObjectId, setBusyObjectId] = useState(null)
   const [toolMessage, setToolMessage] = useState('')
@@ -4826,7 +4849,7 @@ function ScorePopups({ popups }) {
   )
 }
 
-function getViewportRenderSettings() {
+function getViewportRenderSettings(renderScale = MAX_DYNAMIC_RENDER_SCALE) {
   if (typeof window === 'undefined') {
     return { dpr: 1, antialias: false }
   }
@@ -4835,17 +4858,18 @@ function getViewportRenderSettings() {
   const height = Math.max(1, window.innerHeight || 1)
   const nativeDpr = Math.min(MAX_RENDER_DPR, Math.max(MIN_RENDER_DPR, window.devicePixelRatio || 1))
   const viewportPixels = width * height
-  const pixelCappedDpr = Math.sqrt(TARGET_MAX_RENDER_PIXELS / viewportPixels)
+  const targetPixels = TARGET_MAX_RENDER_PIXELS * renderScale
+  const pixelCappedDpr = Math.sqrt(targetPixels / viewportPixels)
   const dpr = MathUtils.clamp(pixelCappedDpr, MIN_RENDER_DPR, nativeDpr)
 
   return {
     dpr: Number(dpr.toFixed(2)),
-    antialias: dpr <= 1.15,
+    antialias: false,
   }
 }
 
-function useViewportRenderSettings() {
-  const [settings, setSettings] = useState(() => getViewportRenderSettings())
+function useViewportRenderSettings(renderScale) {
+  const [settings, setSettings] = useState(() => getViewportRenderSettings(renderScale))
 
   useEffect(() => {
     let frame = null
@@ -4853,7 +4877,7 @@ function useViewportRenderSettings() {
       if (frame) cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         setSettings((current) => {
-          const next = getViewportRenderSettings()
+          const next = getViewportRenderSettings(renderScale)
           return current.dpr === next.dpr && current.antialias === next.antialias ? current : next
         })
       })
@@ -4866,9 +4890,61 @@ function useViewportRenderSettings() {
       window.removeEventListener('resize', update)
       window.removeEventListener('orientationchange', update)
     }
-  }, [])
+  }, [renderScale])
 
   return settings
+}
+
+function RenderQualityGovernor({ onScaleChange }) {
+  const sampleTimeRef = useRef(0)
+  const sampleFramesRef = useRef(0)
+  const recoveryWindowsRef = useRef(0)
+
+  useFrame((_, delta) => {
+    sampleTimeRef.current += delta
+    sampleFramesRef.current += 1
+
+    if (sampleTimeRef.current < FPS_SAMPLE_WINDOW_SECONDS) return
+
+    const fps = sampleFramesRef.current / sampleTimeRef.current
+    sampleTimeRef.current = 0
+    sampleFramesRef.current = 0
+
+    if (fps < LOW_FPS_THRESHOLD) {
+      recoveryWindowsRef.current = 0
+      onScaleChange((current) => Math.max(MIN_DYNAMIC_RENDER_SCALE, Number((current - RENDER_SCALE_STEP).toFixed(2))))
+      return
+    }
+
+    if (fps >= HIGH_FPS_THRESHOLD) {
+      recoveryWindowsRef.current += 1
+      if (recoveryWindowsRef.current >= 3) {
+        recoveryWindowsRef.current = 0
+        onScaleChange((current) => Math.min(MAX_DYNAMIC_RENDER_SCALE, Number((current + RENDER_SCALE_STEP).toFixed(2))))
+      }
+      return
+    }
+
+    recoveryWindowsRef.current = 0
+  })
+
+  return null
+}
+
+function AdaptiveCameraFov() {
+  const { camera, size } = useThree()
+
+  useLayoutEffect(() => {
+    const aspect = Math.max(0.1, size.width / Math.max(1, size.height))
+    const maxHorizontalFovRadians = MathUtils.degToRad(MAX_CAMERA_HORIZONTAL_FOV)
+    const cappedVerticalFov = MathUtils.radToDeg(
+      2 * Math.atan(Math.tan(maxHorizontalFovRadians * 0.5) / aspect),
+    )
+    camera.fov = Math.min(BASE_CAMERA_VERTICAL_FOV, cappedVerticalFov)
+    camera.updateProjectionMatrix()
+  }, [camera, size.height, size.width])
+
+  return null
 }
 
 function App() {
@@ -4881,7 +4957,13 @@ function App() {
     }
   }, [])
 
-  if (isThumbnailTool) return <ThumbnailTool />
+  if (isThumbnailTool) {
+    return (
+      <Suspense fallback={null}>
+        <ThumbnailTool />
+      </Suspense>
+    )
+  }
 
   const isAdminMode = useMemo(() => {
     try {
@@ -4912,7 +4994,8 @@ function App() {
   const progressScope = isAdminMode ? 'admin' : 'player'
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
-  const renderSettings = useViewportRenderSettings()
+  const [dynamicRenderScale, setDynamicRenderScale] = useState(MAX_DYNAMIC_RENDER_SCALE)
+  const renderSettings = useViewportRenderSettings(dynamicRenderScale)
 
   const touchRef = useRef({
     moveX: 0,
@@ -5713,7 +5796,7 @@ function App() {
     <main className="app">
       <Canvas
         dpr={renderSettings.dpr}
-        camera={{ fov: 52, position: [0, 2.4, 6], near: 0.1, far: 240 }}
+        camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 240 }}
         shadows={{ enabled: true, type: PCFSoftShadowMap }}
         gl={{
           antialias: renderSettings.antialias,
@@ -5728,6 +5811,8 @@ function App() {
         }}
         resize={{ debounce: 80 }}
       >
+        <AdaptiveCameraFov />
+        <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
         <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} />
         <PlayerHouse exteriorVisible>
           <group>

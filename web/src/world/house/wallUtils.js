@@ -29,8 +29,9 @@ export function getWallOpeningLayout(wallWidth, wallHeight, opening) {
 }
 
 export function splitWallIntoSolidRects(wall) {
-  const min = Math.min(wall.from, wall.to)
-  const max = Math.max(wall.from, wall.to)
+  const min = 0
+  const max = wall.length ?? Math.abs(wall.to - wall.from)
+  const wallBottom = wall.bottom ?? wall.bottomY ?? 0
   const openings = [...(wall.openings ?? [])]
     .map((opening) => ({
       ...opening,
@@ -64,9 +65,11 @@ export function splitWallIntoSolidRects(wall) {
     if (!coveringOpenings.length) {
       solidRects.push({
         id: `${wall.id}-solid-${index}`,
+        start,
+        end,
         center,
         width,
-        y: wall.height * 0.5,
+        y: wallBottom + wall.height * 0.5,
         height: wall.height,
       })
       continue
@@ -76,9 +79,11 @@ export function splitWallIntoSolidRects(wall) {
       if (opening.bottom > 0) {
         solidRects.push({
           id: `${wall.id}-${opening.id}-bottom-${index}`,
+          start,
+          end,
           center,
           width,
-          y: opening.bottom * 0.5,
+          y: wallBottom + opening.bottom * 0.5,
           height: opening.bottom,
         })
       }
@@ -87,9 +92,11 @@ export function splitWallIntoSolidRects(wall) {
       if (topHeight > 0.001) {
         solidRects.push({
           id: `${wall.id}-${opening.id}-top-${index}`,
+          start,
+          end,
           center,
           width,
-          y: opening.bottom + opening.height + topHeight * 0.5,
+          y: wallBottom + opening.bottom + opening.height + topHeight * 0.5,
           height: topHeight,
         })
       }
@@ -122,15 +129,58 @@ export function getWallSideTransform(wall, rect, side) {
   }
 }
 
-export function getWallColliderTransform(wall, rect) {
-  const x = wall.axis === 'x' ? rect.center : wall.constant
-  const z = wall.axis === 'z' ? rect.center : wall.constant
-  const args = wall.axis === 'x'
-    ? [rect.width * 0.5, rect.height * 0.5, wall.thickness * 0.5]
-    : [wall.thickness * 0.5, rect.height * 0.5, rect.width * 0.5]
+export function getWallDirection(wall) {
+  const dx = wall.endCorner.x - wall.startCorner.x
+  const dz = wall.endCorner.z - wall.startCorner.z
+  const length = Math.hypot(dx, dz) || 1
 
   return {
-    position: [x, rect.y, z],
-    args,
+    x: dx / length,
+    z: dz / length,
+    length,
   }
+}
+
+export function getWallPointAt(wall, distance) {
+  const direction = getWallDirection(wall)
+  return {
+    x: wall.startCorner.x + direction.x * distance,
+    z: wall.startCorner.z + direction.z * distance,
+  }
+}
+
+export function getWallColliderTransform(wall, rect) {
+  const direction = getWallDirection(wall)
+  const jointExtension = wall.thickness * 0.5
+  const rectStart = Number.isFinite(rect.start) ? rect.start : rect.center - rect.width * 0.5
+  const rectEnd = Number.isFinite(rect.end) ? rect.end : rect.center + rect.width * 0.5
+  const startExtension = rectStart <= 0.0001 ? jointExtension : 0
+  const endExtension = rectEnd >= direction.length - 0.0001 ? jointExtension : 0
+  const extendedStart = Math.max(-jointExtension, rectStart - startExtension)
+  const extendedEnd = Math.min(direction.length + jointExtension, rectEnd + endExtension)
+  const extendedWidth = extendedEnd - extendedStart
+  const center = getWallPointAt(wall, (extendedStart + extendedEnd) * 0.5)
+  const rotationY = Math.atan2(direction.z, direction.x)
+
+  return {
+    position: [center.x, rect.y, center.z],
+    rotation: [0, -rotationY, 0],
+    args: [extendedWidth * 0.5, rect.height * 0.5, wall.thickness * 0.5],
+    renderWidth: extendedWidth,
+  }
+}
+
+export function getWallFootprint(wall) {
+  const direction = getWallDirection(wall)
+  const normal = { x: -direction.z, z: direction.x }
+  const halfThickness = wall.thickness * 0.5
+  const start = wall.startCorner
+  const end = wall.endCorner
+
+  return [
+    { x: start.x + normal.x * halfThickness, z: start.z + normal.z * halfThickness },
+    { x: end.x + normal.x * halfThickness, z: end.z + normal.z * halfThickness },
+    { x: end.x - normal.x * halfThickness, z: end.z - normal.z * halfThickness },
+    { x: start.x - normal.x * halfThickness, z: start.z - normal.z * halfThickness },
+  ]
 }

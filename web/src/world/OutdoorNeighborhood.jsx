@@ -5,7 +5,7 @@ import PlayerPlot from './PlayerPlot'
 import Road from './Road'
 import TerrainGroundCover from './TerrainGroundCover'
 import CloudSky from './CloudSky'
-import ProceduralTree from './trees/ProceduralTree'
+import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import { AUTHORED_TREES, DISTANT_TREES } from './outdoorData'
 
 const OUTDOOR_SUN_DIRECTION = [0.62, 0.74, 0.2]
@@ -65,12 +65,8 @@ function OutdoorNeighborhood({ lightingActive = true, playerPositionRef, showAut
       <OutdoorGround />
       <PlayerPlot />
       <Road />
-      {showAuthoredTrees && AUTHORED_TREES.map((tree) => (
-        <ProceduralTree key={tree.id} config={tree.config} />
-      ))}
-      {DISTANT_TREES.map((tree) => (
-        <ProceduralTree key={tree.id} config={tree.config} />
-      ))}
+      {showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} />}
+      <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />
       <TerrainGroundCover playerPositionRef={playerPositionRef} />
     </>
   )

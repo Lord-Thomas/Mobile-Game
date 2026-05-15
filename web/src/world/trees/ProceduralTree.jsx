@@ -15,7 +15,7 @@ function disposeTree(tree) {
   })
 }
 
-function ProceduralTree({ config }) {
+function ProceduralTree({ config, animated = true }) {
   const treeRef = useRef(null)
   const normalized = useMemo(() => normalizeTreeConfig(config), [config])
   const tree = useMemo(() => createProceduralTree(normalized), [normalized])
@@ -29,7 +29,7 @@ function ProceduralTree({ config }) {
   }, [tree])
 
   useFrame(({ clock }) => {
-    treeRef.current?.update(clock.getElapsedTime())
+    if (animated) treeRef.current?.update(clock.getElapsedTime())
   })
 
   return (

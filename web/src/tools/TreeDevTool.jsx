@@ -3,7 +3,10 @@ import { TreePreset } from '@dgreenheck/ez-tree'
 import ProceduralTree from '../world/trees/ProceduralTree'
 import { DEFAULT_TREE_CONFIG, getTreeEditorValues } from '../world/trees/proceduralTreeConfig'
 import {
+  addCurrentTreeToLibrary,
+  deleteTreeFromLibrary,
   getTreeEditorState,
+  loadTreeFromLibrary,
   setTreeEditorConfig,
   setTreeEditorState,
   useTreeEditorStore,
@@ -104,7 +107,7 @@ export function TreeDevScene() {
 }
 
 export function TreeDevPanel() {
-  const { config, panelOpen } = useTreeEditorStore()
+  const { config, library, panelOpen } = useTreeEditorStore()
   const [message, setMessage] = useState('')
   const exportJson = useMemo(() => JSON.stringify(config, null, 2), [config])
 
@@ -135,6 +138,21 @@ export function TreeDevPanel() {
   const resetConfig = () => {
     setTreeEditorConfig(DEFAULT_TREE_CONFIG)
     showMessage('Arbre remis a zero')
+  }
+
+  const addToLibrary = () => {
+    const item = addCurrentTreeToLibrary()
+    showMessage(`${item.name} ajoute`)
+  }
+
+  const loadFromLibrary = (id) => {
+    const item = loadTreeFromLibrary(id)
+    if (item) showMessage(`${item.name} charge`)
+  }
+
+  const removeFromLibrary = (id) => {
+    deleteTreeFromLibrary(id)
+    showMessage('Arbre supprime')
   }
 
   if (!panelOpen) {
@@ -251,6 +269,22 @@ export function TreeDevPanel() {
           <button type="button" onClick={resetConfig} style={styles.secondaryButton}>Reset</button>
         </div>
         {message && <p style={styles.message}>{message}</p>}
+      </Section>
+
+      <Section title="Bibliotheque">
+        <button type="button" onClick={addToLibrary} style={styles.primaryButton}>Ajouter a la bibliotheque</button>
+        <div style={styles.libraryList}>
+          {library.length === 0 && <span style={styles.libraryEmpty}>Aucun arbre ajoute</span>}
+          {library.map((item) => (
+            <div key={item.id} style={styles.libraryItem}>
+              <span>{item.name}</span>
+              <div style={styles.libraryActions}>
+                <button type="button" onClick={() => loadFromLibrary(item.id)} style={styles.smallButton}>Charger</button>
+                <button type="button" onClick={() => removeFromLibrary(item.id)} style={styles.smallButton}>Supprimer</button>
+              </div>
+            </div>
+          ))}
+        </div>
       </Section>
 
       <p style={styles.footer}>Ctrl+Shift+T masque le panneau. La config est gardee en local.</p>
@@ -412,6 +446,24 @@ const styles = {
     fontSize: 11,
   },
   actions: {
+    display: 'flex',
+    gap: 8,
+  },
+  libraryList: {
+    display: 'grid',
+    gap: 8,
+  },
+  libraryEmpty: {
+    color: '#7f918c',
+  },
+  libraryItem: {
+    display: 'grid',
+    gap: 6,
+    padding: 8,
+    border: '1px solid rgba(223, 229, 233, 0.12)',
+    borderRadius: 6,
+  },
+  libraryActions: {
     display: 'flex',
     gap: 8,
   },

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { DEFAULT_TREE_CONFIG, normalizeTreeConfig } from '../world/trees/proceduralTreeConfig'
+import { GAME_TREE_LIBRARY } from '../world/trees/treeLibrary'
 
 const STORAGE_KEY = 'lab_tree_editor_draft_v1'
+const LIBRARY_STORAGE_KEY = 'lab_tree_library_v1'
 
 function loadStoredConfig() {
   try {
@@ -12,8 +14,18 @@ function loadStoredConfig() {
   }
 }
 
+function loadStoredLibrary() {
+  try {
+    const raw = window.localStorage.getItem(LIBRARY_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : Object.values(GAME_TREE_LIBRARY)
+  } catch {
+    return Object.values(GAME_TREE_LIBRARY)
+  }
+}
+
 let state = {
   config: typeof window === 'undefined' ? DEFAULT_TREE_CONFIG : loadStoredConfig(),
+  library: typeof window === 'undefined' ? [] : loadStoredLibrary(),
   panelOpen: true,
 }
 const listeners = new Set()
@@ -54,6 +66,48 @@ export function setTreeEditorConfig(patch) {
   } catch {
     // Local dev tool only: failing to persist should not break the editor.
   }
+}
+
+function persistLibrary(library) {
+  try {
+    window.localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(library))
+  } catch {
+    // Local dev tool only: failing to persist should not break the editor.
+  }
+}
+
+function makeLibraryConfig(config) {
+  const normalized = normalizeTreeConfig(config)
+  return {
+    ...normalized,
+    position: { x: 0, y: normalized.position.y, z: 0 },
+    rotationY: 0,
+  }
+}
+
+export function addCurrentTreeToLibrary() {
+  const item = {
+    id: `tree-${Date.now()}`,
+    name: `${state.config.preset} ${state.config.seed}`,
+    config: makeLibraryConfig(state.config),
+  }
+  const library = [...state.library, item]
+  setTreeEditorState({ library })
+  persistLibrary(library)
+  return item
+}
+
+export function loadTreeFromLibrary(id) {
+  const item = state.library.find((entry) => entry.id === id)
+  if (!item) return null
+  setTreeEditorConfig(item.config)
+  return item
+}
+
+export function deleteTreeFromLibrary(id) {
+  const library = state.library.filter((entry) => entry.id !== id)
+  setTreeEditorState({ library })
+  persistLibrary(library)
 }
 
 export function useTreeEditorStore() {
