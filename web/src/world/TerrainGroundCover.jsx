@@ -16,13 +16,17 @@ const grassPlacementSettings = {
 }
 const GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
-const GRASS_GRID_STEP = 0.13
+const GRASS_GRID_STEP_NEAR = 0.13
+const GRASS_GRID_STEP_FAR = 0.28
+const GRASS_NEAR_DIST = 24
+const GRASS_FAR_DIST = 48
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_ROWS_PER_IDLE_BATCH = 96
 const GRASS_CHUNK_MIN_ROWS_PER_BATCH = 20
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 8
 const GRASS_BOOTSTRAP_CHUNK_COUNT = 9999
+const MAX_GRASS_INSTANCES = 1_200_000
 const DISTANT_GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const DISTANT_GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const DISTANT_GRASS_GRID_STEP = 0.72
@@ -183,8 +187,8 @@ function getDistantGrassDensity(x, z, seed) {
   ) * farFade * clumpVariation * slopeFade * mountainFade * (0.82 + seededRandom(seed + 71) * 0.18)
 }
 
-function pushGrassRow(grass, xi, minZ, maxZ) {
-  for (let zi = minZ; zi <= maxZ; zi += GRASS_GRID_STEP) {
+function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP_NEAR) {
+  for (let zi = minZ; zi <= maxZ; zi += step) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
     const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
@@ -223,6 +227,14 @@ function getGrassChunkIndex(value) {
 
 function getGrassChunkKey(chunkX, chunkZ) {
   return `${chunkX}:${chunkZ}`
+}
+
+function getGrassChunkStep(chunkX, chunkZ) {
+  const centerX = (chunkX + 0.5) * GRASS_CHUNK_SIZE
+  const centerZ = (chunkZ + 0.5) * GRASS_CHUNK_SIZE
+  const dist = Math.max(Math.abs(centerX), Math.abs(centerZ))
+  const t = Math.min(1, Math.max(0, (dist - GRASS_NEAR_DIST) / (GRASS_FAR_DIST - GRASS_NEAR_DIST)))
+  return GRASS_GRID_STEP_NEAR + (GRASS_GRID_STEP_FAR - GRASS_GRID_STEP_NEAR) * t * t
 }
 
 function getAllGrassChunkKeys() {
@@ -278,10 +290,8 @@ function createRockCover() {
   return rocks
 }
 
-function GrassWindMaterial({ texture, playerPositionRef }) {
-  const materialRef = useRef()
-
-  const handleBeforeCompile = useMemo(() => (shader) => {
+function buildGrassHandleBeforeCompile(shaderRef) {
+  return (shader) => {
     shader.uniforms.uTime = { value: 0 }
     shader.uniforms.uPlayerPosition = { value: new Vector3(9999, 0, 9999) }
     shader.uniforms.uBladeHeight = { value: GRASS_CARD_HEIGHT }
@@ -397,73 +407,9 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
       `,
     )
 
-    materialRef.current.userData.shader = shader
-  }, [])
-
-  useFrame((state) => {
-    const shader = materialRef.current?.userData.shader
-    if (!shader) return
-    // R3F shader uniforms are intentionally mutated once per frame.
-    // eslint-disable-next-line react-hooks/immutability
-    shader.uniforms.uTime.value = state.clock.elapsedTime
-    const playerPosition = playerPositionRef?.current
-    if (playerPosition) {
-      shader.uniforms.uPlayerPosition.value.set(playerPosition.x, playerPosition.y, playerPosition.z)
-    }
-    _cameraForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion)
-    _cameraForward.y = 0
-    if (_cameraForward.lengthSq() > 0.0001) _cameraForward.normalize()
-    shader.uniforms.uCameraForward.value.copy(_cameraForward)
-  })
-
-  return (
-    <meshBasicMaterial
-      ref={materialRef}
-      map={texture}
-      alphaTest={0.45}
-      side={FrontSide}
-      transparent={false}
-      depthWrite
-      color="#ffffff"
-      vertexColors
-      onBeforeCompile={handleBeforeCompile}
-    />
-  )
-}
-
-function GrassLayer({ items, playerPositionRef, visible = true }) {
-  const baseTexture = useTexture(GRASS_TEXTURE)
-  const geometry = useMemo(() => createGrassCardGeometry(), [])
-  const ref = useRef()
-
-  const texture = useMemo(() => {
-    const nextTexture = baseTexture.clone()
-    nextTexture.colorSpace = SRGBColorSpace
-    nextTexture.needsUpdate = true
-    return nextTexture
-  }, [baseTexture])
-
-  useEffect(() => () => texture.dispose(), [texture])
-
-  useLayoutEffect(() => {
-    items.forEach((grass, index) => {
-      dummy.position.set(...grass.position)
-      dummy.rotation.set(0, 0, 0)
-      dummy.scale.setScalar(grass.scale)
-      dummy.updateMatrix()
-      ref.current.setMatrixAt(index, dummy.matrix)
-    })
-    ref.current.instanceMatrix.needsUpdate = true
-  }, [items])
-
-  return (
-    <instancedMesh ref={ref} args={[geometry, undefined, items.length]} frustumCulled visible={visible}>
-      <GrassWindMaterial
-        texture={texture}
-        playerPositionRef={playerPositionRef}
-      />
-    </instancedMesh>
-  )
+    // eslint-disable-next-line no-param-reassign
+    shaderRef.current = shader
+  }
 }
 
 function TerrainGroundCover({ playerPositionRef, active = true }) {
@@ -479,6 +425,25 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
   const grassChunkTimerRef = useRef(null)
   const activeGrassChunkJobRef = useRef(null)
   const residentGrassKeysRef = useRef(new Set())
+
+  // Single instancedMesh for all grass — avoids 1000+ draw calls and useFrame callbacks
+  const grassMeshRef = useRef()
+  const shaderRef = useRef(null)
+  const writtenChunkKeysRef = useRef(new Set())
+  const writtenDistantGrassRef = useRef(false)
+  const nextGrassOffsetRef = useRef(0)
+
+  const baseTexture = useTexture(GRASS_TEXTURE)
+  const grassTexture = useMemo(() => {
+    const t = baseTexture.clone()
+    t.colorSpace = SRGBColorSpace
+    t.needsUpdate = true
+    return t
+  }, [baseTexture])
+  useEffect(() => () => grassTexture.dispose(), [grassTexture])
+
+  const grassGeometry = useMemo(() => createGrassCardGeometry(), [])
+  const handleBeforeCompile = useMemo(() => buildGrassHandleBeforeCompile(shaderRef), [])
 
   const publishGrassDebugStats = () => {
     if (typeof window === 'undefined') return
@@ -529,13 +494,14 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
             key: nextKey,
             grass: [],
             xi: bounds.minX,
+            step: getGrassChunkStep(chunkX, chunkZ),
             ...bounds,
           }
         }
 
         const job = activeGrassChunkJobRef.current
-        pushGrassRow(job.grass, job.xi, job.minZ, job.maxZ)
-        job.xi += GRASS_GRID_STEP
+        pushGrassRow(job.grass, job.xi, job.minZ, job.maxZ, job.step)
+        job.xi += job.step
         rows += 1
 
         if (job.xi > job.maxX) {
@@ -649,6 +615,63 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
     publishGrassDebugStats()
   }, [grassChunks])
 
+  // Single useFrame for all grass uniforms (replaces one-per-chunk pattern)
+  useFrame((state) => {
+    const shader = shaderRef.current
+    if (!shader) return
+    // eslint-disable-next-line react-hooks/immutability
+    shader.uniforms.uTime.value = state.clock.elapsedTime
+    const pp = playerPositionRef?.current
+    if (pp) shader.uniforms.uPlayerPosition.value.set(pp.x, pp.y, pp.z)
+    _cameraForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion)
+    _cameraForward.y = 0
+    if (_cameraForward.lengthSq() > 0.0001) _cameraForward.normalize()
+    shader.uniforms.uCameraForward.value.copy(_cameraForward)
+  })
+
+  // Write newly built chunks into the shared buffer (incremental — only new chunks each call)
+  useLayoutEffect(() => {
+    const mesh = grassMeshRef.current
+    if (!mesh) return
+    let written = false
+    Object.entries(grassChunks).forEach(([key, items]) => {
+      if (writtenChunkKeysRef.current.has(key)) return
+      items.forEach((grass) => {
+        if (nextGrassOffsetRef.current >= MAX_GRASS_INSTANCES) return
+        dummy.position.set(...grass.position)
+        dummy.rotation.set(0, 0, 0)
+        dummy.scale.setScalar(grass.scale)
+        dummy.updateMatrix()
+        dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRef.current * 16)
+        nextGrassOffsetRef.current += 1
+      })
+      writtenChunkKeysRef.current.add(key)
+      written = true
+    })
+    if (written) {
+      mesh.count = nextGrassOffsetRef.current
+      mesh.instanceMatrix.needsUpdate = true
+    }
+  }, [grassChunks])
+
+  // Write distant grass into the shared buffer (once)
+  useLayoutEffect(() => {
+    const mesh = grassMeshRef.current
+    if (!mesh || !distantGrass || writtenDistantGrassRef.current) return
+    distantGrass.forEach((grass) => {
+      if (nextGrassOffsetRef.current >= MAX_GRASS_INSTANCES) return
+      dummy.position.set(...grass.position)
+      dummy.rotation.set(0, 0, 0)
+      dummy.scale.setScalar(grass.scale)
+      dummy.updateMatrix()
+      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRef.current * 16)
+      nextGrassOffsetRef.current += 1
+    })
+    writtenDistantGrassRef.current = true
+    grassMeshRef.current.count = nextGrassOffsetRef.current
+    grassMeshRef.current.instanceMatrix.needsUpdate = true
+  }, [distantGrass])
+
   useEffect(() => () => {
     if (grassChunkTimerRef.current === null || typeof window === 'undefined') return
     if ('cancelIdleCallback' in window) window.cancelIdleCallback(grassChunkTimerRef.current)
@@ -718,16 +741,23 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
 
   return (
     <group visible={active} userData={{ debugCategory: 'grass' }}>
-      {distantGrass && (
-        <GrassLayer items={distantGrass} playerPositionRef={playerPositionRef} />
-      )}
-      {Object.entries(grassChunks).map(([key, items]) => (
-        <GrassLayer
-          key={key}
-          items={items}
-          playerPositionRef={playerPositionRef}
+      <instancedMesh
+        ref={grassMeshRef}
+        args={[grassGeometry, undefined, MAX_GRASS_INSTANCES]}
+        frustumCulled={false}
+        userData={{ debugCategory: 'grass-mesh' }}
+      >
+        <meshBasicMaterial
+          map={grassTexture}
+          alphaTest={0.45}
+          side={FrontSide}
+          transparent={false}
+          depthWrite
+          color="#ffffff"
+          vertexColors
+          onBeforeCompile={handleBeforeCompile}
         />
-      ))}
+      </instancedMesh>
       <instancedMesh
         ref={ref}
         args={[undefined, undefined, rocks.length]}
