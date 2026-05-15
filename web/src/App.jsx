@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFSoftShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three'
+import { ACESFilmicToneMapping, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -4931,6 +4931,184 @@ function RenderQualityGovernor({ onScaleChange }) {
   return null
 }
 
+function getDebugCategory(object) {
+  let current = object
+  while (current) {
+    if (current.userData?.debugCategory) return current.userData.debugCategory
+    current = current.parent
+  }
+  return 'other'
+}
+
+function getObjectTriangleCount(object) {
+  if (!object.geometry || !object.isMesh) return 0
+  let current = object
+  while (current) {
+    if (!current.visible) return 0
+    current = current.parent
+  }
+  const geometry = object.geometry
+  const indexCount = geometry.index?.count ?? 0
+  const positionCount = geometry.attributes.position?.count ?? 0
+  const triangleCount = indexCount > 0 ? indexCount / 3 : positionCount / 3
+  return triangleCount * (object.isInstancedMesh ? object.count : 1)
+}
+
+function getRendererInfo(gl) {
+  const context = gl.getContext()
+  const extension = context.getExtension('WEBGL_debug_renderer_info')
+  const renderer = extension
+    ? context.getParameter(extension.UNMASKED_RENDERER_WEBGL)
+    : context.getParameter(context.RENDERER)
+  const vendor = extension
+    ? context.getParameter(extension.UNMASKED_VENDOR_WEBGL)
+    : context.getParameter(context.VENDOR)
+
+  return {
+    renderer: String(renderer ?? ''),
+    vendor: String(vendor ?? ''),
+  }
+}
+
+function isWeakRenderer(rendererInfo) {
+  const value = `${rendererInfo.vendor} ${rendererInfo.renderer}`.toLowerCase()
+  return [
+    'intel',
+    'uhd graphics',
+    'iris',
+    'microsoft basic render driver',
+    'swiftshader',
+    'llvmpipe',
+    'software',
+  ].some((pattern) => value.includes(pattern))
+}
+
+function RenderStatsProbe({ onStatsChange, onRendererInfo }) {
+  const { gl, scene } = useThree()
+  const elapsedRef = useRef(0)
+  const framesRef = useRef(0)
+  const maxFrameTimeRef = useRef(0)
+  const drawingBufferRef = useRef(new Vector2())
+
+  useEffect(() => {
+    onRendererInfo(getRendererInfo(gl))
+  }, [gl, onRendererInfo])
+
+  useFrame((_, delta) => {
+    const frameTimeMs = delta * 1000
+    elapsedRef.current += delta
+    framesRef.current += 1
+    maxFrameTimeRef.current = Math.max(maxFrameTimeRef.current, frameTimeMs)
+
+    if (elapsedRef.current < 0.25) return
+
+    gl.getDrawingBufferSize(drawingBufferRef.current)
+    const fps = framesRef.current / elapsedRef.current
+    const averageFrameTimeMs = (elapsedRef.current / framesRef.current) * 1000
+    const trianglesByCategory = {}
+
+    scene.traverse((object) => {
+      const triangles = getObjectTriangleCount(object)
+      if (triangles <= 0) return
+      const category = getDebugCategory(object)
+      trianglesByCategory[category] = (trianglesByCategory[category] ?? 0) + triangles
+    })
+
+    onStatsChange({
+      fps,
+      frameTimeMs: averageFrameTimeMs,
+      maxFrameTimeMs: maxFrameTimeRef.current,
+      drawCalls: gl.info.render.calls,
+      triangles: gl.info.render.triangles,
+      textures: gl.info.memory.textures,
+      geometries: gl.info.memory.geometries,
+      dpr: gl.getPixelRatio(),
+      drawingBufferWidth: drawingBufferRef.current.x,
+      drawingBufferHeight: drawingBufferRef.current.y,
+      trianglesByCategory,
+    })
+
+    elapsedRef.current = 0
+    framesRef.current = 0
+    maxFrameTimeRef.current = 0
+  })
+
+  return null
+}
+
+function RenderStatsOverlay({ stats, toggles, onToggle }) {
+  if (!stats) return null
+
+  const rows = [
+    ['FPS', stats.fps.toFixed(1)],
+    ['Frame', `${stats.frameTimeMs.toFixed(1)} ms`],
+    ['Max frame', `${stats.maxFrameTimeMs.toFixed(1)} ms`],
+    ['Draw calls', stats.drawCalls.toLocaleString('fr-FR')],
+    ['Triangles', stats.triangles.toLocaleString('fr-FR')],
+    ['Textures', stats.textures.toLocaleString('fr-FR')],
+    ['Geometries', stats.geometries.toLocaleString('fr-FR')],
+    ['DPR', stats.dpr.toFixed(2)],
+    ['Buffer', `${stats.drawingBufferWidth} x ${stats.drawingBufferHeight}`],
+  ]
+  const triangleRows = Object.entries(stats.trianglesByCategory ?? {})
+    .sort((left, right) => right[1] - left[1])
+    .map(([label, value]) => [label, value.toLocaleString('fr-FR')])
+
+  return (
+    <aside className="render-stats" aria-label="Statistiques de rendu">
+      <div className="render-stats-controls">
+        {[
+          ['grass', 'Herbe'],
+          ['trees', 'Arbres'],
+          ['terrain', 'Terrain'],
+          ['sky', 'Ciel'],
+          ['shadows', 'Ombres'],
+          ['house', 'Maison'],
+          ['player', 'Joueur'],
+        ].map(([key, label]) => (
+          <button
+            className={toggles[key] ? 'is-active' : ''}
+            key={key}
+            type="button"
+            onClick={() => onToggle(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {rows.map(([label, value]) => (
+        <div className="render-stats-row" key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+      <div className="render-stats-divider" />
+      {triangleRows.map(([label, value]) => (
+        <div className="render-stats-row" key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+    </aside>
+  )
+}
+
+function GpuWarning({ visible, onDismiss }) {
+  if (!visible) return null
+
+  return (
+    <aside className="gpu-warning" role="status">
+      <p>
+        Votre navigateur utilise probablement le GPU integre. Pour de meilleures performances,
+        activez le GPU haute performance pour Chrome dans les parametres graphiques Windows.
+      </p>
+      <button type="button" onClick={onDismiss}>
+        Fermer
+      </button>
+    </aside>
+  )
+}
+
 function AdaptiveCameraFov() {
   const { camera, size } = useThree()
 
@@ -4991,11 +5169,32 @@ function App() {
       return false
     }
   }, [])
+  const isDebugMode = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      return params.get('debug') === '1'
+    } catch {
+      return false
+    }
+  }, [])
   const progressScope = isAdminMode ? 'admin' : 'player'
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
   const [dynamicRenderScale, setDynamicRenderScale] = useState(MAX_DYNAMIC_RENDER_SCALE)
   const renderSettings = useViewportRenderSettings(dynamicRenderScale)
+  const [renderStats, setRenderStats] = useState(null)
+  const [rendererInfo, setRendererInfo] = useState(null)
+  const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
+  const [debugToggles, setDebugToggles] = useState({
+    grass: true,
+    trees: true,
+    terrain: true,
+    sky: true,
+    shadows: true,
+    house: true,
+    player: true,
+  })
+  const showGpuWarning = Boolean(rendererInfo && isWeakRenderer(rendererInfo) && !gpuWarningDismissed)
 
   const touchRef = useRef({
     moveX: 0,
@@ -5797,7 +5996,7 @@ function App() {
       <Canvas
         dpr={renderSettings.dpr}
         camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 240 }}
-        shadows={{ enabled: true, type: PCFSoftShadowMap }}
+        shadows={{ enabled: !isDebugMode || debugToggles.shadows, type: PCFShadowMap }}
         gl={{
           antialias: renderSettings.antialias,
           powerPreference: 'high-performance',
@@ -5813,7 +6012,9 @@ function App() {
       >
         <AdaptiveCameraFov />
         <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
+        <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} />
         <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} />
+        {(!isDebugMode || debugToggles.house) && (
         <PlayerHouse exteriorVisible>
           <group>
             <HouseInterior
@@ -5846,7 +6047,16 @@ function App() {
             onLockPlacement={() => setPlacementLocked(true)}
           />
         </PlayerHouse>
-        <OutdoorNeighborhood lightingActive={currentZone === ZONES.outside} playerPositionRef={playerPositionRef} />
+        )}
+        <OutdoorNeighborhood
+          lightingActive={currentZone === ZONES.outside}
+          playerPositionRef={playerPositionRef}
+          showGrass={!isDebugMode || debugToggles.grass}
+          showTrees={!isDebugMode || debugToggles.trees}
+          showTerrain={!isDebugMode || debugToggles.terrain}
+          showSky={!isDebugMode || debugToggles.sky}
+          castShadows={!isDebugMode || debugToggles.shadows}
+        />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
@@ -5867,17 +6077,19 @@ function App() {
             />
             </>
           )}
-          <Player
-            touchRef={touchRef}
-            ballRef={ballRef}
-            playerPositionRef={playerPositionRef}
-            mode={mode}
-            currentZone={currentZone}
-            spawnRequest={spawnRequest}
-            goalObject={goalObject}
-            seatedState={seatedState}
-            onSeatedPhaseChange={updateSeatedPhase}
-          />
+          {(!isDebugMode || debugToggles.player) && (
+            <Player
+              touchRef={touchRef}
+              ballRef={ballRef}
+              playerPositionRef={playerPositionRef}
+              mode={mode}
+              currentZone={currentZone}
+              spawnRequest={spawnRequest}
+              goalObject={goalObject}
+              seatedState={seatedState}
+              onSeatedPhaseChange={updateSeatedPhase}
+            />
+          )}
           <OutdoorDoorTrigger
             playerPositionRef={playerPositionRef}
             currentZone={currentZone}
@@ -5909,6 +6121,14 @@ function App() {
           {showCaptureUi && <ScorePopups popups={scorePopups} />}
         </Physics>
       </Canvas>
+      {isDebugMode && (
+        <RenderStatsOverlay
+          stats={renderStats}
+          toggles={debugToggles}
+          onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
+        />
+      )}
+      <GpuWarning visible={showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
       {mode === 'play' && (
         <ControlsOverlay

@@ -12,11 +12,14 @@ const grassPlacementSettings = {
   minScale: 0.18,
   maxScale: 0.3,
 }
-const GRASS_AREA_MIN = -36
-const GRASS_AREA_MAX = 36
+const GRASS_AREA_MIN = -72
+const GRASS_AREA_MAX = 72
 const GRASS_GRID_STEP = 0.13
 const GRASS_DENSITY_MULTIPLIER = 9.5
-const GRASS_ROWS_PER_IDLE_BATCH = 14
+const GRASS_CHUNK_SIZE = 12
+const ACTIVE_GRASS_CHUNK_RADIUS = 2
+const PRELOAD_GRASS_CHUNK_RADIUS = 4
+const GRASS_CHUNK_ROWS_PER_IDLE_BATCH = 10
 const DISTANT_GRASS_AREA_MIN = -86
 const DISTANT_GRASS_AREA_MAX = 86
 const DISTANT_GRASS_GRID_STEP = 1.05
@@ -176,8 +179,8 @@ function getDistantGrassDensity(x, z, seed) {
   return 0.14 * nearFade * farFade * openPatch * slopeFade * mountainFade * (0.72 + seededRandom(seed + 71) * 0.28)
 }
 
-function pushGrassRow(grass, xi) {
-  for (let zi = GRASS_AREA_MIN; zi <= GRASS_AREA_MAX; zi += GRASS_GRID_STEP) {
+function pushGrassRow(grass, xi, minZ, maxZ) {
+  for (let zi = minZ; zi <= maxZ; zi += GRASS_GRID_STEP) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
     const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
@@ -187,6 +190,22 @@ function pushGrassRow(grass, xi) {
     )
     if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
   }
+}
+
+function getGrassChunkBounds(chunkX, chunkZ) {
+  const minX = Math.max(GRASS_AREA_MIN, chunkX * GRASS_CHUNK_SIZE)
+  const maxX = Math.min(GRASS_AREA_MAX, minX + GRASS_CHUNK_SIZE)
+  const minZ = Math.max(GRASS_AREA_MIN, chunkZ * GRASS_CHUNK_SIZE)
+  const maxZ = Math.min(GRASS_AREA_MAX, minZ + GRASS_CHUNK_SIZE)
+  return { minX, maxX, minZ, maxZ }
+}
+
+function getGrassChunkIndex(value) {
+  return Math.floor(value / GRASS_CHUNK_SIZE)
+}
+
+function getGrassChunkKey(chunkX, chunkZ) {
+  return `${chunkX}:${chunkZ}`
 }
 
 function pushDistantGrassRow(grass, xi) {
@@ -319,7 +338,7 @@ function GrassWindMaterial({ texture, playerPositionRef }) {
   )
 }
 
-function GrassLayer({ items, playerPositionRef }) {
+function GrassLayer({ items, playerPositionRef, visible = true }) {
   const baseTexture = useTexture(GRASS_TEXTURE)
   const geometry = useMemo(() => createGrassCardGeometry(), [])
   const ref = useRef()
@@ -345,67 +364,180 @@ function GrassLayer({ items, playerPositionRef }) {
   }, [items])
 
   return (
-    <instancedMesh ref={ref} args={[geometry, undefined, items.length]} frustumCulled>
-      <GrassWindMaterial texture={texture} playerPositionRef={playerPositionRef} />
+    <instancedMesh ref={ref} args={[geometry, undefined, items.length]} frustumCulled visible={visible}>
+      <GrassWindMaterial
+        texture={texture}
+        playerPositionRef={playerPositionRef}
+      />
     </instancedMesh>
   )
 }
 
-function TerrainGroundCover({ playerPositionRef }) {
+function TerrainGroundCover({ playerPositionRef, active = true }) {
   const rocks = useMemo(() => createRockCover(), [])
-  const [grass, setGrass] = useState(null)
+  const [grassChunks, setGrassChunks] = useState({})
   const [distantGrass, setDistantGrass] = useState(null)
   const ref = useRef()
+  const activeGrassCenterRef = useRef(null)
+  const grassChunkCacheRef = useRef(new Map())
+  const pendingGrassChunksRef = useRef(new Set())
+  const grassChunkQueueRef = useRef([])
+  const grassChunkTimerRef = useRef(null)
+  const activeGrassChunkJobRef = useRef(null)
+  const visibleGrassKeysRef = useRef(new Set())
+  const residentGrassKeysRef = useRef(new Set())
 
-  useEffect(() => {
-    if (grass) return undefined
+  const scheduleGrassChunkBuild = () => {
+    if (grassChunkTimerRef.current !== null || grassChunkQueueRef.current.length === 0) return
 
-    let cancelled = false
-    const nextGrass = []
-    let xi = GRASS_AREA_MIN
-    let timeoutId = null
-    let idleId = null
-
-    const schedule = (callback) => {
-      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-        idleId = window.requestIdleCallback(callback, { timeout: 80 })
-        return
+    const run = (deadline) => {
+      grassChunkTimerRef.current = null
+      if (!activeGrassChunkJobRef.current) {
+        const nextKey = grassChunkQueueRef.current.shift()
+        if (!nextKey) return
+        const [chunkX, chunkZ] = nextKey.split(':').map(Number)
+        const bounds = getGrassChunkBounds(chunkX, chunkZ)
+        activeGrassChunkJobRef.current = {
+          key: nextKey,
+          grass: [],
+          xi: bounds.minX,
+          ...bounds,
+        }
       }
-      timeoutId = window.setTimeout(() => callback(), 0)
-    }
 
-    const runBatch = (deadline) => {
+      const job = activeGrassChunkJobRef.current
       let rows = 0
-
       while (
-        xi <= GRASS_AREA_MAX
-        && rows < GRASS_ROWS_PER_IDLE_BATCH
+        job.xi <= job.maxX
+        && rows < GRASS_CHUNK_ROWS_PER_IDLE_BATCH
         && (!deadline || deadline.timeRemaining() > 2)
       ) {
-        pushGrassRow(nextGrass, xi)
-        xi += GRASS_GRID_STEP
+        pushGrassRow(job.grass, job.xi, job.minZ, job.maxZ)
+        job.xi += GRASS_GRID_STEP
         rows += 1
       }
 
-      if (cancelled) return
+      if (job.xi > job.maxX) {
+        grassChunkCacheRef.current.set(job.key, job.grass)
+        pendingGrassChunksRef.current.delete(job.key)
+        activeGrassChunkJobRef.current = null
 
-      if (xi <= GRASS_AREA_MAX) {
-        schedule(runBatch)
-      } else {
-        setGrass(nextGrass)
+        setGrassChunks((current) => (
+          current[job.key]
+            ? current
+            : residentGrassKeysRef.current.has(job.key)
+              ? { ...current, [job.key]: job.grass }
+              : current
+        ))
+      }
+
+      scheduleGrassChunkBuild()
+    }
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      grassChunkTimerRef.current = window.requestIdleCallback(run, { timeout: 48 })
+      return
+    }
+
+    grassChunkTimerRef.current = window.setTimeout(() => run(), 0)
+  }
+
+  useEffect(() => {
+    activeGrassCenterRef.current = null
+
+    if (active) return
+
+    visibleGrassKeysRef.current = new Set()
+    residentGrassKeysRef.current = new Set()
+    grassChunkQueueRef.current = []
+    pendingGrassChunksRef.current.clear()
+    activeGrassChunkJobRef.current = null
+
+    if (grassChunkTimerRef.current !== null && typeof window !== 'undefined') {
+      if ('cancelIdleCallback' in window) window.cancelIdleCallback(grassChunkTimerRef.current)
+      window.clearTimeout(grassChunkTimerRef.current)
+      grassChunkTimerRef.current = null
+    }
+  }, [active])
+
+  useFrame(() => {
+    if (!active) return
+
+    const playerPosition = playerPositionRef?.current
+    if (!playerPosition) return
+
+    const centerChunkX = getGrassChunkIndex(playerPosition.x)
+    const centerChunkZ = getGrassChunkIndex(playerPosition.z)
+    const nextCenterKey = getGrassChunkKey(centerChunkX, centerChunkZ)
+    if (activeGrassCenterRef.current === nextCenterKey) return
+    activeGrassCenterRef.current = nextCenterKey
+    const visibleKeys = new Set()
+    const preloadKeys = new Set()
+
+    for (let offsetX = -PRELOAD_GRASS_CHUNK_RADIUS; offsetX <= PRELOAD_GRASS_CHUNK_RADIUS; offsetX += 1) {
+      for (let offsetZ = -PRELOAD_GRASS_CHUNK_RADIUS; offsetZ <= PRELOAD_GRASS_CHUNK_RADIUS; offsetZ += 1) {
+        const chunkX = centerChunkX + offsetX
+        const chunkZ = centerChunkZ + offsetZ
+        const minX = chunkX * GRASS_CHUNK_SIZE
+        const minZ = chunkZ * GRASS_CHUNK_SIZE
+        if (minX > GRASS_AREA_MAX || minX + GRASS_CHUNK_SIZE < GRASS_AREA_MIN) continue
+        if (minZ > GRASS_AREA_MAX || minZ + GRASS_CHUNK_SIZE < GRASS_AREA_MIN) continue
+        const key = getGrassChunkKey(chunkX, chunkZ)
+        preloadKeys.add(key)
+        if (
+          Math.abs(offsetX) <= ACTIVE_GRASS_CHUNK_RADIUS
+          && Math.abs(offsetZ) <= ACTIVE_GRASS_CHUNK_RADIUS
+        ) {
+          visibleKeys.add(key)
+        }
       }
     }
 
-    schedule(runBatch)
+    visibleGrassKeysRef.current = visibleKeys
+    residentGrassKeysRef.current = preloadKeys
 
-    return () => {
-      cancelled = true
-      if (timeoutId !== null) window.clearTimeout(timeoutId)
-      if (idleId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-        window.cancelIdleCallback(idleId)
-      }
-    }
-  }, [grass])
+    setGrassChunks((current) => {
+      const next = { ...current }
+
+      preloadKeys.forEach((key) => {
+        const cached = grassChunkCacheRef.current.get(key)
+        if (cached) next[key] = cached
+      })
+
+      Object.keys(next).forEach((key) => {
+        if (!preloadKeys.has(key)) delete next[key]
+      })
+
+      return next
+    })
+
+    const visibleKeysByPriority = [...visibleKeys].sort((leftKey, rightKey) => {
+      const [leftX, leftZ] = leftKey.split(':').map(Number)
+      const [rightX, rightZ] = rightKey.split(':').map(Number)
+      const leftDistance = Math.max(Math.abs(leftX - centerChunkX), Math.abs(leftZ - centerChunkZ))
+      const rightDistance = Math.max(Math.abs(rightX - centerChunkX), Math.abs(rightZ - centerChunkZ))
+      return leftDistance - rightDistance
+    })
+
+    visibleKeysByPriority.forEach((key) => {
+      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
+      pendingGrassChunksRef.current.add(key)
+      grassChunkQueueRef.current.push(key)
+    })
+    preloadKeys.forEach((key) => {
+      if (visibleKeys.has(key)) return
+      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
+      pendingGrassChunksRef.current.add(key)
+      grassChunkQueueRef.current.push(key)
+    })
+    scheduleGrassChunkBuild()
+  })
+
+  useEffect(() => () => {
+    if (grassChunkTimerRef.current === null || typeof window === 'undefined') return
+    if ('cancelIdleCallback' in window) window.cancelIdleCallback(grassChunkTimerRef.current)
+    window.clearTimeout(grassChunkTimerRef.current)
+  }, [])
 
   useEffect(() => {
     if (distantGrass) return undefined
@@ -469,10 +601,24 @@ function TerrainGroundCover({ playerPositionRef }) {
   }, [rocks])
 
   return (
-    <group>
-      {distantGrass && <GrassLayer items={distantGrass} playerPositionRef={playerPositionRef} />}
-      {grass && <GrassLayer items={grass} playerPositionRef={playerPositionRef} />}
-      <instancedMesh ref={ref} args={[undefined, undefined, rocks.length]} frustumCulled>
+    <group visible={active} userData={{ debugCategory: 'grass' }}>
+      {distantGrass && (
+        <GrassLayer items={distantGrass} playerPositionRef={playerPositionRef} />
+      )}
+      {Object.entries(grassChunks).map(([key, items]) => (
+        <GrassLayer
+          key={key}
+          items={items}
+          playerPositionRef={playerPositionRef}
+          visible={visibleGrassKeysRef.current.has(key)}
+        />
+      ))}
+      <instancedMesh
+        ref={ref}
+        args={[undefined, undefined, rocks.length]}
+        frustumCulled
+        userData={{ debugCategory: 'rocks' }}
+      >
         <dodecahedronGeometry args={[0.48, 0]} />
         <meshBasicMaterial color="#9d9688" />
       </instancedMesh>

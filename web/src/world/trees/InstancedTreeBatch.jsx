@@ -100,14 +100,18 @@ function InstancedTreeBatch({ trees, animated = true }) {
     return [...next.entries()]
   }, [trees])
 
-  return groups.map(([variantId, placements]) => (
-    <InstancedTreeVariant
-      key={variantId}
-      variantId={variantId}
-      placements={placements}
-      animated={animated}
-    />
-  ))
+  return (
+    <group userData={{ debugCategory: 'trees' }}>
+      {groups.map(([variantId, placements]) => (
+        <InstancedTreeVariant
+          key={variantId}
+          variantId={variantId}
+          placements={placements}
+          animated={animated}
+        />
+      ))}
+    </group>
+  )
 }
 
 export default InstancedTreeBatch

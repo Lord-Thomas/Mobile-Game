@@ -42,7 +42,7 @@ float fbm(vec2 p) {
   float amplitude = 0.5;
   mat2 rotate = mat2(0.8, -0.6, 0.6, 0.8);
 
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 3; i++) {
     value += amplitude * noise(p);
     p = rotate * p * 2.02 + 17.13;
     amplitude *= 0.52;
@@ -53,9 +53,8 @@ float fbm(vec2 p) {
 
 float cloudLayer(vec2 uv, float altitude, float scale, float coverage, float softness, vec2 wind) {
   float broad = fbm(uv * scale + wind);
-  float detail = fbm(uv * scale * 3.2 - wind * 0.7);
-  float wisps = fbm(uv * scale * 7.5 + vec2(wind.y, -wind.x) * 0.35);
-  float shaped = broad * 0.72 + detail * 0.22 + wisps * 0.06;
+  float detail = fbm(uv * scale * 2.7 - wind * 0.7);
+  float shaped = broad * 0.82 + detail * 0.18;
   shaped *= smoothstep(0.02, 0.55, altitude) * (1.0 - smoothstep(0.92, 1.0, altitude));
   return smoothstep(coverage, coverage + softness, shaped);
 }

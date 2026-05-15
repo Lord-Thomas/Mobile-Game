@@ -1,6 +1,6 @@
 function PlayerHouse({ children }) {
   return (
-    <group name="PlayerHouse">
+    <group name="PlayerHouse" userData={{ debugCategory: 'house' }}>
       {children}
     </group>
   )

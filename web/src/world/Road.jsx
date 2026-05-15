@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from 'react'
-import { DoubleSide } from 'three'
 import { roadLayout } from './roads/roadLayout'
 import { createRoadGeometry } from './roads/roadGeometry'
 import OutdoorSurfaceMaterial from './OutdoorSurfaceMaterial'
@@ -20,7 +19,6 @@ function RoadMesh({ road, color = '#58616a', yOffset = 0.028, segments = 80 }) {
         repeat={[1, 1]}
         color={color}
         roughness={0.78}
-        side={DoubleSide}
       />
     </mesh>
   )

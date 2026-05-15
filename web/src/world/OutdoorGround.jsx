@@ -8,7 +8,7 @@ function OutdoorGround() {
   useEffect(() => () => terrain.geometry.dispose(), [terrain.geometry])
 
   return (
-    <group>
+    <group userData={{ debugCategory: 'terrain' }}>
       <mesh geometry={terrain.geometry} receiveShadow>
         <NaturalTerrainMaterial />
       </mesh>

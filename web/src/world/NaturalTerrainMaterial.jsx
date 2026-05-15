@@ -98,6 +98,10 @@ function NaturalTerrainMaterial() {
         return mix(colorA, colorB, blend);
       }
 
+      vec3 naturalNormalSample(sampler2D tex, vec2 uv) {
+        return texture2D(tex, uv).xyz * 2.0 - 1.0;
+      }
+
       float naturalSegmentDistance(vec2 p, vec2 a, vec2 b) {
         vec2 ab = b - a;
         float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
@@ -179,8 +183,8 @@ function NaturalTerrainMaterial() {
       #ifdef USE_NORMALMAP_TANGENTSPACE
         vec2 naturalNormalUv = vNaturalWorldPosition.xz;
         float naturalNormalDirt = naturalSurfaceDirtWeight(naturalNormalUv);
-        vec3 naturalGrassNormal = naturalTextureNoTile(uGrassNormalMap, naturalNormalUv * 0.155).xyz * 2.0 - 1.0;
-        vec3 naturalDirtNormal = naturalTextureNoTile(uDirtNormalMap, naturalNormalUv * 0.18).xyz * 2.0 - 1.0;
+        vec3 naturalGrassNormal = naturalNormalSample(uGrassNormalMap, naturalNormalUv * 0.155);
+        vec3 naturalDirtNormal = naturalNormalSample(uDirtNormalMap, naturalNormalUv * 0.18);
         vec3 mapN = normalize(mix(naturalGrassNormal, naturalDirtNormal, naturalNormalDirt));
         mapN.xy *= normalScale;
         normal = normalize(tbn * mapN);

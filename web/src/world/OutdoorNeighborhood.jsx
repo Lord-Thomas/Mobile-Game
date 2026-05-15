@@ -10,7 +10,7 @@ import { AUTHORED_TREES, DISTANT_TREES } from './outdoorData'
 
 const OUTDOOR_SUN_DIRECTION = [0.62, 0.74, 0.2]
 
-function OutdoorSun() {
+function OutdoorSun({ castShadows }) {
   const lightRef = useRef()
   const targetRef = useRef()
 
@@ -28,8 +28,8 @@ function OutdoorSun() {
         position={OUTDOOR_SUN_DIRECTION.map((value) => value * 32)}
         intensity={1.55}
         color="#fff1d2"
-        castShadow
-        shadow-mapSize={[1024, 1024]}
+        castShadow={castShadows}
+        shadow-mapSize={[512, 512]}
         shadow-camera-left={-28}
         shadow-camera-right={28}
         shadow-camera-top={28}
@@ -43,32 +43,41 @@ function OutdoorSun() {
   )
 }
 
-export function OutdoorLighting({ active }) {
+export function OutdoorLighting({ active, showSky, castShadows }) {
   if (!active) return null
 
   return (
     <>
       <color attach="background" args={['#d7edf6']} />
       <fog attach="fog" args={['#cfe7f1', 34, 92]} />
-      <CloudSky sunDirection={OUTDOOR_SUN_DIRECTION} />
+      {showSky && <CloudSky sunDirection={OUTDOOR_SUN_DIRECTION} />}
       <hemisphereLight args={['#f4fbff', '#6f8c54', 1.05]} />
-      <OutdoorSun />
+      <OutdoorSun castShadows={castShadows} />
       <Environment preset="park" />
     </>
   )
 }
 
-function OutdoorNeighborhood({ lightingActive = true, playerPositionRef, showAuthoredTrees = true }) {
+function OutdoorNeighborhood({
+  lightingActive = true,
+  playerPositionRef,
+  showAuthoredTrees = true,
+  showGrass = true,
+  showTrees = true,
+  showTerrain = true,
+  showSky = true,
+  castShadows = true,
+}) {
   return (
-    <>
-      <OutdoorLighting active={lightingActive} />
-      <OutdoorGround />
+    <group userData={{ debugCategory: 'outdoor' }}>
+      <OutdoorLighting active={lightingActive} showSky={showSky} castShadows={castShadows} />
+      {showTerrain && <OutdoorGround />}
       <PlayerPlot />
       <Road />
-      {showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} />}
-      <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />
-      <TerrainGroundCover playerPositionRef={playerPositionRef} />
-    </>
+      {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} />}
+      {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />}
+      {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} active={lightingActive} />}
+    </group>
   )
 }
 
