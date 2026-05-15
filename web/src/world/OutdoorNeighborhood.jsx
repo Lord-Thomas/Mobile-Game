@@ -5,8 +5,9 @@ import PlayerPlot from './PlayerPlot'
 import Road from './Road'
 import TerrainGroundCover from './TerrainGroundCover'
 import CloudSky from './CloudSky'
+import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
-import { AUTHORED_TREES, DISTANT_TREES } from './outdoorData'
+import { AUTHORED_TREES, DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
 
 const OUTDOOR_SUN_DIRECTION = [0.62, 0.74, 0.2]
 
@@ -74,6 +75,9 @@ function OutdoorNeighborhood({
       {showTerrain && <OutdoorGround />}
       <PlayerPlot />
       <Road />
+      {NEIGHBOR_HOUSES.map((house) => (
+        <NeighborHouse key={house.id} {...house} />
+      ))}
       {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />}
       {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} active={lightingActive} />}

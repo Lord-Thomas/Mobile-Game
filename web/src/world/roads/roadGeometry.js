@@ -27,7 +27,7 @@ export function getRoadLotTransform({ road, t, side, setback, lateralOffset = 0 
 
   return {
     position: [center.x, 0, center.z],
-    rotationY: Math.atan2(directionToRoad.x, directionToRoad.z),
+    roadFacingRotationY: Math.atan2(directionToRoad.x, directionToRoad.z),
     roadPosition: [point.x, 0, point.z],
   }
 }

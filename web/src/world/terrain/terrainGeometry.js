@@ -1,6 +1,6 @@
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { getRoomBounds, houseLayout } from '../house/houseLayout'
-import { OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
+import { NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
 
@@ -187,6 +187,33 @@ function getHouseCutMask(x, z) {
   return playerHouseMask
 }
 
+function getNeighborHousePadHeight(house) {
+  return naturalHeight(house.position[0], house.position[2])
+}
+
+function getNeighborHousePadHeightAt(x, z) {
+  let strongestMask = 0
+  let targetHeight = 0
+
+  NEIGHBOR_HOUSES.forEach((house) => {
+    const mask = softRectMask(
+      x,
+      z,
+      house.position,
+      [house.size[0] + 1.4, house.size[2] + 1.4],
+      house.rotationY,
+      2.4,
+    )
+
+    if (mask > strongestMask) {
+      strongestMask = mask
+      targetHeight = getNeighborHousePadHeight(house)
+    }
+  })
+
+  return { mask: strongestMask, targetHeight }
+}
+
 export function getTerrainHeight(x, z) {
   let height = naturalHeight(x, z)
 
@@ -216,6 +243,9 @@ export function getTerrainHeight(x, z) {
 
   const houseCutMask = getHouseCutMask(x, z)
   height = mix(height, HOUSE_CUT_HEIGHT, houseCutMask)
+
+  const neighborPad = getNeighborHousePadHeightAt(x, z)
+  height = mix(height, neighborPad.targetHeight, neighborPad.mask * (1 - roadMask))
 
   return height
 }

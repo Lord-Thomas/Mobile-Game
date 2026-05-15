@@ -67,7 +67,7 @@ export const NEIGHBOR_HOUSES = neighborHouseSlots.map((slot) => {
   return {
     ...slot,
     position: transform.position,
-    rotationY: transform.rotationY,
+    rotationY: transform.roadFacingRotationY + (slot.doorWall === 'south' ? Math.PI : 0),
     roadPosition: transform.roadPosition,
   }
 })

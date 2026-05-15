@@ -1,8 +1,13 @@
-import { DoubleSide } from 'three'
-import { getWallSideTransform, splitWallIntoSolidRects } from './house/wallUtils'
-import OutdoorSurfaceMaterial from './OutdoorSurfaceMaterial'
+import { useTexture } from '@react-three/drei'
+import { DoubleSide, RepeatWrapping, SRGBColorSpace } from 'three'
+import { useEffect, useMemo } from 'react'
+import { getWallColliderTransform, getWallPointAt, splitWallIntoSolidRects } from './house/wallUtils'
+import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const WALL_THICKNESS = 0.18
+const EXTERIOR_WALL_TEXTURE = '/textures/environment/walls/mur-paint.png'
+const WALL_REPEAT_X_PER_UNIT = 0.18
+const WALL_REPEAT_Y_PER_UNIT = 0.18
 
 function createNeighborWalls({ size, color, trim, doorWall }) {
   const [width, height, depth] = size
@@ -10,64 +15,139 @@ function createNeighborWalls({ size, color, trim, doorWall }) {
   const halfDepth = depth * 0.5
   const doorWidth = 1.05
   const doorHeight = 2.15
+  const corners = {
+    southwest: { x: -halfWidth, z: -halfDepth },
+    southeast: { x: halfWidth, z: -halfDepth },
+    northwest: { x: -halfWidth, z: halfDepth },
+    northeast: { x: halfWidth, z: halfDepth },
+  }
 
   const walls = [
     {
       id: 'west',
-      axis: 'z',
-      constant: -halfWidth,
-      from: -halfDepth,
-      to: halfDepth,
+      startCorner: corners.northwest,
+      endCorner: corners.southwest,
       sideA: { normal: [1, 0, 0], color: '#ece7df' },
-      sideB: { normal: [-1, 0, 0], color },
+      sideB: { type: 'outside', normal: [-1, 0, 0], color },
     },
     {
       id: 'east',
-      axis: 'z',
-      constant: halfWidth,
-      from: -halfDepth,
-      to: halfDepth,
+      startCorner: corners.southeast,
+      endCorner: corners.northeast,
       sideA: { normal: [-1, 0, 0], color: '#ece7df' },
-      sideB: { normal: [1, 0, 0], color },
+      sideB: { type: 'outside', normal: [1, 0, 0], color },
     },
     {
       id: 'south',
-      axis: 'x',
-      constant: -halfDepth,
-      from: -halfWidth,
-      to: halfWidth,
+      startCorner: corners.southwest,
+      endCorner: corners.southeast,
       sideA: { normal: [0, 0, 1], color: '#ece7df' },
-      sideB: { normal: [0, 0, -1], color },
+      sideB: { type: 'outside', normal: [0, 0, -1], color },
     },
     {
       id: 'north',
-      axis: 'x',
-      constant: halfDepth,
-      from: -halfWidth,
-      to: halfWidth,
+      startCorner: corners.northeast,
+      endCorner: corners.northwest,
       sideA: { normal: [0, 0, -1], color: '#ece7df' },
-      sideB: { normal: [0, 0, 1], color },
+      sideB: { type: 'outside', normal: [0, 0, 1], color },
     },
   ]
 
-  return walls.map((wall) => ({
-    ...wall,
-    height,
-    thickness: WALL_THICKNESS,
-    trim,
-    openings: wall.id === doorWall
-      ? [{ id: 'front_door', type: 'door', center: 0, width: doorWidth, bottom: 0, height: doorHeight }]
-      : [],
-  }))
+  return walls.map((wall) => {
+    const dx = wall.endCorner.x - wall.startCorner.x
+    const dz = wall.endCorner.z - wall.startCorner.z
+    const length = Math.hypot(dx, dz)
+    const isHorizontal = Math.abs(dx) >= Math.abs(dz)
+
+    return {
+      ...wall,
+      axis: isHorizontal ? 'x' : 'z',
+      constant: isHorizontal ? wall.startCorner.z : wall.startCorner.x,
+      from: isHorizontal ? wall.startCorner.x : wall.startCorner.z,
+      to: isHorizontal ? wall.endCorner.x : wall.endCorner.z,
+      length,
+      height,
+      thickness: WALL_THICKNESS,
+      trim,
+      openings: wall.id === doorWall
+        ? [{ id: 'front_door', type: 'door', center: length * 0.5, width: doorWidth, bottom: 0, height: doorHeight }]
+        : [],
+    }
+  })
 }
 
-function WallFace({ wall, rect, side }) {
-  const transform = getWallSideTransform(wall, rect, side)
+function getWallMaterialSlots(wall) {
+  const slots = [null, null, null, null, null, null]
+  const dx = wall.endCorner.x - wall.startCorner.x
+  const dz = wall.endCorner.z - wall.startCorner.z
+  const length = Math.hypot(dx, dz) || 1
+  const leftNormal = [-dz / length, 0, dx / length]
+
+  ;[wall.sideA, wall.sideB].forEach((side) => {
+    const sideDot = side.normal[0] * leftNormal[0] + side.normal[2] * leftNormal[2]
+    if (sideDot >= 0) slots[4] = side
+    if (sideDot < 0) slots[5] = side
+  })
+
+  return slots
+}
+
+function WallBlockMaterial({ attach, side, width, height, exteriorTexture, capColor }) {
+  const isExterior = side?.type === 'outside'
+  const repeatedTexture = useMemo(() => {
+    if (!isExterior) return null
+    const next = exteriorTexture.clone()
+    next.wrapS = RepeatWrapping
+    next.wrapT = RepeatWrapping
+    next.repeat.set(
+      Math.max(0.01, width * WALL_REPEAT_X_PER_UNIT),
+      Math.max(0.01, height * WALL_REPEAT_Y_PER_UNIT),
+    )
+    next.colorSpace = SRGBColorSpace
+    next.needsUpdate = true
+    return next
+  }, [exteriorTexture, height, isExterior, width])
+
+  useEffect(() => {
+    return () => repeatedTexture?.dispose()
+  }, [repeatedTexture])
+
+  return (
+    <meshStandardMaterial
+      attach={attach}
+      map={repeatedTexture}
+      color={side?.color ?? capColor}
+      roughness={side ? 0.78 : 0.8}
+      polygonOffset={Boolean(side)}
+      polygonOffsetFactor={side ? -1 : 0}
+      polygonOffsetUnits={side ? -1 : 0}
+    />
+  )
+}
+
+function WallVolume({ wall, rect, exteriorTexture }) {
+  const transform = getWallColliderTransform(wall, rect)
+  const materialSlots = getWallMaterialSlots(wall)
+  const capColor = wall.trim
 
   return (
     <mesh position={transform.position} rotation={transform.rotation} castShadow receiveShadow>
-      <planeGeometry args={[transform.width, transform.height]} />
-      <meshStandardMaterial color={side.color} roughness={0.78} />
+      <boxGeometry args={[
+        transform.args[0] * 2,
+        transform.args[1] * 2,
+        transform.args[2] * 2,
+      ]} />
+      {materialSlots.map((side, index) => (
+        <WallBlockMaterial
+          key={`${rect.id}-material-${index}`}
+          attach={`material-${index}`}
+          side={side}
+          width={transform.renderWidth ?? rect.width}
+          height={rect.height}
+          exteriorTexture={exteriorTexture}
+          capColor={capColor}
+        />
+      ))}
     </mesh>
   )
 }
@@ -85,44 +165,55 @@ function OpeningReveals({ walls }) {
           const y = bottom + opening.height * 0.5
           const color = wall.trim
 
-          if (wall.axis === 'x') {
-            return [
-              <mesh key={`${wall.id}-left-reveal`} position={[min, y, wall.constant]}>
-                <boxGeometry args={[0.05, opening.height, wall.thickness + 0.03]} />
-                <meshStandardMaterial color={color} roughness={0.72} />
-              </mesh>,
-              <mesh key={`${wall.id}-right-reveal`} position={[max, y, wall.constant]}>
-                <boxGeometry args={[0.05, opening.height, wall.thickness + 0.03]} />
-                <meshStandardMaterial color={color} roughness={0.72} />
-              </mesh>,
-              topHeight > 0.001 && (
-                <mesh key={`${wall.id}-top-reveal`} position={[opening.center, top, wall.constant]}>
-                  <boxGeometry args={[opening.width, 0.05, wall.thickness + 0.03]} />
-                  <meshStandardMaterial color={color} roughness={0.72} />
-                </mesh>
-              ),
-            ].filter(Boolean)
-          }
-
           return [
-            <mesh key={`${wall.id}-left-reveal`} position={[wall.constant, y, min]}>
-              <boxGeometry args={[wall.thickness + 0.03, opening.height, 0.05]} />
-              <meshStandardMaterial color={color} roughness={0.72} />
-            </mesh>,
-            <mesh key={`${wall.id}-right-reveal`} position={[wall.constant, y, max]}>
-              <boxGeometry args={[wall.thickness + 0.03, opening.height, 0.05]} />
-              <meshStandardMaterial color={color} roughness={0.72} />
-            </mesh>,
+            <RevealVolume
+              key={`${wall.id}-left-reveal`}
+              wall={wall}
+              center={min}
+              y={y}
+              width={0.05}
+              height={opening.height}
+              color={color}
+            />,
+            <RevealVolume
+              key={`${wall.id}-right-reveal`}
+              wall={wall}
+              center={max}
+              y={y}
+              width={0.05}
+              height={opening.height}
+              color={color}
+            />,
             topHeight > 0.001 && (
-              <mesh key={`${wall.id}-top-reveal`} position={[wall.constant, top, opening.center]}>
-                <boxGeometry args={[wall.thickness + 0.03, 0.05, opening.width]} />
-                <meshStandardMaterial color={color} roughness={0.72} />
-              </mesh>
+              <RevealVolume
+                key={`${wall.id}-top-reveal`}
+                wall={wall}
+                center={opening.center}
+                y={top}
+                width={opening.width}
+                height={0.05}
+                color={color}
+              />
             ),
           ].filter(Boolean)
         }),
       )}
     </>
+  )
+}
+
+function RevealVolume({ wall, center, y, width, height, color }) {
+  const transform = getWallColliderTransform(wall, { center, y, width, height })
+
+  return (
+    <mesh position={transform.position} rotation={transform.rotation}>
+      <boxGeometry args={[
+        transform.args[0] * 2,
+        transform.args[1] * 2,
+        transform.args[2] * 2 + 0.03,
+      ]} />
+      <meshStandardMaterial color={color} roughness={0.72} />
+    </mesh>
   )
 }
 
@@ -133,9 +224,12 @@ function getDoorData(walls) {
 
   const y = (opening.bottom ?? 0) + opening.height * 0.5
   const offset = wall.thickness * 0.5 + 0.012
-  const position = wall.axis === 'x'
-    ? [opening.center, y, wall.constant + wall.sideB.normal[2] * offset]
-    : [wall.constant + wall.sideB.normal[0] * offset, y, opening.center]
+  const openingPoint = getWallPointAt(wall, opening.center)
+  const position = [
+    openingPoint.x + wall.sideB.normal[0] * offset,
+    y,
+    openingPoint.z + wall.sideB.normal[2] * offset,
+  ]
   const rotation = wall.axis === 'x'
     ? [0, wall.sideB.normal[2] < 0 ? Math.PI : 0, 0]
     : [0, wall.sideB.normal[0] > 0 ? Math.PI / 2 : -Math.PI / 2, 0]
@@ -161,84 +255,19 @@ function NeighborDoor({ door }) {
   )
 }
 
-function NeighborPath({ door, roadPosition, housePosition, rotationY }) {
-  if (!door || !roadPosition) return null
-  const dx = roadPosition[0] - housePosition[0]
-  const dz = roadPosition[2] - housePosition[2]
-  const cos = Math.cos(-rotationY)
-  const sin = Math.sin(-rotationY)
-  const localRoadX = dx * cos - dz * sin
-  const localRoadZ = dx * sin + dz * cos
-  const doorX = door.position[0]
-  const doorZ = door.position[2]
-  const pathDx = localRoadX - doorX
-  const pathDz = localRoadZ - doorZ
-  const pathLength = Math.hypot(pathDx, pathDz)
-  const pathCenterX = (localRoadX + doorX) * 0.5
-  const pathCenterZ = (localRoadZ + doorZ) * 0.5
-  const pathAngle = -Math.atan2(pathDx, pathDz)
-
-  if (pathLength < 0.2) return null
-
-  return (
-    <mesh position={[pathCenterX, 0.032, pathCenterZ]} rotation={[-Math.PI / 2, 0, pathAngle]}>
-      <planeGeometry args={[1.2, pathLength]} />
-      <OutdoorSurfaceMaterial
-        colorMap="/textures/outdoor/dirt-ground-basecolor-512.jpg"
-        repeat={[1, Math.max(1, pathLength / 4)]}
-        color="#bfae83"
-        roughness={0.88}
-      />
-    </mesh>
-  )
-}
-
-function NeighborLot({ lotSize }) {
-  return (
-    <group>
-      <mesh position={[0, 0.024, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={lotSize} />
-        <OutdoorSurfaceMaterial
-          colorMap="/textures/outdoor/grass-patchy-basecolor-512.jpg"
-          repeat={[Math.max(1, lotSize[0] / 5), Math.max(1, lotSize[1] / 5)]}
-          color="#a3bd78"
-          roughness={0.9}
-        />
-      </mesh>
-      <mesh position={[0, 0.23, -lotSize[1] * 0.5]}>
-        <boxGeometry args={[lotSize[0], 0.46, 0.12]} />
-        <meshStandardMaterial color="#e8d7ad" roughness={0.72} />
-      </mesh>
-      <mesh position={[0, 0.23, lotSize[1] * 0.5]}>
-        <boxGeometry args={[lotSize[0], 0.46, 0.12]} />
-        <meshStandardMaterial color="#e8d7ad" roughness={0.72} />
-      </mesh>
-      <mesh position={[-lotSize[0] * 0.5, 0.23, 0]}>
-        <boxGeometry args={[0.12, 0.46, lotSize[1]]} />
-        <meshStandardMaterial color="#e8d7ad" roughness={0.72} />
-      </mesh>
-      <mesh position={[lotSize[0] * 0.5, 0.23, 0]}>
-        <boxGeometry args={[0.12, 0.46, lotSize[1]]} />
-        <meshStandardMaterial color="#e8d7ad" roughness={0.72} />
-      </mesh>
-    </group>
-  )
-}
-
-function NeighborHouse({ position, color, trim, rotationY = 0, size, lotSize, doorWall, roadPosition }) {
+function NeighborHouse({ position, color, trim, rotationY = 0, size, doorWall }) {
   const walls = createNeighborWalls({ size, color, trim, doorWall })
   const door = getDoorData(walls)
+  const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   const [width, height, depth] = size
+  const terrainY = getTerrainHeight(position[0], position[2])
 
   return (
-    <group position={position} rotation={[0, rotationY, 0]}>
-      <NeighborLot lotSize={lotSize} />
-      <NeighborPath door={door} roadPosition={roadPosition} housePosition={position} rotationY={rotationY} />
+    <group position={[position[0], terrainY, position[2]]} rotation={[0, rotationY, 0]}>
       {walls.flatMap((wall) =>
-        splitWallIntoSolidRects(wall).flatMap((rect) => [
-          <WallFace key={`${wall.id}-${rect.id}-a`} wall={wall} rect={rect} side={wall.sideA} />,
-          <WallFace key={`${wall.id}-${rect.id}-b`} wall={wall} rect={rect} side={wall.sideB} />,
-        ]),
+        splitWallIntoSolidRects(wall).map((rect) => (
+          <WallVolume key={rect.id} wall={wall} rect={rect} exteriorTexture={exteriorTexture} />
+        )),
       )}
       <OpeningReveals walls={walls} />
       <NeighborDoor door={door} />
@@ -246,12 +275,6 @@ function NeighborHouse({ position, color, trim, rotationY = 0, size, lotSize, do
         <boxGeometry args={[width + 0.12, 0.12, depth + 0.12]} />
         <meshStandardMaterial color={trim} roughness={0.8} />
       </mesh>
-      {[-width * 0.26, width * 0.26].map((x) => (
-        <mesh key={x} position={[x, 1.55, -depth * 0.5 - 0.095]} rotation={[0, Math.PI, 0]}>
-          <planeGeometry args={[0.72, 0.62]} />
-          <meshStandardMaterial color="#dff6ff" emissive="#b7e8ff" emissiveIntensity={0.1} roughness={0.42} />
-        </mesh>
-      ))}
     </group>
   )
 }
