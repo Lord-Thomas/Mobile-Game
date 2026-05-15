@@ -21,7 +21,7 @@ const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_ROWS_PER_IDLE_BATCH = 96
 const GRASS_CHUNK_MIN_ROWS_PER_BATCH = 20
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 8
-const GRASS_BOOTSTRAP_CHUNK_COUNT = 9
+const GRASS_BOOTSTRAP_CHUNK_COUNT = 9999
 const DISTANT_GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const DISTANT_GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const DISTANT_GRASS_GRID_STEP = 0.72
@@ -544,6 +544,22 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
 
     if (active) {
       residentGrassKeysRef.current = new Set(allGrassChunkKeys)
+
+      setGrassChunks((current) => {
+        let changed = false
+        const next = { ...current }
+        allGrassChunkKeys.forEach((key) => {
+          if (!next[key]) {
+            const cached = grassChunkCacheRef.current.get(key)
+            if (cached) {
+              next[key] = cached
+              changed = true
+            }
+          }
+        })
+        return changed ? next : current
+      })
+
       publishGrassDebugStats()
       return
     }
