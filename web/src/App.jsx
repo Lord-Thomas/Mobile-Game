@@ -30,7 +30,7 @@ const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
 const MAX_RENDER_DPR = 1.5
 const MIN_RENDER_DPR = 0.45
-const TARGET_MAX_RENDER_PIXELS = 1_450_000
+const TARGET_MAX_RENDER_PIXELS = 2_200_000
 const MIN_DYNAMIC_RENDER_SCALE = 0.82
 const MAX_DYNAMIC_RENDER_SCALE = 1
 const LOW_FPS_THRESHOLD = 48
@@ -920,9 +920,11 @@ function GlassContainmentColliders() {
 }
 
 function Ball({ ballRef, skinTexturePath }) {
+  const { gl } = useThree()
   const ballSkin = useGLTF('/models/ball/ballon.glb')
   const skinTexture = useTexture(skinTexturePath)
   skinTexture.colorSpace = SRGBColorSpace
+  skinTexture.anisotropy = gl.capabilities.getMaxAnisotropy()
   const visual = useMemo(() => {
     const candidates = []
 
@@ -2003,6 +2005,7 @@ function Player({
 }
 
 function PlayerAvatar({ motion }) {
+  const { gl } = useThree()
   const model = useFBX('/models/player/player-boy01.fbx')
   const idle = useFBX('/models/player/player-idle.fbx')
   const walk = useFBX('/models/player/player-walk.fbx')
@@ -2020,15 +2023,26 @@ function PlayerAvatar({ motion }) {
   const avatar = useMemo(() => {
     const next = clone(model)
     next.visible = false
+    const maxAnisotropy = gl.capabilities.getMaxAnisotropy()
     next.traverse((object) => {
       if (object instanceof Mesh) {
         object.castShadow = true
         object.receiveShadow = true
         object.frustumCulled = false
+        const materials = Array.isArray(object.material) ? object.material : [object.material]
+        materials.forEach((mat) => {
+          if (!mat) return
+          ;[mat.map, mat.normalMap, mat.roughnessMap, mat.metalnessMap, mat.emissiveMap].forEach((tex) => {
+            if (tex) {
+              tex.anisotropy = maxAnisotropy
+              tex.needsUpdate = true
+            }
+          })
+        })
       }
     })
     return next
-  }, [model])
+  }, [model, gl])
 
   const animationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
