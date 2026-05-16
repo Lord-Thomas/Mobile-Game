@@ -123,15 +123,26 @@ function createRoofShellGeometry({ width, depth, wallTopY, pitch, overhangX, ove
   return geometry
 }
 
-// Triangular prism (gable) — non-indexed so each face gets its own flat normal
-function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, wallThickness, ridgeAxis, showStart, showEnd }) {
-  const hw = width * 0.5 + wallThickness * 0.5
-  const hd = depth * 0.5 + wallThickness * 0.5
-  // Run measured from wall face — gives the same pitch angle as the roof slope
-  const run = ridgeAxis === 'z' ? hw : hd
-  const ridgeRise = Math.tan((pitch * Math.PI) / 180) * run
+// Pentagonal prism (gable) — non-indexed so each face gets its own flat normal.
+// Cross-section shape:
+//         (0, ridgeY)            ← apex
+//        /           \
+//  correct slope (same as roof inner)
+//      /               \
+// (-wr, eaveY)   (wr, eaveY)     ← shoulder = point where roof slope meets wall face
+// |                         |    ← vertical strip (extension du mur)
+// (-wr, baseY)   (wr, baseY)     ← base at wall top
+function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overhangX, overhangZ, wallThickness, ridgeAxis, showStart, showEnd }) {
+  const hw = width * 0.5 + wallThickness * 0.5   // halfWallWidth
+  const hd = depth * 0.5 + wallThickness * 0.5   // halfWallDepth
+  const halfRoofRun = ridgeAxis === 'z' ? width * 0.5 + overhangX : depth * 0.5 + overhangZ
+  const halfWallRun = ridgeAxis === 'z' ? hw : hd
+
+  const ridgeRise = Math.tan((pitch * Math.PI) / 180) * halfRoofRun
   const baseY = gableBaseY ?? wallTopY
-  const ridgeY = baseY + ridgeRise
+  const ridgeY = wallTopY + ridgeRise   // apex = inner shell ridge height
+  // Shoulder: height where the inner roof slope intersects the wall face
+  const eaveY = wallTopY + ridgeRise * (halfRoofRun - halfWallRun) / halfRoofRun
 
   const p = []
 
@@ -143,38 +154,58 @@ function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, wallTh
     tri(bx, by, bz, dx, dy, dz, cx, cy, cz)
   }
 
-  // Add a triangular prism in either XY (isZ=true) or ZY (isZ=false) cross-section
-  // Corners: A=(ax,ay), B=(bx,by), C=(cx,cy) in cross-section plane
-  // d0 = outer face depth, d1 = inner face depth
-  function addPrism(ax, ay, bx, by, cx, cy, d0, d1, isZ) {
-    function v(px, py, d) { return isZ ? [px, py, d] : [d, py, px] }
-    const [a0x, a0y, a0z] = v(ax, ay, d0)
-    const [b0x, b0y, b0z] = v(bx, by, d0)
-    const [c0x, c0y, c0z] = v(cx, cy, d0)
-    const [a1x, a1y, a1z] = v(ax, ay, d1)
-    const [b1x, b1y, b1z] = v(bx, by, d1)
-    const [c1x, c1y, c1z] = v(cx, cy, d1)
+  // Pentagon prism: A(-wr,base) B(wr,base) C(wr,eave) D(0,ridge) E(-wr,eave)
+  // d0 = outer face coord, d1 = inner face coord, isZ = extrude along Z (vs X)
+  function addPentaPrism(wr, d0, d1, isZ) {
+    function vt(px, py, d) { return isZ ? [px, py, d] : [d, py, px] }
+    const [a0x,a0y,a0z] = vt(-wr, baseY,  d0)
+    const [b0x,b0y,b0z] = vt( wr, baseY,  d0)
+    const [c0x,c0y,c0z] = vt( wr, eaveY,  d0)
+    const [d0x,d0y,d0z] = vt(  0, ridgeY, d0)
+    const [e0x,e0y,e0z] = vt(-wr, eaveY,  d0)
 
-    // Outer face — A,C,B winding so normal points toward outer direction
-    tri(a0x, a0y, a0z, c0x, c0y, c0z, b0x, b0y, b0z)
-    // Inner face — A,B,C winding (reversed)
-    tri(a1x, a1y, a1z, b1x, b1y, b1z, c1x, c1y, c1z)
-    // Bottom edge A-B
-    quad(a0x, a0y, a0z, a1x, a1y, a1z, b0x, b0y, b0z, b1x, b1y, b1z)
-    // Right edge B-C
-    quad(b0x, b0y, b0z, b1x, b1y, b1z, c0x, c0y, c0z, c1x, c1y, c1z)
-    // Left edge C-A
-    quad(c0x, c0y, c0z, c1x, c1y, c1z, a0x, a0y, a0z, a1x, a1y, a1z)
+    const [a1x,a1y,a1z] = vt(-wr, baseY,  d1)
+    const [b1x,b1y,b1z] = vt( wr, baseY,  d1)
+    const [c1x,c1y,c1z] = vt( wr, eaveY,  d1)
+    const [d1x,d1y,d1z] = vt(  0, ridgeY, d1)
+    const [e1x,e1y,e1z] = vt(-wr, eaveY,  d1)
+
+    // Outer face (d0): A,C,B winding → normal toward outer
+    tri(a0x,a0y,a0z, e0x,e0y,e0z, b0x,b0y,b0z)   // lower half
+    tri(e0x,e0y,e0z, c0x,c0y,c0z, b0x,b0y,b0z)   // lower half right
+    tri(e0x,e0y,e0z, d0x,d0y,d0z, c0x,c0y,c0z)   // upper triangle
+
+    // Inner face (d1): reversed
+    tri(a1x,a1y,a1z, b1x,b1y,b1z, e1x,e1y,e1z)
+    tri(e1x,e1y,e1z, b1x,b1y,b1z, c1x,c1y,c1z)
+    tri(e1x,e1y,e1z, c1x,c1y,c1z, d1x,d1y,d1z)
+
+    // 5 side edges
+    quad(a0x,a0y,a0z, a1x,a1y,a1z, b0x,b0y,b0z, b1x,b1y,b1z)   // base A-B
+    quad(b0x,b0y,b0z, b1x,b1y,b1z, c0x,c0y,c0z, c1x,c1y,c1z)   // right B-C
+    quad(c0x,c0y,c0z, c1x,c1y,c1z, d0x,d0y,d0z, d1x,d1y,d1z)   // slope C-D
+    quad(d0x,d0y,d0z, d1x,d1y,d1z, e0x,e0y,e0z, e1x,e1y,e1z)   // slope D-E
+    quad(e0x,e0y,e0z, e1x,e1y,e1z, a0x,a0y,a0z, a1x,a1y,a1z)   // left E-A
+  }
+
+  function addSideWallInfill(x0, x1, z0, z1) {
+    quad(x0, baseY, z0, x1, baseY, z1, x0, eaveY, z0, x1, eaveY, z1)
   }
 
   if (ridgeAxis === 'z') {
-    // Gable at Z faces; outer = further from center
-    if (showStart) addPrism(-hw, baseY, hw, baseY, 0, ridgeY, -hd, -hd + wallThickness, true)
-    if (showEnd)   addPrism(hw, baseY, -hw, baseY, 0, ridgeY,  hd,  hd - wallThickness, true)
+    if (showStart) addPentaPrism(hw, -hd, -hd + wallThickness, true)
+    if (showEnd)   addPentaPrism(hw,  hd,  hd - wallThickness, true)
+
+    // Side wall infills: closes the holes between side walls and roof slopes
+    addSideWallInfill(-hw, -hw, -hd, hd)
+    addSideWallInfill( hw,  hw, -hd, hd)
   } else {
-    // Gable at X faces
-    if (showStart) addPrism(hd, baseY, -hd, baseY, 0, ridgeY, -hw, -hw + wallThickness, false)
-    if (showEnd)   addPrism(-hd, baseY, hd, baseY, 0, ridgeY,  hw,  hw - wallThickness, false)
+    if (showStart) addPentaPrism(hd, -hw, -hw + wallThickness, false)
+    if (showEnd)   addPentaPrism(hd,  hw,  hw - wallThickness, false)
+
+    // Side wall infills: closes the holes between side walls and roof slopes
+    addSideWallInfill(-hw, hw, -hd, -hd)
+    addSideWallInfill(-hw, hw,  hd,  hd)
   }
 
   if (!p.length) return null
@@ -207,9 +238,9 @@ function GableRoof({
   }), [depth, overhangX, overhangZ, pitch, ridgeAxis, thickness, wallTopY, width])
 
   const gableGeometry = useMemo(() => createGableGeometry({
-    width, depth, wallTopY, gableBaseY, pitch, wallThickness, ridgeAxis,
+    width, depth, wallTopY, gableBaseY, pitch, overhangX, overhangZ, wallThickness, ridgeAxis,
     showStart: showStartGable, showEnd: showEndGable,
-  }), [depth, gableBaseY, pitch, ridgeAxis, showEndGable, showStartGable, wallThickness, wallTopY, width])
+  }), [depth, gableBaseY, overhangX, overhangZ, pitch, ridgeAxis, showEndGable, showStartGable, wallThickness, wallTopY, width])
 
   useEffect(() => () => shellGeometry.dispose(), [shellGeometry])
   useEffect(() => () => gableGeometry?.dispose(), [gableGeometry])

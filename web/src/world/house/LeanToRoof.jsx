@@ -18,9 +18,112 @@ function LeanToRoof({
   overhang = 0.24,
   overhangAttached = 0,
   thickness = 0.12,
+  wallThickness = 0.18,
   color = '#8f4b3a',
+  gableColor = '#f3f0e5',
 }) {
+  const gableGeometry = useMemo(() => {
+    const x0 = -width * 0.5 - wallThickness * 0.5
+    const x1 = width * 0.5 + wallThickness * 0.5
+    const z0 = -depth * 0.5 - wallThickness * 0.5
+    const z1 = depth * 0.5 + wallThickness * 0.5
+  
+    const yH = wallTopY + rise
+    const yL = wallTopY
+  
+    let y00, y10, y01, y11
+  
+    if (attachSide === 'west') {
+      y00 = yH; y10 = yL; y01 = yH; y11 = yL
+    } else if (attachSide === 'east') {
+      y00 = yL; y10 = yH; y01 = yL; y11 = yH
+    } else if (attachSide === 'south') {
+      y00 = yH; y10 = yH; y01 = yL; y11 = yL
+    } else {
+      y00 = yL; y10 = yL; y01 = yH; y11 = yH
+    }
+  
+    const positions = []
+    const indices = []
+  
+    function addQuad(a, b, c, d) {
+      const base = positions.length / 3
+      positions.push(...a, ...b, ...c, ...d)
+      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2)
+    }
+  
+    function addPrism(a0, b0, c0, d0, a1, b1, c1, d1) {
+      // front / back
+      addQuad(a0, b0, c0, d0)
+      addQuad(b1, a1, d1, c1)
+  
+      // thickness sides
+      addQuad(a0, a1, b0, b1)
+      addQuad(b0, b1, d0, d1)
+      addQuad(d0, d1, c0, c1)
+      addQuad(c0, c1, a0, a1)
+    }
+  
+    const inset = 0.002
+  
+    if (attachSide === 'north' || attachSide === 'south') {
+      // left side prism, aligned outside, thickness inward
+      addPrism(
+        [x0, wallTopY, z0 + inset],
+        [x0, wallTopY, z1 - inset],
+        [x0, y00, z0 + inset],
+        [x0, y01, z1 - inset],
+    
+        [x0 + wallThickness, wallTopY, z0 + inset],
+        [x0 + wallThickness, wallTopY, z1 - inset],
+        [x0 + wallThickness, y00, z0 + inset],
+        [x0 + wallThickness, y01, z1 - inset]
+      )
+    
+      // right side prism, aligned outside, thickness inward
+      addPrism(
+        [x1 - wallThickness, wallTopY, z0 + inset],
+        [x1 - wallThickness, wallTopY, z1 - inset],
+        [x1 - wallThickness, y10, z0 + inset],
+        [x1 - wallThickness, y11, z1 - inset],
+    
+        [x1, wallTopY, z0 + inset],
+        [x1, wallTopY, z1 - inset],
+        [x1, y10, z0 + inset],
+        [x1, y11, z1 - inset]
+      )
+    } else {
+      // front side prism, aligned outside, thickness inward
+      addPrism(
+        [x0 + inset, wallTopY, z0],
+        [x1 - inset, wallTopY, z0],
+        [x0 + inset, y00, z0],
+        [x1 - inset, y10, z0],
+    
+        [x0 + inset, wallTopY, z0 + wallThickness],
+        [x1 - inset, wallTopY, z0 + wallThickness],
+        [x0 + inset, y00, z0 + wallThickness],
+        [x1 - inset, y10, z0 + wallThickness]
+      )
+    
+      // back side prism, aligned outside, thickness inward
+      addPrism(
+        [x0 + inset, wallTopY, z1 - wallThickness],
+        [x1 - inset, wallTopY, z1 - wallThickness],
+        [x0 + inset, y01, z1 - wallThickness],
+        [x1 - inset, y11, z1 - wallThickness],
+    
+        [x0 + inset, wallTopY, z1],
+        [x1 - inset, wallTopY, z1],
+        [x0 + inset, y01, z1],
+        [x1 - inset, y11, z1]
+      )
+    }
+  
+    return createGeometry(positions, indices)
+  }, [attachSide, depth, rise, wallThickness, wallTopY, width])
   const geometry = useMemo(() => {
+
     const ovW = attachSide === 'west' ? overhangAttached : overhang
     const ovE = attachSide === 'east' ? overhangAttached : overhang
     const ovS = attachSide === 'south' ? overhangAttached : overhang
@@ -82,11 +185,26 @@ function LeanToRoof({
   }, [attachSide, depth, overhang, overhangAttached, rise, thickness, wallTopY, width])
 
   useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => gableGeometry.dispose(), [gableGeometry])
 
   return (
-    <mesh geometry={geometry} castShadow receiveShadow>
-      <meshStandardMaterial color={color} roughness={0.84} side={DoubleSide} />
-    </mesh>
+    <>
+      <mesh geometry={geometry} castShadow receiveShadow>
+        <meshStandardMaterial
+          color={color}
+          roughness={0.84}
+          side={DoubleSide}
+        />
+      </mesh>
+  
+      <mesh geometry={gableGeometry} castShadow receiveShadow>
+        <meshStandardMaterial
+          color={gableColor}
+          roughness={0.8}
+          side={DoubleSide}
+        />
+      </mesh>
+    </>
   )
 }
 
