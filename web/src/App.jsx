@@ -4902,7 +4902,7 @@ function ScorePopups({ popups }) {
 
 function getViewportRenderSettings(renderScale = MAX_DYNAMIC_RENDER_SCALE) {
   if (typeof window === 'undefined') {
-    return { dpr: 1, antialias: false }
+    return { dpr: 1, antialias: true }
   }
 
   const width = Math.max(1, window.innerWidth || 1)
@@ -4915,7 +4915,7 @@ function getViewportRenderSettings(renderScale = MAX_DYNAMIC_RENDER_SCALE) {
 
   return {
     dpr: Number(dpr.toFixed(2)),
-    antialias: false,
+    antialias: dpr < 1.3,
   }
 }
 
