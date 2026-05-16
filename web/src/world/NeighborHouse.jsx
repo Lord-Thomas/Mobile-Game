@@ -3,6 +3,7 @@ import { DoubleSide, RepeatWrapping, SRGBColorSpace } from 'three'
 import { useEffect, useMemo } from 'react'
 import { getWallColliderTransform, getWallPointAt, splitWallIntoSolidRects } from './house/wallUtils'
 import GableRoof from './house/GableRoof'
+import LeanToRoof from './house/LeanToRoof'
 import { createNeighborFloorplan } from './house/neighborFloorplan'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
@@ -192,8 +193,6 @@ function NeighborDoor({ door }) {
 function HouseVolume({ id, room, walls, exteriorTexture, trim }) {
   const door = getDoorData(walls)
   const [width, height, depth] = room.size
-  const hasSharedXWall = walls.some((wall) => wall.axis === 'z' && wall.length < depth - 0.001)
-  const hasSharedZWall = walls.some((wall) => wall.axis === 'x' && wall.length < width - 0.001)
 
   return (
     <>
@@ -205,23 +204,9 @@ function HouseVolume({ id, room, walls, exteriorTexture, trim }) {
       <OpeningReveals walls={walls} />
       <NeighborDoor door={door} />
       <mesh position={[room.position[0], height + 0.02, room.position[2]]}>
-        <boxGeometry args={[width + 0.12, 0.12, depth + 0.12]} />
+        <boxGeometry args={[width, 0.12, depth]} />
         <meshStandardMaterial color={trim} roughness={0.8} />
       </mesh>
-      <group position={room.position}>
-        <GableRoof
-          width={width}
-          depth={depth}
-          baseY={height + 0.1}
-          pitch={width >= depth ? 30 : 34}
-          overhang={0.32}
-          overhangX={hasSharedXWall ? 0.08 : 0.32}
-          overhangZ={hasSharedZWall ? 0.08 : 0.32}
-          thickness={0.12}
-          color={trim}
-          gableColor={walls[0]?.sideB?.color ?? '#f3f0e5'}
-        />
-      </group>
     </>
   )
 }
@@ -242,6 +227,34 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
           trim={trim}
           exteriorTexture={exteriorTexture}
         />
+      ))}
+      {floorplan.roofGroups.map((group, index) => (
+        <group key={group.id} position={group.center}>
+          {group.type === 'flat' ? null : group.type === 'lean_to' && group.attachmentSide ? (
+            <LeanToRoof
+              width={group.width}
+              depth={group.depth}
+              wallTopY={group.height + 0.08}
+              attachSide={group.attachmentSide}
+              rise={0.72}
+              overhang={0.24}
+              thickness={0.14}
+              color={trim}
+            />
+          ) : (
+            <GableRoof
+              width={group.width}
+              depth={group.depth}
+              wallTopY={group.height + 0.08}
+              pitch={group.width >= group.depth ? 30 : 34}
+              overhang={index === 0 ? 0.34 : 0.28}
+              thickness={0.14}
+              wallThickness={floorplan.wallThickness}
+              color={trim}
+              gableColor={color}
+            />
+          )}
+        </group>
       ))}
     </group>
   )

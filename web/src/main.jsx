@@ -7,7 +7,8 @@ import App from './App.jsx'
 
 ColorManagement.enabled = true
 
-const isTreeEditor = new URLSearchParams(window.location.search).has('treeeditor')
+const params = new URLSearchParams(window.location.search)
+const isTreeEditor = params.has('treeeditor') || params.has('editor')
 
 if (isTreeEditor) {
   import('./tools/TreeEditor.jsx').then(({ default: TreeEditor }) => {

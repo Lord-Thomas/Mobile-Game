@@ -36,7 +36,7 @@ const neighborHouseSlots = [
     doorWall: 'south',
     parts: [
       { id: 'main', offset: [0, 0], size: [6.2, 3.4, 5.1], doorWall: 'south' },
-      { id: 'annex', offset: [4.35, 0.55], size: [2.7, 2.8, 3.6] },
+      { id: 'annex', offset: [4.45, 0.55], size: [2.7, 2.8, 3.6] },
     ],
   },
   {
@@ -49,7 +49,7 @@ const neighborHouseSlots = [
     doorWall: 'south',
     parts: [
       { id: 'main', offset: [0, 0], size: [5.2, 3, 4.4], doorWall: 'south' },
-      { id: 'rear_room', offset: [-0.9, 3.45], size: [3.8, 2.8, 2.7] },
+      { id: 'rear_room', offset: [-0.9, 3.55], size: [3.8, 2.8, 2.7] },
     ],
   },
   {
@@ -62,7 +62,7 @@ const neighborHouseSlots = [
     doorWall: 'south',
     parts: [
       { id: 'main', offset: [0, 0], size: [6.4, 3.2, 4.8], doorWall: 'south' },
-      { id: 'side_room', offset: [-4.25, -0.35], size: [2.5, 2.9, 3.4] },
+      { id: 'side_room', offset: [-4.45, -0.35], size: [2.5, 2.9, 3.4] },
     ],
   },
 ]

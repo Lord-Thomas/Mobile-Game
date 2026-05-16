@@ -614,10 +614,11 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
       <GableRoof
         width={MAIN_ROOM.width}
         depth={MAIN_ROOM.depth}
-        baseY={MAIN_ROOM.height + 0.04}
+        wallTopY={MAIN_ROOM.height + 0.08}
         pitch={32}
         overhang={0.42}
         thickness={0.14}
+        wallThickness={houseLayout.wallThickness}
         color="#8b4c3f"
         gableColor={EXTERIOR_WALL_COLOR}
       />
@@ -625,10 +626,11 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
         <GableRoof
           width={secondRoom.size[0]}
           depth={secondRoom.size[2]}
-          baseY={secondRoom.size[1] + 0.04}
+          wallTopY={secondRoom.size[1] + 0.08}
           pitch={28}
           overhang={0.34}
           thickness={0.12}
+          wallThickness={houseLayout.wallThickness}
           color="#8b4c3f"
           gableColor={EXTERIOR_WALL_COLOR}
         />
