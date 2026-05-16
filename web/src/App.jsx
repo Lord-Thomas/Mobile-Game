@@ -572,7 +572,7 @@ function useKeyboardInput() {
   return keysRef
 }
 
-function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling }) {
+function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof }) {
   const floorColorMap = useTexture(floorTexturePath)
   const wallColorMap = useTexture(wallTexturePath)
   const ceilingColorMap = useTexture(ceilingTexturePath)
@@ -611,30 +611,34 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
         <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
         <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
       </mesh>
-      <GableRoof
-        width={MAIN_ROOM.width}
-        depth={MAIN_ROOM.depth}
-        wallTopY={MAIN_ROOM.height + 0.08}
-        pitch={32}
-        overhang={0.42}
-        thickness={0.14}
-        wallThickness={houseLayout.wallThickness}
-        color="#8b4c3f"
-        gableColor={EXTERIOR_WALL_COLOR}
-      />
-      <group position={secondRoom.position}>
-        <GableRoof
-          width={secondRoom.size[0]}
-          depth={secondRoom.size[2]}
-          wallTopY={secondRoom.size[1] + 0.08}
-          pitch={28}
-          overhang={0.34}
-          thickness={0.12}
-          wallThickness={houseLayout.wallThickness}
-          color="#8b4c3f"
-          gableColor={EXTERIOR_WALL_COLOR}
-        />
-      </group>
+      {!hideRoof && (
+        <>
+          <GableRoof
+            width={MAIN_ROOM.width}
+            depth={MAIN_ROOM.depth}
+            wallTopY={MAIN_ROOM.height + 0.08}
+            pitch={32}
+            overhang={0.42}
+            thickness={0.14}
+            wallThickness={houseLayout.wallThickness}
+            color="#8b4c3f"
+            gableColor={EXTERIOR_WALL_COLOR}
+          />
+          <group position={secondRoom.position}>
+            <GableRoof
+              width={secondRoom.size[0]}
+              depth={secondRoom.size[2]}
+              wallTopY={secondRoom.size[1] + 0.08}
+              pitch={28}
+              overhang={0.34}
+              thickness={0.12}
+              wallThickness={houseLayout.wallThickness}
+              color="#8b4c3f"
+              gableColor={EXTERIOR_WALL_COLOR}
+            />
+          </group>
+        </>
+      )}
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
@@ -2741,15 +2745,88 @@ function SeatTargetMarker({ seat }) {
   )
 }
 
+const CUSTOMIZE_ZOOM_MIN = 20
+const CUSTOMIZE_ZOOM_MAX = 150
+const CUSTOMIZE_ZOOM_DEFAULT = 58
+
 function CustomizationCamera({ active }) {
+  const { gl } = useThree()
+  const camRef = useRef()
+  const zoomRef = useRef(CUSTOMIZE_ZOOM_DEFAULT)
+  const pinchDistRef = useRef(null)
+
+  useEffect(() => {
+    if (active) zoomRef.current = CUSTOMIZE_ZOOM_DEFAULT
+  }, [active])
+
+  useEffect(() => {
+    if (!active) return
+    const canvas = gl.domElement
+
+    const onWheel = (e) => {
+      e.preventDefault()
+      zoomRef.current = MathUtils.clamp(
+        zoomRef.current + Math.sign(e.deltaY) * -5,
+        CUSTOMIZE_ZOOM_MIN,
+        CUSTOMIZE_ZOOM_MAX,
+      )
+    }
+
+    const onTouchStart = (e) => {
+      if (e.touches.length === 2) {
+        pinchDistRef.current = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY,
+        )
+      }
+    }
+
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 2 || pinchDistRef.current === null) return
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      )
+      zoomRef.current = MathUtils.clamp(
+        zoomRef.current + (dist - pinchDistRef.current) * 0.3,
+        CUSTOMIZE_ZOOM_MIN,
+        CUSTOMIZE_ZOOM_MAX,
+      )
+      pinchDistRef.current = dist
+    }
+
+    const onTouchEnd = () => { pinchDistRef.current = null }
+
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    canvas.addEventListener('touchstart', onTouchStart, { passive: true })
+    canvas.addEventListener('touchmove', onTouchMove, { passive: true })
+    canvas.addEventListener('touchend', onTouchEnd, { passive: true })
+
+    return () => {
+      canvas.removeEventListener('wheel', onWheel)
+      canvas.removeEventListener('touchstart', onTouchStart)
+      canvas.removeEventListener('touchmove', onTouchMove)
+      canvas.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [active, gl])
+
+  useFrame(() => {
+    if (!camRef.current) return
+    if (Math.abs(camRef.current.zoom - zoomRef.current) > 0.1) {
+      camRef.current.zoom = MathUtils.lerp(camRef.current.zoom, zoomRef.current, 0.15)
+      camRef.current.updateProjectionMatrix()
+    }
+  })
+
   if (!active) return null
 
   return (
     <OrthographicCamera
+      ref={camRef}
       makeDefault
       position={[0, 18, 0]}
       rotation={[-Math.PI / 2, 0, 0]}
-      zoom={58}
+      zoom={CUSTOMIZE_ZOOM_DEFAULT}
       near={0.1}
       far={60}
     />
@@ -4259,6 +4336,26 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
   )
 }
 
+const CUSTOMIZE_PAN_BOUNDS = { minX: -6, maxX: 6, minZ: -6, maxZ: 12 }
+
+function RoomBorder({ width, depth, posX = 0, posZ = 0 }) {
+  const positions = useMemo(() => new Float32Array([
+    -width / 2, 0, -depth / 2,
+     width / 2, 0, -depth / 2,
+     width / 2, 0,  depth / 2,
+    -width / 2, 0,  depth / 2,
+  ]), [width, depth])
+
+  return (
+    <lineLoop position={[posX, 0.07, posZ]}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" array={positions} count={4} itemSize={3} />
+      </bufferGeometry>
+      <lineBasicMaterial color="#f2c14e" />
+    </lineLoop>
+  )
+}
+
 function EditableFloor({
   mode,
   draggingObjectId,
@@ -4270,6 +4367,16 @@ function EditableFloor({
   onStopDragging,
   onClearSelection,
 }) {
+  const { camera } = useThree()
+  const lastClientRef = useRef(null)
+
+  useEffect(() => {
+    if (mode !== 'customize') {
+      camera.position.x = 0
+      camera.position.z = 0
+    }
+  }, [mode, camera])
+
   if (mode !== 'customize') return null
 
   const getSnappedPlacement = (point, objectId) => {
@@ -4277,12 +4384,34 @@ function EditableFloor({
     return [x, getPlacementY(x, z, objectId), z]
   }
 
+  const isPanning = !draggingObjectId && !placingObjectId
+
   return (
     <mesh
       rotation={[-Math.PI / 2, 0, 0]}
       position={[0, 0.028, 0]}
+      onPointerDown={(event) => {
+        if (isPanning) {
+          if (event.pointerType === 'touch' && lastClientRef.current) {
+            // Second finger landed — cancel pan to let pinch zoom take over
+            lastClientRef.current = null
+          } else {
+            lastClientRef.current = { x: event.clientX, y: event.clientY }
+          }
+        }
+      }}
       onPointerMove={(event) => {
-        if (!draggingObjectId && !placingObjectId) return
+        if (isPanning) {
+          if (lastClientRef.current) {
+            const dx = event.clientX - lastClientRef.current.x
+            const dy = event.clientY - lastClientRef.current.y
+            lastClientRef.current = { x: event.clientX, y: event.clientY }
+            const worldPerPixel = 1 / camera.zoom
+            camera.position.x = MathUtils.clamp(camera.position.x - dx * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minX, CUSTOMIZE_PAN_BOUNDS.maxX)
+            camera.position.z = MathUtils.clamp(camera.position.z - dy * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minZ, CUSTOMIZE_PAN_BOUNDS.maxZ)
+          }
+          return
+        }
         if (placingObjectId && placementLocked) return
         event.stopPropagation()
         const objectId = draggingObjectId ?? placingObjectId
@@ -4295,15 +4424,17 @@ function EditableFloor({
         onLockPlacement()
       }}
       onPointerUp={(event) => {
+        lastClientRef.current = null
         event.stopPropagation()
         onStopDragging()
       }}
       onPointerMissed={() => {
+        lastClientRef.current = null
         onStopDragging()
         onClearSelection()
       }}
     >
-      <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
+      <planeGeometry args={[30, 30]} />
       <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>
   )
@@ -4404,6 +4535,17 @@ function CustomizationLayer({
         position={[0, 0.032, 0]}
         visible={mode === 'customize'}
       />
+      {mode === 'customize' && (
+        <>
+          <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} />
+          <RoomBorder
+            width={secondRoom.size[0]}
+            depth={secondRoom.size[2]}
+            posX={secondRoom.position[0]}
+            posZ={secondRoom.position[2]}
+          />
+        </>
+      )}
       {placedObjects.map((object) => (
         <EditableObject
           key={object.id}
@@ -6093,6 +6235,7 @@ function App() {
               wallTexturePath={activeWallSkin.texture}
               ceilingTexturePath={activeCeilingTexturePath}
               hideCeiling={mode === 'customize'}
+              hideRoof={mode === 'customize'}
             />
             <Dragon playerPositionRef={playerPositionRef} />
             <GlassContainmentRoom />
@@ -6127,7 +6270,7 @@ function App() {
           showTerrain={!isDebugMode || debugToggles.terrain}
           showSky={!isDebugMode || debugToggles.sky}
           castShadows={!isDebugMode || debugToggles.shadows}
-          showPlayerPlot={isDebugMode && debugToggles.plot}
+          showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
         />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
