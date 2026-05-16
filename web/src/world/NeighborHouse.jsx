@@ -203,14 +203,30 @@ function HouseVolume({ id, room, walls, exteriorTexture, trim }) {
       )}
       <OpeningReveals walls={walls} />
       <NeighborDoor door={door} />
+      {/* Faux plafond — cache la structure du toit vue depuis l'intérieur */}
+      <mesh position={[room.position[0], height + 0.02, room.position[2]]}>
+        <boxGeometry args={[width, 0.12, depth]} />
+        <meshStandardMaterial color={trim} roughness={0.8} />
+      </mesh>
     </>
   )
+}
+
+// Fallback: deviner le côté d'attachement en fonction de la position relative
+function guessAttachSide(group, primaryGroup) {
+  if (!primaryGroup) return 'south'
+  const dx = group.center[0] - primaryGroup.center[0]
+  const dz = group.center[2] - primaryGroup.center[2]
+  if (Math.abs(dx) >= Math.abs(dz)) return dx > 0 ? 'west' : 'east'
+  return dz > 0 ? 'south' : 'north'
 }
 
 function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, doorWall }) {
   const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   const terrainY = getTerrainHeight(position[0], position[2])
   const floorplan = useMemo(() => createNeighborFloorplan({ parts, size, doorWall, color, trim }), [color, doorWall, parts, size, trim])
+
+  const primaryGroup = floorplan.roofGroups[0] ?? null
 
   return (
     <group position={[position[0], terrainY, position[2]]} rotation={[0, rotationY, 0]}>
@@ -224,35 +240,44 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
           exteriorTexture={exteriorTexture}
         />
       ))}
-      {floorplan.roofGroups.map((group, index) => (
-        <group key={group.id} position={group.center}>
-          {group.type === 'flat' ? null : group.type === 'lean_to' ? (
-            <LeanToRoof
-              width={group.width}
-              depth={group.depth}
-              wallTopY={group.height + 0.08}
-              attachSide={group.attachmentSide ?? 'south'}
-              rise={0.72}
-              overhang={0.24}
-              overhangAttached={0}
-              thickness={0.14}
-              color={trim}
-            />
-          ) : (
-            <GableRoof
-              width={group.width}
-              depth={group.depth}
-              wallTopY={group.height + 0.08}
-              pitch={group.width >= group.depth ? 30 : 34}
-              overhang={index === 0 ? 0.34 : 0.28}
-              thickness={0.14}
-              wallThickness={floorplan.wallThickness}
-              color={trim}
-              gableColor={color}
-            />
-          )}
-        </group>
-      ))}
+      {floorplan.roofGroups.map((group, index) => {
+        const attachSide = group.attachmentSide ?? guessAttachSide(group, primaryGroup)
+        // Rise = différence de hauteur entre maison principale et dépendance
+        const rise = primaryGroup && index > 0
+          ? Math.max(0.4, primaryGroup.height - group.height)
+          : 0.72
+
+        return (
+          <group key={group.id} position={group.center}>
+            {group.type === 'flat' ? null : group.type === 'lean_to' ? (
+              <LeanToRoof
+                width={group.width}
+                depth={group.depth}
+                wallTopY={group.height}
+                attachSide={attachSide}
+                rise={rise}
+                overhang={0.24}
+                overhangAttached={0}
+                thickness={0.14}
+                color={trim}
+              />
+            ) : (
+              <GableRoof
+                width={group.width}
+                depth={group.depth}
+                wallTopY={group.height}
+                gableBaseY={group.height}
+                pitch={group.width >= group.depth ? 30 : 34}
+                overhang={index === 0 ? 0.34 : 0.28}
+                thickness={0.14}
+                wallThickness={floorplan.wallThickness}
+                color={trim}
+                gableColor={color}
+              />
+            )}
+          </group>
+        )
+      })}
     </group>
   )
 }
