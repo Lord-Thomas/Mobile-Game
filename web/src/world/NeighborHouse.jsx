@@ -203,10 +203,6 @@ function HouseVolume({ id, room, walls, exteriorTexture, trim }) {
       )}
       <OpeningReveals walls={walls} />
       <NeighborDoor door={door} />
-      <mesh position={[room.position[0], height + 0.02, room.position[2]]}>
-        <boxGeometry args={[width, 0.12, depth]} />
-        <meshStandardMaterial color={trim} roughness={0.8} />
-      </mesh>
     </>
   )
 }
@@ -230,14 +226,15 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
       ))}
       {floorplan.roofGroups.map((group, index) => (
         <group key={group.id} position={group.center}>
-          {group.type === 'flat' ? null : group.type === 'lean_to' && group.attachmentSide ? (
+          {group.type === 'flat' ? null : group.type === 'lean_to' ? (
             <LeanToRoof
               width={group.width}
               depth={group.depth}
               wallTopY={group.height + 0.08}
-              attachSide={group.attachmentSide}
+              attachSide={group.attachmentSide ?? 'south'}
               rise={0.72}
               overhang={0.24}
+              overhangAttached={0}
               thickness={0.14}
               color={trim}
             />

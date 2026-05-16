@@ -47,14 +47,33 @@ function createRoofShellGeometry({
         0, bottomRidgeY, -halfRoofDepth,
         halfRoofWidth, bottomEaveY, -halfRoofDepth,
 
+        // X side walls (ferme la tranche à X=±halfRoofWidth)
         -halfRoofWidth, bottomEaveY, -halfRoofDepth,
-        -halfRoofWidth, topEaveY, -halfRoofDepth,
-        -halfRoofWidth, bottomEaveY, halfRoofDepth,
-        -halfRoofWidth, topEaveY, halfRoofDepth,
-        halfRoofWidth, topEaveY, -halfRoofDepth,
-        halfRoofWidth, bottomEaveY, -halfRoofDepth,
-        halfRoofWidth, topEaveY, halfRoofDepth,
-        halfRoofWidth, bottomEaveY, halfRoofDepth,
+        -halfRoofWidth, topEaveY,    -halfRoofDepth,
+        -halfRoofWidth, bottomEaveY,  halfRoofDepth,
+        -halfRoofWidth, topEaveY,     halfRoofDepth,
+        halfRoofWidth,  topEaveY,    -halfRoofDepth,
+        halfRoofWidth,  bottomEaveY, -halfRoofDepth,
+        halfRoofWidth,  topEaveY,     halfRoofDepth,
+        halfRoofWidth,  bottomEaveY,  halfRoofDepth,
+
+        // Z end faces (ferme la tranche à Z=±halfRoofDepth)
+        -halfRoofWidth, topEaveY,    -halfRoofDepth,
+        0,              topRidgeY,   -halfRoofDepth,
+        0,              bottomRidgeY,-halfRoofDepth,
+        -halfRoofWidth, bottomEaveY, -halfRoofDepth,
+        0,              topRidgeY,   -halfRoofDepth,
+        halfRoofWidth,  topEaveY,    -halfRoofDepth,
+        halfRoofWidth,  bottomEaveY, -halfRoofDepth,
+        0,              bottomRidgeY,-halfRoofDepth,
+        -halfRoofWidth, topEaveY,     halfRoofDepth,
+        0,              topRidgeY,    halfRoofDepth,
+        0,              bottomRidgeY, halfRoofDepth,
+        -halfRoofWidth, bottomEaveY,  halfRoofDepth,
+        0,              topRidgeY,    halfRoofDepth,
+        halfRoofWidth,  topEaveY,     halfRoofDepth,
+        halfRoofWidth,  bottomEaveY,  halfRoofDepth,
+        0,              bottomRidgeY, halfRoofDepth,
       ]
     : [
         -halfRoofWidth, topEaveY, -halfRoofDepth,
@@ -83,6 +102,24 @@ function createRoofShellGeometry({
         -halfRoofWidth, bottomEaveY, halfRoofDepth,
         halfRoofWidth, topEaveY, halfRoofDepth,
         halfRoofWidth, bottomEaveY, halfRoofDepth,
+
+        // eave end faces at X=±halfRoofWidth (ferme la tranche du débord)
+        -halfRoofWidth, topEaveY,    -halfRoofDepth,
+        -halfRoofWidth, topRidgeY,   0,
+        -halfRoofWidth, bottomRidgeY,0,
+        -halfRoofWidth, bottomEaveY, -halfRoofDepth,
+        -halfRoofWidth, topRidgeY,   0,
+        -halfRoofWidth, topEaveY,    halfRoofDepth,
+        -halfRoofWidth, bottomEaveY, halfRoofDepth,
+        -halfRoofWidth, bottomRidgeY,0,
+        halfRoofWidth,  topEaveY,    -halfRoofDepth,
+        halfRoofWidth,  topRidgeY,   0,
+        halfRoofWidth,  bottomRidgeY,0,
+        halfRoofWidth,  bottomEaveY, -halfRoofDepth,
+        halfRoofWidth,  topRidgeY,   0,
+        halfRoofWidth,  topEaveY,    halfRoofDepth,
+        halfRoofWidth,  bottomEaveY, halfRoofDepth,
+        halfRoofWidth,  bottomRidgeY,0,
       ]
   return createGeometry(positions, [
     0, 1, 2, 1, 3, 2,
@@ -91,6 +128,11 @@ function createRoofShellGeometry({
     12, 13, 14, 13, 15, 14,
     16, 17, 18, 17, 19, 18,
     20, 21, 22, 21, 23, 22,
+    // eave end caps (communs aux deux axes, décalés à partir de 24)
+    24, 25, 26, 24, 26, 27,
+    28, 29, 30, 28, 30, 31,
+    32, 33, 34, 32, 34, 35,
+    36, 37, 38, 36, 38, 39,
   ])
 }
 
@@ -102,6 +144,7 @@ function createGableGeometry({
   overhangX,
   overhangZ,
   wallThickness,
+  thickness,
   ridgeAxis,
   showStart,
   showEnd,
@@ -110,7 +153,7 @@ function createGableGeometry({
   const halfWallDepth = depth * 0.5 + wallThickness * 0.5
   const run = ridgeAxis === 'z' ? width * 0.5 + overhangX : depth * 0.5 + overhangZ
   const ridgeRise = Math.tan((pitch * Math.PI) / 180) * run
-  const ridgeY = wallTopY + ridgeRise
+  const ridgeY = wallTopY + thickness + ridgeRise
   const positions = []
   const indices = []
 
@@ -173,10 +216,11 @@ function GableRoof({
     overhangX,
     overhangZ,
     wallThickness,
+    thickness,
     ridgeAxis,
     showStart: showStartGable,
     showEnd: showEndGable,
-  }), [depth, overhangX, overhangZ, pitch, ridgeAxis, showEndGable, showStartGable, wallThickness, wallTopY, width])
+  }), [depth, overhangX, overhangZ, pitch, ridgeAxis, showEndGable, showStartGable, thickness, wallThickness, wallTopY, width])
 
   useEffect(() => () => shellGeometry.dispose(), [shellGeometry])
   useEffect(() => () => gableGeometry?.dispose(), [gableGeometry])

@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:aleksandargjoreski.dev)"
+      "WebFetch(domain:aleksandargjoreski.dev)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\" -Recurse -Include *.js,*.ts,*.py,*.cs,*.glsl,*.json)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
