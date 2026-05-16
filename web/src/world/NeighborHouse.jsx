@@ -1,5 +1,5 @@
 import { useTexture } from '@react-three/drei'
-import { DoubleSide, RepeatWrapping, SRGBColorSpace } from 'three'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, RepeatWrapping, SRGBColorSpace } from 'three'
 import { useEffect, useMemo } from 'react'
 import { getWallColliderTransform, getWallPointAt, splitWallIntoSolidRects } from './house/wallUtils'
 import GableRoof from './house/GableRoof'
@@ -190,7 +190,120 @@ function NeighborDoor({ door }) {
   )
 }
 
-function HouseVolume({ id, room, walls, exteriorTexture, trim }) {
+function createSlopedCeilingGeometry({ width, height, depth, attachSide, rise }) {
+  const x0 = -width * 0.5
+  const x1 = width * 0.5
+  const z0 = -depth * 0.5
+  const z1 = depth * 0.5
+
+  // On garde quasiment la même sous-face que l'ancien faux plafond.
+  const bottomY = height - 0.04
+
+  // Le dessus suit la pente du toit appentis pour éviter de dépasser.
+  const clearance = 0.025
+  const yH = height + rise - clearance
+  const yL = height - clearance
+
+  let y00, y10, y01, y11
+
+  if (attachSide === 'west') {
+    y00 = yH; y10 = yL; y01 = yH; y11 = yL
+  } else if (attachSide === 'east') {
+    y00 = yL; y10 = yH; y01 = yL; y11 = yH
+  } else if (attachSide === 'south') {
+    y00 = yH; y10 = yH; y01 = yL; y11 = yL
+  } else {
+    y00 = yL; y10 = yL; y01 = yH; y11 = yH
+  }
+
+  const vertices = [
+    // bottom face
+    x0, bottomY, z0, // 0
+    x1, bottomY, z0, // 1
+    x0, bottomY, z1, // 2
+    x1, bottomY, z1, // 3
+
+    // sloped top face
+    x0, y00, z0, // 4
+    x1, y10, z0, // 5
+    x0, y01, z1, // 6
+    x1, y11, z1, // 7
+  ]
+
+  const quads = [
+    [0, 2, 1, 3], // bottom
+    [4, 5, 6, 7], // sloped top
+    [0, 1, 4, 5], // south
+    [2, 6, 3, 7], // north
+    [0, 4, 2, 6], // west
+    [1, 3, 5, 7], // east
+  ]
+
+  const positions = []
+  const indices = []
+
+  quads.forEach(([a, b, c, d]) => {
+    const base = positions.length / 3
+
+    positions.push(
+      vertices[a * 3], vertices[a * 3 + 1], vertices[a * 3 + 2],
+      vertices[b * 3], vertices[b * 3 + 1], vertices[b * 3 + 2],
+      vertices[c * 3], vertices[c * 3 + 1], vertices[c * 3 + 2],
+      vertices[d * 3], vertices[d * 3 + 1], vertices[d * 3 + 2],
+    )
+
+    indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2)
+  })
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+
+  return geometry
+}
+
+function CeilingPlate({ room, trim, roofGroup, attachSide, rise }) {
+  const [width, height, depth] = room.size
+
+  const slopedGeometry = useMemo(() => {
+    if (roofGroup?.type !== 'lean_to') return null
+
+    return createSlopedCeilingGeometry({
+      width,
+      height,
+      depth,
+      attachSide,
+      rise,
+    })
+  }, [attachSide, depth, height, rise, roofGroup?.type, width])
+
+  useEffect(() => {
+    return () => slopedGeometry?.dispose()
+  }, [slopedGeometry])
+
+  if (roofGroup?.type === 'lean_to' && slopedGeometry) {
+    return (
+      <mesh
+        geometry={slopedGeometry}
+        position={[room.position[0], 0, room.position[2]]}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial color={trim} roughness={0.8} side={DoubleSide} />
+      </mesh>
+    )
+  }
+
+  return (
+    <mesh position={[room.position[0], height + 0.02, room.position[2]]}>
+      <boxGeometry args={[width, 0.12, depth]} />
+      <meshStandardMaterial color={trim} roughness={0.8} />
+    </mesh>
+  )
+}
+
+function HouseVolume({ id, room, walls, exteriorTexture, trim, roofGroup, attachSide, rise }) {
   const door = getDoorData(walls)
   const [width, height, depth] = room.size
 
@@ -203,11 +316,14 @@ function HouseVolume({ id, room, walls, exteriorTexture, trim }) {
       )}
       <OpeningReveals walls={walls} />
       <NeighborDoor door={door} />
-      {/* Faux plafond — cache la structure du toit vue depuis l'intérieur */}
-      <mesh position={[room.position[0], height + 0.02, room.position[2]]}>
-        <boxGeometry args={[width, 0.12, depth]} />
-        <meshStandardMaterial color={trim} roughness={0.8} />
-      </mesh>
+{/* Faux plafond — cache la structure du toit vue depuis l'intérieur */}
+<CeilingPlate
+  room={room}
+  trim={trim}
+  roofGroup={roofGroup}
+  attachSide={attachSide}
+  rise={rise}
+/>
     </>
   )
 }
@@ -230,16 +346,31 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
 
   return (
     <group position={[position[0], terrainY, position[2]]} rotation={[0, rotationY, 0]}>
-      {floorplan.rooms.map((room) => (
-        <HouseVolume
-          key={room.id}
-          id={room.id}
-          room={room}
-          walls={floorplan.walls.filter((wall) => wall.roomId === room.id)}
-          trim={trim}
-          exteriorTexture={exteriorTexture}
-        />
-      ))}
+{floorplan.rooms.map((room) => {
+  const roofGroup = floorplan.roofGroups.find((group) => group.roomIds.includes(room.id))
+  const roofGroupIndex = floorplan.roofGroups.findIndex((group) => group.id === roofGroup?.id)
+  const attachSide = roofGroup
+    ? roofGroup.attachmentSide ?? guessAttachSide(roofGroup, primaryGroup)
+    : 'south'
+
+  const rise = primaryGroup && roofGroupIndex > 0
+    ? Math.max(0.4, primaryGroup.height - roofGroup.height)
+    : 0.72
+
+  return (
+    <HouseVolume
+      key={room.id}
+      id={room.id}
+      room={room}
+      walls={floorplan.walls.filter((wall) => wall.roomId === room.id)}
+      trim={trim}
+      exteriorTexture={exteriorTexture}
+      roofGroup={roofGroup}
+      attachSide={attachSide}
+      rise={rise}
+    />
+  )
+})}
       {floorplan.roofGroups.map((group, index) => {
         const attachSide = group.attachmentSide ?? guessAttachSide(group, primaryGroup)
         // Rise = différence de hauteur entre maison principale et dépendance

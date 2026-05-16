@@ -148,17 +148,56 @@ function LeanToRoof({
       y00 = yL; y10 = yL; y01 = yH; y11 = yH
     }
 
-    // 8 vertices: 4 outer top (0-3) + 4 inner bottom (4-7)
-    const v = [
-      x0, y00, z0,              // 0 SW outer
-      x1, y10, z0,              // 1 SE outer
-      x0, y01, z1,              // 2 NW outer
-      x1, y11, z1,              // 3 NE outer
-      x0, y00 - thickness, z0,  // 4 SW inner
-      x1, y10 - thickness, z0,  // 5 SE inner
-      x0, y01 - thickness, z1,  // 6 NW inner
-      x1, y11 - thickness, z1,  // 7 NE inner
-    ]
+// 8 vertices: 4 outer top (0-3) + 4 inner bottom (4-7)
+// The inner ceiling is offset along the roof normal, not straight down,
+// so the thickness follows the roof bevel.
+const ux = x1 - x0
+const uy = y10 - y00
+const uz = 0
+
+const vx = 0
+const vy = y01 - y00
+const vz = z1 - z0
+
+let nx = uy * vz - uz * vy
+let ny = uz * vx - ux * vz
+let nz = ux * vy - uy * vx
+
+if (ny < 0) {
+  nx *= -1
+  ny *= -1
+  nz *= -1
+}
+
+const nLen = Math.hypot(nx, ny, nz) || 1
+nx /= nLen
+ny /= nLen
+nz /= nLen
+
+function innerPoint(x, y, z) {
+  return [
+    x + nx * thickness,
+    y - Math.abs(ny) * thickness,
+    z + nz * thickness,
+  ]
+}
+
+const p4 = innerPoint(x0, y00, z0)
+const p5 = innerPoint(x1, y10, z0)
+const p6 = innerPoint(x0, y01, z1)
+const p7 = innerPoint(x1, y11, z1)
+
+const v = [
+  x0, y00, z0,  // 0 SW outer
+  x1, y10, z0,  // 1 SE outer
+  x0, y01, z1,  // 2 NW outer
+  x1, y11, z1,  // 3 NE outer
+
+  ...p4,        // 4 SW inner
+  ...p5,        // 5 SE inner
+  ...p6,        // 6 NW inner
+  ...p7,        // 7 NE inner
+]
 
     // 6 closed faces: top, bottom, south, north, west, east
     const quads = [
