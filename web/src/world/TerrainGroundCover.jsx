@@ -308,6 +308,8 @@ function buildGrassHandleBeforeCompile(shaderRef) {
   return (shader) => {
     shader.uniforms.uTime = { value: 0 }
     shader.uniforms.uPlayerPosition = { value: new Vector3(9999, 0, 9999) }
+    shader.uniforms.uBallPosition = { value: new Vector3(9999, 0, 9999) }
+    shader.uniforms.uBallInteractionRadius = { value: 0.55 }
     shader.uniforms.uBladeHeight = { value: GRASS_CARD_HEIGHT }
     shader.uniforms.uWindStrength = { value: grassWindSettings.strength }
     shader.uniforms.uWindSpeed = { value: grassWindSettings.speed }
@@ -339,6 +341,8 @@ function buildGrassHandleBeforeCompile(shaderRef) {
       uniform float uThinningRadius;
       uniform float uMinKeepProbability;
       uniform vec3 uPlayerPosition;
+      uniform vec3 uBallPosition;
+      uniform float uBallInteractionRadius;
       uniform vec3 uWindDirection;
       uniform vec3 uCameraForward;
       uniform float uCameraAngleMinDensity;
@@ -418,7 +422,17 @@ function buildGrassHandleBeforeCompile(shaderRef) {
         transformed.z += pushDirection.y * uInteractionStrength * playerInfluence;
         transformed.y -= uInteractionStrength * 0.06 * playerInfluence;
       }
-      `,
+
+      vec2 fromBall = grassOrigin.xz - uBallPosition.xz;
+      float ballDistance = length(fromBall);
+      float ballInfluence = smoothstep(uBallInteractionRadius, 0.0, ballDistance) * heightFactor;
+      if (ballDistance > 0.0001) {
+        vec2 ballPushDir = normalize(fromBall);
+        transformed.x += ballPushDir.x * uInteractionStrength * ballInfluence;
+        transformed.z += ballPushDir.y * uInteractionStrength * ballInfluence;
+        transformed.y -= uInteractionStrength * 0.06 * ballInfluence;
+      }
+`,
     )
 
     // eslint-disable-next-line no-param-reassign
@@ -426,7 +440,7 @@ function buildGrassHandleBeforeCompile(shaderRef) {
   }
 }
 
-function TerrainGroundCover({ playerPositionRef, active = true }) {
+function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   const rocks = useMemo(() => createRockCover(), [])
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
   const [grassChunks, setGrassChunks] = useState({})
@@ -665,6 +679,9 @@ function TerrainGroundCover({ playerPositionRef, active = true }) {
     shader.uniforms.uTime.value = state.clock.elapsedTime
     const pp = playerPositionRef?.current
     if (pp) shader.uniforms.uPlayerPosition.value.set(pp.x, pp.y, pp.z)
+    const bp = ballRef?.current?.translation?.()
+    if (bp) shader.uniforms.uBallPosition.value.set(bp.x, bp.y, bp.z)
+    else shader.uniforms.uBallPosition.value.set(9999, 0, 9999)
     _cameraForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion)
     _cameraForward.y = 0
     if (_cameraForward.lengthSq() > 0.0001) _cameraForward.normalize()

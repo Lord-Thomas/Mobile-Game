@@ -62,6 +62,7 @@ export function OutdoorLighting({ active, showSky, castShadows }) {
 function OutdoorNeighborhood({
   lightingActive = true,
   playerPositionRef,
+  ballRef,
   showAuthoredTrees = true,
   showGrass = true,
   showTrees = true,
@@ -81,7 +82,7 @@ function OutdoorNeighborhood({
       ))}
       {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />}
-      {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} active={lightingActive} />}
+      {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} />}
     </group>
   )
 }

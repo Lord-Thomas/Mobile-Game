@@ -4,7 +4,7 @@ import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
 
-export const TERRAIN_COLLIDER_SEGMENTS = 96
+export const TERRAIN_COLLIDER_SEGMENTS = 128
 export const TERRAIN_VISUAL_SEGMENTS = 176
 export const TERRAIN_COLLIDER_SIZE = OUTDOOR_WORLD_SIZE
 export const TERRAIN_VISUAL_SIZE = 188

@@ -390,7 +390,10 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
                 overhang={0.24}
                 overhangAttached={0}
                 thickness={0.14}
+                wallThickness={floorplan.wallThickness}
                 color={trim}
+                gableColor={color}
+                gableTexture={exteriorTexture}
               />
             ) : (
               <GableRoof
@@ -404,6 +407,7 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
                 wallThickness={floorplan.wallThickness}
                 color={trim}
                 gableColor={color}
+                gableTexture={exteriorTexture}
               />
             )}
           </group>

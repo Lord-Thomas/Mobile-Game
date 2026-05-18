@@ -1,5 +1,8 @@
 import { useEffect, useMemo } from 'react'
-import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, RepeatWrapping, SRGBColorSpace } from 'three'
+
+// Texture repeat scale — matches exterior wall repeat so gable tiles identically
+const GABLE_UV_REPEAT = 0.18
 
 function createRoofShellGeometry({ width, depth, wallTopY, pitch, overhangX, overhangZ, thickness, ridgeAxis }) {
   const halfRoofWidth = width * 0.5 + overhangX
@@ -132,6 +135,9 @@ function createRoofShellGeometry({ width, depth, wallTopY, pitch, overhangX, ove
 // (-wr, eaveY)   (wr, eaveY)     ← shoulder = point where roof slope meets wall face
 // |                         |    ← vertical strip (extension du mur)
 // (-wr, baseY)   (wr, baseY)     ← base at wall top
+//
+// UV coordinates use world-space planar projection (px * R, py * R) so the
+// texture tiles identically to the exterior wall material.
 function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overhangX, overhangZ, wallThickness, ridgeAxis, showStart, showEnd }) {
   const hw = width * 0.5 + wallThickness * 0.5   // halfWallWidth
   const hd = depth * 0.5 + wallThickness * 0.5   // halfWallDepth
@@ -144,52 +150,74 @@ function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overha
   // Shoulder: height where the inner roof slope intersects the wall face
   const eaveY = wallTopY + ridgeRise * (halfRoofRun - halfWallRun) / halfRoofRun
 
+  const R = GABLE_UV_REPEAT
   const p = []
+  const uvs = []
 
-  function tri(ax, ay, az, bx, by, bz, cx, cy, cz) {
-    p.push(ax, ay, az, bx, by, bz, cx, cy, cz)
+  // Push a single vertex (world position + planar UV)
+  function pushVert(wx, wy, wz, u, v) {
+    p.push(wx, wy, wz)
+    uvs.push(u, v)
   }
-  function quad(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) {
-    tri(ax, ay, az, bx, by, bz, cx, cy, cz)
-    tri(bx, by, bz, dx, dy, dz, cx, cy, cz)
+
+  function tri(a, b, c) {
+    pushVert(...a); pushVert(...b); pushVert(...c)
+  }
+  function quad(a, b, c, d) {
+    tri(a, b, c); tri(b, d, c)
   }
 
   // Pentagon prism: A(-wr,base) B(wr,base) C(wr,eave) D(0,ridge) E(-wr,eave)
   // d0 = outer face coord, d1 = inner face coord, isZ = extrude along Z (vs X)
+  // UV uses (px, py) in the gable's cross-section plane — matches wall tiling.
   function addPentaPrism(wr, d0, d1, isZ) {
-    function vt(px, py, d) { return isZ ? [px, py, d] : [d, py, px] }
-    const [a0x,a0y,a0z] = vt(-wr, baseY,  d0)
-    const [b0x,b0y,b0z] = vt( wr, baseY,  d0)
-    const [c0x,c0y,c0z] = vt( wr, eaveY,  d0)
-    const [d0x,d0y,d0z] = vt(  0, ridgeY, d0)
-    const [e0x,e0y,e0z] = vt(-wr, eaveY,  d0)
+    // mk: local coords (px=lateral, py=height, d=depth) → [worldX, worldY, worldZ, u, v]
+    function mk(px, py, d) {
+      const [wx, wy, wz] = isZ ? [px, py, d] : [d, py, px]
+      return [wx, wy, wz, px * R, py * R]
+    }
 
-    const [a1x,a1y,a1z] = vt(-wr, baseY,  d1)
-    const [b1x,b1y,b1z] = vt( wr, baseY,  d1)
-    const [c1x,c1y,c1z] = vt( wr, eaveY,  d1)
-    const [d1x,d1y,d1z] = vt(  0, ridgeY, d1)
-    const [e1x,e1y,e1z] = vt(-wr, eaveY,  d1)
+    const A0 = mk(-wr, baseY,  d0)
+    const B0 = mk( wr, baseY,  d0)
+    const C0 = mk( wr, eaveY,  d0)
+    const R0 = mk(  0, ridgeY, d0)   // ridge at d0
+    const E0 = mk(-wr, eaveY,  d0)
+    const A1 = mk(-wr, baseY,  d1)
+    const B1 = mk( wr, baseY,  d1)
+    const C1 = mk( wr, eaveY,  d1)
+    const R1 = mk(  0, ridgeY, d1)   // ridge at d1
+    const E1 = mk(-wr, eaveY,  d1)
 
-    // Outer face (d0): A,C,B winding → normal toward outer
-    tri(a0x,a0y,a0z, e0x,e0y,e0z, b0x,b0y,b0z)   // lower half
-    tri(e0x,e0y,e0z, c0x,c0y,c0z, b0x,b0y,b0z)   // lower half right
-    tri(e0x,e0y,e0z, d0x,d0y,d0z, c0x,c0y,c0z)   // upper triangle
+    // Outer face (d0): winding → normal toward outer
+    tri(A0, E0, B0)
+    tri(E0, C0, B0)
+    tri(E0, R0, C0)
 
     // Inner face (d1): reversed
-    tri(a1x,a1y,a1z, b1x,b1y,b1z, e1x,e1y,e1z)
-    tri(e1x,e1y,e1z, b1x,b1y,b1z, c1x,c1y,c1z)
-    tri(e1x,e1y,e1z, c1x,c1y,c1z, d1x,d1y,d1z)
+    tri(A1, B1, E1)
+    tri(E1, B1, C1)
+    tri(E1, C1, R1)
 
-    // 5 side edges
-    quad(a0x,a0y,a0z, a1x,a1y,a1z, b0x,b0y,b0z, b1x,b1y,b1z)   // base A-B
-    quad(b0x,b0y,b0z, b1x,b1y,b1z, c0x,c0y,c0z, c1x,c1y,c1z)   // right B-C
-    quad(c0x,c0y,c0z, c1x,c1y,c1z, d0x,d0y,d0z, d1x,d1y,d1z)   // slope C-D
-    quad(d0x,d0y,d0z, d1x,d1y,d1z, e0x,e0y,e0z, e1x,e1y,e1z)   // slope D-E
-    quad(e0x,e0y,e0z, e1x,e1y,e1z, a0x,a0y,a0z, a1x,a1y,a1z)   // left E-A
+    // 5 side quads
+    quad(A0, A1, B0, B1)   // base A–B
+    quad(B0, B1, C0, C1)   // right B–C
+    quad(C0, C1, R0, R1)   // slope C–D(ridge)
+    quad(R0, R1, E0, E1)   // slope D(ridge)–E
+    quad(E0, E1, A0, A1)   // left E–A
   }
 
+  // Thin vertical infill panel matching the side wall face between ridgeAxis side walls
+  // and the sloped shoulder of the gable. Fills the strip from baseY to eaveY.
   function addSideWallInfill(x0, x1, z0, z1) {
-    quad(x0, baseY, z0, x1, baseY, z1, x0, eaveY, z0, x1, eaveY, z1)
+    // UV: along-wall direction for u, height for v
+    const uFn = ridgeAxis === 'z'
+      ? (wx, wz) => wz * R
+      : (wx, wz) => wx * R
+    const lo0 = [x0, baseY, z0, uFn(x0, z0), baseY * R]
+    const lo1 = [x1, baseY, z1, uFn(x1, z1), baseY * R]
+    const hi0 = [x0, eaveY, z0, uFn(x0, z0), eaveY * R]
+    const hi1 = [x1, eaveY, z1, uFn(x1, z1), eaveY * R]
+    quad(lo0, lo1, hi0, hi1)
   }
 
   if (ridgeAxis === 'z') {
@@ -211,6 +239,7 @@ function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overha
   if (!p.length) return null
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(p, 3))
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
   geometry.computeVertexNormals()
   return geometry
 }
@@ -228,6 +257,7 @@ function GableRoof({
   wallThickness = 0.18,
   color = '#8f4b3a',
   gableColor = '#f3f0e5',
+  gableTexture = null,
   showStartGable = true,
   showEndGable = true,
 }) {
@@ -242,8 +272,21 @@ function GableRoof({
     showStart: showStartGable, showEnd: showEndGable,
   }), [depth, gableBaseY, overhangX, overhangZ, pitch, ridgeAxis, showEndGable, showStartGable, wallThickness, wallTopY, width])
 
+  // Clone and configure the gable texture so it tiles at the same scale as exterior walls
+  const tiledGableTexture = useMemo(() => {
+    if (!gableTexture) return null
+    const tex = gableTexture.clone()
+    tex.wrapS = RepeatWrapping
+    tex.wrapT = RepeatWrapping
+    tex.repeat.set(1, 1)   // UVs already encode world-space repeat via GABLE_UV_REPEAT
+    tex.colorSpace = SRGBColorSpace
+    tex.needsUpdate = true
+    return tex
+  }, [gableTexture])
+
   useEffect(() => () => shellGeometry.dispose(), [shellGeometry])
   useEffect(() => () => gableGeometry?.dispose(), [gableGeometry])
+  useEffect(() => () => tiledGableTexture?.dispose(), [tiledGableTexture])
 
   return (
     <>
@@ -252,7 +295,12 @@ function GableRoof({
       </mesh>
       {gableGeometry && (
         <mesh geometry={gableGeometry} castShadow receiveShadow>
-          <meshStandardMaterial color={gableColor} roughness={0.8} side={DoubleSide} />
+          <meshStandardMaterial
+            color={gableColor}
+            map={tiledGableTexture}
+            roughness={0.78}
+            side={DoubleSide}
+          />
         </mesh>
       )}
     </>

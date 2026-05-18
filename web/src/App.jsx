@@ -10,11 +10,12 @@ import { addPlayerCoins, getCurrentUser, loadPlayerProgress, onAuthStateChange, 
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
-import { OUTDOOR_PLAYER_COLLIDERS } from './world/outdoorData'
+import { OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE } from './world/outdoorData'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
+import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
@@ -115,11 +116,13 @@ const LEGACY_STARTER_FURNITURE_IDS = new Set(['sofa_01', 'desk_01', 'office_chai
 const SKIN_STATION_POSITION = { x: -3.5, y: 0.35, z: 1.8 }
 const ENV_STATION_POSITION = { x: 3.5, y: 0.35, z: 1.8 }
 const CUSTOM_STATION_POSITION = { x: 0, y: 0.35, z: 3.55 }
-const CUSTOM_ROOM_BOUNDS = { minX: -4.25, maxX: 4.25, minZ: -4.25, maxZ: 4.25 }
+const PARCEL_HALF = PLAYER_PLOT_SIZE / 2
+const CUSTOM_ROOM_BOUNDS = { minX: -PARCEL_HALF, maxX: PARCEL_HALF, minZ: -PARCEL_HALF, maxZ: PARCEL_HALF }
 const CUSTOM_GRID_SIZE = 0.25
 const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const TV_INTERACTION_DISTANCE = 1.35
 const TV_MENU_EVENT = 'lab-tv-open-menu'
+let activeNearbyTvId = null
 const MAIN_ROOM = { width: mainRoom.size[0], depth: mainRoom.size[2], height: mainRoom.size[1] }
 const WALL_REPEAT_X_PER_UNIT = 3.4 / 12
 const WALL_REPEAT_Y_PER_UNIT = 1.9 / 5
@@ -576,6 +579,7 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
   const floorColorMap = useTexture(floorTexturePath)
   const wallColorMap = useTexture(wallTexturePath)
   const ceilingColorMap = useTexture(ceilingTexturePath)
+  const exteriorWallTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   floorColorMap.wrapS = RepeatWrapping
   floorColorMap.wrapT = RepeatWrapping
   floorColorMap.repeat.set(3.2, 3.2)
@@ -616,25 +620,30 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
           <GableRoof
             width={MAIN_ROOM.width}
             depth={MAIN_ROOM.depth}
-            wallTopY={MAIN_ROOM.height + 0.08}
+            wallTopY={MAIN_ROOM.height}
+            gableBaseY={MAIN_ROOM.height}
             pitch={32}
             overhang={0.42}
             thickness={0.14}
             wallThickness={houseLayout.wallThickness}
             color="#8b4c3f"
             gableColor={EXTERIOR_WALL_COLOR}
+            gableTexture={exteriorWallTexture}
           />
           <group position={secondRoom.position}>
-            <GableRoof
+            <LeanToRoof
               width={secondRoom.size[0]}
               depth={secondRoom.size[2]}
-              wallTopY={secondRoom.size[1] + 0.08}
-              pitch={28}
+              wallTopY={secondRoom.size[1]}
+              attachSide="south"
+              rise={MAIN_ROOM.height - secondRoom.size[1]}
               overhang={0.34}
+              overhangAttached={0}
               thickness={0.12}
               wallThickness={houseLayout.wallThickness}
               color="#8b4c3f"
               gableColor={EXTERIOR_WALL_COLOR}
+              gableTexture={exteriorWallTexture}
             />
           </group>
         </>
@@ -923,7 +932,7 @@ function GlassContainmentColliders() {
   )
 }
 
-function Ball({ ballRef, skinTexturePath }) {
+function Ball({ ballRef, skinTexturePath, spawnPosition = [0, 3.2, 0], linearDamping = 0.35, angularDamping = 0.4 }) {
   const { gl } = useThree()
   const ballSkin = useGLTF('/models/ball/ballon.glb')
   const skinTexture = useTexture(skinTexturePath)
@@ -976,11 +985,11 @@ function Ball({ ballRef, skinTexturePath }) {
       ref={ballRef}
       name="ball"
       colliders={false}
-      position={[0, 3.2, 0]}
+      position={spawnPosition}
       restitution={0.82}
       friction={0.55}
-      linearDamping={0.35}
-      angularDamping={0.4}
+      linearDamping={linearDamping}
+      angularDamping={angularDamping}
       mass={1}
       ccd
     >
@@ -1794,7 +1803,7 @@ function Player({
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
     } else if (wantsAction) {
-      const ball = currentZone === ZONES.outside ? null : ballRef.current
+      const ball = ballRef.current
       if (ball) {
         const ballPos = ball.translation()
         const kickContact = getKickContact({
@@ -3596,6 +3605,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
 
   useEffect(() => {
     const handleDocumentScreenPress = (event) => {
+      if (activeNearbyTvId !== tvInstanceId) return
       if (event.button && event.button !== 0) return
       if (!isPointerInsideScreen(event)) return
       if (isMobileMediaMode && event.type === 'pointerdown' && event.pointerType === 'touch') return
@@ -4362,6 +4372,7 @@ function EditableFloor({
   placingObjectId,
   placementLocked,
   getPlacementY,
+  getFootprint,
   onDrag,
   onLockPlacement,
   onStopDragging,
@@ -4380,7 +4391,9 @@ function EditableFloor({
   if (mode !== 'customize') return null
 
   const getSnappedPlacement = (point, objectId) => {
-    const [x, z] = clampToCustomRoom(snap(point.x), snap(point.z))
+    const { hx, hz } = getFootprint(objectId)
+    const x = MathUtils.clamp(snap(point.x), -PARCEL_HALF + hx, PARCEL_HALF - hx)
+    const z = MathUtils.clamp(snap(point.z), -PARCEL_HALF + hz, PARCEL_HALF - hz)
     return [x, getPlacementY(x, z, objectId), z]
   }
 
@@ -4434,18 +4447,18 @@ function EditableFloor({
         onClearSelection()
       }}
     >
-      <planeGeometry args={[30, 30]} />
+      <planeGeometry args={[PLAYER_PLOT_SIZE + 4, PLAYER_PLOT_SIZE + 4]} />
       <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>
   )
 }
 
-function PlacementPreview({ object, preview }) {
+function PlacementPreview({ object, preview, groupRef }) {
   if (!object || !preview) return null
 
   return (
     <group position={preview.position} rotation={[0, preview.rotationY, 0]}>
-      <group scale={0.96}>
+      <group ref={groupRef} scale={0.96}>
         <Suspense fallback={null}>
           <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
         </Suspense>
@@ -4480,6 +4493,9 @@ function CustomizationLayer({
   const placedObjects = objects.filter((object) => object.status !== 'stored')
   const placingObject = objects.find((object) => object.id === placingObjectId)
   const placeableRefs = useRef(new Map())
+  const previewGroupRef = useRef()
+  const placingObjectIdRef = useRef(placingObjectId)
+  useEffect(() => { placingObjectIdRef.current = placingObjectId }, [placingObjectId])
 
   const registerPlaceableRef = useCallback((id, object3D) => {
     if (object3D) {
@@ -4487,6 +4503,16 @@ function CustomizationLayer({
       return
     }
     placeableRefs.current.delete(id)
+  }, [])
+
+  const getFootprint = useCallback((objectId) => {
+    const isPreview = objectId === placingObjectIdRef.current
+    const object3D = isPreview ? previewGroupRef.current : placeableRefs.current.get(objectId)
+    if (!object3D) return { hx: 0, hz: 0 }
+    object3D.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(object3D)
+    const size = box.getSize(new Vector3())
+    return { hx: size.x / 2, hz: size.z / 2 }
   }, [])
 
   const getPlacementY = useCallback((x, z, ignoredObjectId) => {
@@ -4507,7 +4533,15 @@ function CustomizationLayer({
         return !intersection.object.userData.ignorePlacementSupport && hitObjectId !== ignoredObjectId
       })
 
-    return hit ? hit.point.y : 0
+    if (hit) return hit.point.y
+    const insideHouse = houseLayout.rooms.some((room) => {
+      const [rx, , rz] = room.position
+      return (
+        Math.abs(x - rx) <= room.size[0] * 0.5 &&
+        Math.abs(z - rz) <= room.size[2] * 0.5
+      )
+    })
+    return insideHouse ? 0 : getTerrainHeight(x, z)
   }, [])
 
   return (
@@ -4519,6 +4553,7 @@ function CustomizationLayer({
         placingObjectId={placingObjectId}
         placementLocked={placementLocked}
         getPlacementY={getPlacementY}
+        getFootprint={getFootprint}
         onDrag={(id, position) => {
           if (placingObjectId) {
             onUpdatePlacementPreview(position)
@@ -4557,7 +4592,7 @@ function CustomizationLayer({
           onObjectRef={registerPlaceableRef}
         />
       ))}
-      <PlacementPreview object={placingObject} preview={placementPreview} />
+      <PlacementPreview object={placingObject} preview={placementPreview} groupRef={previewGroupRef} />
     </>
   )
 }
@@ -4960,7 +4995,19 @@ function EnvironmentMenu({
   )
 }
 
-function BallRespawnGuard({ ballRef, onOutOfBounds }) {
+function isGoalInsideHouse(goalPosition) {
+  if (!goalPosition) return true
+  const [x, , z] = goalPosition
+  return houseLayout.rooms.some((room) => {
+    const [rx, , rz] = room.position
+    return (
+      Math.abs(x - rx) <= room.size[0] * 0.5 + 0.5 &&
+      Math.abs(z - rz) <= room.size[2] * 0.5 + 0.5
+    )
+  })
+}
+
+function BallRespawnGuard({ ballRef, goalObject, onOutOfBounds }) {
   const outTimerRef = useRef(0)
   const triggerLockRef = useRef(false)
 
@@ -4969,11 +5016,10 @@ function BallRespawnGuard({ ballRef, onOutOfBounds }) {
     if (!ball) return
 
     const p = ball.translation()
-    const isOut =
-      p.y < -1.2 ||
-      p.y > 7 ||
-      Math.abs(p.x) > 8.2 ||
-      Math.abs(p.z) > 12
+    const goalInside = isGoalInsideHouse(goalObject?.position)
+    const isOut = goalInside
+      ? (p.y < -1.2 || p.y > 7 || Math.abs(p.x) > 8.2 || Math.abs(p.z) > 12)
+      : (p.y < getTerrainHeight(p.x, p.z) - 0.5 || Math.abs(p.x) > OUTDOOR_HALF_SIZE - 1 || Math.abs(p.z) > OUTDOOR_HALF_SIZE - 1)
 
     if (isOut) {
       outTimerRef.current += delta
@@ -5270,6 +5316,7 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
           ['house', 'Maison'],
           ['player', 'Joueur'],
           ['plot', 'Parcelle'],
+          ['portrait', '9:16'],
         ].map(([key, label]) => (
           <button
             className={toggles[key] ? 'is-active' : ''}
@@ -5406,6 +5453,7 @@ function App() {
     house: true,
     player: true,
     plot: false,
+    portrait: false,
   })
   const showGpuWarning = Boolean(rendererInfo && isWeakRenderer(rendererInfo) && !gpuWarningDismissed)
 
@@ -5459,6 +5507,7 @@ function App() {
   const [isNearOutdoorDoor, setIsNearOutdoorDoor] = useState(false)
   const [nearbySeat, setNearbySeat] = useState(null)
   const [nearbyTv, setNearbyTv] = useState(null)
+  useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
   const [seatedState, setSeatedState] = useState(null)
   const [authUser, setAuthUser] = useState(null)
   const [isAccountOpen, setIsAccountOpen] = useState(false)
@@ -5804,7 +5853,20 @@ function App() {
     const ball = ballRef.current
     if (!ball) return
 
-    ball.setTranslation({ x: 0, y: 3.2, z: 0 }, true)
+    const gx = goalObject.position?.[0] ?? 0
+    const gy = goalObject.position?.[1] ?? 0
+    const gz = goalObject.position?.[2] ?? 0
+    const rotY = goalObject.rotationY ?? 0
+    const BALL_FORWARD_OFFSET = 3.5
+    const spawnX = gx + Math.sin(rotY) * BALL_FORWARD_OFFSET
+    const spawnZ = gz + Math.cos(rotY) * BALL_FORWARD_OFFSET
+    const goalInside = isGoalInsideHouse(goalObject.position)
+    const groundY = goalInside ? 0 : getTerrainHeight(spawnX, spawnZ)
+    ball.setTranslation({
+      x: spawnX,
+      y: Math.max(gy + 1.2, groundY + 0.5),
+      z: spawnZ,
+    }, true)
     ball.setLinvel({ x: 0, y: 0, z: 0 }, true)
     ball.setAngvel({ x: 0, y: 0, z: 0 }, true)
     scoreCooldownRef.current = false
@@ -6206,6 +6268,7 @@ function App() {
 
   const gameView = (
     <main className="app">
+      <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
       <Canvas
         dpr={renderSettings.dpr}
         camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 240 }}
@@ -6265,6 +6328,7 @@ function App() {
         <OutdoorNeighborhood
           lightingActive={currentZone === ZONES.outside}
           playerPositionRef={playerPositionRef}
+          ballRef={ballRef}
           showGrass={!isDebugMode || debugToggles.grass}
           showTrees={!isDebugMode || debugToggles.trees}
           showTerrain={!isDebugMode || debugToggles.terrain}
@@ -6276,22 +6340,34 @@ function App() {
           <PhysicsBounds />
           <GlassContainmentColliders />
           <OutdoorBounds includeHouseFootprint={false} />
-          {currentZone !== ZONES.outside && (
-            <>
-            <Ball ballRef={ballRef} skinTexturePath={activeSkin.texture} />
-            <BallRespawnGuard ballRef={ballRef} onOutOfBounds={handleOutOfBoundsRespawn} />
-            <Goal
-              object={goalObject}
-              mode={mode}
-              selected={selectedObjectId === goalObject.id}
-              onSelect={setSelectedObjectId}
-              onStartDragging={setDraggingObjectId}
-              onBallZoneEnter={handleBallZoneEnter}
-              onBallZoneExit={handleBallZoneExit}
-              ballRef={ballRef}
-            />
-            </>
-          )}
+          <Goal
+            object={goalObject}
+            mode={mode}
+            selected={selectedObjectId === goalObject.id}
+            onSelect={setSelectedObjectId}
+            onStartDragging={setDraggingObjectId}
+            onBallZoneEnter={handleBallZoneEnter}
+            onBallZoneExit={handleBallZoneExit}
+            ballRef={ballRef}
+          />
+          <Ball
+            ballRef={ballRef}
+            skinTexturePath={activeSkin.texture}
+            linearDamping={currentZone === ZONES.outside ? 0.08 : 0.35}
+            angularDamping={currentZone === ZONES.outside ? 0.12 : 0.4}
+            spawnPosition={(() => {
+              const gx = goalObject.position?.[0] ?? 0
+              const gy = goalObject.position?.[1] ?? 0
+              const gz = goalObject.position?.[2] ?? 0
+              const rotY = goalObject.rotationY ?? 0
+              const offset = 3.5
+              const sx = gx + Math.sin(rotY) * offset
+              const sz = gz + Math.cos(rotY) * offset
+              const groundY = isGoalInsideHouse(goalObject.position) ? 0 : getTerrainHeight(sx, sz)
+              return [sx, Math.max(gy + 1.2, groundY + 0.5), sz]
+            })()}
+          />
+          <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
           {(!isDebugMode || debugToggles.player) && (
             <Player
               touchRef={touchRef}
@@ -6310,6 +6386,18 @@ function App() {
             currentZone={currentZone}
             onNearChange={setIsNearOutdoorDoor}
           />
+          <SeatInteractionTrigger
+            playerPositionRef={playerPositionRef}
+            objects={placedEditableObjects}
+            seatedState={seatedState}
+            onNearbySeatChange={setNearbySeat}
+          />
+          <TvInteractionTrigger
+            playerPositionRef={playerPositionRef}
+            objects={placedEditableObjects}
+            enabled={mode === 'play'}
+            onNearbyTvChange={setNearbyTv}
+          />
           {currentZone !== ZONES.outside && (
             <>
               <SkinStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearSkinStation} />
@@ -6319,23 +6407,12 @@ function App() {
                 onNearChange={setIsNearCustomizationStation}
                 enabled={mode === 'play'}
               />
-              <SeatInteractionTrigger
-                playerPositionRef={playerPositionRef}
-                objects={placedEditableObjects}
-                seatedState={seatedState}
-                onNearbySeatChange={setNearbySeat}
-              />
-              <TvInteractionTrigger
-                playerPositionRef={playerPositionRef}
-                objects={placedEditableObjects}
-                enabled={mode === 'play'}
-                onNearbyTvChange={setNearbyTv}
-              />
             </>
           )}
           {showCaptureUi && <ScorePopups popups={scorePopups} />}
         </Physics>
       </Canvas>
+      </div>
       {isDebugMode && (
         <RenderStatsOverlay
           stats={renderStats}
