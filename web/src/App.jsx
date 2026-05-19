@@ -2667,40 +2667,80 @@ function AccountSyncPanel({
   )
 }
 
-function SkinStation() {
+// Halo d'interaction : anneau au sol qui s'agrandit et pulse quand on approche
+function InteractionHalo({ isNear, color = '#ffffff', pulseColor, position }) {
+  const outerRef = useRef()
+  const innerRef = useRef()
+  const scaleRef = useRef(0.35)
+  const pulseRef = useRef(0)
+
+  useFrame((_, delta) => {
+    const target = isNear ? 1 : 0.35
+    scaleRef.current += (target - scaleRef.current) * Math.min(1, 8 * delta)
+    const s = scaleRef.current
+    if (outerRef.current) outerRef.current.scale.set(s, s, 1)
+    if (innerRef.current) {
+      if (isNear) {
+        pulseRef.current += delta * 2.2
+        const pulse = 0.6 + 0.4 * Math.sin(pulseRef.current)
+        innerRef.current.scale.set(s * pulse, s * pulse, 1)
+        innerRef.current.material.opacity = 0.35 * pulse
+      } else {
+        pulseRef.current = 0
+        innerRef.current.scale.set(s * 0.6, s * 0.6, 1)
+        innerRef.current.material.opacity = 0
+      }
+    }
+  })
+
+  const pc = pulseColor ?? color
+
   return (
-    <group position={[SKIN_STATION_POSITION.x, SKIN_STATION_POSITION.y, SKIN_STATION_POSITION.z]}>
-      <mesh position={[0, -0.32, 0]}>
-        <cylinderGeometry args={[0.6, 0.6, 0.16, 20]} />
-        <meshStandardMaterial color="#d7dde5" />
+    <group position={position} rotation={[-Math.PI / 2, 0, 0]}>
+      {/* Anneau principal */}
+      <mesh ref={outerRef}>
+        <ringGeometry args={[0.28, 0.42, 48]} />
+        <meshBasicMaterial color={color} transparent opacity={0.75} depthWrite={false} />
+      </mesh>
+      {/* Disque intérieur pulsé */}
+      <mesh ref={innerRef}>
+        <circleGeometry args={[0.28, 48]} />
+        <meshBasicMaterial color={pc} transparent opacity={0} depthWrite={false} />
       </mesh>
     </group>
   )
 }
 
-function EnvironmentStation() {
+function SkinStation({ isNear }) {
   return (
-    <group position={[ENV_STATION_POSITION.x, ENV_STATION_POSITION.y, ENV_STATION_POSITION.z]}>
-      <mesh position={[0, -0.32, 0]}>
-        <cylinderGeometry args={[0.6, 0.6, 0.16, 20]} />
-        <meshStandardMaterial color="#d0d8e3" />
-      </mesh>
-    </group>
+    <InteractionHalo
+      isNear={isNear}
+      color="#a8c4e0"
+      pulseColor="#d0e8ff"
+      position={[SKIN_STATION_POSITION.x, 0.02, SKIN_STATION_POSITION.z]}
+    />
   )
 }
 
-function CustomizationStation() {
+function EnvironmentStation({ isNear }) {
   return (
-    <group position={[CUSTOM_STATION_POSITION.x, CUSTOM_STATION_POSITION.y, CUSTOM_STATION_POSITION.z]}>
-      <mesh position={[0, -0.32, 0]}>
-        <cylinderGeometry args={[0.68, 0.68, 0.16, 24]} />
-        <meshStandardMaterial color="#c9d8e6" />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.22, 0]}>
-        <ringGeometry args={[0.42, 0.5, 32]} />
-        <meshBasicMaterial color="#f2c14e" />
-      </mesh>
-    </group>
+    <InteractionHalo
+      isNear={isNear}
+      color="#a0d4b8"
+      pulseColor="#c8f0d8"
+      position={[ENV_STATION_POSITION.x, 0.02, ENV_STATION_POSITION.z]}
+    />
+  )
+}
+
+function CustomizationStation({ isNear }) {
+  return (
+    <InteractionHalo
+      isNear={isNear}
+      color="#f2c14e"
+      pulseColor="#ffe599"
+      position={[CUSTOM_STATION_POSITION.x, 0.02, CUSTOM_STATION_POSITION.z]}
+    />
   )
 }
 
@@ -2880,15 +2920,13 @@ function TvInteractionTrigger({ playerPositionRef, objects, enabled, onNearbyTvC
 
 function SeatTargetMarker({ seat }) {
   if (!seat) return null
-
   return (
-    <group position={[seat.position[0], 0.58, seat.position[2]]}>
-      <mesh>
-        <sphereGeometry args={[0.08, 16, 12]} />
-        <meshBasicMaterial color="#ffd447" />
-      </mesh>
-      <pointLight intensity={0.5} distance={1.2} color="#ffd447" />
-    </group>
+    <InteractionHalo
+      isNear={true}
+      color="#ffd447"
+      pulseColor="#fff0a0"
+      position={[seat.position[0], 0.02, seat.position[2]]}
+    />
   )
 }
 
@@ -6448,9 +6486,9 @@ function App() {
             <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} />
             <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
             <OutdoorDoor />
-            <SkinStation />
-            <EnvironmentStation />
-            <CustomizationStation />
+            <SkinStation isNear={isNearSkinStation} />
+            <EnvironmentStation isNear={isNearEnvironmentStation} />
+            <CustomizationStation isNear={isNearCustomizationStation} />
             <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
           </group>
           <CustomizationLayer
