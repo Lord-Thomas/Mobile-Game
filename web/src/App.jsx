@@ -2219,7 +2219,7 @@ function PlayerAvatar({ motion }) {
         if (name === 'wave' || name === 'dance' || name === 'pointingUp') {
           lockEmoteHipsHeight(clip, hipsRestHeight)
         }
-        if (name === 'sitDown' || name === 'sittingIdle' || name === 'standUp') {
+        if (name === 'sitDown' || name === 'sittingIdle' || name === 'standUp' || name === 'walk' || name === 'run') {
           lockHipsPlanarPosition(clip)
         }
         return clip
@@ -6789,26 +6789,8 @@ const CAT_OFFSETS = [
 ]
 
 function Cat({ playerPositionRef, playerVelocityRef, currentZone }) {
-  const { scene, animations: rawAnimations } = useGLTF('/models/cat.glb')
+  const { scene, animations } = useGLTF('/models/cat.glb')
   const cat = useMemo(() => clone(scene), [scene])
-
-  // Supprime le root motion XZ sur le bone Hips (garde Y pour le rebond naturel)
-  const animations = useMemo(() => rawAnimations.map(clip => {
-    const tracks = clip.tracks.map(track => {
-      if (!track.name.includes('Hips') || !track.name.endsWith('.position')) return track
-      const values = track.values.slice() // copie
-      for (let i = 0; i < values.length; i += 3) {
-        values[i]     = 0  // X → 0
-        // values[i + 1] inchangé (Y : rebond vertical)
-        values[i + 2] = 0  // Z → 0
-      }
-      const fixed = track.clone()
-      fixed.values = values
-      return fixed
-    })
-    return Object.assign(clip.clone(), { tracks })
-  }), [rawAnimations])
-
   const { actions } = useAnimations(animations, cat)
   const groupRef         = useRef()
   const stateRef         = useRef(PET_STATE.IDLE_NEAR)
