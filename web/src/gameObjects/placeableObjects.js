@@ -315,6 +315,32 @@ export const objectCatalog = {
     thumbnailRotationY: Math.PI * 0.08,
     thumbnailScale: 0.94,
   },
+  crystal_egg: {
+    id: 'crystal_egg',
+    type: 'decoration',
+    name: 'Oeuf de cristal',
+    category: 'decoration',
+    modelUrl: '/models/placeables/crystal_egg/model.glb',
+    thumbnail: '/ui/object-thumbnails/crystal_egg.webp',
+    price: 150,
+    targetHeightMeters: 0.55,
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 0.25,
+    thumbnailScale: 1.0,
+  },
+  crystal_rock: {
+    id: 'crystal_rock',
+    type: 'decoration',
+    name: 'Cristal lumineux',
+    category: 'decoration',
+    modelUrl: '/models/placeables/crystal_rock/model.glb',
+    thumbnail: '/ui/object-thumbnails/crystal_rock.webp',
+    price: 120,
+    targetHeightMeters: 1.8,
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 0.15,
+    thumbnailScale: 1.0,
+  },
 }
 
 export const defaultEditableObjects = [
@@ -346,6 +372,8 @@ export const shopObjectIds = [
   'amber_stool',
   'flat_screen_display',
   'monstera_plant',
+  'crystal_egg',
+  'crystal_rock',
 ]
 
 export function createEditableObjectInstance(objectId, overrides = {}) {

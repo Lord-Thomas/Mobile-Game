@@ -866,7 +866,7 @@ function LightSwitchTrigger({ playerPositionRef, enabled, onNearChange }) {
   return null
 }
 
-function LightSwitch({ isOn, onToggle, mode }) {
+function LightSwitch({ isOn, isNear, onOpen, mode }) {
   const WALL_X = -4.86
   const SWITCH_Y = 1.1
   const SWITCH_Z = -1.3
@@ -876,13 +876,7 @@ function LightSwitch({ isOn, onToggle, mode }) {
 
   return (
     <group position={[WALL_X, SWITCH_Y, SWITCH_Z]} rotation={[0, Math.PI / 2, 0]}>
-      <mesh
-        onPointerDown={(e) => {
-          if (mode !== 'play') return
-          e.stopPropagation()
-          onToggle()
-        }}
-      >
+      <mesh>
         <boxGeometry args={[0.086, 0.086, 0.018]} />
         <meshStandardMaterial color={plateColor} roughness={0.7} metalness={0.05} />
       </mesh>
@@ -895,6 +889,14 @@ function LightSwitch({ isOn, onToggle, mode }) {
           roughness={0.4}
         />
       </mesh>
+      {isNear && mode === 'play' && (
+        <Html position={[0, 0, 0.02]} center>
+          <div
+            onPointerDown={(e) => { e.stopPropagation(); onOpen() }}
+            style={{ width: 60, height: 60, cursor: 'pointer', borderRadius: 4 }}
+          />
+        </Html>
+      )}
     </group>
   )
 }
@@ -5621,6 +5623,7 @@ function App() {
   const [roomLightOn, setRoomLightOn] = useState(true)
   const [lightColor, setLightColor] = useState('#ffffff')
   const [isNearLightSwitch, setIsNearLightSwitch] = useState(false)
+  const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
   const [ownedFloorSkins, setOwnedFloorSkins] = useState(['floor-classic'])
   const [ownedWallSkins, setOwnedWallSkins] = useState(['wall-classic'])
@@ -6440,7 +6443,7 @@ function App() {
               hideCeiling={mode === 'customize'}
               hideRoof={mode === 'customize'}
             />
-            <LightSwitch isOn={roomLightOn} onToggle={() => setRoomLightOn((v) => !v)} mode={mode} />
+            <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch} onOpen={() => setIsLightMenuOpen((v) => !v)} mode={mode} />
             <Dragon playerPositionRef={playerPositionRef} />
             <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} />
             <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
@@ -6544,7 +6547,7 @@ function App() {
           <LightSwitchTrigger
             playerPositionRef={playerPositionRef}
             enabled={currentZone !== ZONES.outside && mode === 'play'}
-            onNearChange={setIsNearLightSwitch}
+            onNearChange={(near) => { setIsNearLightSwitch(near); if (!near) setIsLightMenuOpen(false) }}
           />
           {currentZone !== ZONES.outside && (
             <>
@@ -6621,7 +6624,7 @@ function App() {
           Personnaliser la piece
         </button>
       )}
-      {showCaptureUi && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && isLightMenuOpen && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <div className="light-panel">
           <button
             className={`light-panel-toggle ${roomLightOn ? 'on' : 'off'}`}
@@ -6631,6 +6634,9 @@ function App() {
             {roomLightOn ? 'Lumière ON' : 'Lumière OFF'}
           </button>
           {roomLightOn && <LightColorWheel onChange={setLightColor} />}
+          <button className="light-panel-close" type="button" onClick={() => setIsLightMenuOpen(false)}>
+            Fermer
+          </button>
         </div>
       )}
       {showCaptureUi && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
