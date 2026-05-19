@@ -6,7 +6,11 @@
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Sort-Object)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(copy \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\Modèles a classer\\\\Cat-magic.glb\" \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\web\\\\public\\\\models\\\\cat.glb\")",
+      "PowerShell(Copy-Item \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\Mod�les a classer\\\\Cat-magic.glb\" \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\web\\\\public\\\\models\\\\cat.glb\")",
+      "Bash(npm run *)",
+      "Bash(node -e ' *)"
     ]
   }
 }

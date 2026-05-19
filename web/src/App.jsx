@@ -833,18 +833,69 @@ function HouseOpeningReveals({ walls }) {
   )
 }
 
-function InteriorLighting({ active, hideCeiling }) {
+function InteriorLighting({ active, hideCeiling, roomLightOn = true, lightColor = '#ffffff' }) {
   if (!active) return null
 
   return (
     <>
-      <color attach="background" args={['#eef3f8']} />
-      {!hideCeiling && <fog attach="fog" args={['#eef3f8', 10, 24]} />}
-      <ambientLight intensity={0.5} />
-      <hemisphereLight args={['#f7fbff', '#d8dee9', 0.7]} />
-      <directionalLight position={[4, 7, 5]} intensity={1.15} color="#ffffff" />
+      <color attach="background" args={[roomLightOn ? '#eef3f8' : '#04060a']} />
+      {!hideCeiling && <fog attach="fog" args={[roomLightOn ? '#eef3f8' : '#04060a', 10, 24]} />}
+      <ambientLight intensity={roomLightOn ? 0.5 : 0.008} color={roomLightOn ? lightColor : '#ffffff'} />
+      <hemisphereLight args={['#f7fbff', '#d8dee9', roomLightOn ? 0.7 : 0.015]} />
+      <directionalLight position={[4, 7, 5]} intensity={roomLightOn ? 1.15 : 0} color={roomLightOn ? lightColor : '#ffffff'} />
       <Environment preset="city" />
     </>
+  )
+}
+
+const LIGHT_SWITCH_POS = { x: -4.86, z: -1.3 }
+const LIGHT_SWITCH_DISTANCE = 1.5
+
+function LightSwitchTrigger({ playerPositionRef, enabled, onNearChange }) {
+  const nearRef = useRef(false)
+  useFrame(() => {
+    if (!enabled) {
+      if (nearRef.current) { nearRef.current = false; onNearChange(false) }
+      return
+    }
+    const p = playerPositionRef.current
+    const dist = Math.hypot(p.x - LIGHT_SWITCH_POS.x, p.z - LIGHT_SWITCH_POS.z)
+    const next = dist <= LIGHT_SWITCH_DISTANCE
+    if (next !== nearRef.current) { nearRef.current = next; onNearChange(next) }
+  })
+  return null
+}
+
+function LightSwitch({ isOn, onToggle, mode }) {
+  const WALL_X = -4.86
+  const SWITCH_Y = 1.1
+  const SWITCH_Z = -1.3
+  const plateColor = '#f0ece4'
+  const rockerOnColor = '#fffbe6'
+  const rockerOffColor = '#444'
+
+  return (
+    <group position={[WALL_X, SWITCH_Y, SWITCH_Z]} rotation={[0, Math.PI / 2, 0]}>
+      <mesh
+        onPointerDown={(e) => {
+          if (mode !== 'play') return
+          e.stopPropagation()
+          onToggle()
+        }}
+      >
+        <boxGeometry args={[0.086, 0.086, 0.018]} />
+        <meshStandardMaterial color={plateColor} roughness={0.7} metalness={0.05} />
+      </mesh>
+      <mesh position={[0, isOn ? 0.012 : -0.012, 0.01]} rotation={[isOn ? -0.18 : 0.18, 0, 0]}>
+        <boxGeometry args={[0.042, 0.056, 0.012]} />
+        <meshStandardMaterial
+          color={isOn ? rockerOnColor : rockerOffColor}
+          emissive={isOn ? '#fff8c0' : '#000000'}
+          emissiveIntensity={isOn ? 0.4 : 0}
+          roughness={0.4}
+        />
+      </mesh>
+    </group>
   )
 }
 
@@ -867,7 +918,87 @@ function PhysicsBounds() {
   )
 }
 
-function GlassContainmentRoom() {
+function LightColorWheel({ onChange }) {
+  const canvasRef = useRef(null)
+  const isDragging = useRef(false)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    const size = canvas.width
+    const cx = size / 2
+    const cy = size / 2
+    const radius = size / 2 - 1
+    const imageData = ctx.createImageData(size, size)
+    const data = imageData.data
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = x - cx
+        const dy = y - cy
+        const dist = Math.hypot(dx, dy)
+        if (dist <= radius) {
+          const hue = ((Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360
+          const sat = dist / radius
+          const h = hue / 60
+          const i = Math.floor(h)
+          const f = h - i
+          const p = 1 - sat
+          const q = 1 - sat * f
+          const t = 1 - sat * (1 - f)
+          let r, g, b
+          switch (i % 6) {
+            case 0: r = 1; g = t; b = p; break
+            case 1: r = q; g = 1; b = p; break
+            case 2: r = p; g = 1; b = t; break
+            case 3: r = p; g = q; b = 1; break
+            case 4: r = t; g = p; b = 1; break
+            default: r = 1; g = p; b = q; break
+          }
+          const idx = (y * size + x) * 4
+          data[idx] = Math.round(r * 255)
+          data[idx + 1] = Math.round(g * 255)
+          data[idx + 2] = Math.round(b * 255)
+          data[idx + 3] = 255
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0)
+  }, [])
+
+  function pickColor(e) {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const clientX = e.clientX ?? e.touches?.[0]?.clientX
+    const clientY = e.clientY ?? e.touches?.[0]?.clientY
+    if (clientX == null) return
+    const x = Math.round((clientX - rect.left) * (canvas.width / rect.width))
+    const y = Math.round((clientY - rect.top) * (canvas.height / rect.height))
+    const cx = canvas.width / 2
+    const cy = canvas.height / 2
+    if (Math.hypot(x - cx, y - cy) > canvas.width / 2) return
+    const pixel = canvas.getContext('2d').getImageData(x, y, 1, 1).data
+    const hex = '#' + [pixel[0], pixel[1], pixel[2]].map((v) => v.toString(16).padStart(2, '0')).join('')
+    onChange(hex)
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={140}
+      height={140}
+      style={{ width: '100%', aspectRatio: '1', borderRadius: '50%', cursor: 'crosshair', touchAction: 'none', display: 'block' }}
+      onPointerDown={(e) => { isDragging.current = true; pickColor(e); e.currentTarget.setPointerCapture(e.pointerId) }}
+      onPointerMove={(e) => { if (isDragging.current) pickColor(e) }}
+      onPointerUp={() => { isDragging.current = false }}
+    />
+  )
+}
+
+function GlassContainmentRoom({ roomLightOn = true, lightColor = '#ffffff' }) {
   const [roomWidth, roomHeight, roomDepth] = secondRoom.size
   const halfWidth = roomWidth * 0.5
   const halfDepth = roomDepth * 0.5
@@ -913,7 +1044,7 @@ function GlassContainmentRoom() {
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
 
-      <pointLight position={[0, roomHeight - 0.6, 0.05]} intensity={1.45} color="#bfefff" />
+      {roomLightOn && <pointLight position={[0, roomHeight - 0.6, 0.05]} intensity={1.45} color={lightColor} />}
     </group>
   )
 }
@@ -1442,6 +1573,7 @@ function Player({
   touchRef,
   ballRef,
   playerPositionRef,
+  playerVelocityRef,
   mode,
   currentZone,
   spawnRequest,
@@ -1902,6 +2034,10 @@ function Player({
     playerPositionRef.current.x = nextX
     playerPositionRef.current.y = nextY
     playerPositionRef.current.z = nextZ
+    if (playerVelocityRef) {
+      playerVelocityRef.current.x = planarVelocityRef.current.x
+      playerVelocityRef.current.z = planarVelocityRef.current.z
+    }
 
     playerBodyRef.current.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
     if (visualRef.current) {
@@ -5471,6 +5607,7 @@ function App() {
   })
   const ballRef = useRef()
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
+  const playerVelocityRef = useRef({ x: 0, z: 0 })
   const scoreCooldownRef = useRef(false)
   const respawnTimerRef = useRef(null)
   const outRespawnCooldownRef = useRef(false)
@@ -5481,6 +5618,9 @@ function App() {
   const [previewSkinId, setPreviewSkinId] = useState('classic')
   const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false)
   const [isNearSkinStation, setIsNearSkinStation] = useState(false)
+  const [roomLightOn, setRoomLightOn] = useState(true)
+  const [lightColor, setLightColor] = useState('#ffffff')
+  const [isNearLightSwitch, setIsNearLightSwitch] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
   const [ownedFloorSkins, setOwnedFloorSkins] = useState(['floor-classic'])
   const [ownedWallSkins, setOwnedWallSkins] = useState(['wall-classic'])
@@ -6289,7 +6429,7 @@ function App() {
         <AdaptiveCameraFov />
         <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} />
-        <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} />
+        <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} roomLightOn={roomLightOn} lightColor={lightColor} />
         {(!isDebugMode || debugToggles.house) && (
         <PlayerHouse exteriorVisible>
           <group>
@@ -6300,8 +6440,10 @@ function App() {
               hideCeiling={mode === 'customize'}
               hideRoof={mode === 'customize'}
             />
+            <LightSwitch isOn={roomLightOn} onToggle={() => setRoomLightOn((v) => !v)} mode={mode} />
             <Dragon playerPositionRef={playerPositionRef} />
-            <GlassContainmentRoom />
+            <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} />
+            <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
             <OutdoorDoor />
             <SkinStation />
             <EnvironmentStation />
@@ -6373,6 +6515,7 @@ function App() {
               touchRef={touchRef}
               ballRef={ballRef}
               playerPositionRef={playerPositionRef}
+              playerVelocityRef={playerVelocityRef}
               mode={mode}
               currentZone={currentZone}
               spawnRequest={spawnRequest}
@@ -6397,6 +6540,11 @@ function App() {
             objects={placedEditableObjects}
             enabled={mode === 'play'}
             onNearbyTvChange={setNearbyTv}
+          />
+          <LightSwitchTrigger
+            playerPositionRef={playerPositionRef}
+            enabled={currentZone !== ZONES.outside && mode === 'play'}
+            onNearChange={setIsNearLightSwitch}
           />
           {currentZone !== ZONES.outside && (
             <>
@@ -6472,6 +6620,18 @@ function App() {
         <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationMode}>
           Personnaliser la piece
         </button>
+      )}
+      {showCaptureUi && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+        <div className="light-panel">
+          <button
+            className={`light-panel-toggle ${roomLightOn ? 'on' : 'off'}`}
+            type="button"
+            onClick={() => setRoomLightOn((v) => !v)}
+          >
+            {roomLightOn ? 'Lumière ON' : 'Lumière OFF'}
+          </button>
+          {roomLightOn && <LightColorWheel onChange={setLightColor} />}
+        </div>
       )}
       {showCaptureUi && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <button className="skin-open-btn tv-open-btn" type="button" onClick={requestTvMenu}>
@@ -6595,8 +6755,285 @@ function App() {
 
 export default App
 
+// ─── Cat NPC ────────────────────────────────────────────────────────────────
+
+const PET_STATE = {
+  IDLE_NEAR:      'idle_near',
+  FOLLOW:         'follow',
+  CATCH_UP:       'catch_up',
+  RUN_WITH_PLAYER:'run_with_player',
+  WANDER:         'wander',
+  DECIDING:       'deciding',
+}
+
+const CAT_MAX_WALK_SPEED   = 1.7
+const CAT_MAX_RUN_SPEED    = 4.0
+const CAT_TURN_SPEED       = 5.5
+const CAT_SLOW_RADIUS      = 1.2   // arrive : commence à freiner dans ce rayon
+const CAT_IDLE_DIST        = 1.1   // en dessous → IDLE_NEAR
+const CAT_CATCHUP_DIST     = 4.0   // au-delà → CATCH_UP
+const CAT_RUN_PLAYER_SPEED = 2.8   // vitesse joueur déclenchant RUN_WITH_PLAYER
+// Seuils d'hysteresis pour IDLE_NEAR : le chat ne part pas au premier micro-mouvement
+const CAT_LAZY_MOVE_DIST   = 1.8   // distance minimale pour quitter IDLE_NEAR
+const CAT_LAZY_MOVE_TIME   = 1.2   // secondes à cette distance avant de se décider
+const CAT_SIT_DELAY        = 4.0   // secondes idle avant de s'asseoir
+const CAT_WANDER_INTERVAL  = 6000  // ms entre tentatives de promenade
+const CAT_WANDER_RADIUS    = 1.5
+
+const CAT_OFFSETS = [
+  { side: -0.7, back: 0.9 },
+  { side:  0.7, back: 0.9 },
+  { side: -0.5, back: 0.3 },
+  { side:  0.5, back: 0.3 },
+  { side:  0.0, back: 1.1 },
+]
+
+function Cat({ playerPositionRef, playerVelocityRef, currentZone }) {
+  const { scene, animations: rawAnimations } = useGLTF('/models/cat.glb')
+  const cat = useMemo(() => clone(scene), [scene])
+
+  // Supprime le root motion XZ sur le bone Hips (garde Y pour le rebond naturel)
+  const animations = useMemo(() => rawAnimations.map(clip => {
+    const tracks = clip.tracks.map(track => {
+      if (!track.name.includes('Hips') || !track.name.endsWith('.position')) return track
+      const values = track.values.slice() // copie
+      for (let i = 0; i < values.length; i += 3) {
+        values[i]     = 0  // X → 0
+        // values[i + 1] inchangé (Y : rebond vertical)
+        values[i + 2] = 0  // Z → 0
+      }
+      const fixed = track.clone()
+      fixed.values = values
+      return fixed
+    })
+    return Object.assign(clip.clone(), { tracks })
+  }), [rawAnimations])
+
+  const { actions } = useAnimations(animations, cat)
+  const groupRef         = useRef()
+  const stateRef         = useRef(PET_STATE.IDLE_NEAR)
+  const timerRef         = useRef(CAT_SIT_DELAY)
+  // Accumule le temps passé hors de la zone confortable (hysteresis)
+  const lazyTimerRef     = useRef(0)
+  const wanderTargetRef  = useRef(new Vector3())
+  const offsetRef        = useRef(CAT_OFFSETS[0])
+  const currentActionRef = useRef(null)
+  const currentAnimRef   = useRef('')
+
+  const playAnim = useCallback((name, loop = true, fade = 0.3) => {
+    if (currentAnimRef.current === name) return
+    const action = actions[name]
+    if (!action) return
+    currentActionRef.current?.fadeOut(fade)
+    action.reset().setLoop(loop ? LoopRepeat : LoopOnce, loop ? Infinity : 1).play()
+    action.setEffectiveWeight(1).setEffectiveTimeScale(1)
+    if (fade > 0) action.fadeIn(fade)
+    action.clampWhenFinished = !loop
+    currentActionRef.current = action
+    currentAnimRef.current = name
+  }, [actions])
+
+  useEffect(() => {
+    cat.traverse((obj) => {
+      if (obj instanceof Mesh) { obj.castShadow = true; obj.receiveShadow = true }
+    })
+    playAnim('Idle')
+  }, [cat, playAnim])
+
+  // Hauteur du sol sous une position XZ donnée
+  const getFloorY = useCallback((x, z) => {
+    return currentZone === ZONES.outside ? getTerrainHeight(x, z) : 0
+  }, [currentZone])
+
+  const pickOffset = useCallback(() => {
+    const prev = offsetRef.current
+    const choices = CAT_OFFSETS.filter(o => o !== prev)
+    offsetRef.current = choices[Math.floor(Math.random() * choices.length)]
+  }, [])
+
+  const computeTarget = useCallback((pp, pv, side, back) => {
+    const speed = Math.sqrt(pv.x * pv.x + pv.z * pv.z)
+    let fwdX, fwdZ
+    if (speed > 0.15) {
+      fwdX = pv.x / speed; fwdZ = pv.z / speed
+    } else {
+      const g = groupRef.current
+      if (!g) return { x: pp.x, z: pp.z }
+      const dx = pp.x - g.position.x
+      const dz = pp.z - g.position.z
+      const d = Math.sqrt(dx * dx + dz * dz) || 1
+      fwdX = dx / d; fwdZ = dz / d
+    }
+    const rightX = fwdZ, rightZ = -fwdX
+    return {
+      x: pp.x - fwdX * back + rightX * side,
+      z: pp.z - fwdZ * back + rightZ * side,
+    }
+  }, [])
+
+  // Steering arrive + colle le chat au sol
+  const arriveToward = useCallback((tx, tz, maxSpeed, delta) => {
+    const g = groupRef.current
+    const dx = tx - g.position.x
+    const dz = tz - g.position.z
+    const dist = Math.sqrt(dx * dx + dz * dz)
+    if (dist < 0.02) return 0
+    const speed = maxSpeed * MathUtils.clamp(dist / CAT_SLOW_RADIUS, 0, 1)
+    const step = Math.min(speed * delta, dist)
+    const nx = g.position.x + (dx / dist) * step
+    const nz = g.position.z + (dz / dist) * step
+    g.position.x = nx
+    g.position.z = nz
+    g.position.y = getFloorY(nx, nz)
+    return dist
+  }, [getFloorY])
+
+  const turnToward = useCallback((tx, tz, delta) => {
+    const g = groupRef.current
+    const dx = tx - g.position.x
+    const dz = tz - g.position.z
+    if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return
+    let diff = Math.atan2(dx, dz) - g.rotation.y
+    while (diff > Math.PI)  diff -= Math.PI * 2
+    while (diff < -Math.PI) diff += Math.PI * 2
+    g.rotation.y += diff * Math.min(CAT_TURN_SPEED * delta, 1)
+  }, [])
+
+  useFrame((_, delta) => {
+    if (!groupRef.current || !playerPositionRef?.current) return
+
+    const pp  = playerPositionRef.current
+    const pv  = playerVelocityRef?.current ?? { x: 0, z: 0 }
+    const pos = groupRef.current.position
+
+    const playerSpeed = Math.sqrt(pv.x * pv.x + pv.z * pv.z)
+    const dist = Math.hypot(pp.x - pos.x, pp.z - pos.z)
+
+    // Colle toujours le chat au sol, même quand il est immobile
+    pos.y = getFloorY(pos.x, pos.z)
+
+    // ── Transitions d'état ────────────────────────────────────────────────
+    const state = stateRef.current
+
+    if (state === PET_STATE.IDLE_NEAR) {
+      // Hysteresis : n'accumule le timer que si le joueur est vraiment loin ET bouge
+      if (dist > CAT_LAZY_MOVE_DIST) {
+        lazyTimerRef.current += delta
+        if (lazyTimerRef.current >= CAT_LAZY_MOVE_TIME) {
+          lazyTimerRef.current = 0
+          // Le joueur court : RUN_WITH_PLAYER directement
+          if (playerSpeed > CAT_RUN_PLAYER_SPEED) {
+            pickOffset(); stateRef.current = PET_STATE.RUN_WITH_PLAYER
+          } else if (dist > CAT_CATCHUP_DIST) {
+            stateRef.current = PET_STATE.CATCH_UP
+          } else {
+            pickOffset(); stateRef.current = PET_STATE.FOLLOW; timerRef.current = CAT_SIT_DELAY
+          }
+        }
+      } else {
+        lazyTimerRef.current = Math.max(0, lazyTimerRef.current - delta * 2) // oublie vite si revenu proche
+      }
+
+      timerRef.current -= delta
+      if (timerRef.current <= 0) playAnim('Sit')
+      else playAnim('Idle')
+      return
+    }
+
+    // Dans tous les autres états, retour à IDLE_NEAR si le joueur est revenu
+    if (dist <= CAT_IDLE_DIST && state !== PET_STATE.WANDER) {
+      stateRef.current = PET_STATE.IDLE_NEAR
+      timerRef.current = CAT_SIT_DELAY
+      lazyTimerRef.current = 0
+      playAnim('Idle')
+      return
+    }
+
+    // Escalade vers CATCH_UP ou RUN si nécessaire depuis FOLLOW
+    if (state === PET_STATE.FOLLOW) {
+      if (playerSpeed > CAT_RUN_PLAYER_SPEED) { pickOffset(); stateRef.current = PET_STATE.RUN_WITH_PLAYER; return }
+      if (dist > CAT_CATCHUP_DIST) { stateRef.current = PET_STATE.CATCH_UP; return }
+    }
+    // Retour vers FOLLOW depuis CATCH_UP quand assez proche
+    if (state === PET_STATE.CATCH_UP && dist <= CAT_CATCHUP_DIST * 0.7) {
+      pickOffset(); stateRef.current = PET_STATE.FOLLOW; timerRef.current = CAT_SIT_DELAY
+    }
+    // Retour vers FOLLOW depuis RUN si le joueur ralentit
+    if (state === PET_STATE.RUN_WITH_PLAYER && playerSpeed <= CAT_RUN_PLAYER_SPEED * 0.7 && dist <= CAT_CATCHUP_DIST) {
+      pickOffset(); stateRef.current = PET_STATE.FOLLOW; timerRef.current = CAT_SIT_DELAY
+    }
+
+    // ── Comportements ─────────────────────────────────────────────────────
+    if (stateRef.current === PET_STATE.FOLLOW) {
+      const { side, back } = offsetRef.current
+      const tgt = computeTarget(pp, pv, side, back)
+      turnToward(tgt.x, tgt.z, delta)
+      const remaining = arriveToward(tgt.x, tgt.z, CAT_MAX_WALK_SPEED, delta)
+      playAnim(remaining > 0.15 ? 'Walk' : 'Idle')
+      return
+    }
+
+    if (stateRef.current === PET_STATE.CATCH_UP) {
+      playAnim('Run')
+      turnToward(pp.x, pp.z, delta)
+      arriveToward(pp.x, pp.z, CAT_MAX_RUN_SPEED, delta)
+      return
+    }
+
+    if (stateRef.current === PET_STATE.RUN_WITH_PLAYER) {
+      const { side, back } = offsetRef.current
+      const tgt = computeTarget(pp, pv, side, back)
+      playAnim('Run')
+      turnToward(tgt.x, tgt.z, delta)
+      arriveToward(tgt.x, tgt.z, CAT_MAX_RUN_SPEED, delta)
+      return
+    }
+
+    if (stateRef.current === PET_STATE.WANDER) {
+      if (dist > CAT_CATCHUP_DIST) { stateRef.current = PET_STATE.CATCH_UP; return }
+      const wt = wanderTargetRef.current
+      turnToward(wt.x, wt.z, delta)
+      const remaining = arriveToward(wt.x, wt.z, CAT_MAX_WALK_SPEED * 0.75, delta)
+      playAnim(remaining > 0.1 ? 'Walk' : 'Idle')
+      timerRef.current -= delta
+      if (remaining < 0.2 || timerRef.current <= 0) {
+        stateRef.current = PET_STATE.IDLE_NEAR
+        timerRef.current = CAT_SIT_DELAY
+        lazyTimerRef.current = 0
+        playAnim('Idle')
+      }
+    }
+  })
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (stateRef.current !== PET_STATE.IDLE_NEAR) return
+      if (!playerPositionRef?.current || !groupRef.current) return
+      const pv = playerVelocityRef?.current ?? { x: 0, z: 0 }
+      if (Math.sqrt(pv.x * pv.x + pv.z * pv.z) > 0.2) return
+      if (Math.random() > 0.5) return
+      const pp = playerPositionRef.current
+      const angle = Math.random() * Math.PI * 2
+      const r = CAT_WANDER_RADIUS * (0.4 + Math.random() * 0.6)
+      wanderTargetRef.current.set(pp.x + Math.cos(angle) * r, 0, pp.z + Math.sin(angle) * r)
+      stateRef.current = PET_STATE.WANDER
+      timerRef.current = 3 + Math.random() * 3
+    }, CAT_WANDER_INTERVAL)
+    return () => clearInterval(id)
+  }, [playerPositionRef, playerVelocityRef])
+
+  return (
+    <group ref={groupRef} position={[1, 0, 2]}>
+      <primitive object={cat} />
+    </group>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
+useGLTF.preload('/models/cat.glb')
 useFBX.preload('/models/player/player-boy01.fbx')
 useFBX.preload('/models/player/player-idle.fbx')
 useFBX.preload('/models/player/player-walk.fbx')
