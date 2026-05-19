@@ -341,6 +341,17 @@ export const objectCatalog = {
     thumbnailRotationY: Math.PI * 0.15,
     thumbnailScale: 1.0,
   },
+  cat: {
+    id: 'cat',
+    type: 'animal',
+    name: 'Chat',
+    category: 'animals',
+    modelUrl: '/models/cat.glb',
+    thumbnail: '/ui/object-thumbnails/cat.webp',
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 1.7,
+    thumbnailScale: 1.0,
+  },
 }
 
 export const defaultEditableObjects = [

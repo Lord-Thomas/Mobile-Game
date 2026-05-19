@@ -681,6 +681,21 @@ canvas {
   transform: none;
 }
 
+.debug-add-coins-btn {
+  position: absolute;
+  top: 14px;
+  left: calc(50% + 90px);
+  z-index: 4;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 212, 71, 0.4);
+  background: rgba(255, 200, 80, 0.18);
+  color: #ffd447;
+  font-weight: 900;
+  font-size: 14px;
+  cursor: pointer;
+}
+
 .custom-open-btn {
   bottom: 154px;
   background: rgba(32, 42, 50, 0.9);
@@ -1125,6 +1140,47 @@ canvas {
   opacity: 0.48;
 }
 
+.thumbnail-rotation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thumbnail-rotate-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08);
+  color: #f0f6ff;
+  font-size: 18px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.thumbnail-rotation-label {
+  min-width: 36px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffe56a;
+}
+
+.thumbnail-save-btn {
+  background: rgba(100, 220, 140, 0.15);
+  border: 1px solid rgba(100, 220, 140, 0.35);
+  color: #7ef5a0;
+}
+
+.thumbnail-save-btn.saved {
+  background: rgba(100, 220, 140, 0.08);
+  border-color: rgba(100, 220, 140, 0.2);
+  color: #4ec97a;
+  opacity: 0.7;
+}
+
 .skin-menu-overlay {
   position: absolute;
   inset: 0;
@@ -1502,6 +1558,93 @@ canvas {
   width: 100%;
   background: rgba(221, 232, 247, 0.2);
   color: #dbe7f5;
+}
+
+.animals-shop-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.animal-shop-card {
+  min-height: 148px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 8px;
+  background: rgba(20, 24, 30, 0.92);
+  color: #f8fbff;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.animal-shop-preview {
+  width: min(108px, 100%);
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  display: grid;
+  place-items: center;
+  font-size: 48px;
+  overflow: hidden;
+}
+
+.animal-shop-preview img {
+  width: 88%;
+  height: 88%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.animal-shop-name {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.animal-shop-price {
+  color: #ffe56a;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.animal-buy-btn {
+  width: 100%;
+  border: 1px solid rgba(255, 212, 71, 0.4);
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: rgba(255, 200, 80, 0.18);
+  color: #ffd447;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.animal-buy-btn:disabled {
+  opacity: 0.4;
+}
+
+.animal-toggle-btn {
+  width: 100%;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-weight: 800;
+  font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.animal-toggle-btn.summon {
+  background: rgba(100, 200, 120, 0.22);
+  color: #7ef5a0;
+  border-color: rgba(100, 220, 140, 0.35);
+}
+
+.animal-toggle-btn.dismiss {
+  background: rgba(200, 100, 80, 0.18);
+  color: #ff9a85;
+  border-color: rgba(220, 100, 80, 0.3);
 }
 
 .skin-respawn-btn {

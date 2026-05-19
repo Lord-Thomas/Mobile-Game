@@ -2,10 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { objectCatalog } from '../gameObjects/placeableObjects'
 import { downloadBlob, generateThumbnailBlob } from './thumbnails/generateThumbnailBlob'
 
+const ROTATION_STEP = Math.PI / 4 // 45°
+
 function ThumbnailTool() {
   const [captures, setCaptures] = useState({})
+  const [saved, setSaved] = useState({})
   const [busyObjectId, setBusyObjectId] = useState(null)
   const [toolMessage, setToolMessage] = useState('')
+  const [rotationOffsets, setRotationOffsets] = useState({})
   const catalogItems = Object.values(objectCatalog)
   const isThumbnailGeneratable = (item) => {
     const url = item.thumbnailModelUrl ?? item.modelUrl
@@ -20,6 +24,23 @@ function ThumbnailTool() {
     }
   }, [])
 
+  const getRotationY = (item) => {
+    const offset = rotationOffsets[item.id] ?? 0
+    return (item.modelRotationY ?? 0) + (item.thumbnailRotationY ?? 0) + offset
+  }
+
+  const rotateItem = (item, direction) => {
+    setRotationOffsets((current) => ({
+      ...current,
+      [item.id]: ((current[item.id] ?? 0) + direction * ROTATION_STEP),
+    }))
+    setCaptures((current) => {
+      const next = { ...current }
+      delete next[item.id]
+      return next
+    })
+  }
+
   const generateItemThumbnail = async (item) => {
     const modelUrl = item.thumbnailModelUrl ?? item.modelUrl
     if (!isThumbnailGeneratable(item)) return
@@ -29,7 +50,7 @@ function ThumbnailTool() {
       const blob = await generateThumbnailBlob({
         modelUrl,
         textureUrl: item.thumbnailTextureUrl,
-        rotationY: (item.modelRotationY ?? 0) + (item.thumbnailRotationY ?? 0),
+        rotationY: getRotationY(item),
         margin: item.thumbnailMargin ?? 1.24,
         view: item.thumbnailView ?? 'front',
       })
@@ -38,6 +59,7 @@ function ThumbnailTool() {
         if (current[item.id]?.url) URL.revokeObjectURL(current[item.id].url)
         return { ...current, [item.id]: { url, blob } }
       })
+      setSaved((current) => { const next = { ...current }; delete next[item.id]; return next })
       setToolMessage(`Miniature prete : ${item.name}`)
     } catch (error) {
       setToolMessage(`Generation impossible pour ${item.name}: ${error.message}`)
@@ -56,6 +78,26 @@ function ThumbnailTool() {
   const downloadCapture = (objectId) => {
     const blob = captures[objectId]?.blob
     if (blob) downloadBlob(blob, `${objectId}.webp`)
+  }
+
+  const saveCapture = async (objectId) => {
+    const blob = captures[objectId]?.blob
+    if (!blob) return
+    try {
+      const res = await fetch('/dev/save-thumbnail', {
+        method: 'POST',
+        headers: { 'x-object-id': objectId, 'content-type': 'image/webp' },
+        body: blob,
+      })
+      if (res.ok) {
+        setSaved((current) => ({ ...current, [objectId]: true }))
+        setToolMessage(`Sauvegarde : ${objectId}.webp`)
+      } else {
+        setToolMessage(`Erreur sauvegarde ${objectId}: ${await res.text()}`)
+      }
+    } catch (err) {
+      setToolMessage(`Erreur sauvegarde ${objectId}: ${err.message}`)
+    }
   }
 
   useEffect(() => {
@@ -82,9 +124,24 @@ function ThumbnailTool() {
             <h1>Object thumbnails</h1>
             <p>Outil dev : genere des WebP carres depuis les GLB. Le jeu charge ensuite seulement les images sauvegardees.</p>
           </div>
-          <button type="button" onClick={generateMissingThumbnails} disabled={Boolean(busyObjectId)}>
-            Generer les manquantes
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={generateMissingThumbnails} disabled={Boolean(busyObjectId)}>
+              Generer les manquantes
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                for (const item of generatableItems) {
+                  if (captures[item.id] && !saved[item.id]) await saveCapture(item.id)
+                }
+                setToolMessage('Toutes les miniatures generees ont ete sauvegardees.')
+              }}
+              disabled={Boolean(busyObjectId) || Object.keys(captures).length === 0}
+              style={{ background: 'rgba(100,220,140,0.18)', borderColor: 'rgba(100,220,140,0.4)', color: '#7ef5a0' }}
+            >
+              Tout sauvegarder
+            </button>
+          </div>
         </div>
         {toolMessage && <div className="thumbnail-tool-message">{toolMessage}</div>}
         <div className="thumbnail-tool-grid">
@@ -102,6 +159,31 @@ function ThumbnailTool() {
               <div className="thumbnail-tool-info">
                 <strong>{item.name}</strong>
                 <span>{isThumbnailGeneratable(item) ? 'Compatible' : 'Miniature manuelle'}</span>
+                {isThumbnailGeneratable(item) && (
+                  <div className="thumbnail-rotation-row">
+                    <button
+                      type="button"
+                      className="thumbnail-rotate-btn"
+                      onClick={() => rotateItem(item, -1)}
+                      disabled={Boolean(busyObjectId)}
+                      title="Tourner à gauche 45°"
+                    >
+                      ↺
+                    </button>
+                    <span className="thumbnail-rotation-label">
+                      {Math.round(((rotationOffsets[item.id] ?? 0) * 180) / Math.PI)}°
+                    </span>
+                    <button
+                      type="button"
+                      className="thumbnail-rotate-btn"
+                      onClick={() => rotateItem(item, 1)}
+                      disabled={Boolean(busyObjectId)}
+                      title="Tourner à droite 45°"
+                    >
+                      ↻
+                    </button>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => generateItemThumbnail(item)}
@@ -110,7 +192,15 @@ function ThumbnailTool() {
                   {captures[item.id] ? 'Regenerer' : 'Generer'}
                 </button>
                 <button type="button" onClick={() => downloadCapture(item.id)} disabled={!captures[item.id]}>
-                  Telecharger PNG
+                  Telecharger
+                </button>
+                <button
+                  type="button"
+                  className={`thumbnail-save-btn ${saved[item.id] ? 'saved' : ''}`}
+                  onClick={() => saveCapture(item.id)}
+                  disabled={!captures[item.id] || saved[item.id]}
+                >
+                  {saved[item.id] ? '✓ Sauvegarde' : 'Sauvegarder'}
                 </button>
               </div>
             </div>

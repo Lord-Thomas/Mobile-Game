@@ -5067,9 +5067,14 @@ function EnvironmentMenu({
   onBuy,
   onSelect,
   onBuyFurniture,
+  ownedCat,
+  catActive,
+  onBuyCat,
+  onToggleCat,
 }) {
   if (!open) return null
 
+  const isAnimalsTab = activeTab === 'animals'
   const isFurnitureTab = activeTab === 'furniture'
   const isFloorTab = activeTab === 'floor'
   const skins = isFloorTab ? floorSkins : wallSkins
@@ -5110,8 +5115,48 @@ function EnvironmentMenu({
           >
             Meubles
           </button>
+          <button
+            type="button"
+            className={`env-tab-btn ${isAnimalsTab ? 'active' : ''}`}
+            onClick={() => onTabChange('animals')}
+          >
+            Animaux
+          </button>
         </div>
-        {isFurnitureTab ? (
+        {isAnimalsTab ? (
+          <>
+            <div className="skin-title">Animaux</div>
+            <div className="animals-shop-grid">
+              <div className="animal-shop-card">
+                <div className="animal-shop-preview">
+                  <img src="/ui/object-thumbnails/cat.webp" alt="Chat" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement.textContent = '🐱' }} />
+                </div>
+                <span className="animal-shop-name">Chat</span>
+                {!ownedCat ? (
+                  <>
+                    <span className="animal-shop-price">500 pieces</span>
+                    <button
+                      type="button"
+                      className="animal-buy-btn"
+                      onClick={onBuyCat}
+                      disabled={coins < 500}
+                    >
+                      Acheter
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className={`animal-toggle-btn ${catActive ? 'dismiss' : 'summon'}`}
+                    onClick={onToggleCat}
+                  >
+                    {catActive ? 'Renvoyer' : 'Invoquer'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        ) : isFurnitureTab ? (
           <>
             <div className="skin-title">Meubles</div>
             <div className="furniture-shop-grid">
@@ -5626,6 +5671,14 @@ function App() {
       return false
     }
   }, [])
+  const isLocalNetwork = useMemo(() => {
+    try {
+      const h = window.location.hostname
+      return h === 'localhost' || h === '127.0.0.1' || /^192\.168\./.test(h) || /^10\./.test(h)
+    } catch {
+      return false
+    }
+  }, [])
   const progressScope = isAdminMode ? 'admin' : 'player'
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
@@ -5700,6 +5753,8 @@ function App() {
   const [isObjectInventoryOpen, setIsObjectInventoryOpen] = useState(false)
   const [isNearCustomizationStation, setIsNearCustomizationStation] = useState(false)
   const [isNearOutdoorDoor, setIsNearOutdoorDoor] = useState(false)
+  const [ownedCat, setOwnedCat] = useState(false)
+  const [catActive, setCatActive] = useState(false)
   const [nearbySeat, setNearbySeat] = useState(null)
   const [nearbyTv, setNearbyTv] = useState(null)
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
@@ -5754,6 +5809,8 @@ function App() {
     selectedWallSkinId,
     applyWallToCeiling,
     editableObjects,
+    ownedCat,
+    catActive,
   })
 
   const resetGuestProgress = () => {
@@ -5777,6 +5834,8 @@ function App() {
     setIsObjectInventoryOpen(false)
     setNearbySeat(null)
     setSeatedState(null)
+    setOwnedCat(false)
+    setCatActive(false)
   }
 
   const applyProgressSnapshot = (parsed, { includeCoins = true } = {}) => {
@@ -5867,6 +5926,8 @@ function App() {
 
       setEditableObjects([...mergedObjects, ...savedShopObjects])
     }
+    if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
+    if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
   }
 
   const saveCurrentProgressToCloud = async () => {
@@ -5923,7 +5984,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
+  }, [progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -6229,6 +6290,19 @@ function App() {
     setEditableObjects((current) => [...current, object])
   }
 
+  const buyCat = async () => {
+    if (ownedCat) return
+    if (!isAdminMode && coins < 500) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-500)
+    if (!paid) return
+    setOwnedCat(true)
+  }
+
+  const toggleCat = () => {
+    if (!ownedCat) return
+    setCatActive((v) => !v)
+  }
+
   const requestSit = () => {
     if (!nearbySeat || mode !== 'play') return
     setSeatedState({ phase: 'sitDown', seat: nearbySeat })
@@ -6497,7 +6571,7 @@ function App() {
             />
             <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch} onOpen={() => setIsLightMenuOpen((v) => !v)} mode={mode} />
             <Dragon playerPositionRef={playerPositionRef} />
-            <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} />
+            {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} />}
             <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
             <OutdoorDoor />
             <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
@@ -6633,6 +6707,11 @@ function App() {
         />
       )}
       {showCaptureUi && <CoinsOverlay coins={coins} />}
+      {showCaptureUi && isLocalNetwork && (
+        <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
+          +500
+        </button>
+      )}
       {showCaptureUi && (
         <AccountSyncPanel
           configured={isSupabaseConfigured}
@@ -6788,6 +6867,10 @@ function App() {
         onBuy={buyPreviewEnvironmentSkin}
         onSelect={selectPreviewEnvironmentSkin}
         onBuyFurniture={buyFurnitureObject}
+        ownedCat={ownedCat}
+        catActive={catActive}
+        onBuyCat={buyCat}
+        onToggleCat={toggleCat}
       />
       <div className={`zone-fade${zoneFadeActive ? ' active' : ''}`} />
     </main>
