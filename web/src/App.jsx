@@ -840,10 +840,11 @@ function InteriorLighting({ active, hideCeiling, roomLightOn = true, lightColor 
     <>
       <color attach="background" args={[roomLightOn ? '#eef3f8' : '#04060a']} />
       {!hideCeiling && <fog attach="fog" args={[roomLightOn ? '#eef3f8' : '#04060a', 10, 24]} />}
-      <ambientLight intensity={roomLightOn ? 0.5 : 0.008} color={roomLightOn ? lightColor : '#ffffff'} />
-      <hemisphereLight args={['#f7fbff', '#d8dee9', roomLightOn ? 0.7 : 0.015]} />
-      <directionalLight position={[4, 7, 5]} intensity={roomLightOn ? 1.15 : 0} color={roomLightOn ? lightColor : '#ffffff'} />
-      <Environment preset="city" />
+      <ambientLight intensity={roomLightOn ? 0.65 : 0.45} color={roomLightOn ? lightColor : '#6878a0'} />
+      <hemisphereLight args={[roomLightOn ? lightColor : '#3a4a6a', '#10131a', roomLightOn ? 0.9 : 0.5]} />
+      <directionalLight position={[4, 7, 5]} intensity={roomLightOn ? 1.4 : 0} color={roomLightOn ? lightColor : '#ffffff'} />
+      <directionalLight position={[-3, 5, -4]} intensity={roomLightOn ? 0.6 : 0} color={roomLightOn ? lightColor : '#ffffff'} />
+      {roomLightOn && <Environment preset="city" environmentIntensity={0.15} />}
     </>
   )
 }
@@ -2711,13 +2712,19 @@ function InteractionHalo({ isNear, color = '#ffffff', pulseColor, position }) {
   )
 }
 
-function SkinStation({ isNear }) {
+function BallStation({ isNear, goalObject }) {
+  const BALL_SIDE_OFFSET = 2.0
+  const gx = goalObject?.position?.[0] ?? 0
+  const gz = goalObject?.position?.[2] ?? GOAL_Z
+  const rotY = goalObject?.rotationY ?? 0
+  const tx = gx - Math.cos(rotY) * BALL_SIDE_OFFSET
+  const tz = gz + Math.sin(rotY) * BALL_SIDE_OFFSET
   return (
     <InteractionHalo
       isNear={isNear}
       color="#a8c4e0"
       pulseColor="#d0e8ff"
-      position={[SKIN_STATION_POSITION.x, 0.02, SKIN_STATION_POSITION.z]}
+      position={[tx, 0.02, tz]}
     />
   )
 }
@@ -2779,13 +2786,18 @@ function OutdoorDoorTrigger({ playerPositionRef, currentZone, onNearChange }) {
   return null
 }
 
-function SkinStationTrigger({ playerPositionRef, onNearChange }) {
+function BallStationTrigger({ playerPositionRef, goalObject, onNearChange }) {
   const wasNearRef = useRef(false)
+  const BALL_SIDE_OFFSET = 2.0
 
   useFrame(() => {
     const p = playerPositionRef.current
-    const d = Math.hypot(p.x - SKIN_STATION_POSITION.x, p.z - SKIN_STATION_POSITION.z)
-    const near = d < 1.45
+    const gx = goalObject?.position?.[0] ?? 0
+    const gz = goalObject?.position?.[2] ?? GOAL_Z
+    const rotY = goalObject?.rotationY ?? 0
+    const tx = gx - Math.cos(rotY) * BALL_SIDE_OFFSET
+    const tz = gz + Math.sin(rotY) * BALL_SIDE_OFFSET
+    const near = Math.hypot(p.x - tx, p.z - tz) < 1.6
     if (near !== wasNearRef.current) {
       wasNearRef.current = near
       onNearChange(near)
@@ -4984,6 +4996,7 @@ function SkinMenu({
   onNext,
   onBuy,
   onSelect,
+  onRespawn,
 }) {
   if (!open) return null
 
@@ -5024,6 +5037,7 @@ function SkinMenu({
           <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
         )}
         {isOwned && isSelected && <div className="skin-equipped">Equipe</div>}
+        <button type="button" className="skin-respawn-btn" onClick={onRespawn}>Respawn ballon</button>
         <button type="button" className="skin-close-btn" onClick={onClose}>Fermer</button>
       </div>
     </div>
@@ -6486,7 +6500,7 @@ function App() {
             <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} />
             <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
             <OutdoorDoor />
-            <SkinStation isNear={isNearSkinStation} />
+            <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
             <EnvironmentStation isNear={isNearEnvironmentStation} />
             <CustomizationStation isNear={isNearCustomizationStation} />
             <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
@@ -6587,9 +6601,9 @@ function App() {
             enabled={currentZone !== ZONES.outside && mode === 'play'}
             onNearChange={(near) => { setIsNearLightSwitch(near); if (!near) setIsLightMenuOpen(false) }}
           />
+          <BallStationTrigger playerPositionRef={playerPositionRef} goalObject={goalObject} onNearChange={setIsNearSkinStation} />
           {currentZone !== ZONES.outside && (
             <>
-              <SkinStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearSkinStation} />
               <EnvironmentStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearEnvironmentStation} />
               <CustomizationStationTrigger
                 playerPositionRef={playerPositionRef}
@@ -6647,7 +6661,7 @@ function App() {
           {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
         </button>
       )}
-      {showCaptureUi && currentZone !== ZONES.outside && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
+      {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
           Personnaliser le ballon
         </button>
@@ -6749,6 +6763,7 @@ function App() {
         onNext={() => goPreview(1)}
         onBuy={buyPreviewSkin}
         onSelect={selectPreviewSkin}
+        onRespawn={handleBallRespawn}
       />
       <EnvironmentMenu
         open={showCaptureUi && isEnvironmentMenuOpen}

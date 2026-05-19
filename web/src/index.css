@@ -1504,6 +1504,17 @@ canvas {
   color: #dbe7f5;
 }
 
+.skin-respawn-btn {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 800;
+  background: rgba(255, 200, 80, 0.18);
+  color: #ffd447;
+  border: 1px solid rgba(255, 212, 71, 0.35);
+}
+
 .skin-equipped {
   color: #8ff0ad;
   font-weight: 800;
