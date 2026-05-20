@@ -126,6 +126,8 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       selectedFloorSkinId: progress.selectedFloorSkinId,
       selectedWallSkinId: progress.selectedWallSkinId,
       applyWallToCeiling: progress.applyWallToCeiling,
+      ownedCat: progress.ownedCat ?? false,
+      catActive: progress.catActive ?? false,
     },
     updated_at: new Date().toISOString(),
   }
@@ -150,6 +152,8 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       selectedFloorSkinId: progress.selectedFloorSkinId,
       selectedWallSkinId: progress.selectedWallSkinId,
       applyWallToCeiling: progress.applyWallToCeiling,
+      ownedCat: progress.ownedCat ?? false,
+      catActive: progress.catActive ?? false,
     },
   }
 }
@@ -170,6 +174,8 @@ export function fromProgressRow(row) {
     selectedFloorSkinId: row.world_settings?.selectedFloorSkinId ?? 'floor-classic',
     selectedWallSkinId: row.world_settings?.selectedWallSkinId ?? 'wall-classic',
     applyWallToCeiling: Boolean(row.world_settings?.applyWallToCeiling),
+    ownedCat: Boolean(row.world_settings?.ownedCat),
+    catActive: Boolean(row.world_settings?.catActive),
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],
   }
 }

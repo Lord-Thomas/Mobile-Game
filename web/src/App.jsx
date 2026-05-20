@@ -1583,6 +1583,8 @@ function Player({
   goalObject,
   seatedState,
   onSeatedPhaseChange,
+  cameraOnCat = false,
+  catPositionRef = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -2100,31 +2102,37 @@ function Player({
     const pitch = touch.cameraPitch
     const cameraSettings = CAMERA_SETTINGS[currentZone] ?? CAMERA_SETTINGS.interior
     const cameraDistance = touch.cameraDistance ?? cameraSettings.distance
+
+    const focusX = cameraOnCat && catPositionRef ? catPositionRef.current.x : nextX
+    const focusY = cameraOnCat && catPositionRef ? catPositionRef.current.y : nextY
+    const focusZ = cameraOnCat && catPositionRef ? catPositionRef.current.z : nextZ
+    const lookHeight = cameraOnCat ? 0.3 : 0.55
+
     const horizontalDistance = cameraDistance * Math.cos(pitch)
-    const desiredX = nextX + Math.sin(yaw) * horizontalDistance
-    const desiredY = nextY + cameraSettings.height + Math.sin(pitch) * cameraDistance
-    const desiredZ = nextZ + Math.cos(yaw) * horizontalDistance
+    const desiredX = focusX + Math.sin(yaw) * horizontalDistance
+    const desiredY = focusY + cameraSettings.height + Math.sin(pitch) * cameraDistance
+    const desiredZ = focusZ + Math.cos(yaw) * horizontalDistance
 
     let targetX = desiredX
     let targetY = desiredY
     let targetZ = desiredZ
 
-    const originY = nextY + 0.7
-    const dirX = desiredX - nextX
+    const originY = focusY + 0.7
+    const dirX = desiredX - focusX
     const dirY = desiredY - originY
-    const dirZ = desiredZ - nextZ
+    const dirZ = desiredZ - focusZ
     const rayDistance = Math.hypot(dirX, dirY, dirZ)
 
     if (rayDistance > 0.001) {
       const inv = 1 / rayDistance
       const rayDir = { x: dirX * inv, y: dirY * inv, z: dirZ * inv }
-      const ray = new rapier.Ray({ x: nextX, y: originY, z: nextZ }, rayDir)
+      const ray = new rapier.Ray({ x: focusX, y: originY, z: focusZ }, rayDir)
       const hit = world.castRay(ray, rayDistance, true)
       if (hit && hit.toi < rayDistance) {
         const safe = Math.max(0.2, hit.toi - 0.14)
-        targetX = nextX + rayDir.x * safe
+        targetX = focusX + rayDir.x * safe
         targetY = originY + rayDir.y * safe
-        targetZ = nextZ + rayDir.z * safe
+        targetZ = focusZ + rayDir.z * safe
       }
     }
 
@@ -2133,9 +2141,9 @@ function Player({
     camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, 12, delta)
     camera.position.z = MathUtils.damp(camera.position.z, clampedTarget.z, 12, delta)
 
-    cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, nextX, 16, delta)
-    cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, nextY + 0.55, 16, delta)
-    cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, nextZ, 16, delta)
+    cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, focusX, 16, delta)
+    cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, focusY + lookHeight, 16, delta)
+    cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, focusZ, 16, delta)
     camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
   })
 
@@ -2299,7 +2307,7 @@ function PlayerAvatar({ motion }) {
   )
 }
 
-function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false }) {
+function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false, onTap }) {
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookLastRef = useRef({ x: 0, y: 0 })
@@ -2454,7 +2462,12 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
     event.currentTarget.releasePointerCapture(event.pointerId)
     if (selectedEmoteId) {
       touchRef.current.emoteQueued = selectedEmoteId
+      return
     }
+    const dx = event.clientX - emotePressRef.current.x
+    const dy = event.clientY - emotePressRef.current.y
+    const isTap = Math.hypot(dx, dy) < 8
+    if (isTap && onTap) onTap(event.clientX, event.clientY)
   }
 
   const onCameraWheel = (event) => {
@@ -5715,6 +5728,10 @@ function App() {
   const ballRef = useRef()
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
   const playerVelocityRef = useRef({ x: 0, z: 0 })
+  const catPositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const catGroupRef = useRef(null)
+  const catTapCallbackRef = useRef(null)
+  const [cameraOnCat, setCameraOnCat] = useState(false)
   const scoreCooldownRef = useRef(false)
   const respawnTimerRef = useRef(null)
   const outRespawnCooldownRef = useRef(false)
@@ -5779,7 +5796,7 @@ function App() {
     const onKeyDown = (event) => {
       const key = getKeyboardKey(event)
       const isDeleteToggle = key === 'delete'
-      const isPointingUp = isAdminMode && key === 'p' && !event.repeat
+      const isPointingUp = (isAdminMode || isVerticalFrameMode) && key === 'p' && !event.repeat
       if (!isDeleteToggle && !isPointingUp) return
       const target = event.target
       const isTyping =
@@ -6071,7 +6088,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
+  }, [authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -6180,7 +6197,7 @@ function App() {
   const previewIndex = Math.max(0, ballSkins.findIndex((skin) => skin.id === previewSkinId))
   const activeSkinId = isSkinMenuOpen ? previewSkinId : selectedSkinId
   const activeSkin = ballSkins.find((skin) => skin.id === activeSkinId) || ballSkins[0]
-  const availableWallSkins = isAdminMode ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
+  const availableWallSkins = (isAdminMode || isLocalNetwork) ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
   const previewFloorIndex = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
   const previewWallIndex = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
   const activeFloorSkinId = isEnvironmentMenuOpen ? previewFloorSkinId : selectedFloorSkinId
@@ -6302,6 +6319,8 @@ function App() {
     if (!ownedCat) return
     setCatActive((v) => !v)
   }
+
+  const toggleCameraOnCat = useCallback(() => setCameraOnCat(v => !v), [])
 
   const requestSit = () => {
     if (!nearbySeat || mode !== 'play') return
@@ -6571,7 +6590,8 @@ function App() {
             />
             <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch} onOpen={() => setIsLightMenuOpen((v) => !v)} mode={mode} />
             <Dragon playerPositionRef={playerPositionRef} />
-            {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} />}
+            {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
+            {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
             <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
             <OutdoorDoor />
             <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
@@ -6651,6 +6671,8 @@ function App() {
               goalObject={goalObject}
               seatedState={seatedState}
               onSeatedPhaseChange={updateSeatedPhase}
+              cameraOnCat={cameraOnCat}
+              catPositionRef={catPositionRef}
             />
           )}
           <OutdoorDoorTrigger
@@ -6702,14 +6724,20 @@ function App() {
       {mode === 'play' && (
         <ControlsOverlay
           touchRef={touchRef}
-          adminCameraControls={isAdminMode}
+          adminCameraControls={isAdminMode || isVerticalFrameMode}
           uiHidden={!showCaptureUi}
+          onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
       )}
       {showCaptureUi && <CoinsOverlay coins={coins} />}
       {showCaptureUi && isLocalNetwork && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
           +500
+        </button>
+      )}
+      {showCaptureUi && catActive && cameraOnCat && (isAdminMode || isVerticalFrameMode) && (
+        <button className="cat-cam-btn" type="button" onClick={() => setCameraOnCat(false)}>
+          🐱 Caméra chat — Retour joueur
         </button>
       )}
       {showCaptureUi && (
@@ -6897,6 +6925,32 @@ function App() {
 
 export default App
 
+// ─── Cat tap detector ────────────────────────────────────────────────────────
+
+function CatTapDetector({ catPositionRef, callbackRef, onToggle }) {
+  const { camera, gl } = useThree()
+
+  useEffect(() => {
+    callbackRef.current = (clientX, clientY) => {
+      const rect = gl.domElement.getBoundingClientRect()
+      const nx = ((clientX - rect.left) / rect.width) * 2 - 1
+      const ny = -((clientY - rect.top) / rect.height) * 2 + 1
+      const raycaster = new Raycaster()
+      raycaster.setFromCamera({ x: nx, y: ny }, camera)
+      const catVec = new Vector3(
+        catPositionRef.current.x,
+        catPositionRef.current.y + 0.3,
+        catPositionRef.current.z,
+      )
+      const closest = raycaster.ray.closestPointToPoint(catVec, new Vector3())
+      if (closest.distanceTo(catVec) < 0.7) onToggle()
+    }
+    return () => { callbackRef.current = null }
+  }, [camera, gl, catPositionRef, callbackRef, onToggle])
+
+  return null
+}
+
 // ─── Cat NPC ────────────────────────────────────────────────────────────────
 
 const PET_STATE = {
@@ -6930,7 +6984,7 @@ const CAT_OFFSETS = [
   { side:  0.0, back: 1.1 },
 ]
 
-function Cat({ playerPositionRef, playerVelocityRef, currentZone }) {
+function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef, catGroupRef }) {
   const { scene, animations } = useGLTF('/models/cat.glb')
   const cat = useMemo(() => clone(scene), [scene])
   const { actions } = useAnimations(animations, cat)
@@ -7127,6 +7181,12 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone }) {
         playAnim('Idle')
       }
     }
+
+    if (catPositionRef) {
+      catPositionRef.current.x = pos.x
+      catPositionRef.current.y = pos.y
+      catPositionRef.current.z = pos.z
+    }
   })
 
   useEffect(() => {
@@ -7147,7 +7207,7 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone }) {
   }, [playerPositionRef, playerVelocityRef])
 
   return (
-    <group ref={groupRef} position={[1, 0, 2]}>
+    <group ref={(el) => { groupRef.current = el; if (catGroupRef) catGroupRef.current = el }} position={[1, 0, 2]}>
       <primitive object={cat} />
     </group>
   )

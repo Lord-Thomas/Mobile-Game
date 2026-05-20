@@ -681,6 +681,23 @@ canvas {
   transform: none;
 }
 
+.cat-cam-btn {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  padding: 7px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(10, 14, 22, 0.82);
+  color: #f0f6ff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .debug-add-coins-btn {
   position: absolute;
   top: 14px;
