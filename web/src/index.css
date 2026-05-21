@@ -591,6 +591,11 @@ canvas {
   opacity: 0.5;
 }
 
+.multiplayer-player.selected {
+  border-color: rgba(159, 214, 255, 0.55);
+  background: rgba(159, 214, 255, 0.16);
+}
+
 .multiplayer-player span,
 .multiplayer-session-card strong,
 .multiplayer-request-card strong {
@@ -598,7 +603,8 @@ canvas {
 }
 
 .multiplayer-player small,
-.multiplayer-session-card span {
+.multiplayer-session-card span,
+.multiplayer-request-card span {
   color: #aebdcb;
   font-size: 11px;
 }
@@ -624,6 +630,17 @@ canvas {
   display: flex;
   gap: 8px;
   margin-top: 10px;
+}
+
+.social-player-actions {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid rgba(159, 214, 255, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  color: #edf7ff;
+  background: rgba(159, 214, 255, 0.09);
 }
 
 .multiplayer-actions button:last-child {
@@ -699,13 +716,14 @@ canvas {
 .game-chat-toggle {
   left: 50%;
   transform: translateX(-50%);
-  min-height: 42px;
+  min-height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 14px;
-  padding: 0 16px;
+  border-radius: 12px;
+  padding: 0 12px;
   color: #edf7ff;
   background: rgba(8, 12, 20, 0.78);
   font: inherit;
+  font-size: 12px;
   font-weight: 900;
   backdrop-filter: blur(12px);
 }
@@ -715,11 +733,11 @@ canvas {
   right: 12px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: auto;
-  max-width: 420px;
+  max-width: 360px;
   margin: 0 auto;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 16px;
   background: rgba(8, 12, 20, 0.88);
@@ -730,7 +748,7 @@ canvas {
 .game-chat-panel input {
   min-width: 0;
   flex: 1;
-  height: 38px;
+  height: 34px;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 11px;
@@ -746,9 +764,9 @@ canvas {
   color: rgba(237, 247, 255, 0.58);
 }
 
-.game-chat-panel button {
+.game-chat-send {
   flex: 0 0 auto;
-  height: 38px;
+  height: 34px;
   box-sizing: border-box;
   border: 0;
   border-radius: 11px;
@@ -756,11 +774,26 @@ canvas {
   color: #06111c;
   background: #9fd6ff;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
 }
 
-.game-chat-panel button:disabled {
+.game-chat-close {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 10px;
+  color: #edf7ff;
+  background: rgba(255, 255, 255, 0.13);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.game-chat-send:disabled {
   opacity: 0.5;
 }
 
@@ -1551,7 +1584,7 @@ canvas {
 }
 
 .account-sync-panel {
-  width: min(282px, calc(100vw - 28px));
+  width: min(340px, calc(100vw - 28px));
   margin-top: 8px;
   padding: 10px;
   border-radius: 14px;
@@ -1560,6 +1593,28 @@ canvas {
   backdrop-filter: blur(10px);
   display: grid;
   gap: 8px;
+}
+
+.main-menu-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.main-menu-tabs button {
+  min-width: 0;
+  min-height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fbff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.main-menu-tabs button.active {
+  background: #9fd6ff;
+  color: #06111c;
 }
 
 .account-sync-status {

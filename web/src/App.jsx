@@ -7,7 +7,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
-import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable } from './services/multiplayerService'
+import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
 import { connectColyseusVisitSession } from './services/colyseusSessionService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
@@ -52,6 +52,7 @@ const MULTIPLAYER_REMOTE_VISUAL_SMOOTHING = 10
 const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
+const SOCIAL_MENU_TABS = ['account', 'social', 'friends']
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -2787,7 +2788,7 @@ function CoinsOverlay({ coins }) {
   )
 }
 
-function AccountSyncPanel({
+function GameMenuPanel({
   configured,
   user,
   email,
@@ -2795,15 +2796,39 @@ function AccountSyncPanel({
   displayName,
   mode,
   open,
+  activeTab,
   message,
+  socialMessage,
   saveState,
+  role,
+  session,
+  onlinePlayers,
+  selectedPlayerId,
+  incomingRequest,
+  outgoingRequest,
+  visitRemainingSeconds,
+  sessionConnectionState,
+  sessionTransport,
+  hasRemotePlayer,
+  friends,
+  incomingFriendRequests,
+  pendingFriendRequests,
   onToggle,
+  onTabChange,
   onEmailChange,
   onPasswordChange,
   onDisplayNameChange,
   onModeChange,
   onSubmit,
   onSignOut,
+  onSelectPlayer,
+  onRequestVisit,
+  onAcceptRequest,
+  onRejectRequest,
+  onLeaveSession,
+  onRequestFriend,
+  onAcceptFriend,
+  onRejectFriend,
 }) {
   const isConnected = Boolean(user)
   const statusText = configured
@@ -2811,94 +2836,186 @@ function AccountSyncPanel({
       ? 'Compte connecte'
       : 'Mode invite'
     : 'Supabase non configure'
+  const selectedPlayer = onlinePlayers.find((player) => player.userId === selectedPlayerId)
+  const friendIds = new Set(friends.map((friend) => friend.userId))
+  const pendingFriendIds = new Set(pendingFriendRequests.map((request) => request.toUserId))
+  const friendsWithStatus = friends
+    .map((friend) => {
+      const online = onlinePlayers.find((player) => player.userId === friend.userId)
+      return {
+        ...friend,
+        displayName: online?.displayName || friend.displayName,
+        status: online?.status || 'offline',
+        online: Boolean(online),
+      }
+    })
+    .sort((a, b) => Number(b.online) - Number(a.online) || a.displayName.localeCompare(b.displayName))
+  const sessionLabel = role === 'host'
+    ? `${session?.guestDisplayName ?? 'Visiteur'} visite ton monde`
+    : role === 'guest'
+      ? `Tu visites ${session?.hostDisplayName ?? 'un monde'}`
+      : null
 
   return (
     <div className={`account-sync ${open ? 'open' : ''}`}>
-      <button className="account-sync-toggle" type="button" onClick={onToggle} aria-label="Compte">
+      <button className="account-sync-toggle" type="button" onClick={onToggle} aria-label="Menu">
         <span className={`account-sync-dot ${isConnected ? 'connected' : ''}`} />
-        <span>Compte</span>
+        <span>Menu</span>
       </button>
       {open && (
         <div className="account-sync-panel">
-          <div className="account-sync-status">
-            {statusText}
-            <span>{saveState}</span>
-          </div>
-          {!isConnected && (
-            <p className="account-sync-help">
-              Ta progression invite reste sur cet appareil. Cree un compte pour la sauvegarder en ligne.
-            </p>
-          )}
-          {configured && !isConnected && (
-            <>
-              <div className="account-sync-tabs">
-                <button
-                  type="button"
-                  className={mode === 'signup' ? 'active' : ''}
-                  onClick={() => onModeChange('signup')}
-                >
-                  Creer
-                </button>
-                <button
-                  type="button"
-                  className={mode === 'signin' ? 'active' : ''}
-                  onClick={() => onModeChange('signin')}
-                >
-                  Connexion
-                </button>
-              </div>
-              <form className="account-sync-form" onSubmit={onSubmit}>
-                {mode === 'signup' && (
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(event) => onDisplayNameChange(event.target.value)}
-                    placeholder="Pseudo"
-                    aria-label="Pseudo"
-                    minLength={2}
-                    required
-                  />
-                )}
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => onEmailChange(event.target.value)}
-                  placeholder="Email"
-                  aria-label="Email"
-                  required
-                />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => onPasswordChange(event.target.value)}
-                  placeholder="Mot de passe"
-                  aria-label="Mot de passe"
-                  minLength={8}
-                  required
-                />
-                <button type="submit">
-                  {mode === 'signup' ? 'Creer mon compte' : 'Se connecter'}
-                </button>
-              </form>
-              <div className="account-sync-social">
-                <button type="button" disabled>Google bientot</button>
-                <button type="button" disabled>Apple bientot</button>
-              </div>
-            </>
-          )}
-          {configured && isConnected && (
-            <>
-              <div className="account-sync-help">
-                {displayName || user.email}
-                <br />
-                Progression sauvegardee en ligne.
-              </div>
-              <button className="account-sync-out" type="button" onClick={onSignOut}>
-                Deconnexion
+          <div className="main-menu-tabs">
+            {SOCIAL_MENU_TABS.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? 'active' : ''}
+                onClick={() => onTabChange(tab)}
+              >
+                {tab === 'account' ? 'Compte' : tab === 'social' ? 'Social' : 'Amis'}
               </button>
+            ))}
+          </div>
+
+          {activeTab === 'account' && (
+            <>
+              <div className="account-sync-status">
+                {statusText}
+                <span>{saveState}</span>
+              </div>
+              {!isConnected && (
+                <p className="account-sync-help">
+                  Ta progression invite reste sur cet appareil. Cree un compte pour la sauvegarder en ligne.
+                </p>
+              )}
+              {configured && !isConnected && (
+                <>
+                  <div className="account-sync-tabs">
+                    <button type="button" className={mode === 'signup' ? 'active' : ''} onClick={() => onModeChange('signup')}>Creer</button>
+                    <button type="button" className={mode === 'signin' ? 'active' : ''} onClick={() => onModeChange('signin')}>Connexion</button>
+                  </div>
+                  <form className="account-sync-form" onSubmit={onSubmit}>
+                    {mode === 'signup' && (
+                      <input type="text" value={displayName} onChange={(event) => onDisplayNameChange(event.target.value)} placeholder="Pseudo" aria-label="Pseudo" minLength={2} required />
+                    )}
+                    <input type="email" value={email} onChange={(event) => onEmailChange(event.target.value)} placeholder="Email" aria-label="Email" required />
+                    <input type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="Mot de passe" aria-label="Mot de passe" minLength={8} required />
+                    <button type="submit">{mode === 'signup' ? 'Creer mon compte' : 'Se connecter'}</button>
+                  </form>
+                  <div className="account-sync-social">
+                    <button type="button" disabled>Google bientot</button>
+                    <button type="button" disabled>Apple bientot</button>
+                  </div>
+                </>
+              )}
+              {configured && isConnected && (
+                <>
+                  <div className="account-sync-help">
+                    {displayName || user.email}
+                    <br />
+                    Progression sauvegardee en ligne.
+                  </div>
+                  <button className="account-sync-out" type="button" onClick={onSignOut}>Deconnexion</button>
+                </>
+              )}
+              {message && <div className="account-sync-message">{message}</div>}
             </>
           )}
-          {message && <div className="account-sync-message">{message}</div>}
+
+          {activeTab === 'social' && (
+            <>
+              {!configured && <p className="multiplayer-help">Supabase doit etre configure pour les visites.</p>}
+              {configured && !user && <p className="multiplayer-help">Connecte ton compte pour voir les joueurs.</p>}
+              {configured && user && role !== 'solo' && (
+                <div className="multiplayer-session-card">
+                  <strong>{sessionLabel}</strong>
+                  <span>{role === 'guest' ? 'Mode visite: modification bloquee.' : 'La personnalisation est suspendue pendant la visite.'}</span>
+                  <span>
+                    Canal: {sessionConnectionState === 'connected' ? 'connecte' : 'connexion...'}
+                    {sessionTransport !== 'none' ? ` (${sessionTransport})` : ''}
+                    {' / '}
+                    Joueur distant: {hasRemotePlayer ? 'recu' : 'en attente'}
+                  </span>
+                  <button type="button" onClick={onLeaveSession}>Quitter</button>
+                </div>
+              )}
+              {configured && user && role === 'solo' && incomingRequest && (
+                <div className="multiplayer-request-card">
+                  <strong>{incomingRequest.fromDisplayName} veut visiter ton monde.</strong>
+                  <span>Expire dans {visitRemainingSeconds}s.</span>
+                  <div className="multiplayer-actions">
+                    <button type="button" onClick={onAcceptRequest}>Accepter</button>
+                    <button type="button" onClick={onRejectRequest}>Refuser</button>
+                  </div>
+                </div>
+              )}
+              {configured && user && role === 'solo' && outgoingRequest && (
+                <p className="multiplayer-help">Demande envoyee a {outgoingRequest.toDisplayName}. Expire dans {visitRemainingSeconds}s.</p>
+              )}
+              {configured && user && (
+                <>
+                  <div className="multiplayer-title">Joueurs en ligne</div>
+                  <div className="multiplayer-list">
+                    {onlinePlayers.length === 0 && <span className="multiplayer-empty">Personne d'autre en ligne pour l'instant.</span>}
+                    {onlinePlayers.map((player) => (
+                      <button
+                        key={player.userId}
+                        type="button"
+                        className={`multiplayer-player ${selectedPlayerId === player.userId ? 'selected' : ''}`}
+                        onClick={() => onSelectPlayer(player)}
+                      >
+                        <span>{player.displayName}</span>
+                        <small>{player.status === 'available' ? 'Disponible' : 'Occupe'}</small>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              {selectedPlayer && (
+                <div className="social-player-actions">
+                  <strong>{selectedPlayer.displayName}</strong>
+                  <div className="multiplayer-actions">
+                    <button type="button" onClick={() => onRequestVisit(selectedPlayer)} disabled={Boolean(outgoingRequest) || role !== 'solo'}>Visiter</button>
+                    <button type="button" onClick={() => onRequestFriend(selectedPlayer)} disabled={friendIds.has(selectedPlayer.userId) || pendingFriendIds.has(selectedPlayer.userId)}>
+                      {friendIds.has(selectedPlayer.userId) ? 'Ami' : pendingFriendIds.has(selectedPlayer.userId) ? 'Envoye' : 'Ajouter'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {socialMessage && <div className="multiplayer-message">{socialMessage}</div>}
+            </>
+          )}
+
+          {activeTab === 'friends' && (
+            <>
+              {incomingFriendRequests.length > 0 && (
+                <>
+                  <div className="multiplayer-title">Demandes d'amis</div>
+                  <div className="multiplayer-list">
+                    {incomingFriendRequests.map((request) => (
+                      <div key={request.id} className="multiplayer-request-card">
+                        <strong>{request.fromDisplayName}</strong>
+                        <div className="multiplayer-actions">
+                          <button type="button" onClick={() => onAcceptFriend(request)}>Accepter</button>
+                          <button type="button" onClick={() => onRejectFriend(request)}>Refuser</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              <div className="multiplayer-title">Liste d'amis</div>
+              <div className="multiplayer-list">
+                {friendsWithStatus.length === 0 && <span className="multiplayer-empty">Aucun ami pour l'instant.</span>}
+                {friendsWithStatus.map((friend) => (
+                  <button key={friend.userId} type="button" className="multiplayer-player" onClick={() => friend.online && onSelectPlayer(friend)}>
+                    <span>{friend.displayName}</span>
+                    <small>{friend.online ? 'En ligne' : 'Hors ligne'}</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -3005,13 +3122,16 @@ function GameChatPanel({
   if (!open) {
     return (
       <button className="game-chat-toggle" type="button" onClick={onOpen}>
-        Chat
+        Message
       </button>
     )
   }
 
   return (
     <form className="game-chat-panel" onSubmit={onSubmit}>
+      <button className="game-chat-close" type="button" onClick={onClose} aria-label="Fermer le message">
+        ×
+      </button>
       <input
         type="text"
         value={value}
@@ -3027,7 +3147,7 @@ function GameChatPanel({
         }}
         onKeyUp={(event) => event.stopPropagation()}
       />
-      <button type="submit" disabled={disabled || !value.trim()}>
+      <button className="game-chat-send" type="submit" disabled={disabled || !value.trim()}>
         Envoyer
       </button>
     </form>
@@ -6290,6 +6410,7 @@ function App() {
   const [displayName, setDisplayName] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [cloudSaveState, setCloudSaveState] = useState(isSupabaseConfigured ? 'offline' : 'local')
+  const [mainMenuTab, setMainMenuTab] = useState('account')
   const hasLoadedCloudProgressRef = useRef(false)
   const skipNextCloudSaveRef = useRef(false)
   const authUserRef = useRef(null)
@@ -6304,6 +6425,12 @@ function App() {
   const [onlinePlayers, setOnlinePlayers] = useState([])
   const [incomingVisitRequest, setIncomingVisitRequest] = useState(null)
   const [outgoingVisitRequest, setOutgoingVisitRequest] = useState(null)
+  const outgoingVisitRequestIdRef = useRef(null)
+  const [visitRequestNow, setVisitRequestNow] = useState(Date.now())
+  const [selectedSocialPlayerId, setSelectedSocialPlayerId] = useState(null)
+  const [friends, setFriends] = useState([])
+  const [incomingFriendRequests, setIncomingFriendRequests] = useState([])
+  const [pendingFriendRequests, setPendingFriendRequests] = useState([])
   const [multiplayerRole, setMultiplayerRole] = useState('solo')
   const [multiplayerSession, setMultiplayerSession] = useState(null)
   // Refs instead of state: network updates 20x/sec must not trigger React re-renders
@@ -6325,6 +6452,10 @@ function App() {
   const isHostVisit = multiplayerRole === 'host'
   const isMultiplayerSession = multiplayerRole !== 'solo'
   const canModifyWorld = !isGuestVisit && !isHostVisit
+  const activeVisitExpiry = incomingVisitRequest?.expiresAt || outgoingVisitRequest?.expiresAt
+  const visitRemainingSeconds = activeVisitExpiry
+    ? Math.max(0, Math.ceil((new Date(activeVisitExpiry).getTime() - visitRequestNow) / 1000))
+    : Math.ceil(VISIT_REQUEST_TIMEOUT_MS / 1000)
 
   const clearChatBubbles = useCallback(() => {
     chatBubbleTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
@@ -6357,6 +6488,45 @@ function App() {
   useEffect(() => {
     return () => clearChatBubbles()
   }, [clearChatBubbles])
+
+  useEffect(() => {
+    if (!authUser?.id) {
+      setFriends([])
+      setIncomingFriendRequests([])
+      setPendingFriendRequests([])
+      return
+    }
+
+    try {
+      const raw = localStorage.getItem(`lab_friends_v1:${authUser.id}`)
+      setFriends(raw ? JSON.parse(raw) : [])
+    } catch {
+      setFriends([])
+    }
+  }, [authUser?.id])
+
+  useEffect(() => {
+    if (!authUser?.id) return
+    localStorage.setItem(`lab_friends_v1:${authUser.id}`, JSON.stringify(friends))
+  }, [authUser?.id, friends])
+
+  useEffect(() => {
+    if (!incomingVisitRequest && !outgoingVisitRequest) return undefined
+    const intervalId = window.setInterval(() => setVisitRequestNow(Date.now()), 1000)
+    return () => window.clearInterval(intervalId)
+  }, [incomingVisitRequest, outgoingVisitRequest])
+
+  useEffect(() => {
+    const now = Date.now()
+    if (incomingVisitRequest?.expiresAt && new Date(incomingVisitRequest.expiresAt).getTime() <= now) {
+      setIncomingVisitRequest(null)
+      setMultiplayerMessage('Demande de visite expiree.')
+    }
+    if (outgoingVisitRequest?.expiresAt && new Date(outgoingVisitRequest.expiresAt).getTime() <= now) {
+      setOutgoingVisitRequest(null)
+      setMultiplayerMessage('Demande de visite expiree.')
+    }
+  }, [incomingVisitRequest, outgoingVisitRequest, visitRequestNow])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -6579,6 +6749,25 @@ function App() {
   }, [authUser])
 
   useEffect(() => {
+    outgoingVisitRequestIdRef.current = outgoingVisitRequest?.id ?? null
+  }, [outgoingVisitRequest?.id])
+
+  const addFriend = useCallback((friend) => {
+    if (!friend?.userId) return
+    setFriends((current) => {
+      if (current.some((item) => item.userId === friend.userId)) return current
+      return [
+        ...current,
+        {
+          userId: friend.userId,
+          displayName: friend.displayName || 'Joueur',
+          addedAt: new Date().toISOString(),
+        },
+      ]
+    })
+  }, [])
+
+  useEffect(() => {
     if (!isMultiplayerAvailable() || !authUser) {
       setOnlinePlayers([])
       onlinePresenceRef.current?.disconnect()
@@ -6593,11 +6782,16 @@ function App() {
       onPlayers: setOnlinePlayers,
       onVisitRequest: (request) => {
         if (multiplayerRole !== 'solo') return
+        if (request?.expiresAt && new Date(request.expiresAt).getTime() <= Date.now()) return
         setIncomingVisitRequest(request)
+        setVisitRequestNow(Date.now())
         setIsMultiplayerOpen(true)
+        setIsAccountOpen(true)
+        setMainMenuTab('social')
         setMultiplayerMessage(`${request.fromDisplayName} veut visiter ton monde.`)
       },
       onVisitResponse: async (response) => {
+        if (response?.requestId && outgoingVisitRequestIdRef.current && response.requestId !== outgoingVisitRequestIdRef.current) return
         if (!response?.accepted) {
           setOutgoingVisitRequest(null)
           setMultiplayerMessage('Demande refusee.')
@@ -6626,6 +6820,29 @@ function App() {
           setMultiplayerMessage('Lecture du monde impossible. Lance le SQL Supabase mis a jour.')
         }
       },
+      onFriendRequest: (request) => {
+        if (!request?.fromUserId) return
+        setIncomingFriendRequests((current) => (
+          current.some((item) => item.id === request.id || item.fromUserId === request.fromUserId)
+            ? current
+            : [...current, request]
+        ))
+        setIsAccountOpen(true)
+        setMainMenuTab('friends')
+        setMultiplayerMessage(`${request.fromDisplayName} veut t'ajouter en ami.`)
+      },
+      onFriendResponse: (response) => {
+        setPendingFriendRequests((current) => current.filter((request) => request.id !== response?.requestId))
+        if (!response?.accepted) {
+          setMultiplayerMessage('Demande d ami refusee.')
+          return
+        }
+        addFriend({
+          userId: response.fromUserId,
+          displayName: response.fromDisplayName,
+        })
+        setMultiplayerMessage(`${response.fromDisplayName} est maintenant dans ta liste d'amis.`)
+      },
       onSessionEnded: () => {
         setMultiplayerMessage('La visite est terminee.')
         setMultiplayerRole('solo')
@@ -6650,7 +6867,7 @@ function App() {
       connection.disconnect()
       if (onlinePresenceRef.current === connection) onlinePresenceRef.current = null
     }
-  }, [authUser, clearChatBubbles, displayName, multiplayerRole, progressScope])
+  }, [addFriend, authUser, clearChatBubbles, displayName, multiplayerRole, progressScope])
 
   useEffect(() => {
     multiplayerChannelRef.current?.disconnect()
@@ -7294,17 +7511,24 @@ function App() {
 
   const requestVisitPlayer = async (player) => {
     if (!authUser || multiplayerRole !== 'solo') return
+    if (outgoingVisitRequest?.expiresAt && new Date(outgoingVisitRequest.expiresAt).getTime() > Date.now()) return
     const request = {
       ...createVisitRequest({ fromUser: authUser, toUserId: player.userId }),
       toDisplayName: player.displayName,
     }
     setOutgoingVisitRequest(request)
+    setVisitRequestNow(Date.now())
     setMultiplayerMessage(`Demande envoyee a ${player.displayName}.`)
     await onlinePresenceRef.current?.sendVisitRequest(request)
   }
 
   const acceptVisitRequest = async () => {
     if (!incomingVisitRequest || !authUser || multiplayerRole !== 'solo') return
+    if (incomingVisitRequest.expiresAt && new Date(incomingVisitRequest.expiresAt).getTime() <= Date.now()) {
+      setIncomingVisitRequest(null)
+      setMultiplayerMessage('Demande de visite expiree.')
+      return
+    }
     await saveCurrentProgressToCloud()
     const session = createSessionFromRequest({
       ...incomingVisitRequest,
@@ -7343,6 +7567,60 @@ function App() {
     })
     setIncomingVisitRequest(null)
     setMultiplayerMessage('Demande refusee.')
+  }
+
+  const selectSocialPlayer = (player) => {
+    if (!player?.userId) return
+    setSelectedSocialPlayerId(player.userId)
+    setMainMenuTab('social')
+  }
+
+  const requestFriend = async (player) => {
+    if (!authUser || !player?.userId) return
+    if (friends.some((friend) => friend.userId === player.userId)) return
+    if (pendingFriendRequests.some((request) => request.toUserId === player.userId)) return
+
+    const request = {
+      id: `friend-${authUser.id}-${player.userId}-${Date.now()}`,
+      fromUserId: authUser.id,
+      fromDisplayName: displayName || authUser.email?.split('@')[0] || 'Joueur',
+      toUserId: player.userId,
+      toDisplayName: player.displayName,
+      createdAt: new Date().toISOString(),
+    }
+    setPendingFriendRequests((current) => [...current, request])
+    setMultiplayerMessage(`Demande d ami envoyee a ${player.displayName}.`)
+    await onlinePresenceRef.current?.sendFriendRequest(request)
+  }
+
+  const acceptFriendRequest = async (request) => {
+    if (!authUser || !request?.fromUserId) return
+    addFriend({
+      userId: request.fromUserId,
+      displayName: request.fromDisplayName,
+    })
+    setIncomingFriendRequests((current) => current.filter((item) => item.id !== request.id))
+    setMultiplayerMessage(`${request.fromDisplayName} est maintenant dans ta liste d'amis.`)
+    await onlinePresenceRef.current?.sendFriendResponse({
+      accepted: true,
+      requestId: request.id,
+      toUserId: request.fromUserId,
+      fromUserId: authUser.id,
+      fromDisplayName: displayName || authUser.email?.split('@')[0] || 'Joueur',
+    })
+  }
+
+  const rejectFriendRequest = async (request) => {
+    if (!authUser || !request?.fromUserId) return
+    setIncomingFriendRequests((current) => current.filter((item) => item.id !== request.id))
+    setMultiplayerMessage('Demande d ami refusee.')
+    await onlinePresenceRef.current?.sendFriendResponse({
+      accepted: false,
+      requestId: request.id,
+      toUserId: request.fromUserId,
+      fromUserId: authUser.id,
+      fromDisplayName: displayName || authUser.email?.split('@')[0] || 'Joueur',
+    })
   }
 
   const leaveMultiplayerSession = async () => {
@@ -7659,7 +7937,7 @@ function App() {
         </button>
       )}
       {showCaptureUi && (
-        <AccountSyncPanel
+        <GameMenuPanel
           configured={isSupabaseConfigured}
           user={authUser}
           email={authEmail}
@@ -7667,9 +7945,25 @@ function App() {
           displayName={displayName}
           mode={authMode}
           open={isAccountOpen}
+          activeTab={mainMenuTab}
           message={authMessage}
+          socialMessage={multiplayerMessage}
           saveState={cloudSaveState}
+          role={multiplayerRole}
+          session={multiplayerSession}
+          onlinePlayers={onlinePlayers}
+          selectedPlayerId={selectedSocialPlayerId}
+          incomingRequest={incomingVisitRequest}
+          outgoingRequest={outgoingVisitRequest}
+          visitRemainingSeconds={visitRemainingSeconds}
+          sessionConnectionState={sessionConnectionState}
+          sessionTransport={sessionTransport}
+          hasRemotePlayer={hasRemotePlayer}
+          friends={friends}
+          incomingFriendRequests={incomingFriendRequests}
+          pendingFriendRequests={pendingFriendRequests}
           onToggle={() => setIsAccountOpen((current) => !current)}
+          onTabChange={setMainMenuTab}
           onEmailChange={setAuthEmail}
           onPasswordChange={setAuthPassword}
           onDisplayNameChange={setDisplayName}
@@ -7679,27 +7973,14 @@ function App() {
           }}
           onSubmit={requestAccountSubmit}
           onSignOut={requestSignOut}
-        />
-      )}
-      {showCaptureUi && (
-        <MultiplayerPanel
-          configured={isMultiplayerAvailable()}
-          user={authUser}
-          open={isMultiplayerOpen}
-          role={multiplayerRole}
-          session={multiplayerSession}
-          onlinePlayers={onlinePlayers}
-          incomingRequest={incomingVisitRequest}
-          outgoingRequest={outgoingVisitRequest}
-          sessionConnectionState={sessionConnectionState}
-          sessionTransport={sessionTransport}
-          hasRemotePlayer={hasRemotePlayer}
-          message={multiplayerMessage}
-          onToggle={() => setIsMultiplayerOpen((current) => !current)}
+          onSelectPlayer={selectSocialPlayer}
           onRequestVisit={requestVisitPlayer}
           onAcceptRequest={acceptVisitRequest}
           onRejectRequest={rejectVisitRequest}
           onLeaveSession={leaveMultiplayerSession}
+          onRequestFriend={requestFriend}
+          onAcceptFriend={acceptFriendRequest}
+          onRejectFriend={rejectFriendRequest}
         />
       )}
       {showCaptureUi && isMultiplayerSession && (

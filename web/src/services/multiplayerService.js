@@ -2,6 +2,7 @@ import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 const ONLINE_CHANNEL = 'online-players'
 const PRESENCE_REFRESH_MS = 25_000
+export const VISIT_REQUEST_TIMEOUT_MS = 30_000
 
 function nowIso() {
   return new Date().toISOString()
@@ -38,12 +39,14 @@ export function isMultiplayerAvailable() {
 }
 
 export function createVisitRequest({ fromUser, toUserId }) {
+  const createdAt = Date.now()
   return {
     id: `${fromUser.id}-${toUserId}-${Date.now()}`,
     fromUserId: fromUser.id,
     fromDisplayName: getDisplayName(fromUser),
     toUserId,
-    createdAt: nowIso(),
+    createdAt: new Date(createdAt).toISOString(),
+    expiresAt: new Date(createdAt + VISIT_REQUEST_TIMEOUT_MS).toISOString(),
   }
 }
 
@@ -65,11 +68,20 @@ export function connectOnlinePresence({
   onPlayers,
   onVisitRequest,
   onVisitResponse,
+  onFriendRequest,
+  onFriendResponse,
   onSessionEnded,
 }) {
   if (!isMultiplayerAvailable() || !user) {
     onPlayers?.([])
-    return { disconnect: () => {}, sendVisitRequest: async () => false, sendVisitResponse: async () => false }
+    return {
+      disconnect: () => {},
+      sendVisitRequest: async () => false,
+      sendVisitResponse: async () => false,
+      sendFriendRequest: async () => false,
+      sendFriendResponse: async () => false,
+      sendSessionEnded: async () => false,
+    }
   }
 
   const channel = supabase.channel(ONLINE_CHANNEL, {
@@ -98,6 +110,12 @@ export function connectOnlinePresence({
     .on('broadcast', { event: 'visit-response' }, ({ payload }) => {
       if (payload?.toUserId === user.id) onVisitResponse?.(payload)
     })
+    .on('broadcast', { event: 'friend-request' }, ({ payload }) => {
+      if (payload?.toUserId === user.id) onFriendRequest?.(payload)
+    })
+    .on('broadcast', { event: 'friend-response' }, ({ payload }) => {
+      if (payload?.toUserId === user.id) onFriendResponse?.(payload)
+    })
     .on('broadcast', { event: 'session-ended' }, ({ payload }) => {
       if (payload?.toUserId === user.id || payload?.hostUserId === user.id || payload?.guestUserId === user.id) {
         onSessionEnded?.(payload)
@@ -123,6 +141,10 @@ export function connectOnlinePresence({
       channel.send({ type: 'broadcast', event: 'visit-request', payload: request }),
     sendVisitResponse: (response) =>
       channel.send({ type: 'broadcast', event: 'visit-response', payload: response }),
+    sendFriendRequest: (request) =>
+      channel.send({ type: 'broadcast', event: 'friend-request', payload: request }),
+    sendFriendResponse: (response) =>
+      channel.send({ type: 'broadcast', event: 'friend-response', payload: response }),
     sendSessionEnded: (payload) =>
       channel.send({ type: 'broadcast', event: 'session-ended', payload }),
   }
