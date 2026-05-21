@@ -2,6 +2,7 @@ import { Room } from 'colyseus'
 
 const MAX_CLIENTS = 2
 const PLAYER_STATE_INTERVAL_MS = 50
+const PLAYER_ACTIVE_GRACE_MS = 220
 const BALL_ACTIVE_INTERVAL_MS = 50
 const BALL_IDLE_INTERVAL_MS = 200
 
@@ -72,9 +73,7 @@ export class VisitRoom extends Room {
     this.players = new Map()
     this.hostClient = null
     this.ballState = null
-    this.pendingPlayerStates = new Map()
     this.pendingBallState = null
-    this.lastPlayerBroadcastAt = 0
     this.lastBallBroadcastAt = 0
 
     this.setMetadata({
@@ -106,6 +105,12 @@ export class VisitRoom extends Room {
       lastSeq: -1,
       position: [0, 0.42, 2.2],
       rotationY: 0,
+      velocity: [0, 0, 0],
+      grounded: true,
+      motion: 'idle',
+      zone: 'interior',
+      lastUpdateAt: 0,
+      lastBroadcastAt: 0,
     }
 
     this.players.set(client.sessionId, player)
@@ -151,7 +156,11 @@ export class VisitRoom extends Room {
     player.lastSeq = seq
     player.position = state.position
     player.rotationY = state.rotationY
-    this.pendingPlayerStates.set(client.sessionId, state)
+    player.velocity = state.velocity
+    player.grounded = state.grounded
+    player.motion = state.motion
+    player.zone = state.zone
+    player.lastUpdateAt = now()
   }
 
   handleBallState(client, message) {
@@ -179,13 +188,28 @@ export class VisitRoom extends Room {
 
   flushNetworkState() {
     const time = now()
-    if (this.pendingPlayerStates.size && time - this.lastPlayerBroadcastAt >= PLAYER_STATE_INTERVAL_MS) {
-      this.pendingPlayerStates.forEach((state, sessionId) => {
-        this.broadcast('player-state', state, { except: this.clients.find((client) => client.sessionId === sessionId) })
-      })
-      this.pendingPlayerStates.clear()
-      this.lastPlayerBroadcastAt = time
-    }
+    this.players.forEach((player, sessionId) => {
+      const sourceClient = this.clients.find((client) => client.sessionId === sessionId)
+      if (!sourceClient) return
+      if (time - player.lastBroadcastAt < PLAYER_STATE_INTERVAL_MS) return
+      if (time - player.lastUpdateAt > PLAYER_ACTIVE_GRACE_MS && player.motion === 'idle') return
+
+      this.broadcast('player-state', {
+        seq: player.lastSeq,
+        serverTime: time,
+        userId: player.userId,
+        sessionId,
+        displayName: player.displayName,
+        role: player.role,
+        position: player.position,
+        rotationY: player.rotationY,
+        velocity: player.velocity,
+        grounded: player.grounded,
+        motion: player.motion,
+        zone: player.zone,
+      }, { except: sourceClient })
+      player.lastBroadcastAt = time
+    })
 
     if (!this.pendingBallState) return
 

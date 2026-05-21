@@ -47,6 +47,7 @@ const MULTIPLAYER_PLAYER_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_ACTIVE_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL = 1 / 5
 const MULTIPLAYER_MAX_EXTRAPOLATION_MS = 180
+const MULTIPLAYER_REMOTE_SNAP_DISTANCE = 4
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -2333,8 +2334,9 @@ function PlayerAvatar({ motion }) {
   )
 }
 
-function RemotePlayer({ state, label = 'Visiteur' }) {
+function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTimeOffsetRef = null }) {
   const groupRef = useRef(null)
+  const samplesRef = useRef([])
   const lastSeqRef = useRef(-1)
   const targetRef = useRef({
     position: state?.position ?? [0, PLAYER_HEIGHT, 2.2],
@@ -2349,35 +2351,83 @@ function RemotePlayer({ state, label = 'Visiteur' }) {
     const seq = state.seq ?? 0
     if (seq <= lastSeqRef.current) return
     lastSeqRef.current = seq
-    targetRef.current = {
+    const sample = {
       position: state.position,
       rotationY: Number.isFinite(state.rotationY) ? state.rotationY : 0,
       velocity: Array.isArray(state.velocity) ? state.velocity : [0, 0, 0],
       motion: state.motion || 'idle',
+      time: transport === 'colyseus' && Number.isFinite(state.serverTime) ? state.serverTime : Date.now(),
+    }
+    samplesRef.current.push(sample)
+    if (samplesRef.current.length > 14) samplesRef.current.splice(0, samplesRef.current.length - 14)
+
+    targetRef.current = {
+      position: sample.position,
+      rotationY: sample.rotationY,
+      velocity: sample.velocity,
+      motion: sample.motion,
       receivedAt: Date.now(),
     }
-  }, [state])
+  }, [state, transport])
 
   useFrame((_, delta) => {
     const group = groupRef.current
     if (!group) return
-    const target = targetRef.current
-    const ageSeconds = MathUtils.clamp((Date.now() - target.receivedAt) / 1000, 0, MULTIPLAYER_MAX_EXTRAPOLATION_MS / 1000)
-    const leadSeconds = Math.min(ageSeconds + 0.06, 0.16)
-    const x = target.position[0] + (target.velocity?.[0] ?? 0) * leadSeconds
-    const y = target.position[1] + (target.velocity?.[1] ?? 0) * leadSeconds
-    const z = target.position[2] + (target.velocity?.[2] ?? 0) * leadSeconds
-    const rotationY = target.rotationY
+    let x
+    let y
+    let z
+    let rotationY
+
+    if (transport === 'colyseus' && samplesRef.current.length) {
+      const samples = samplesRef.current
+      const renderAt = Date.now() + (serverTimeOffsetRef?.current ?? 0) - MULTIPLAYER_INTERP_DELAY_MS
+      while (samples.length > 2 && samples[1].time <= renderAt) samples.shift()
+
+      const previous = samples[0]
+      const next = samples[1]
+      x = previous.position[0]
+      y = previous.position[1]
+      z = previous.position[2]
+      rotationY = previous.rotationY
+
+      if (next) {
+        const span = Math.max(1, next.time - previous.time)
+        const alpha = MathUtils.clamp((renderAt - previous.time) / span, 0, 1)
+        x = MathUtils.lerp(previous.position[0], next.position[0], alpha)
+        y = MathUtils.lerp(previous.position[1], next.position[1], alpha)
+        z = MathUtils.lerp(previous.position[2], next.position[2], alpha)
+        const rotationDelta = MathUtils.euclideanModulo(next.rotationY - previous.rotationY + Math.PI, Math.PI * 2) - Math.PI
+        rotationY = previous.rotationY + rotationDelta * alpha
+      } else {
+        const extrapolateSeconds = MathUtils.clamp(
+          (renderAt - previous.time) / 1000,
+          0,
+          MULTIPLAYER_MAX_EXTRAPOLATION_MS / 1000,
+        )
+        x += (previous.velocity?.[0] ?? 0) * extrapolateSeconds
+        y += (previous.velocity?.[1] ?? 0) * extrapolateSeconds
+        z += (previous.velocity?.[2] ?? 0) * extrapolateSeconds
+      }
+    } else {
+      const target = targetRef.current
+      const ageSeconds = MathUtils.clamp((Date.now() - target.receivedAt) / 1000, 0, MULTIPLAYER_MAX_EXTRAPOLATION_MS / 1000)
+      const leadSeconds = Math.min(ageSeconds + 0.06, 0.16)
+      x = target.position[0] + (target.velocity?.[0] ?? 0) * leadSeconds
+      y = target.position[1] + (target.velocity?.[1] ?? 0) * leadSeconds
+      z = target.position[2] + (target.velocity?.[2] ?? 0) * leadSeconds
+      rotationY = target.rotationY
+    }
 
     const distance = Math.hypot(group.position.x - x, group.position.y - y, group.position.z - z)
-    if (distance > 4) {
+    if (distance > MULTIPLAYER_REMOTE_SNAP_DISTANCE) {
       group.position.set(x, y, z)
     } else {
-      group.position.x = MathUtils.damp(group.position.x, x, 10, delta)
-      group.position.y = MathUtils.damp(group.position.y, y, 10, delta)
-      group.position.z = MathUtils.damp(group.position.z, z, 10, delta)
+      const smoothing = transport === 'colyseus' ? 18 : 10
+      group.position.x = MathUtils.damp(group.position.x, x, smoothing, delta)
+      group.position.y = MathUtils.damp(group.position.y, y, smoothing, delta)
+      group.position.z = MathUtils.damp(group.position.z, z, smoothing, delta)
     }
-    group.rotation.y = dampAngle(group.rotation.y, rotationY, 12, delta)
+    group.rotation.y = dampAngle(group.rotation.y, rotationY, transport === 'colyseus' ? 18 : 12, delta)
   })
 
   if (!state?.position) return null
@@ -6485,6 +6535,9 @@ function App() {
         setMultiplayerMessage('Le joueur distant a quitte la visite.')
       },
       onStatusChange: setSessionConnectionState,
+      onServerTimeOffsetChange: (offset) => {
+        hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.35)
+      },
     })
       .then((channel) => {
         if (cancelled) {
@@ -7253,6 +7306,8 @@ function App() {
         <RemotePlayer
           state={remotePlayerState}
           label={multiplayerRole === 'host' ? multiplayerSession?.guestDisplayName : multiplayerSession?.hostDisplayName}
+          transport={sessionTransport}
+          serverTimeOffsetRef={hostTimeOffsetRef}
         />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />

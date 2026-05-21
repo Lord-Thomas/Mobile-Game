@@ -21,6 +21,7 @@ export async function connectColyseusVisitSession({
   onGuestKick,
   onPlayerLeft,
   onStatusChange,
+  onServerTimeOffsetChange,
 }) {
   if (!session?.id || !user?.id || role === 'solo') return null
 
@@ -35,18 +36,37 @@ export async function connectColyseusVisitSession({
   })
 
   onStatusChange?.('connected')
+  let pingIntervalId = null
+
+  const sendTimePing = () => {
+    room.send('time-ping', {
+      pingId: `${user.id}-${Date.now()}`,
+      clientSentAt: Date.now(),
+    })
+  }
 
   room.onMessage('joined', () => onStatusChange?.('connected'))
+  room.onMessage('time-pong', (message) => {
+    if (!message?.clientSentAt || !message?.serverTime) return
+    const now = Date.now()
+    const rtt = Math.max(0, now - message.clientSentAt)
+    onServerTimeOffsetChange?.(message.serverTime + rtt * 0.5 - now)
+  })
   room.onMessage('player-state', (message) => onRemotePlayerState?.(message))
   room.onMessage('ball-state', (message) => onRemoteBallState?.(message))
   room.onMessage('guest-kick', (message) => onGuestKick?.(message))
   room.onMessage('player-left', (message) => onPlayerLeft?.(message))
   room.onLeave(() => onStatusChange?.('closed'))
   room.onError(() => onStatusChange?.('error'))
+  sendTimePing()
+  pingIntervalId = window.setInterval(sendTimePing, 2000)
 
   return {
     room,
-    disconnect: () => room.leave(false),
+    disconnect: () => {
+      if (pingIntervalId) window.clearInterval(pingIntervalId)
+      room.leave(false)
+    },
     sendPlayerState: (payload) => room.send('player-state', payload),
     sendBallState: (payload) => room.send('ball-state', payload),
     sendGuestKick: (payload) => room.send('guest-kick', payload),
