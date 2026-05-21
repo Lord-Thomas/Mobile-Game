@@ -2929,7 +2929,7 @@ function GameMenuPanel({
               {configured && user && role !== 'solo' && (
                 <div className="multiplayer-session-card">
                   <strong>{sessionLabel}</strong>
-                  <span>{role === 'guest' ? 'Mode visite: modification bloquee.' : 'La personnalisation est suspendue pendant la visite.'}</span>
+                  <span>{role === 'guest' ? 'Mode visite: modification bloquee.' : 'Tu peux modifier ton monde, le visiteur voit les changements.'}</span>
                   <span>
                     Canal: {sessionConnectionState === 'connected' ? 'connecte' : 'connexion...'}
                     {sessionTransport !== 'none' ? ` (${sessionTransport})` : ''}
@@ -3060,7 +3060,7 @@ function MultiplayerPanel({
           {configured && user && role !== 'solo' && (
             <div className="multiplayer-session-card">
               <strong>{sessionLabel}</strong>
-              <span>{role === 'guest' ? 'Mode visite: modification bloquee.' : 'La personnalisation est suspendue pendant la visite.'}</span>
+              <span>{role === 'guest' ? 'Mode visite: modification bloquee.' : 'Tu peux modifier ton monde, le visiteur voit les changements.'}</span>
               <span>
                 Canal: {sessionConnectionState === 'connected' ? 'connecte' : 'connexion...'}
                 {sessionTransport !== 'none' ? ` (${sessionTransport})` : ''}
@@ -6421,6 +6421,9 @@ function App() {
   const localPlayerStateRef = useRef({ position: [0, PLAYER_HEIGHT, 2.2], rotationY: 0, motion: 'idle', zone: ZONES.interior })
   const guestKickQueueRef = useRef([])
   const hostTimeOffsetRef = useRef(0)
+  const worldSyncTimeoutRef = useRef(null)
+  const lastWorldSyncPayloadRef = useRef('')
+  const lastRemoteWorldSeqRef = useRef(-1)
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false)
   const [onlinePlayers, setOnlinePlayers] = useState([])
   const [incomingVisitRequest, setIncomingVisitRequest] = useState(null)
@@ -6451,7 +6454,7 @@ function App() {
   const isGuestVisit = multiplayerRole === 'guest'
   const isHostVisit = multiplayerRole === 'host'
   const isMultiplayerSession = multiplayerRole !== 'solo'
-  const canModifyWorld = !isGuestVisit && !isHostVisit
+  const canModifyWorld = !isGuestVisit
   const activeVisitExpiry = incomingVisitRequest?.expiresAt || outgoingVisitRequest?.expiresAt
   const visitRemainingSeconds = activeVisitExpiry
     ? Math.max(0, Math.ceil((new Date(activeVisitExpiry).getTime() - visitRequestNow) / 1000))
@@ -6529,6 +6532,30 @@ function App() {
   }, [incomingVisitRequest, outgoingVisitRequest, visitRequestNow])
 
   useEffect(() => {
+    if (!isHostVisit || !multiplayerSession || !authUser) return undefined
+
+    const snapshot = createCurrentProgressSnapshot()
+    const payload = JSON.stringify(snapshot)
+    if (payload === lastWorldSyncPayloadRef.current) return undefined
+
+    if (worldSyncTimeoutRef.current) window.clearTimeout(worldSyncTimeoutRef.current)
+    worldSyncTimeoutRef.current = window.setTimeout(() => {
+      worldSyncTimeoutRef.current = null
+      const channel = multiplayerChannelRef.current
+      if (!channel?.sendWorldState) return
+      channel.sendWorldState(snapshot)
+      lastWorldSyncPayloadRef.current = payload
+    }, 120)
+
+    return () => {
+      if (worldSyncTimeoutRef.current) {
+        window.clearTimeout(worldSyncTimeoutRef.current)
+        worldSyncTimeoutRef.current = null
+      }
+    }
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+
+  useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
 
     const onKeyDown = (event) => {
@@ -6558,6 +6585,8 @@ function App() {
     coins,
     ownedSkins,
     selectedSkinId,
+    roomLightOn,
+    lightColor,
     ownedFloorSkins,
     ownedWallSkins,
     selectedFloorSkinId,
@@ -6573,6 +6602,8 @@ function App() {
     setOwnedSkins(['classic'])
     setSelectedSkinId('classic')
     setPreviewSkinId('classic')
+    setRoomLightOn(true)
+    setLightColor('#ffffff')
     setOwnedFloorSkins(['floor-classic'])
     setOwnedWallSkins(['wall-classic'])
     setSelectedFloorSkinId('floor-classic')
@@ -6606,6 +6637,8 @@ function App() {
       setSelectedSkinId(parsed.selectedSkinId)
       setPreviewSkinId(parsed.selectedSkinId)
     }
+    if (typeof parsed.roomLightOn === 'boolean') setRoomLightOn(parsed.roomLightOn)
+    if (typeof parsed.lightColor === 'string') setLightColor(parsed.lightColor)
 
     const validFloorSkinIds = new Set(floorSkins.map((skin) => skin.id))
     const validWallSkinIds = new Set(wallSkins.map((skin) => skin.id))
@@ -6742,7 +6775,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -6874,6 +6907,8 @@ function App() {
     multiplayerChannelRef.current = null
     remotePlayerStateRef.current = null
     remoteBallStateRef.current = null
+    lastRemoteWorldSeqRef.current = -1
+    if (multiplayerRole !== 'host') lastWorldSyncPayloadRef.current = ''
     clearChatBubbles()
     if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
     setSessionConnectionState('idle')
@@ -6900,6 +6935,14 @@ function App() {
         setHasRemotePlayer(false)
       }
     }
+    const applyRemoteWorldState = (message) => {
+      if (multiplayerRole !== 'guest') return
+      const seq = Number.isFinite(message?.seq) ? message.seq : Date.now()
+      if (seq <= lastRemoteWorldSeqRef.current) return
+      if (!message?.snapshot) return
+      lastRemoteWorldSeqRef.current = seq
+      applyProgressSnapshot(message.snapshot, { includeCoins: false })
+    }
 
     const connectFallbackSupabase = () => {
       const channel = connectMultiplayerSession({
@@ -6912,6 +6955,7 @@ function App() {
           if (payload?.impulse) guestKickQueueRef.current.push(payload)
         },
         onChatMessage: (payload) => addChatBubble('remote', payload),
+        onWorldState: applyRemoteWorldState,
         onStatusChange: setSessionConnectionState,
         onHostTimeOffsetChange: (offset) => {
           hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
@@ -6941,6 +6985,7 @@ function App() {
         if (payload?.impulse) guestKickQueueRef.current.push(payload)
       },
       onChatMessage: (payload) => addChatBubble('remote', payload),
+      onWorldState: applyRemoteWorldState,
       onPlayerLeft: () => {
         clearRemoteState()
         setMultiplayerMessage('Le joueur distant a quitte la visite.')
@@ -7060,7 +7105,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {

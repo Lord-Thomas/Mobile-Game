@@ -158,6 +158,7 @@ export function connectMultiplayerSession({
   onRemoteBallState,
   onGuestKick,
   onChatMessage,
+  onWorldState,
   onSessionEnded,
   onStatusChange,
   onHostTimeOffsetChange,
@@ -169,6 +170,7 @@ export function connectMultiplayerSession({
       sendBallState: async () => false,
       sendGuestKick: async () => false,
       sendChatMessage: async () => false,
+      sendWorldState: async () => false,
       sendSessionEnded: async () => false,
     }
   }
@@ -208,6 +210,9 @@ export function connectMultiplayerSession({
     })
     .on('broadcast', { event: 'chat-message' }, ({ payload }) => {
       if (payload?.userId !== userId) onChatMessage?.(payload)
+    })
+    .on('broadcast', { event: 'world-state' }, ({ payload }) => {
+      if (role === 'guest' && payload?.userId !== userId) onWorldState?.(payload)
     })
     .on('broadcast', { event: 'time-ping' }, ({ payload }) => {
       if (role !== 'host' || !payload?.pingId) return
@@ -288,6 +293,17 @@ export function connectMultiplayerSession({
           userId,
           role,
           text,
+          sentAt: Date.now(),
+        },
+      }),
+    sendWorldState: (snapshot) =>
+      sendWhenReady({
+        type: 'broadcast',
+        event: 'world-state',
+        payload: {
+          userId,
+          role,
+          snapshot,
           sentAt: Date.now(),
         },
       }),

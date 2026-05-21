@@ -82,6 +82,8 @@ export class VisitRoom extends Room {
     this.pendingBallState = null
     this.lastBallBroadcastAt = 0
     this.chatSeq = 0
+    this.worldSeq = 0
+    this.latestWorldState = null
 
     this.setMetadata({
       sessionId: this.sessionId,
@@ -95,6 +97,7 @@ export class VisitRoom extends Room {
     this.onMessage('ball-state', (client, message) => this.handleBallState(client, message))
     this.onMessage('guest-kick', (client, message) => this.handleGuestKick(client, message))
     this.onMessage('chat-message', (client, message) => this.handleChatMessage(client, message))
+    this.onMessage('world-state', (client, message) => this.handleWorldState(client, message))
     this.onMessage('time-ping', (client, message) => {
       client.send('time-pong', {
         pingId: message?.pingId,
@@ -138,6 +141,10 @@ export class VisitRoom extends Room {
       role,
       serverTime: now(),
     }, { except: client })
+
+    if (role === 'guest' && this.latestWorldState) {
+      client.send('world-state', this.latestWorldState)
+    }
   }
 
   onLeave(client) {
@@ -212,6 +219,22 @@ export class VisitRoom extends Room {
       role: player.role,
       text,
     })
+  }
+
+  handleWorldState(client, message) {
+    const player = this.players.get(client.sessionId)
+    if (player?.role !== 'host' || !message?.snapshot || typeof message.snapshot !== 'object') return
+
+    this.worldSeq += 1
+    this.latestWorldState = {
+      seq: this.worldSeq,
+      serverTime: now(),
+      userId: player.userId,
+      sessionId: client.sessionId,
+      snapshot: message.snapshot,
+    }
+
+    this.broadcast('world-state', this.latestWorldState, { except: client })
   }
 
   flushNetworkState() {
