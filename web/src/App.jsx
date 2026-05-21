@@ -42,7 +42,7 @@ const RENDER_SCALE_STEP = 0.05
 const BASE_CAMERA_VERTICAL_FOV = 52
 const MAX_CAMERA_HORIZONTAL_FOV = 72
 const MULTIPLAYER_INTERP_DELAY_MS = 120
-const MULTIPLAYER_PLAYER_SEND_INTERVAL = 1 / 15
+const MULTIPLAYER_PLAYER_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_ACTIVE_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL = 1 / 5
 const MULTIPLAYER_MAX_EXTRAPOLATION_MS = 180
@@ -2334,11 +2334,13 @@ function PlayerAvatar({ motion }) {
 
 function RemotePlayer({ state, label = 'Visiteur' }) {
   const groupRef = useRef(null)
-  const samplesRef = useRef([])
   const lastSeqRef = useRef(-1)
-  const lastRenderedRef = useRef({
+  const targetRef = useRef({
     position: state?.position ?? [0, PLAYER_HEIGHT, 2.2],
     rotationY: state?.rotationY ?? 0,
+    velocity: [0, 0, 0],
+    receivedAt: Date.now(),
+    motion: state?.motion ?? 'idle',
   })
 
   useEffect(() => {
@@ -2346,74 +2348,42 @@ function RemotePlayer({ state, label = 'Visiteur' }) {
     const seq = state.seq ?? 0
     if (seq <= lastSeqRef.current) return
     lastSeqRef.current = seq
-    const sample = {
+    targetRef.current = {
       position: state.position,
       rotationY: Number.isFinite(state.rotationY) ? state.rotationY : 0,
       velocity: Array.isArray(state.velocity) ? state.velocity : [0, 0, 0],
       motion: state.motion || 'idle',
-      sentAt: state.hostTime ?? state.sentAt ?? Date.now(),
+      receivedAt: Date.now(),
     }
-    const samples = samplesRef.current
-    samples.push(sample)
-    samples.sort((left, right) => left.sentAt - right.sentAt)
-    if (samples.length > 12) samples.splice(0, samples.length - 12)
   }, [state])
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const group = groupRef.current
     if (!group) return
-    const samples = samplesRef.current
-    if (!samples.length) return
-
-    const renderAt = Date.now() - MULTIPLAYER_INTERP_DELAY_MS
-    while (samples.length > 2 && samples[1].sentAt <= renderAt) {
-      samples.shift()
-    }
-
-    const previous = samples[0]
-    const next = samples[1]
-    let x = previous.position[0]
-    let y = previous.position[1]
-    let z = previous.position[2]
-    let rotationY = previous.rotationY
-
-    if (next) {
-      const span = Math.max(1, next.sentAt - previous.sentAt)
-      const alpha = MathUtils.clamp((renderAt - previous.sentAt) / span, 0, 1)
-      x = MathUtils.lerp(previous.position[0], next.position[0], alpha)
-      y = MathUtils.lerp(previous.position[1], next.position[1], alpha)
-      z = MathUtils.lerp(previous.position[2], next.position[2], alpha)
-      const rotationDelta = MathUtils.euclideanModulo(next.rotationY - previous.rotationY + Math.PI, Math.PI * 2) - Math.PI
-      rotationY = previous.rotationY + rotationDelta * alpha
-    } else {
-      const extrapolateMs = MathUtils.clamp(renderAt - previous.sentAt, 0, MULTIPLAYER_MAX_EXTRAPOLATION_MS)
-      const extrapolateSeconds = extrapolateMs / 1000
-      x += (previous.velocity?.[0] ?? 0) * extrapolateSeconds
-      y += (previous.velocity?.[1] ?? 0) * extrapolateSeconds
-      z += (previous.velocity?.[2] ?? 0) * extrapolateSeconds
-    }
+    const target = targetRef.current
+    const ageSeconds = MathUtils.clamp((Date.now() - target.receivedAt) / 1000, 0, MULTIPLAYER_MAX_EXTRAPOLATION_MS / 1000)
+    const leadSeconds = Math.min(ageSeconds + 0.06, 0.16)
+    const x = target.position[0] + (target.velocity?.[0] ?? 0) * leadSeconds
+    const y = target.position[1] + (target.velocity?.[1] ?? 0) * leadSeconds
+    const z = target.position[2] + (target.velocity?.[2] ?? 0) * leadSeconds
+    const rotationY = target.rotationY
 
     const distance = Math.hypot(group.position.x - x, group.position.y - y, group.position.z - z)
     if (distance > 4) {
       group.position.set(x, y, z)
     } else {
-      group.position.x = MathUtils.lerp(group.position.x, x, 0.72)
-      group.position.y = MathUtils.lerp(group.position.y, y, 0.72)
-      group.position.z = MathUtils.lerp(group.position.z, z, 0.72)
+      group.position.x = MathUtils.damp(group.position.x, x, 10, delta)
+      group.position.y = MathUtils.damp(group.position.y, y, 10, delta)
+      group.position.z = MathUtils.damp(group.position.z, z, 10, delta)
     }
-    group.rotation.y = dampAngle(group.rotation.y, rotationY, 20, 1 / 60)
-
-    lastRenderedRef.current = {
-      position: [x, y, z],
-      rotationY,
-    }
+    group.rotation.y = dampAngle(group.rotation.y, rotationY, 12, delta)
   })
 
   if (!state?.position) return null
 
   return (
     <group ref={groupRef} position={state.position} rotation={[0, state.rotationY ?? 0, 0]}>
-      <PlayerAvatar motion={state.motion || samplesRef.current.at(-1)?.motion || 'idle'} />
+      <PlayerAvatar motion={state.motion || targetRef.current.motion || 'idle'} />
       <Html position={[0, 1.65, 0]} center distanceFactor={8} occlude>
         <div className="remote-player-label">{label}</div>
       </Html>
