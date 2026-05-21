@@ -42,7 +42,7 @@ const FPS_SAMPLE_WINDOW_SECONDS = 2
 const RENDER_SCALE_STEP = 0.05
 const BASE_CAMERA_VERTICAL_FOV = 52
 const MAX_CAMERA_HORIZONTAL_FOV = 72
-const MULTIPLAYER_INTERP_DELAY_MS = 120
+const MULTIPLAYER_INTERP_DELAY_MS = 150
 const MULTIPLAYER_PLAYER_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_ACTIVE_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL = 1 / 5
@@ -2350,6 +2350,14 @@ function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTim
     motion: state?.motion ?? 'idle',
   })
 
+  // Initialize group position imperatively on mount so R3F never resets it via JSX props on re-renders
+  useLayoutEffect(() => {
+    const group = groupRef.current
+    if (!group || !state?.position) return
+    group.position.fromArray(state.position)
+    group.rotation.y = state.rotationY ?? 0
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!state?.position) return
     const seq = state.seq ?? 0
@@ -2397,9 +2405,19 @@ function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTim
       if (next) {
         const span = Math.max(1, next.time - previous.time)
         const alpha = MathUtils.clamp((renderAt - previous.time) / span, 0, 1)
-        x = MathUtils.lerp(previous.position[0], next.position[0], alpha)
-        y = MathUtils.lerp(previous.position[1], next.position[1], alpha)
-        z = MathUtils.lerp(previous.position[2], next.position[2], alpha)
+        // Hermite cubic spline: uses velocity at both endpoints for smooth curves
+        const spanSec = span / 1000
+        const a2 = alpha * alpha
+        const a3 = a2 * alpha
+        const h00 = 2 * a3 - 3 * a2 + 1
+        const h10 = a3 - 2 * a2 + alpha
+        const h01 = -2 * a3 + 3 * a2
+        const h11 = a3 - a2
+        const v0 = previous.velocity
+        const v1 = next.velocity
+        x = h00 * previous.position[0] + h10 * v0[0] * spanSec + h01 * next.position[0] + h11 * v1[0] * spanSec
+        y = h00 * previous.position[1] + h10 * v0[1] * spanSec + h01 * next.position[1] + h11 * v1[1] * spanSec
+        z = h00 * previous.position[2] + h10 * v0[2] * spanSec + h01 * next.position[2] + h11 * v1[2] * spanSec
         const rotationDelta = MathUtils.euclideanModulo(next.rotationY - previous.rotationY + Math.PI, Math.PI * 2) - Math.PI
         rotationY = previous.rotationY + rotationDelta * alpha
       } else {
@@ -2445,7 +2463,7 @@ function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTim
   if (!state?.position) return null
 
   return (
-    <group ref={groupRef} position={state.position} rotation={[0, state.rotationY ?? 0, 0]}>
+    <group ref={groupRef}>
       <PlayerAvatar motion={displayedMotionRef.current || 'idle'} />
       <Html position={[0, 1.65, 0]} center distanceFactor={8} occlude>
         <div className="remote-player-label">{label}</div>
@@ -2942,7 +2960,6 @@ function MultiplayerBridge({
   const ballSeqRef = useRef(0)
   const guestKickSeqRef = useRef(0)
   const lastRemoteBallSeqRef = useRef(-1)
-  const appliedRemoteBallAtRef = useRef(0)
 
   useFrame(({ clock }) => {
     const channel = channelRef.current
@@ -2999,8 +3016,7 @@ function MultiplayerBridge({
 
     if (
       role === 'guest' &&
-      remoteBallState?.sentAt &&
-      remoteBallState.sentAt !== appliedRemoteBallAtRef.current &&
+      remoteBallState?.position &&
       (remoteBallState.seq ?? 0) > lastRemoteBallSeqRef.current
     ) {
       const [x, y, z] = remoteBallState.position ?? []
@@ -3032,7 +3048,6 @@ function MultiplayerBridge({
           z: MathUtils.lerp(localAngularVelocity.z, az, 0.35),
         }, true)
       }
-      appliedRemoteBallAtRef.current = remoteBallState.sentAt
       lastRemoteBallSeqRef.current = remoteBallState.seq ?? lastRemoteBallSeqRef.current
     }
 

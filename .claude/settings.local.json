@@ -10,7 +10,10 @@
       "Bash(copy \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\Modèles a classer\\\\Cat-magic.glb\" \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\web\\\\public\\\\models\\\\cat.glb\")",
       "PowerShell(Copy-Item \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\Mod�les a classer\\\\Cat-magic.glb\" \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\\\\web\\\\public\\\\models\\\\cat.glb\")",
       "Bash(npm run *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(xargs grep -l \"player.*state\\\\|sync\\\\|network\\\\|broadcast\\\\|channel\")",
+      "Bash(xargs grep -l \"MultiplayerPanel\\\\|MultiplayerUI\\\\|remotePlayerState\")",
+      "Bash(xargs wc -l)"
     ]
   }
 }
