@@ -5868,7 +5868,7 @@ function isWeakRenderer(rendererInfo) {
   ].some((pattern) => value.includes(pattern))
 }
 
-function RenderStatsProbe({ onStatsChange, onRendererInfo }) {
+function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
   const { gl, scene } = useThree()
   const elapsedRef = useRef(0)
   const framesRef = useRef(0)
@@ -5880,6 +5880,8 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo }) {
   }, [gl, onRendererInfo])
 
   useFrame((_, delta) => {
+    if (!active) return
+
     const frameTimeMs = delta * 1000
     elapsedRef.current += delta
     framesRef.current += 1
@@ -7284,7 +7286,7 @@ function App() {
       >
         <AdaptiveCameraFov />
         <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
-        <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} />
+        <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode} />
         <MultiplayerBridge
           channelRef={multiplayerChannelRef}
           role={multiplayerRole}
