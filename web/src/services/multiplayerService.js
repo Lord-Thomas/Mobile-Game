@@ -135,6 +135,7 @@ export function connectMultiplayerSession({
   onRemotePlayerState,
   onRemoteBallState,
   onGuestKick,
+  onChatMessage,
   onSessionEnded,
   onStatusChange,
   onHostTimeOffsetChange,
@@ -145,6 +146,7 @@ export function connectMultiplayerSession({
       sendPlayerState: async () => false,
       sendBallState: async () => false,
       sendGuestKick: async () => false,
+      sendChatMessage: async () => false,
       sendSessionEnded: async () => false,
     }
   }
@@ -181,6 +183,9 @@ export function connectMultiplayerSession({
     })
     .on('broadcast', { event: 'guest-kick' }, ({ payload }) => {
       if (role === 'host' && payload?.userId !== userId) onGuestKick?.(payload)
+    })
+    .on('broadcast', { event: 'chat-message' }, ({ payload }) => {
+      if (payload?.userId !== userId) onChatMessage?.(payload)
     })
     .on('broadcast', { event: 'time-ping' }, ({ payload }) => {
       if (role !== 'host' || !payload?.pingId) return
@@ -252,6 +257,18 @@ export function connectMultiplayerSession({
       sendWhenReady({ type: 'broadcast', event: 'ball-state', payload }),
     sendGuestKick: (payload) =>
       sendWhenReady({ type: 'broadcast', event: 'guest-kick', payload: { ...payload, userId } }),
+    sendChatMessage: (text) =>
+      sendWhenReady({
+        type: 'broadcast',
+        event: 'chat-message',
+        payload: {
+          id: `${userId}-${Date.now()}`,
+          userId,
+          role,
+          text,
+          sentAt: Date.now(),
+        },
+      }),
     sendSessionEnded: (payload) =>
       sendWhenReady({ type: 'broadcast', event: 'session-ended', payload }),
   }

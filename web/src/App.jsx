@@ -49,6 +49,9 @@ const MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL = 1 / 5
 const MULTIPLAYER_MAX_EXTRAPOLATION_MS = 180
 const MULTIPLAYER_REMOTE_SNAP_DISTANCE = 4
 const MULTIPLAYER_REMOTE_VISUAL_SMOOTHING = 10
+const CHAT_BUBBLE_LIFETIME_MS = 5600
+const CHAT_MAX_LENGTH = 120
+const CHAT_MAX_VISIBLE_BUBBLES = 4
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -474,6 +477,14 @@ function getKeyboardKey(event) {
   return event.code.toLowerCase()
 }
 
+function isTextInputEvent(event) {
+  const target = event?.target
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+  )
+}
+
 function clampCameraInPlayableVolume(x, y, z, currentZone = ZONES.interior) {
   const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
   const settings = CAMERA_SETTINGS[currentZone] ?? CAMERA_SETTINGS.interior
@@ -549,7 +560,20 @@ function useKeyboardInput() {
   })
 
   useEffect(() => {
+    const resetKeys = () => {
+      keysRef.current.forward = false
+      keysRef.current.back = false
+      keysRef.current.left = false
+      keysRef.current.right = false
+      keysRef.current.actionQueued = false
+    }
+
     const onKeyDown = (event) => {
+      if (isTextInputEvent(event)) {
+        resetKeys()
+        return
+      }
+
       const key = getKeyboardKey(event)
 
       if (key === 'z' || key === 'arrowup' || key === 'w') keysRef.current.forward = true
@@ -557,13 +581,18 @@ function useKeyboardInput() {
       if (key === 'q' || key === 'arrowleft' || key === 'a') keysRef.current.left = true
       if (key === 'd' || key === 'arrowright') keysRef.current.right = true
 
-      if (key === ' ') {
+      if (key === ' ' || key === 'space') {
         event.preventDefault()
         keysRef.current.actionQueued = true
       }
     }
 
     const onKeyUp = (event) => {
+      if (isTextInputEvent(event)) {
+        resetKeys()
+        return
+      }
+
       const key = getKeyboardKey(event)
 
       if (key === 'z' || key === 'arrowup' || key === 'w') keysRef.current.forward = false
@@ -2335,7 +2364,41 @@ function PlayerAvatar({ motion }) {
   )
 }
 
-function RemotePlayer({ stateRef, label = 'Visiteur', transport = 'none', serverTimeOffsetRef = null }) {
+function ChatBubbles({ bubblesRef, version = 0 }) {
+  const bubbles = bubblesRef.current
+  if (!bubbles.length) return null
+
+  return (
+    <Html position={[0, 1.08, 0]} distanceFactor={8} zIndexRange={[80, 0]}>
+      <div className="chat-bubble-stack" data-version={version}>
+        {bubbles.map((bubble) => (
+          <div key={bubble.id} className="chat-bubble">
+            {bubble.text}
+          </div>
+        ))}
+      </div>
+    </Html>
+  )
+}
+
+function PlayerChatAnchor({ playerPositionRef, bubblesRef, version }) {
+  const groupRef = useRef(null)
+
+  useFrame(() => {
+    const group = groupRef.current
+    const position = playerPositionRef.current
+    if (!group || !position) return
+    group.position.set(position.x, position.y, position.z)
+  })
+
+  return (
+    <group ref={groupRef}>
+      <ChatBubbles bubblesRef={bubblesRef} version={version} />
+    </group>
+  )
+}
+
+function RemotePlayer({ stateRef, label = 'Visiteur', transport = 'none', serverTimeOffsetRef = null, chatBubblesRef = null, chatVersion = 0 }) {
   const groupRef = useRef(null)
   const samplesRef = useRef([])
   const lastSeqRef = useRef(-1)
@@ -2463,6 +2526,7 @@ function RemotePlayer({ stateRef, label = 'Visiteur', transport = 'none', server
       <Html position={[0, 1.65, 0]} center distanceFactor={8}>
         <div className="remote-player-label">{label}</div>
       </Html>
+      {chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
     </group>
   )
 }
@@ -2925,6 +2989,48 @@ function MultiplayerPanel({
         </div>
       )}
     </div>
+  )
+}
+
+function GameChatPanel({
+  open,
+  value,
+  disabled,
+  onOpen,
+  onClose,
+  onChange,
+  onFocus,
+  onSubmit,
+}) {
+  if (!open) {
+    return (
+      <button className="game-chat-toggle" type="button" onClick={onOpen}>
+        Chat
+      </button>
+    )
+  }
+
+  return (
+    <form className="game-chat-panel" onSubmit={onSubmit}>
+      <input
+        type="text"
+        value={value}
+        maxLength={CHAT_MAX_LENGTH}
+        placeholder="Message..."
+        aria-label="Message de chat"
+        autoFocus
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={onFocus}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === 'Escape') onClose()
+        }}
+        onKeyUp={(event) => event.stopPropagation()}
+      />
+      <button type="submit" disabled={disabled || !value.trim()}>
+        Envoyer
+      </button>
+    </form>
   )
 }
 
@@ -6203,15 +6309,54 @@ function App() {
   // Refs instead of state: network updates 20x/sec must not trigger React re-renders
   const remotePlayerStateRef = useRef(null)
   const remoteBallStateRef = useRef(null)
+  const localChatBubblesRef = useRef([])
+  const remoteChatBubblesRef = useRef([])
+  const chatBubbleTimersRef = useRef(new Map())
+  const chatBubbleIdRef = useRef(0)
+  const [chatBubbleVersion, setChatBubbleVersion] = useState(0)
   const [hasRemotePlayer, setHasRemotePlayer] = useState(false)
   const hasRemotePlayerRef = useRef(false)
   const [sessionConnectionState, setSessionConnectionState] = useState('idle')
   const [sessionTransport, setSessionTransport] = useState('none')
   const [multiplayerMessage, setMultiplayerMessage] = useState('')
+  const [chatInput, setChatInput] = useState('')
+  const [isGameChatOpen, setIsGameChatOpen] = useState(false)
   const isGuestVisit = multiplayerRole === 'guest'
   const isHostVisit = multiplayerRole === 'host'
   const isMultiplayerSession = multiplayerRole !== 'solo'
   const canModifyWorld = !isGuestVisit && !isHostVisit
+
+  const clearChatBubbles = useCallback(() => {
+    chatBubbleTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
+    chatBubbleTimersRef.current.clear()
+    localChatBubblesRef.current = []
+    remoteChatBubblesRef.current = []
+    setChatBubbleVersion((version) => version + 1)
+  }, [])
+
+  const addChatBubble = useCallback((target, message) => {
+    const text = typeof message?.text === 'string'
+      ? message.text.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_LENGTH)
+      : ''
+    if (!text) return
+
+    const bubblesRef = target === 'remote' ? remoteChatBubblesRef : localChatBubblesRef
+    const id = message?.id ?? `${target}-${chatBubbleIdRef.current++}`
+    const bubble = { id, text }
+    bubblesRef.current = [...bubblesRef.current, bubble].slice(-CHAT_MAX_VISIBLE_BUBBLES)
+    setChatBubbleVersion((version) => version + 1)
+
+    const timerId = window.setTimeout(() => {
+      bubblesRef.current = bubblesRef.current.filter((current) => current.id !== id)
+      chatBubbleTimersRef.current.delete(id)
+      setChatBubbleVersion((version) => version + 1)
+    }, CHAT_BUBBLE_LIFETIME_MS)
+    chatBubbleTimersRef.current.set(id, timerId)
+  }, [])
+
+  useEffect(() => {
+    return () => clearChatBubbles()
+  }, [clearChatBubbles])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -6487,6 +6632,7 @@ function App() {
         setMultiplayerSession(null)
         remotePlayerStateRef.current = null
         remoteBallStateRef.current = null
+        clearChatBubbles()
         if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
         setSessionConnectionState('idle')
         if (authUserRef.current) {
@@ -6504,13 +6650,14 @@ function App() {
       connection.disconnect()
       if (onlinePresenceRef.current === connection) onlinePresenceRef.current = null
     }
-  }, [authUser, displayName, multiplayerRole, progressScope])
+  }, [authUser, clearChatBubbles, displayName, multiplayerRole, progressScope])
 
   useEffect(() => {
     multiplayerChannelRef.current?.disconnect()
     multiplayerChannelRef.current = null
     remotePlayerStateRef.current = null
     remoteBallStateRef.current = null
+    clearChatBubbles()
     if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
     setSessionConnectionState('idle')
     setSessionTransport('none')
@@ -6547,6 +6694,7 @@ function App() {
         onGuestKick: (payload) => {
           if (payload?.impulse) guestKickQueueRef.current.push(payload)
         },
+        onChatMessage: (payload) => addChatBubble('remote', payload),
         onStatusChange: setSessionConnectionState,
         onHostTimeOffsetChange: (offset) => {
           hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
@@ -6575,6 +6723,7 @@ function App() {
       onGuestKick: (payload) => {
         if (payload?.impulse) guestKickQueueRef.current.push(payload)
       },
+      onChatMessage: (payload) => addChatBubble('remote', payload),
       onPlayerLeft: () => {
         clearRemoteState()
         setMultiplayerMessage('Le joueur distant a quitte la visite.')
@@ -6610,7 +6759,7 @@ function App() {
       activeChannel?.disconnect()
       if (multiplayerChannelRef.current === activeChannel) multiplayerChannelRef.current = null
     }
-  }, [authUser, displayName, multiplayerRole, multiplayerSession])
+  }, [addChatBubble, authUser, clearChatBubbles, displayName, multiplayerRole, multiplayerSession])
 
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined
@@ -7217,6 +7366,7 @@ function App() {
     setMultiplayerSession(null)
     remotePlayerStateRef.current = null
     remoteBallStateRef.current = null
+    clearChatBubbles()
     if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
     setIncomingVisitRequest(null)
     setOutgoingVisitRequest(null)
@@ -7228,6 +7378,28 @@ function App() {
         if (ownProgress) applyProgressSnapshot(ownProgress)
       } catch {}
     }
+  }
+
+  const submitChatMessage = (event) => {
+    event.preventDefault()
+    if (!isMultiplayerSession) return
+
+    const text = chatInput.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_LENGTH)
+    if (!text) return
+
+    addChatBubble('local', { text })
+    multiplayerChannelRef.current?.sendChatMessage?.(text)
+    setChatInput('')
+  }
+
+  const pausePlayerControlsForChat = () => {
+    touchRef.current.moveX = 0
+    touchRef.current.moveY = 0
+    touchRef.current.lookX = 0
+    touchRef.current.lookY = 0
+    touchRef.current.lookActive = false
+    touchRef.current.actionQueued = false
+    touchRef.current.emoteQueued = null
   }
 
   const requestAccountSubmit = async (event) => {
@@ -7355,6 +7527,15 @@ function App() {
             label={multiplayerRole === 'host' ? multiplayerSession?.guestDisplayName : multiplayerSession?.hostDisplayName}
             transport={sessionTransport}
             serverTimeOffsetRef={hostTimeOffsetRef}
+            chatBubblesRef={remoteChatBubblesRef}
+            chatVersion={chatBubbleVersion}
+          />
+        )}
+        {isMultiplayerSession && (
+          <PlayerChatAnchor
+            playerPositionRef={playerPositionRef}
+            bubblesRef={localChatBubblesRef}
+            version={chatBubbleVersion}
           />
         )}
         <Physics gravity={[0, -9.81, 0]}>
@@ -7519,6 +7700,18 @@ function App() {
           onAcceptRequest={acceptVisitRequest}
           onRejectRequest={rejectVisitRequest}
           onLeaveSession={leaveMultiplayerSession}
+        />
+      )}
+      {showCaptureUi && isMultiplayerSession && (
+        <GameChatPanel
+          open={isGameChatOpen}
+          value={chatInput}
+          disabled={sessionConnectionState !== 'connected'}
+          onOpen={() => setIsGameChatOpen(true)}
+          onClose={() => setIsGameChatOpen(false)}
+          onChange={setChatInput}
+          onFocus={pausePlayerControlsForChat}
+          onSubmit={submitChatMessage}
         />
       )}
       {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (

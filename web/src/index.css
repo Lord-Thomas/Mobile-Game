@@ -642,6 +642,128 @@ canvas {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
 }
 
+.chat-bubble-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: min(220px, 72vw);
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.chat-bubble {
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid rgba(6, 17, 28, 0.12);
+  border-radius: 12px;
+  color: #06111c;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+  animation: chat-bubble-life 5.6s ease-out forwards;
+}
+
+@keyframes chat-bubble-life {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+
+  8%,
+  78% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+}
+
+.game-chat-toggle,
+.game-chat-panel {
+  position: absolute;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 12;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.game-chat-toggle {
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 0 16px;
+  color: #edf7ff;
+  background: rgba(8, 12, 20, 0.78);
+  font: inherit;
+  font-weight: 900;
+  backdrop-filter: blur(12px);
+}
+
+.game-chat-panel {
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  background: rgba(8, 12, 20, 0.88);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px);
+}
+
+.game-chat-panel input {
+  min-width: 0;
+  flex: 1;
+  height: 38px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 11px;
+  padding: 0 11px;
+  color: #f8fbff;
+  background: rgba(255, 255, 255, 0.1);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+.game-chat-panel input::placeholder {
+  color: rgba(237, 247, 255, 0.58);
+}
+
+.game-chat-panel button {
+  flex: 0 0 auto;
+  height: 38px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 11px;
+  padding: 0 10px;
+  color: #06111c;
+  background: #9fd6ff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.game-chat-panel button:disabled {
+  opacity: 0.5;
+}
+
 .score-bursts {
   position: absolute;
   left: 50%;

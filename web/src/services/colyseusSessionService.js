@@ -19,6 +19,7 @@ export async function connectColyseusVisitSession({
   onRemotePlayerState,
   onRemoteBallState,
   onGuestKick,
+  onChatMessage,
   onPlayerLeft,
   onStatusChange,
   onServerTimeOffsetChange,
@@ -55,6 +56,9 @@ export async function connectColyseusVisitSession({
   room.onMessage('player-state', (message) => onRemotePlayerState?.(message))
   room.onMessage('ball-state', (message) => onRemoteBallState?.(message))
   room.onMessage('guest-kick', (message) => onGuestKick?.(message))
+  room.onMessage('chat-message', (message) => {
+    if (message?.userId !== user.id) onChatMessage?.(message)
+  })
   room.onMessage('player-left', (message) => onPlayerLeft?.(message))
   room.onLeave(() => onStatusChange?.('closed'))
   room.onError(() => onStatusChange?.('error'))
@@ -70,6 +74,7 @@ export async function connectColyseusVisitSession({
     sendPlayerState: (payload) => room.send('player-state', payload),
     sendBallState: (payload) => room.send('ball-state', payload),
     sendGuestKick: (payload) => room.send('guest-kick', payload),
+    sendChatMessage: (text) => room.send('chat-message', { text }),
     sendSessionEnded: () => room.leave(true),
   }
 }

@@ -5,6 +5,7 @@ const PLAYER_STATE_INTERVAL_MS = 50
 const PLAYER_ACTIVE_GRACE_MS = 220
 const BALL_ACTIVE_INTERVAL_MS = 50
 const BALL_IDLE_INTERVAL_MS = 200
+const CHAT_MAX_LENGTH = 120
 
 function now() {
   return Date.now()
@@ -65,6 +66,11 @@ function sanitizeImpulse(message) {
   }
 }
 
+function sanitizeChatText(message) {
+  if (typeof message?.text !== 'string') return ''
+  return message.text.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_LENGTH)
+}
+
 export class VisitRoom extends Room {
   maxClients = MAX_CLIENTS
 
@@ -75,6 +81,7 @@ export class VisitRoom extends Room {
     this.ballState = null
     this.pendingBallState = null
     this.lastBallBroadcastAt = 0
+    this.chatSeq = 0
 
     this.setMetadata({
       sessionId: this.sessionId,
@@ -87,6 +94,7 @@ export class VisitRoom extends Room {
     this.onMessage('player-state', (client, message) => this.handlePlayerState(client, message))
     this.onMessage('ball-state', (client, message) => this.handleBallState(client, message))
     this.onMessage('guest-kick', (client, message) => this.handleGuestKick(client, message))
+    this.onMessage('chat-message', (client, message) => this.handleChatMessage(client, message))
     this.onMessage('time-ping', (client, message) => {
       client.send('time-pong', {
         pingId: message?.pingId,
@@ -183,6 +191,26 @@ export class VisitRoom extends Room {
       userId: player.userId,
       impulse,
       kind: message?.kind === 'body-push' ? 'body-push' : 'kick',
+    })
+  }
+
+  handleChatMessage(client, message) {
+    const player = this.players.get(client.sessionId)
+    if (!player) return
+
+    const text = sanitizeChatText(message)
+    if (!text) return
+
+    this.chatSeq += 1
+    this.broadcast('chat-message', {
+      id: `${this.roomId}-${this.chatSeq}`,
+      seq: this.chatSeq,
+      serverTime: now(),
+      userId: player.userId,
+      sessionId: client.sessionId,
+      displayName: player.displayName,
+      role: player.role,
+      text,
     })
   }
 
