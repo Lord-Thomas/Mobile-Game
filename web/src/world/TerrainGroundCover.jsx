@@ -456,6 +456,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   // 4 quadrant instancedMeshes — each has a correct bounding box so Three.js can
   // frustum-cull entire quadrants that fall outside the camera view (4 draw calls).
   const grassMeshRefs = useRef([null, null, null, null])
+  // Quadrant bounding spheres stored so we can re-apply them after each GPU write.
+  // Three.js r175+ uses mesh.boundingSphere in priority over geometry.boundingSphere,
+  // and may auto-recompute it from newly added instances only → wrong frustum culling.
+  const grassQuadrantSpheresRef = useRef(null)
   const shaderRef = useRef(null)
   const writtenChunkKeysRefs = useRef([new Set(), new Set(), new Set(), new Set()])
   const writtenDistantGrassRef = useRef(false)
@@ -474,15 +478,22 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
 
   // One geometry clone per quadrant — each carries its own bounding sphere so
   // Three.js frustum-culls correctly (the blade geometry alone is too small to cull by).
-  const grassGeometries = useMemo(() => QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
-    const geo = grassBaseGeometry.clone()
-    const cx = (minX + maxX) / 2
-    const cz = (minZ + maxZ) / 2
-    const radius = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 6
-    geo.boundingBox = new Box3(new Vector3(minX, -2, minZ), new Vector3(maxX, 5, maxZ))
-    geo.boundingSphere = new Sphere(new Vector3(cx, 1.5, cz), radius)
-    return geo
-  }), [grassBaseGeometry])
+  const grassGeometries = useMemo(() => {
+    const geos = QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
+      const geo = grassBaseGeometry.clone()
+      const cx = (minX + maxX) / 2
+      const cz = (minZ + maxZ) / 2
+      const radius = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 6
+      geo.boundingBox = new Box3(new Vector3(minX, -2, minZ), new Vector3(maxX, 5, maxZ))
+      geo.boundingSphere = new Sphere(new Vector3(cx, 1.5, cz), radius)
+      return geo
+    })
+    // Cache the quadrant spheres so writeChunkToGPU can re-apply them after partial uploads.
+    // Three.js r175+ may overwrite mesh.boundingSphere from newly added instances only,
+    // causing incorrect frustum culling. We always restore the full-quadrant sphere.
+    grassQuadrantSpheresRef.current = geos.map((geo) => geo.boundingSphere.clone())
+    return geos
+  }, [grassBaseGeometry])
 
   // One shared material for all 4 quadrants — single shader compilation, single uniform set.
   const grassMaterial = useMemo(() => {
@@ -505,7 +516,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     grassMeshRefs.current.forEach((mesh) => { if (mesh) mesh.count = 0 })
   }, [])
 
-  // Write a single chunk directly into the correct quadrant GPU buffer — no React state involved
+  // Write a single chunk directly into the correct quadrant GPU buffer — no React state involved.
+  // Uses addUpdateRange so Three.js only uploads the new portion to the GPU (not the full 22 MB buffer).
+  // After the partial upload we restore mesh.boundingSphere to the full quadrant sphere because
+  // Three.js r175+ may recompute it from the new instances only, causing incorrect frustum culling.
   const writeChunkToGPU = (key, items) => {
     const [cx, cz] = key.split(':').map(Number)
     const qi = getChunkQuadrantIndex(cx, cz)
@@ -529,6 +543,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
     }
     mesh.instanceMatrix.needsUpdate = true
+    // Restore the full-quadrant bounding sphere so frustum culling is never based on a subset
+    const sphere = grassQuadrantSpheresRef.current?.[qi]
+    if (sphere) mesh.boundingSphere = sphere
   }
 
   // Write all distant grass instances directly into quadrant GPU buffers — called once
@@ -558,6 +575,8 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
         mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
       }
       mesh.instanceMatrix.needsUpdate = true
+      const sphere = grassQuadrantSpheresRef.current?.[qi]
+      if (sphere) mesh.boundingSphere = sphere
     })
   }
 
