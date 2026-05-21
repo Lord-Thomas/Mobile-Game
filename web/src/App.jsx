@@ -8,6 +8,7 @@ import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, sh
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable } from './services/multiplayerService'
+import { connectColyseusVisitSession } from './services/colyseusSessionService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
@@ -2775,6 +2776,7 @@ function MultiplayerPanel({
   incomingRequest,
   outgoingRequest,
   sessionConnectionState,
+  sessionTransport,
   remotePlayerState,
   message,
   onToggle,
@@ -2805,6 +2807,7 @@ function MultiplayerPanel({
               <span>{role === 'guest' ? 'Mode visite: modification bloquee.' : 'La personnalisation est suspendue pendant la visite.'}</span>
               <span>
                 Canal: {sessionConnectionState === 'connected' ? 'connecte' : 'connexion...'}
+                {sessionTransport !== 'none' ? ` (${sessionTransport})` : ''}
                 {' / '}
                 Joueur distant: {remotePlayerState?.position ? 'recu' : 'en attente'}
               </span>
@@ -6125,6 +6128,7 @@ function App() {
   const [remotePlayerState, setRemotePlayerState] = useState(null)
   const [remoteBallState, setRemoteBallState] = useState(null)
   const [sessionConnectionState, setSessionConnectionState] = useState('idle')
+  const [sessionTransport, setSessionTransport] = useState('none')
   const [multiplayerMessage, setMultiplayerMessage] = useState('')
   const isGuestVisit = multiplayerRole === 'guest'
   const isHostVisit = multiplayerRole === 'host'
@@ -6429,39 +6433,86 @@ function App() {
     setRemotePlayerState(null)
     setRemoteBallState(null)
     setSessionConnectionState('idle')
+    setSessionTransport('none')
     guestKickQueueRef.current = []
 
     if (!multiplayerSession || multiplayerRole === 'solo' || !authUser) return undefined
 
-    const channel = connectMultiplayerSession({
-      sessionId: multiplayerSession.id,
-      userId: authUser.id,
+    let cancelled = false
+    let activeChannel = null
+
+    const connectFallbackSupabase = () => {
+      const channel = connectMultiplayerSession({
+        sessionId: multiplayerSession.id,
+        userId: authUser.id,
+        role: multiplayerRole,
+        onRemotePlayerState: setRemotePlayerState,
+        onRemoteBallState: setRemoteBallState,
+        onGuestKick: (payload) => {
+          if (payload?.impulse) guestKickQueueRef.current.push(payload)
+        },
+        onStatusChange: setSessionConnectionState,
+        onHostTimeOffsetChange: (offset) => {
+          hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
+        },
+        onSessionEnded: () => {
+          setMultiplayerRole('solo')
+          setMultiplayerSession(null)
+          setRemotePlayerState(null)
+          setRemoteBallState(null)
+          setSessionConnectionState('idle')
+          setSessionTransport('none')
+          setMultiplayerMessage('La visite est terminee.')
+        },
+      })
+      setSessionTransport('supabase')
+      return channel
+    }
+
+    setSessionConnectionState('connecting')
+    connectColyseusVisitSession({
+      session: multiplayerSession,
+      user: authUser,
       role: multiplayerRole,
+      displayName: displayName || authUser.email?.split('@')[0] || '',
       onRemotePlayerState: setRemotePlayerState,
       onRemoteBallState: setRemoteBallState,
       onGuestKick: (payload) => {
         if (payload?.impulse) guestKickQueueRef.current.push(payload)
       },
-      onStatusChange: setSessionConnectionState,
-      onHostTimeOffsetChange: (offset) => {
-        hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
-      },
-      onSessionEnded: () => {
-        setMultiplayerRole('solo')
-        setMultiplayerSession(null)
+      onPlayerLeft: () => {
         setRemotePlayerState(null)
-        setRemoteBallState(null)
-        setSessionConnectionState('idle')
-        setMultiplayerMessage('La visite est terminee.')
+        setMultiplayerMessage('Le joueur distant a quitte la visite.')
       },
+      onStatusChange: setSessionConnectionState,
     })
+      .then((channel) => {
+        if (cancelled) {
+          channel?.disconnect()
+          return
+        }
+        if (channel) {
+          activeChannel = channel
+          multiplayerChannelRef.current = channel
+          setSessionTransport('colyseus')
+          return
+        }
+        activeChannel = connectFallbackSupabase()
+        multiplayerChannelRef.current = activeChannel
+      })
+      .catch(() => {
+        if (cancelled) return
+        activeChannel = connectFallbackSupabase()
+        multiplayerChannelRef.current = activeChannel
+        setMultiplayerMessage('Colyseus indisponible: fallback Supabase actif.')
+      })
 
-    multiplayerChannelRef.current = channel
     return () => {
-      channel.disconnect()
-      if (multiplayerChannelRef.current === channel) multiplayerChannelRef.current = null
+      cancelled = true
+      activeChannel?.disconnect()
+      if (multiplayerChannelRef.current === activeChannel) multiplayerChannelRef.current = null
     }
-  }, [authUser, multiplayerRole, multiplayerSession])
+  }, [authUser, displayName, multiplayerRole, multiplayerSession])
 
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined
@@ -7357,6 +7408,7 @@ function App() {
           incomingRequest={incomingVisitRequest}
           outgoingRequest={outgoingVisitRequest}
           sessionConnectionState={sessionConnectionState}
+          sessionTransport={sessionTransport}
           remotePlayerState={remotePlayerState}
           message={multiplayerMessage}
           onToggle={() => setIsMultiplayerOpen((current) => !current)}
