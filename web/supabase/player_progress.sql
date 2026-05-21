@@ -96,3 +96,44 @@ end;
 $$;
 
 grant execute on function public.add_player_coins(integer, text) to authenticated;
+
+create or replace function public.get_player_visit_world(target_user_id uuid, requested_scope text default 'player')
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  safe_scope text := case when requested_scope = 'admin' then 'admin' else 'player' end;
+  progress_row public.player_progress%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+
+  select *
+  into progress_row
+  from public.player_progress
+  where user_id = target_user_id
+    and progress_scope = safe_scope;
+
+  if progress_row.user_id is null then
+    return null;
+  end if;
+
+  return jsonb_build_object(
+    'user_id', progress_row.user_id,
+    'progress_scope', progress_row.progress_scope,
+    'display_name', progress_row.display_name,
+    'coins', 0,
+    'inventory', progress_row.inventory,
+    'placed_decorations', progress_row.placed_decorations,
+    'owned_skins', progress_row.owned_skins,
+    'equipped_skin', progress_row.equipped_skin,
+    'world_settings', progress_row.world_settings,
+    'updated_at', progress_row.updated_at
+  );
+end;
+$$;
+
+grant execute on function public.get_player_visit_world(uuid, text) to authenticated;

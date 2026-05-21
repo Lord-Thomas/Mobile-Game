@@ -1,224 +1,309 @@
-## 🎯 Objectif du projet
+# MANIFESTE PROJET - JEU COMMUNAUTAIRE 3D AVEC IA
 
-Ce projet consiste à créer un jeu 3D évolutif, développé en collaboration avec une intelligence artificielle et une communauté.
+## Objectif du projet
 
-Le jeu commence dans un environnement vide (type “white room” / laboratoire), et évolue progressivement à chaque itération.
+Creer un jeu web 3D evolutif, developpe avec l'aide d'une IA et enrichi par les idees de la communaute.
 
-Les fonctionnalités du jeu sont définies par les idées les plus populaires issues des commentaires des utilisateurs.
+Le projet a demarre comme une base simple en interieur, puis a evolue vers une maison personnalisable avec un exterieur jouable, des objets achetables, des interactions et une sauvegarde de progression.
 
-Chaque itération correspond à l’ajout d’une nouvelle feature dans le jeu.
-
----
-
-## 🧠 Rôle de l’intelligence artificielle
-
-Tu es un assistant de développement spécialisé dans la création de jeux web 3D.
-
-Ton rôle est de :
-
-* proposer des solutions simples, efficaces et rapides à implémenter
-* générer du code clair, structuré et fonctionnel
-* expliquer brièvement les choix techniques si nécessaire
-* optimiser la performance et la compatibilité mobile
-* éviter toute complexité inutile
-
-Tu dois privilégier :
-
-* la simplicité
-* la lisibilité
-* la rapidité d’exécution
+Chaque iteration doit ajouter une feature visible, testable rapidement et compatible avec l'esprit prototype du jeu.
 
 ---
 
-## ⚙️ Stack technique
+## Role de l'intelligence artificielle
 
-Le projet utilise les technologies suivantes :
+Tu es un assistant de developpement specialise dans les jeux web 3D.
 
-* React
-* Vite
+Ton role est de :
+
+* proposer des solutions simples, efficaces et rapides a implementer
+* generer du code clair, structure et fonctionnel
+* expliquer brievement les choix techniques si necessaire
+* optimiser la performance et la compatibilite mobile
+* eviter toute complexite inutile
+* respecter l'etat actuel du projet avant d'ajouter une nouvelle fonctionnalite
+
+Tu dois privilegier :
+
+* la simplicite
+* la lisibilite
+* la rapidite d'execution
+* les changements incrementaux
+* les features immediatement visibles en jeu
+
+---
+
+## Stack technique actuelle
+
+Le projet utilise :
+
+* React 19
+* Vite 8
 * Three.js
 * React Three Fiber
-* Drei (helpers Three.js)
+* Drei
+* React Three Rapier
+* Supabase, si les variables d'environnement sont configurees
+* Vercel Analytics
+* EZ Tree pour les arbres proceduraux
 
-Optionnel (si nécessaire) :
+Scripts utiles dans `web/package.json` :
 
-* Rapier (physique)
-* Zustand (state management)
+* `npm run dev` : serveur Vite
+* `npm run build` : build production
+* `npm run lint` : lint ESLint
+* `npm run preview` : preview Vite
+* `npm run thumbnails` : outil de generation de thumbnails d'objets
 
 ---
 
-## 📱 Contraintes techniques
+## Contraintes techniques
 
 Le jeu doit :
 
-* être jouable directement dans un navigateur
-* être compatible mobile (priorité téléphone)
-* fonctionner en format vertical
-* être léger et rapide à charger
-* éviter les dépendances lourdes inutiles
+* etre jouable directement dans un navigateur
+* rester compatible mobile, avec priorite au format telephone vertical
+* fonctionner correctement en format `?frame=9x16`
+* rester leger et rapide a charger
+* limiter les dependances lourdes inutiles
+* garder une interface lisible par-dessus la scene 3D
+* ne pas demarrer le serveur local automatiquement, sauf demande explicite de l'utilisateur
 
 ---
 
-## 🎮 Philosophie de développement
+## Philosophie de developpement
 
-Le développement doit être :
+Le developpement doit rester :
 
 * progressif
-* itératif
-* orienté prototype
+* iteratif
+* oriente prototype
+* facile a tester
+* comprehensible par un humain qui reprend le projet
 
-Chaque version du jeu doit être :
-
-* fonctionnelle
-* testable rapidement
-* visuellement compréhensible
-
-Il n’est pas nécessaire de viser une architecture parfaite dès le départ.
+Chaque version du jeu doit rester fonctionnelle. Il vaut mieux une petite feature stable qu'un grand systeme fragile.
 
 ---
 
-## 🧱 État initial du projet
+## Etat actuel du jeu
 
-Le jeu commence avec :
+### Monde et navigation
 
-* une scène 3D simple
-* un environnement minimaliste (white room / labo)
-* un sol (grille ou surface simple)
-* un personnage basique (forme simple)
-* des contrôles de base (déplacement, éventuellement saut)
-* une caméra fonctionnelle
+* Maison jouable avec interieur, murs, ouvertures, plafond, lumiere et toit.
+* Deux zones interieures gerees par le layout de maison.
+* Exterieur jouable accessible depuis une porte.
+* Terrain exterieur avec relief, herbe, routes, maisons voisines, arbres et decor lointain.
+* Ciel, brouillard, soleil, lumiere exterieure et environnement de parc.
+* Collisions interieures et exterieures pour le joueur, la camera et les obstacles.
+* Transition interieur/exterieur avec repositionnement du joueur.
+* Camera adaptee au mobile, au mode vertical et aux zones interieur/exterieur.
 
----
+### Joueur et controles
 
-## 🔁 Évolution du projet
+* Personnage 3D anime en FBX.
+* Deplacement clavier et tactile.
+* Saut, marche, course et animation de coup de pied.
+* Menu d'emotes avec salut et danse.
+* Systeme pour s'asseoir sur les objets compatibles.
+* Animations assis, transition assis/debout et blocage camera adapte quand le joueur est assis.
 
-À chaque itération :
+### Football
 
-* une seule feature est ajoutée
-* la feature provient d’une idée externe (utilisateur ou IA)
-* la feature doit être visible et testable immédiatement
+* Ballon physique avec Rapier.
+* But de football placable et deplacable en mode personnalisation.
+* Colliders du but et filet visuel anime.
+* Detection de but, score et popups visuels.
+* Respawn du ballon.
+* Pieces gagnees via le gameplay.
 
----
+### Personnalisation de la maison
 
-## ⚠️ Règles importantes
-
-* Ne jamais complexifier inutilement le code
-* Toujours proposer la solution la plus simple viable
-* Prioriser la performance mobile
-* Éviter les systèmes complexes dès le début
-* Garder un code compréhensible et modifiable
-* Ne pas démarrer le serveur local automatiquement : l'utilisateur s'en charge, sauf demande explicite
-
----
-
-## 🎯 Objectif court terme (V1)
-
-Créer une version initiale du jeu avec :
-
-* une scène 3D fonctionnelle
-* un personnage contrôlable
-* un environnement visuellement propre (lumières simples)
-* une base stable permettant d’ajouter facilement de nouvelles features
-
----
-
-## 💡 Format des réponses attendues
-
-Lorsque tu proposes du code :
-
-* donne un code directement utilisable
-* évite les explications longues
-* ajoute des commentaires uniquement si nécessaire
-* structure clairement les fichiers si besoin
-
----
-
-## 🚀 Vision long terme
-
-Créer un jeu entièrement construit par la communauté, avec une évolution visible à travers des itérations successives, tout en restant accessible, performant et jouable sur mobile.
-
-Le projet doit rester simple, fun et évolutif.
-
----
-
-## Ajouts presents dans le jeu
-
-### Gameplay et camera
-
-* Piece 3D jouable avec sol, murs, plafond, lumiere et ambiance de laboratoire.
-* Joueur controle en vue 3D avec deplacement, saut et controles tactiles.
-* Camera compatible mobile et format vertical.
-* Limites physiques de la piece pour garder le joueur et la camera dans l'espace jouable.
-* Quand le joueur est assis, la camera reste bloquee par les murs et ne peut plus sortir de la piece.
-* But de football deplacable dans le mode personnalisation.
-* Systeme de score et popups visuels quand le ballon entre dans le but.
-* Pieces / monnaie affichees dans l'interface.
-
-### Personnalisation de la piece
-
-* Station de personnalisation accessible en jeu.
+* Station de personnalisation en jeu.
 * Mode personnalisation avec vue de dessus.
-* Inventaire d'objets avec placement, selection, rotation, rangement et remise en jeu.
-* Boutique d'objets achetables avec monnaie du jeu.
-* Placement des meubles en X/Z avec calcul automatique du Y.
-* Raycast vertical vers le bas pour poser les objets sur le sol ou sur un autre meuble.
-* Possibilite de poser des objets les uns sur les autres.
-* Exclusion de l'objet en cours de deplacement pendant le raycast pour eviter qu'il se pose sur lui-meme.
+* Inventaire d'objets.
+* Placement, selection, rotation, rangement et remise en jeu.
+* Boutique d'objets achetables avec monnaie.
+* Placement sur grille avec clamp dans la parcelle.
+* Raycast vertical pour poser les objets sur le sol ou sur un autre meuble.
 * Sauvegarde de la hauteur Y des objets places.
+* Exclusion de l'objet deplace pendant le raycast pour eviter l'auto-placement.
 
-### Objets et meubles disponibles
+### Objets placables disponibles
 
-* But de football.
+* Cage de football.
 * Canape modulaire.
 * Canape peluche rose.
-* Canape rose (`pink_sofa`).
+* Canape rose.
 * Canape rouge.
-* Bureau en bois.
+* Bureau bois.
 * Table beige.
-* Chaise de bureau.
+* Chaise bureau.
 * Chaise moderne.
 * Chaise orange.
 * Fauteuil oeuf orange.
-* Trone.
-* Tabouret ambre.
-* Television interactive.
+* Fauteuil trone.
+* Table ambre.
+* Television.
 * Plante monstera.
+* Oeuf de cristal.
+* Cristal lumineux.
+
+Objet reference mais non achetable actuellement :
+
+* Chat, declare dans le catalogue pour son modele et son thumbnail.
 
 ### Television interactive
 
 * Television placable comme objet de personnalisation.
-* Detection de proximite du joueur avec bouton d'interaction "Changer la TV".
-* Menu de controle de la television avec bouton de fermeture.
+* Detection de proximite avec bouton d'interaction.
+* Menu de controle TV avec fermeture.
 * Mode fichier local / capture existant conserve.
 * Mode video en ligne via lien YouTube.
-* Conversion des liens YouTube classiques, `youtu.be`, `embed` et `shorts` vers une URL embed.
-* Integration YouTube via `Html` de Drei avec `occlude="blending"` pour rester dans la scene 3D.
+* Conversion des liens YouTube classiques, `youtu.be`, `embed` et `shorts` en URL embed.
+* Integration YouTube via `Html` de Drei avec `occlude="blending"`.
 * Lecture, pause, marche, arret et changement de video.
-* Controle du volume YouTube via l'API postMessage.
-* Iframe cliquable pour conserver les interactions YouTube.
-* Correction du z-index pour garder l'UX du jeu visible au-dessus de la video.
-* Correction du cadrage en format mobile vertical et en mode `?frame=9x16`, basee sur la taille reelle du canvas et non la fenetre entiere.
+* Controle du volume YouTube via l'API `postMessage`.
+* Iframe cliquable pour garder les interactions YouTube.
+* Cadrage corrige en mobile vertical et en mode `?frame=9x16`.
 
-### Skins et environnement
+### Skins, textures et boutique
 
 * Station de skins pour changer l'apparence du ballon.
-* Station d'environnement pour changer les textures du sol et des murs.
+* Skins de ballon : classique, lune, mars, terre, planete X.
+* Station d'environnement pour changer le sol et les murs.
+* Textures de sol : parquet classique, beton, parquets, tomette, damier, carreaux retro, chevron, peinture, brun mat, stuc beige doux.
+* Textures de murs : peinture blanche, briques, brun mat, stuc, tomette, damier, carreaux retro, chevron.
+* Texture `Fond Vert` reservee aux modes admin/local.
 * Option pour appliquer la texture des murs au plafond.
-* Sauvegarde locale de la progression, des skins, de l'environnement et des objets.
+* Boutique animaux avec achat et activation du chat.
+
+### Animaux et personnages speciaux
+
+* Chat 3D achetable et invocable.
+* Chat anime qui suit le joueur et reagit a sa position.
+* Mode camera sur le chat en admin ou en frame vertical.
+* Dragon 3D place dans la scene.
+
+### Sauvegarde et compte joueur
+
+* Sauvegarde locale de la progression.
 * Synchronisation cloud via Supabase quand la configuration est disponible.
+* Authentification email/mot de passe.
+* Pseudo joueur.
+* Sauvegarde des pieces, skins, textures, objets places, chat achete/actif.
+* Scopes de progression `player` et `admin`.
+* SQL Supabase disponible dans `web/supabase/player_progress.sql`.
 
-### Assets ajoutes
+### Outils de developpement
 
-* Modele `web/public/models/placeables/pink_sofa/model.glb`.
-* Thumbnail `web/public/ui/object-thumbnails/pink_sofa.webp`.
-* Modele television `web/public/models/placeables/flat_screen_display/model.glb`.
-* Thumbnail `web/public/ui/object-thumbnails/flat_screen_display.webp`.
+* Outil thumbnail accessible via `?tool=thumbnail`.
+* Script `npm run thumbnails` pour capturer les thumbnails.
+* Outil dev de maison avec presets, bibliotheque et export JSON.
+* Outil dev d'arbres avec presets EZ Tree, edition visuelle, bibliotheque et export JSON.
+* Mode admin via `?mode=admin`.
+* Mode frame vertical via `?frame=9x16`.
+* Compteur/debug de triangles par categorie.
 
-### Notes techniques actuelles
+---
 
-* Projet React + Vite + Three.js + React Three Fiber + Drei.
-* Physique geree avec Rapier.
+## Assets principaux presents
+
+### Modeles joueur et animations
+
+* `web/public/models/player/player-boy.fbx`
+* `web/public/models/player/player-boy01.fbx`
+* `web/public/models/player/player-idle.fbx`
+* `web/public/models/player/player-walk.fbx`
+* `web/public/models/player/player-run.fbx`
+* `web/public/models/player/player-kick.fbx`
+* `web/public/models/player/player-jump-start.fbx`
+* `web/public/models/player/player-jump-loop.fbx`
+* `web/public/models/player/player-jump-land.fbx`
+* `web/public/models/player/Stand To Sit.fbx`
+* `web/public/models/player/Sitting Idle.fbx`
+* `web/public/models/player/Stand Up.fbx`
+* `web/public/models/player/pointing-up.fbx`
+
+### Modeles jeu
+
+* `web/public/models/ball/ballon.glb`
+* `web/public/models/cat.glb`
+* `web/public/models/dragon.glb`
+* `web/public/models/world/tree.glb`
+
+### Modeles placables
+
+* `web/public/models/placeables/modular-sofa/modular-sofa.fbx`
+* `web/public/models/placeables/wooden+desk+3d+model.glb`
+* `web/public/models/placeables/office+chair+3d+model.glb`
+* `web/public/models/placeables/beige_table/model.glb`
+* `web/public/models/placeables/modern_chair/model.glb`
+* `web/public/models/placeables/orange_chair/model.glb`
+* `web/public/models/placeables/orange_egg_chair/model.glb`
+* `web/public/models/placeables/throne_chair/model.glb`
+* `web/public/models/placeables/amber_stool/model.glb`
+* `web/public/models/placeables/pink_plush_sofa/model.glb`
+* `web/public/models/placeables/pink_sofa/model.glb`
+* `web/public/models/placeables/red_sofa/model.glb`
+* `web/public/models/placeables/flat_screen_display/model.glb`
+* `web/public/models/placeables/monstera+plant+3d+model.glb`
+* `web/public/models/placeables/crystal_egg/model.glb`
+* `web/public/models/placeables/crystal_rock/model.glb`
+
+### Textures et UI
+
+* Textures de ballon dans `web/public/models/ball/textures/`.
+* Textures d'environnement dans `web/public/textures/environment/`.
+* Textures outdoor dans `web/public/textures/outdoor/`.
+* Thumbnails d'objets dans `web/public/ui/object-thumbnails/`.
+* Image de pieces dans `web/public/ui/coins.png`.
+
+---
+
+## Notes techniques actuelles
+
+* Le gameplay principal est dans `web/src/App.jsx`.
 * Les objets placables sont declares dans `web/src/gameObjects/placeableObjects.js`.
-* Le gameplay principal et la logique TV sont dans `web/src/App.jsx`.
-* Les styles d'interface et de TV sont dans `web/src/index.css`.
-* Le serveur local ne doit pas etre demarre automatiquement sauf demande explicite de l'utilisateur.
+* La sauvegarde Supabase est dans `web/src/services/progressService.js`.
+* Le client Supabase est dans `web/src/lib/supabase.js`.
+* Les styles principaux sont dans `web/src/index.css`.
+* Le monde exterieur est dans `web/src/world/`.
+* Le layout de maison est dans `web/src/world/house/`.
+* Les routes sont dans `web/src/world/roads/`.
+* Le terrain est dans `web/src/world/terrain/`.
+* Les arbres proceduraux sont dans `web/src/world/trees/`.
+* Les outils dev sont dans `web/src/tools/`.
+
+---
+
+## Regles importantes pour les prochaines iterations
+
+* Ne pas supprimer une feature existante sans demande explicite.
+* Verifier l'etat actuel du code avant de modifier le manifeste ou la logique.
+* Ajouter une seule feature principale par iteration quand c'est possible.
+* Garder le jeu testable apres chaque changement.
+* Prioriser mobile, performance et lisibilite.
+* Eviter les systemes trop abstraits tant que le besoin n'est pas clair.
+* Respecter les modes existants : joueur, admin, thumbnail et frame vertical.
+* Ne pas demarrer le serveur local automatiquement sauf demande explicite.
+
+---
+
+## Objectif court terme
+
+Continuer a stabiliser la boucle principale :
+
+* exploration interieur/exterieur
+* personnalisation de la maison
+* boutique et progression
+* interactions simples et fun
+* sauvegarde fiable locale/cloud
+* ajout progressif de contenu visible
+
+---
+
+## Vision long terme
+
+Construire un jeu communautaire ou chaque nouvelle idee populaire peut devenir une petite evolution visible du monde.
+
+Le projet doit rester simple, fun, modifiable et performant, meme en grandissant.

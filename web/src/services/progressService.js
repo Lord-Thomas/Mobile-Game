@@ -241,6 +241,19 @@ export async function loadPlayerProgress({ scope = DEFAULT_PROGRESS_SCOPE } = {}
   return data ? fromProgressRow(data) : null
 }
 
+export async function loadPlayerPublicWorld(userId, { scope = DEFAULT_PROGRESS_SCOPE } = {}) {
+  if (!isSupabaseConfigured || !userId) return null
+  const progressScope = normalizeProgressScope(scope)
+
+  const { data, error } = await supabase.rpc('get_player_visit_world', {
+    target_user_id: userId,
+    requested_scope: progressScope,
+  })
+
+  if (error) throw error
+  return data ? fromProgressRow(data) : null
+}
+
 export async function addPlayerCoins(delta, { scope = DEFAULT_PROGRESS_SCOPE } = {}) {
   const user = await getCurrentUser()
   if (!user) return null

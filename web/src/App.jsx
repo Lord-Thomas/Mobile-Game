@@ -6,7 +6,8 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
-import { addPlayerCoins, getCurrentUser, loadPlayerProgress, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
+import { addPlayerCoins, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
+import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable } from './services/multiplayerService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
@@ -40,6 +41,11 @@ const FPS_SAMPLE_WINDOW_SECONDS = 2
 const RENDER_SCALE_STEP = 0.05
 const BASE_CAMERA_VERTICAL_FOV = 52
 const MAX_CAMERA_HORIZONTAL_FOV = 72
+const MULTIPLAYER_INTERP_DELAY_MS = 120
+const MULTIPLAYER_PLAYER_SEND_INTERVAL = 1 / 15
+const MULTIPLAYER_BALL_ACTIVE_SEND_INTERVAL = 1 / 20
+const MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL = 1 / 5
+const MULTIPLAYER_MAX_EXTRAPOLATION_MS = 180
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -1585,6 +1591,8 @@ function Player({
   onSeatedPhaseChange,
   cameraOnCat = false,
   catPositionRef = null,
+  localPlayerStateRef = null,
+  onKickIntent = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -1716,6 +1724,14 @@ function Player({
             ? 'standUp'
             : 'sittingIdle'
       setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
+      if (localPlayerStateRef) {
+        localPlayerStateRef.current = {
+          position: [nextX, nextY, nextZ],
+          rotationY: targetYaw,
+          motion: nextMotion,
+          zone: currentZone,
+        }
+      }
 
       if (seatedState.phase === 'sitDown' && seatTimerRef.current >= PLAYER_SIT_DOWN_DURATION) {
         onSeatedPhaseChange('sitting')
@@ -2065,10 +2081,11 @@ function Player({
         if (kickContact.isInKickArc && kickContact.isTouchingFoot) {
           const power = pendingKick.running ? 0.22 : 0.17
           const lift = pendingKick.running ? 0.08 : 0.06
-          ball.applyImpulse(
-            { x: kickContact.forwardX * power, y: lift, z: kickContact.forwardZ * power },
-            true,
-          )
+          const impulse = { x: kickContact.forwardX * power, y: lift, z: kickContact.forwardZ * power }
+          const shouldApplyLocalImpulse = onKickIntent?.({ impulse, power, lift }) !== false
+          if (shouldApplyLocalImpulse) {
+            ball.applyImpulse(impulse, true)
+          }
         }
       }
       pendingKick.fired = true
@@ -2098,6 +2115,14 @@ function Player({
                         : 'walk'
                       : 'idle'
     setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
+    if (localPlayerStateRef) {
+      localPlayerStateRef.current = {
+        position: [nextX, nextY, nextZ],
+        rotationY: visualRef.current.rotation.y,
+        motion: nextMotion,
+        zone: currentZone,
+      }
+    }
 
     const pitch = touch.cameraPitch
     const cameraSettings = CAMERA_SETTINGS[currentZone] ?? CAMERA_SETTINGS.interior
@@ -2304,6 +2329,95 @@ function PlayerAvatar({ motion }) {
       rotation={[0, 0, 0]}
       scale={PLAYER_MODEL_SCALE}
     />
+  )
+}
+
+function RemotePlayer({ state, label = 'Visiteur' }) {
+  const groupRef = useRef(null)
+  const samplesRef = useRef([])
+  const lastSeqRef = useRef(-1)
+  const lastRenderedRef = useRef({
+    position: state?.position ?? [0, PLAYER_HEIGHT, 2.2],
+    rotationY: state?.rotationY ?? 0,
+  })
+
+  useEffect(() => {
+    if (!state?.position) return
+    const seq = state.seq ?? 0
+    if (seq <= lastSeqRef.current) return
+    lastSeqRef.current = seq
+    const sample = {
+      position: state.position,
+      rotationY: Number.isFinite(state.rotationY) ? state.rotationY : 0,
+      velocity: Array.isArray(state.velocity) ? state.velocity : [0, 0, 0],
+      motion: state.motion || 'idle',
+      sentAt: state.hostTime ?? state.sentAt ?? Date.now(),
+    }
+    const samples = samplesRef.current
+    samples.push(sample)
+    samples.sort((left, right) => left.sentAt - right.sentAt)
+    if (samples.length > 12) samples.splice(0, samples.length - 12)
+  }, [state])
+
+  useFrame(() => {
+    const group = groupRef.current
+    if (!group) return
+    const samples = samplesRef.current
+    if (!samples.length) return
+
+    const renderAt = Date.now() - MULTIPLAYER_INTERP_DELAY_MS
+    while (samples.length > 2 && samples[1].sentAt <= renderAt) {
+      samples.shift()
+    }
+
+    const previous = samples[0]
+    const next = samples[1]
+    let x = previous.position[0]
+    let y = previous.position[1]
+    let z = previous.position[2]
+    let rotationY = previous.rotationY
+
+    if (next) {
+      const span = Math.max(1, next.sentAt - previous.sentAt)
+      const alpha = MathUtils.clamp((renderAt - previous.sentAt) / span, 0, 1)
+      x = MathUtils.lerp(previous.position[0], next.position[0], alpha)
+      y = MathUtils.lerp(previous.position[1], next.position[1], alpha)
+      z = MathUtils.lerp(previous.position[2], next.position[2], alpha)
+      const rotationDelta = MathUtils.euclideanModulo(next.rotationY - previous.rotationY + Math.PI, Math.PI * 2) - Math.PI
+      rotationY = previous.rotationY + rotationDelta * alpha
+    } else {
+      const extrapolateMs = MathUtils.clamp(renderAt - previous.sentAt, 0, MULTIPLAYER_MAX_EXTRAPOLATION_MS)
+      const extrapolateSeconds = extrapolateMs / 1000
+      x += (previous.velocity?.[0] ?? 0) * extrapolateSeconds
+      y += (previous.velocity?.[1] ?? 0) * extrapolateSeconds
+      z += (previous.velocity?.[2] ?? 0) * extrapolateSeconds
+    }
+
+    const distance = Math.hypot(group.position.x - x, group.position.y - y, group.position.z - z)
+    if (distance > 4) {
+      group.position.set(x, y, z)
+    } else {
+      group.position.x = MathUtils.lerp(group.position.x, x, 0.72)
+      group.position.y = MathUtils.lerp(group.position.y, y, 0.72)
+      group.position.z = MathUtils.lerp(group.position.z, z, 0.72)
+    }
+    group.rotation.y = dampAngle(group.rotation.y, rotationY, 20, 1 / 60)
+
+    lastRenderedRef.current = {
+      position: [x, y, z],
+      rotationY,
+    }
+  })
+
+  if (!state?.position) return null
+
+  return (
+    <group ref={groupRef} position={state.position} rotation={[0, state.rotationY ?? 0, 0]}>
+      <PlayerAvatar motion={state.motion || samplesRef.current.at(-1)?.motion || 'idle'} />
+      <Html position={[0, 1.65, 0]} center distanceFactor={8} occlude>
+        <div className="remote-player-label">{label}</div>
+      </Html>
+    </group>
   )
 }
 
@@ -2679,6 +2793,244 @@ function AccountSyncPanel({
       )}
     </div>
   )
+}
+
+function MultiplayerPanel({
+  configured,
+  user,
+  open,
+  role,
+  session,
+  onlinePlayers,
+  incomingRequest,
+  outgoingRequest,
+  sessionConnectionState,
+  remotePlayerState,
+  message,
+  onToggle,
+  onRequestVisit,
+  onAcceptRequest,
+  onRejectRequest,
+  onLeaveSession,
+}) {
+  const sessionLabel = role === 'host'
+    ? `${session?.guestDisplayName ?? 'Visiteur'} visite ton monde`
+    : role === 'guest'
+      ? `Tu visites ${session?.hostDisplayName ?? 'un monde'}`
+      : null
+
+  return (
+    <div className={`multiplayer-panel ${open ? 'open' : ''}`}>
+      <button className="multiplayer-toggle" type="button" onClick={onToggle} aria-label="Multijoueur">
+        <span className={`multiplayer-dot ${role !== 'solo' ? 'connected' : ''}`} />
+        <span>Visites</span>
+      </button>
+      {open && (
+        <div className="multiplayer-menu">
+          {!configured && <p className="multiplayer-help">Supabase doit etre configure pour les visites.</p>}
+          {configured && !user && <p className="multiplayer-help">Connecte ton compte pour voir les joueurs en ligne.</p>}
+          {configured && user && role !== 'solo' && (
+            <div className="multiplayer-session-card">
+              <strong>{sessionLabel}</strong>
+              <span>{role === 'guest' ? 'Mode visite: modification bloquee.' : 'La personnalisation est suspendue pendant la visite.'}</span>
+              <span>
+                Canal: {sessionConnectionState === 'connected' ? 'connecte' : 'connexion...'}
+                {' / '}
+                Joueur distant: {remotePlayerState?.position ? 'recu' : 'en attente'}
+              </span>
+              <button type="button" onClick={onLeaveSession}>Quitter</button>
+            </div>
+          )}
+          {configured && user && role === 'solo' && incomingRequest && (
+            <div className="multiplayer-request-card">
+              <strong>{incomingRequest.fromDisplayName} veut visiter ton monde.</strong>
+              <div className="multiplayer-actions">
+                <button type="button" onClick={onAcceptRequest}>Accepter</button>
+                <button type="button" onClick={onRejectRequest}>Refuser</button>
+              </div>
+            </div>
+          )}
+          {configured && user && role === 'solo' && outgoingRequest && (
+            <p className="multiplayer-help">Demande envoyee a {outgoingRequest.toDisplayName}.</p>
+          )}
+          {configured && user && role === 'solo' && (
+            <>
+              <div className="multiplayer-title">Joueurs en ligne</div>
+              <div className="multiplayer-list">
+                {onlinePlayers.length === 0 && <span className="multiplayer-empty">Personne d'autre en ligne pour l'instant.</span>}
+                {onlinePlayers.map((player) => (
+                  <button
+                    key={player.userId}
+                    type="button"
+                    className="multiplayer-player"
+                    onClick={() => onRequestVisit(player)}
+                    disabled={Boolean(outgoingRequest)}
+                  >
+                    <span>{player.displayName}</span>
+                    <small>{player.status === 'available' ? 'Disponible' : 'Occupe'}</small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {message && <div className="multiplayer-message">{message}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function roundNetValue(value, precision = 100) {
+  return Math.round(value * precision) / precision
+}
+
+function roundNetVector(values, precision = 100) {
+  return values.map((value) => roundNetValue(value, precision))
+}
+
+function MultiplayerBridge({
+  channelRef,
+  role,
+  localUserId,
+  playerPositionRef,
+  playerVelocityRef,
+  localPlayerStateRef,
+  remoteBallState,
+  ballRef,
+  guestKickQueueRef,
+  hostTimeOffsetRef,
+}) {
+  const lastSendRef = useRef(0)
+  const lastBallSendRef = useRef(0)
+  const lastGuestBallPushRef = useRef(0)
+  const playerSeqRef = useRef(0)
+  const ballSeqRef = useRef(0)
+  const guestKickSeqRef = useRef(0)
+  const lastRemoteBallSeqRef = useRef(-1)
+  const appliedRemoteBallAtRef = useRef(0)
+
+  useFrame(({ clock }) => {
+    const channel = channelRef.current
+    if (!channel || role === 'solo' || !localUserId) return
+
+    const now = clock.elapsedTime
+    const estimatedHostTime = Date.now() + (hostTimeOffsetRef?.current ?? 0)
+
+    if (now - lastSendRef.current > MULTIPLAYER_PLAYER_SEND_INTERVAL) {
+      const position = playerPositionRef.current
+      const velocity = playerVelocityRef?.current ?? { x: 0, z: 0 }
+      channel.sendPlayerState({
+        seq: playerSeqRef.current++,
+        hostTime: estimatedHostTime,
+        position: roundNetVector([position.x, position.y, position.z]),
+        rotationY: localPlayerStateRef.current.rotationY,
+        velocity: roundNetVector([velocity.x, 0, velocity.z]),
+        grounded: true,
+        motion: localPlayerStateRef.current.motion,
+        zone: localPlayerStateRef.current.zone,
+        sentAt: estimatedHostTime,
+      })
+      lastSendRef.current = now
+    }
+
+    const ball = ballRef.current
+    if (!ball) return
+
+    if (role === 'host') {
+      const nextKick = guestKickQueueRef.current.shift()
+      if (nextKick?.impulse) {
+        ball.applyImpulse(nextKick.impulse, true)
+      }
+
+      const p = ball.translation()
+      const v = ball.linvel()
+      const a = ball.angvel()
+      const isBallActive = Math.hypot(v.x, v.y, v.z) > 0.08 || Math.hypot(a.x, a.y, a.z) > 0.08
+      const ballInterval = isBallActive ? MULTIPLAYER_BALL_ACTIVE_SEND_INTERVAL : MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL
+
+      if (now - lastBallSendRef.current > ballInterval) {
+        channel.sendBallState({
+          seq: ballSeqRef.current++,
+          hostTime: Date.now(),
+          position: roundNetVector([p.x, p.y, p.z]),
+          linvel: roundNetVector([v.x, v.y, v.z]),
+          angvel: roundNetVector([a.x, a.y, a.z]),
+          sentAt: Date.now(),
+        })
+        lastBallSendRef.current = now
+      }
+      return
+    }
+
+    if (
+      role === 'guest' &&
+      remoteBallState?.sentAt &&
+      remoteBallState.sentAt !== appliedRemoteBallAtRef.current &&
+      (remoteBallState.seq ?? 0) > lastRemoteBallSeqRef.current
+    ) {
+      const [x, y, z] = remoteBallState.position ?? []
+      const [vx, vy, vz] = remoteBallState.linvel ?? []
+      const [ax, ay, az] = remoteBallState.angvel ?? []
+      if ([x, y, z].every(Number.isFinite)) {
+        const localPosition = ball.translation()
+        const error = Math.hypot(localPosition.x - x, localPosition.y - y, localPosition.z - z)
+        const correction = error < 0.5 ? 0.22 : error < 1.6 ? 0.55 : 1
+        ball.setTranslation({
+          x: MathUtils.lerp(localPosition.x, x, correction),
+          y: MathUtils.lerp(localPosition.y, y, correction),
+          z: MathUtils.lerp(localPosition.z, z, correction),
+        }, true)
+      }
+      if ([vx, vy, vz].every(Number.isFinite)) {
+        const localVelocity = ball.linvel()
+        ball.setLinvel({
+          x: MathUtils.lerp(localVelocity.x, vx, 0.35),
+          y: MathUtils.lerp(localVelocity.y, vy, 0.35),
+          z: MathUtils.lerp(localVelocity.z, vz, 0.35),
+        }, true)
+      }
+      if ([ax, ay, az].every(Number.isFinite)) {
+        const localAngularVelocity = ball.angvel()
+        ball.setAngvel({
+          x: MathUtils.lerp(localAngularVelocity.x, ax, 0.35),
+          y: MathUtils.lerp(localAngularVelocity.y, ay, 0.35),
+          z: MathUtils.lerp(localAngularVelocity.z, az, 0.35),
+        }, true)
+      }
+      appliedRemoteBallAtRef.current = remoteBallState.sentAt
+      lastRemoteBallSeqRef.current = remoteBallState.seq ?? lastRemoteBallSeqRef.current
+    }
+
+    if (role === 'guest' && now - lastGuestBallPushRef.current > 0.11) {
+      const playerPosition = playerPositionRef.current
+      const playerVelocity = playerVelocityRef?.current
+      const ballPosition = ball.translation()
+      const dx = ballPosition.x - playerPosition.x
+      const dz = ballPosition.z - playerPosition.z
+      const distance = Math.hypot(dx, dz)
+      const playerSpeed = Math.hypot(playerVelocity?.x ?? 0, playerVelocity?.z ?? 0)
+
+      if (distance > 0.001 && distance < 0.48 && playerSpeed > 0.55) {
+        const inv = 1 / distance
+        const speedScale = MathUtils.clamp(playerSpeed / 3.4, 0.25, 1)
+        const impulse = {
+          x: dx * inv * 0.045 * speedScale,
+          y: 0.012,
+          z: dz * inv * 0.045 * speedScale,
+        }
+        ball.applyImpulse(impulse, true)
+        channel.sendGuestKick({
+          seq: guestKickSeqRef.current++,
+          hostTime: estimatedHostTime,
+          impulse,
+          kind: 'body-push',
+        })
+        lastGuestBallPushRef.current = now
+      }
+    }
+  })
+
+  return null
 }
 
 // Halo d'interaction : anneau au sol qui s'agrandit et pulse quand on approche
@@ -5789,6 +6141,25 @@ function App() {
   const authUserRef = useRef(null)
   const latestProgressRef = useRef(null)
   const cloudSaveTimeoutRef = useRef(null)
+  const onlinePresenceRef = useRef(null)
+  const multiplayerChannelRef = useRef(null)
+  const localPlayerStateRef = useRef({ position: [0, PLAYER_HEIGHT, 2.2], rotationY: 0, motion: 'idle', zone: ZONES.interior })
+  const guestKickQueueRef = useRef([])
+  const hostTimeOffsetRef = useRef(0)
+  const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false)
+  const [onlinePlayers, setOnlinePlayers] = useState([])
+  const [incomingVisitRequest, setIncomingVisitRequest] = useState(null)
+  const [outgoingVisitRequest, setOutgoingVisitRequest] = useState(null)
+  const [multiplayerRole, setMultiplayerRole] = useState('solo')
+  const [multiplayerSession, setMultiplayerSession] = useState(null)
+  const [remotePlayerState, setRemotePlayerState] = useState(null)
+  const [remoteBallState, setRemoteBallState] = useState(null)
+  const [sessionConnectionState, setSessionConnectionState] = useState('idle')
+  const [multiplayerMessage, setMultiplayerMessage] = useState('')
+  const isGuestVisit = multiplayerRole === 'guest'
+  const isHostVisit = multiplayerRole === 'host'
+  const isMultiplayerSession = multiplayerRole !== 'solo'
+  const canModifyWorld = !isGuestVisit && !isHostVisit
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -5948,6 +6319,7 @@ function App() {
   }
 
   const saveCurrentProgressToCloud = async () => {
+    if (isGuestVisit) return false
     if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return false
     setCloudSaveState('saving')
     try {
@@ -5961,6 +6333,7 @@ function App() {
   }
 
   const applyCoinDelta = async (delta) => {
+    if (isGuestVisit) return false
     const previousCoins = latestProgressRef.current?.coins ?? coins
     setCoins((current) => Math.max(0, current + delta))
     if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return true
@@ -5995,17 +6368,130 @@ function App() {
   }, [progressStorageKey])
 
   useEffect(() => {
+    if (isGuestVisit) return
     const snapshot = createCurrentProgressSnapshot()
     latestProgressRef.current = snapshot
     localStorage.setItem(
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
 
   useEffect(() => {
     authUserRef.current = authUser
   }, [authUser])
+
+  useEffect(() => {
+    if (!isMultiplayerAvailable() || !authUser) {
+      setOnlinePlayers([])
+      onlinePresenceRef.current?.disconnect()
+      onlinePresenceRef.current = null
+      return undefined
+    }
+
+    const connection = connectOnlinePresence({
+      user: authUser,
+      displayName,
+      status: multiplayerRole === 'solo' ? 'available' : 'busy',
+      onPlayers: setOnlinePlayers,
+      onVisitRequest: (request) => {
+        if (multiplayerRole !== 'solo') return
+        setIncomingVisitRequest(request)
+        setIsMultiplayerOpen(true)
+        setMultiplayerMessage(`${request.fromDisplayName} veut visiter ton monde.`)
+      },
+      onVisitResponse: async (response) => {
+        if (!response?.accepted) {
+          setOutgoingVisitRequest(null)
+          setMultiplayerMessage('Demande refusee.')
+          return
+        }
+
+        setOutgoingVisitRequest(null)
+        setMultiplayerMessage('Chargement du monde...')
+        try {
+          const hostWorld = response.session.worldSnapshot
+            ?? await loadPlayerPublicWorld(response.session.hostUserId, { scope: progressScope })
+          if (!hostWorld) {
+            setMultiplayerMessage('Impossible de charger ce monde. Verifie le SQL Supabase.')
+            return
+          }
+          applyProgressSnapshot(hostWorld, { includeCoins: false })
+          setMultiplayerSession(response.session)
+          setMultiplayerRole('guest')
+          setMode('play')
+          setIsSkinMenuOpen(false)
+          setIsEnvironmentMenuOpen(false)
+          setIsObjectInventoryOpen(false)
+          setSelectedObjectId(null)
+          setMultiplayerMessage('Mode visite active: tu peux te balader et jouer au foot.')
+        } catch {
+          setMultiplayerMessage('Lecture du monde impossible. Lance le SQL Supabase mis a jour.')
+        }
+      },
+      onSessionEnded: () => {
+        setMultiplayerMessage('La visite est terminee.')
+        setMultiplayerRole('solo')
+        setMultiplayerSession(null)
+        setRemotePlayerState(null)
+        setRemoteBallState(null)
+        setSessionConnectionState('idle')
+        if (authUserRef.current) {
+          loadPlayerProgress({ scope: progressScope })
+            .then((progress) => {
+              if (progress) applyProgressSnapshot(progress)
+            })
+            .catch(() => {})
+        }
+      },
+    })
+
+    onlinePresenceRef.current = connection
+    return () => {
+      connection.disconnect()
+      if (onlinePresenceRef.current === connection) onlinePresenceRef.current = null
+    }
+  }, [authUser, displayName, multiplayerRole, progressScope])
+
+  useEffect(() => {
+    multiplayerChannelRef.current?.disconnect()
+    multiplayerChannelRef.current = null
+    setRemotePlayerState(null)
+    setRemoteBallState(null)
+    setSessionConnectionState('idle')
+    guestKickQueueRef.current = []
+
+    if (!multiplayerSession || multiplayerRole === 'solo' || !authUser) return undefined
+
+    const channel = connectMultiplayerSession({
+      sessionId: multiplayerSession.id,
+      userId: authUser.id,
+      role: multiplayerRole,
+      onRemotePlayerState: setRemotePlayerState,
+      onRemoteBallState: setRemoteBallState,
+      onGuestKick: (payload) => {
+        if (payload?.impulse) guestKickQueueRef.current.push(payload)
+      },
+      onStatusChange: setSessionConnectionState,
+      onHostTimeOffsetChange: (offset) => {
+        hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
+      },
+      onSessionEnded: () => {
+        setMultiplayerRole('solo')
+        setMultiplayerSession(null)
+        setRemotePlayerState(null)
+        setRemoteBallState(null)
+        setSessionConnectionState('idle')
+        setMultiplayerMessage('La visite est terminee.')
+      },
+    })
+
+    multiplayerChannelRef.current = channel
+    return () => {
+      channel.disconnect()
+      if (multiplayerChannelRef.current === channel) multiplayerChannelRef.current = null
+    }
+  }, [authUser, multiplayerRole, multiplayerSession])
 
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined
@@ -6071,6 +6557,7 @@ function App() {
   }, [progressScope])
 
   useEffect(() => {
+    if (isGuestVisit) return undefined
     if (!isSupabaseConfigured || !authUser || !hasLoadedCloudProgressRef.current) return undefined
     if (skipNextCloudSaveRef.current) {
       skipNextCloudSaveRef.current = false
@@ -6088,7 +6575,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -6219,6 +6706,7 @@ function App() {
   }, {})
 
   const openSkinMenu = () => {
+    if (!canModifyWorld) return
     setPreviewSkinId(selectedSkinId)
     setIsSkinMenuOpen(true)
   }
@@ -6228,6 +6716,7 @@ function App() {
     setIsSkinMenuOpen(false)
   }
   const openEnvironmentMenu = () => {
+    if (!canModifyWorld) return
     setEnvironmentTab('floor')
     setPreviewFloorSkinId(selectedFloorSkinId)
     setPreviewWallSkinId(selectedWallSkinId)
@@ -6257,6 +6746,7 @@ function App() {
   }
 
   const buyPreviewSkin = async () => {
+    if (!canModifyWorld) return
     const skin = ballSkins[previewIndex]
     if (ownedSkins.includes(skin.id)) return
     if (!isAdminMode && coins < skin.price) return
@@ -6266,12 +6756,14 @@ function App() {
   }
 
   const selectPreviewSkin = () => {
+    if (!canModifyWorld) return
     const skin = ballSkins[previewIndex]
     if (!ownedSkins.includes(skin.id)) return
     setSelectedSkinId(skin.id)
     setIsSkinMenuOpen(false)
   }
   const buyPreviewEnvironmentSkin = async () => {
+    if (!canModifyWorld) return
     const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : availableWallSkins[previewWallIndex]
     const owned = environmentTab === 'floor' ? ownedFloorSkins : ownedWallSkins
     if (owned.includes(skin.id)) return
@@ -6285,6 +6777,7 @@ function App() {
     }
   }
   const selectPreviewEnvironmentSkin = () => {
+    if (!canModifyWorld) return
     if (environmentTab === 'floor') {
       const skin = floorSkins[previewFloorIndex]
       if (!ownedFloorSkins.includes(skin.id)) return
@@ -6297,6 +6790,7 @@ function App() {
   }
 
   const buyFurnitureObject = async (objectId) => {
+    if (!canModifyWorld) return
     const item = objectCatalog[objectId]
     if (!item || !shopObjectIds.includes(objectId)) return
     if (!isAdminMode && coins < item.price) return
@@ -6308,6 +6802,7 @@ function App() {
   }
 
   const buyCat = async () => {
+    if (!canModifyWorld) return
     if (ownedCat) return
     if (!isAdminMode && coins < 500) return
     const paid = isAdminMode ? true : await applyCoinDelta(-500)
@@ -6316,6 +6811,7 @@ function App() {
   }
 
   const toggleCat = () => {
+    if (!canModifyWorld) return
     if (!ownedCat) return
     setCatActive((v) => !v)
   }
@@ -6334,6 +6830,7 @@ function App() {
   }
 
   const requestTvMenu = () => {
+    if (!canModifyWorld) return
     if (!nearbyTv) return
     window.dispatchEvent(new CustomEvent(TV_MENU_EVENT, { detail: { objectId: nearbyTv.id } }))
   }
@@ -6406,6 +6903,7 @@ function App() {
   }, [mode, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive])
 
   const openCustomizationMode = () => {
+    if (!canModifyWorld) return
     setIsSkinMenuOpen(false)
     setIsEnvironmentMenuOpen(false)
     setMode('customize')
@@ -6432,12 +6930,14 @@ function App() {
   }
 
   const updateEditableObjectPosition = (id, position) => {
+    if (!canModifyWorld) return
     setEditableObjects((current) =>
       current.map((object) => (object.id === id ? { ...object, position } : object)),
     )
   }
 
   const storeSelectedObject = () => {
+    if (!canModifyWorld) return
     if (!selectedObject?.canStore) return
     setEditableObjects((current) =>
       current.map((object) =>
@@ -6451,6 +6951,7 @@ function App() {
   }
 
   const beginPlaceObject = (id) => {
+    if (!canModifyWorld) return
     const object = editableObjects.find((nextObject) => nextObject.id === id)
     if (!object || object.status !== 'stored') return
     setSelectedObjectId(null)
@@ -6466,6 +6967,7 @@ function App() {
   }
 
   const updatePlacementPreview = (position) => {
+    if (!canModifyWorld) return
     setPlacementPreview((current) => {
       if (!current) return current
       const [x, z] = clampToCustomRoom(position[0], position[2])
@@ -6478,6 +6980,7 @@ function App() {
   }
 
   const confirmPlacement = () => {
+    if (!canModifyWorld) return
     if (!placingObjectId || !placementPreview?.isValid) return
     setEditableObjects((current) =>
       current.map((object) =>
@@ -6504,6 +7007,7 @@ function App() {
   }
 
   const rotateSelectedObject = (direction) => {
+    if (!canModifyWorld) return
     const angle = Math.PI / 4
     if (placingObjectId) {
       setPlacementPreview((current) => (
@@ -6518,6 +7022,92 @@ function App() {
         return { ...object, rotationY: object.rotationY + direction * angle }
       }),
     )
+  }
+
+  const requestVisitPlayer = async (player) => {
+    if (!authUser || multiplayerRole !== 'solo') return
+    const request = {
+      ...createVisitRequest({ fromUser: authUser, toUserId: player.userId }),
+      toDisplayName: player.displayName,
+    }
+    setOutgoingVisitRequest(request)
+    setMultiplayerMessage(`Demande envoyee a ${player.displayName}.`)
+    await onlinePresenceRef.current?.sendVisitRequest(request)
+  }
+
+  const acceptVisitRequest = async () => {
+    if (!incomingVisitRequest || !authUser || multiplayerRole !== 'solo') return
+    await saveCurrentProgressToCloud()
+    const session = createSessionFromRequest({
+      ...incomingVisitRequest,
+      toDisplayName: displayName || authUser.email?.split('@')[0] || 'Hote',
+    })
+    session.worldSnapshot = latestProgressRef.current ?? createCurrentProgressSnapshot()
+    const response = {
+      accepted: true,
+      requestId: incomingVisitRequest.id,
+      toUserId: incomingVisitRequest.fromUserId,
+      fromUserId: authUser.id,
+      session,
+    }
+    setIncomingVisitRequest(null)
+    setMultiplayerSession(session)
+    setMultiplayerRole('host')
+    setMode('play')
+    setIsSkinMenuOpen(false)
+    setIsEnvironmentMenuOpen(false)
+    setSelectedObjectId(null)
+    setDraggingObjectId(null)
+    setPlacingObjectId(null)
+    setPlacementPreview(null)
+    setIsObjectInventoryOpen(false)
+    setMultiplayerMessage(`${session.guestDisplayName} rejoint ton monde.`)
+    await onlinePresenceRef.current?.sendVisitResponse(response)
+  }
+
+  const rejectVisitRequest = async () => {
+    if (!incomingVisitRequest || !authUser) return
+    await onlinePresenceRef.current?.sendVisitResponse({
+      accepted: false,
+      requestId: incomingVisitRequest.id,
+      toUserId: incomingVisitRequest.fromUserId,
+      fromUserId: authUser.id,
+    })
+    setIncomingVisitRequest(null)
+    setMultiplayerMessage('Demande refusee.')
+  }
+
+  const leaveMultiplayerSession = async () => {
+    if (multiplayerSession && authUser) {
+      await multiplayerChannelRef.current?.sendSessionEnded({
+        sessionId: multiplayerSession.id,
+        hostUserId: multiplayerSession.hostUserId,
+        guestUserId: multiplayerSession.guestUserId,
+      })
+      await onlinePresenceRef.current?.sendSessionEnded({
+        sessionId: multiplayerSession.id,
+        hostUserId: multiplayerSession.hostUserId,
+        guestUserId: multiplayerSession.guestUserId,
+        toUserId: authUser.id === multiplayerSession.hostUserId
+          ? multiplayerSession.guestUserId
+          : multiplayerSession.hostUserId,
+      })
+    }
+
+    setMultiplayerRole('solo')
+    setMultiplayerSession(null)
+    setRemotePlayerState(null)
+    setRemoteBallState(null)
+    setIncomingVisitRequest(null)
+    setOutgoingVisitRequest(null)
+    setMultiplayerMessage('Visite terminee.')
+
+    if (isGuestVisit) {
+      try {
+        const ownProgress = await loadPlayerProgress({ scope: progressScope })
+        if (ownProgress) applyProgressSnapshot(ownProgress)
+      } catch {}
+    }
   }
 
   const requestAccountSubmit = async (event) => {
@@ -6577,6 +7167,18 @@ function App() {
         <AdaptiveCameraFov />
         <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} />
+        <MultiplayerBridge
+          channelRef={multiplayerChannelRef}
+          role={multiplayerRole}
+          localUserId={authUser?.id}
+          playerPositionRef={playerPositionRef}
+          playerVelocityRef={playerVelocityRef}
+          localPlayerStateRef={localPlayerStateRef}
+          remoteBallState={remoteBallState}
+          ballRef={ballRef}
+          guestKickQueueRef={guestKickQueueRef}
+          hostTimeOffsetRef={hostTimeOffsetRef}
+        />
         <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} roomLightOn={roomLightOn} lightColor={lightColor} />
         {(!isDebugMode || debugToggles.house) && (
         <PlayerHouse exteriorVisible>
@@ -6588,7 +7190,7 @@ function App() {
               hideCeiling={mode === 'customize'}
               hideRoof={mode === 'customize'}
             />
-            <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch} onOpen={() => setIsLightMenuOpen((v) => !v)} mode={mode} />
+            <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch && canModifyWorld} onOpen={() => canModifyWorld && setIsLightMenuOpen((v) => !v)} mode={mode} />
             <Dragon playerPositionRef={playerPositionRef} />
             {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
@@ -6600,7 +7202,7 @@ function App() {
             <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
           </group>
           <CustomizationLayer
-            mode={currentZone === ZONES.outside ? 'play' : mode}
+            mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             objects={editableObjects}
             selectedObjectId={selectedObjectId}
             draggingObjectId={draggingObjectId}
@@ -6627,13 +7229,17 @@ function App() {
           castShadows={!isDebugMode || debugToggles.shadows}
           showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
         />
+        <RemotePlayer
+          state={remotePlayerState}
+          label={multiplayerRole === 'host' ? multiplayerSession?.guestDisplayName : multiplayerSession?.hostDisplayName}
+        />
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
           <OutdoorBounds includeHouseFootprint={false} />
           <Goal
             object={goalObject}
-            mode={mode}
+            mode={canModifyWorld ? mode : 'play'}
             selected={selectedObjectId === goalObject.id}
             onSelect={setSelectedObjectId}
             onStartDragging={setDraggingObjectId}
@@ -6673,6 +7279,13 @@ function App() {
               onSeatedPhaseChange={updateSeatedPhase}
               cameraOnCat={cameraOnCat}
               catPositionRef={catPositionRef}
+              localPlayerStateRef={localPlayerStateRef}
+              onKickIntent={isGuestVisit
+                ? ({ impulse }) => {
+                  multiplayerChannelRef.current?.sendGuestKick({ impulse })
+                  return false
+                }
+                : null}
             />
           )}
           <OutdoorDoorTrigger
@@ -6694,7 +7307,7 @@ function App() {
           />
           <LightSwitchTrigger
             playerPositionRef={playerPositionRef}
-            enabled={currentZone !== ZONES.outside && mode === 'play'}
+            enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
             onNearChange={(near) => { setIsNearLightSwitch(near); if (!near) setIsLightMenuOpen(false) }}
           />
           <BallStationTrigger playerPositionRef={playerPositionRef} goalObject={goalObject} onNearChange={setIsNearSkinStation} />
@@ -6704,7 +7317,7 @@ function App() {
               <CustomizationStationTrigger
                 playerPositionRef={playerPositionRef}
                 onNearChange={setIsNearCustomizationStation}
-                enabled={mode === 'play'}
+                enabled={mode === 'play' && canModifyWorld}
               />
             </>
           )}
@@ -6730,7 +7343,7 @@ function App() {
         />
       )}
       {showCaptureUi && <CoinsOverlay coins={coins} />}
-      {showCaptureUi && isLocalNetwork && (
+      {showCaptureUi && isLocalNetwork && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
           +500
         </button>
@@ -6763,27 +7376,47 @@ function App() {
           onSignOut={requestSignOut}
         />
       )}
+      {showCaptureUi && (
+        <MultiplayerPanel
+          configured={isMultiplayerAvailable()}
+          user={authUser}
+          open={isMultiplayerOpen}
+          role={multiplayerRole}
+          session={multiplayerSession}
+          onlinePlayers={onlinePlayers}
+          incomingRequest={incomingVisitRequest}
+          outgoingRequest={outgoingVisitRequest}
+          sessionConnectionState={sessionConnectionState}
+          remotePlayerState={remotePlayerState}
+          message={multiplayerMessage}
+          onToggle={() => setIsMultiplayerOpen((current) => !current)}
+          onRequestVisit={requestVisitPlayer}
+          onAcceptRequest={acceptVisitRequest}
+          onRejectRequest={rejectVisitRequest}
+          onLeaveSession={leaveMultiplayerSession}
+        />
+      )}
       {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <button className="skin-open-btn outdoor-open-btn" type="button" onClick={requestOutdoorTransition}>
           {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
         </button>
       )}
-      {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
+      {showCaptureUi && canModifyWorld && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
           Personnaliser le ballon
         </button>
       )}
-      {showCaptureUi && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && mode === 'play' && (
+      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && mode === 'play' && (
         <button className="skin-open-btn skin-open-btn-right" type="button" onClick={openEnvironmentMenu}>
           Boutique
         </button>
       )}
-      {showCaptureUi && currentZone !== ZONES.outside && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationMode}>
           Personnaliser la piece
         </button>
       )}
-      {showCaptureUi && isLightMenuOpen && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && canModifyWorld && isLightMenuOpen && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <div className="light-panel">
           <button
             className={`light-panel-toggle ${roomLightOn ? 'on' : 'off'}`}
@@ -6798,7 +7431,7 @@ function App() {
           </button>
         </div>
       )}
-      {showCaptureUi && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && canModifyWorld && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
         <button className="skin-open-btn tv-open-btn" type="button" onClick={requestTvMenu}>
           TV
         </button>
@@ -6813,7 +7446,7 @@ function App() {
           Se relever
         </button>
       )}
-      {showCaptureUi && currentZone !== ZONES.outside && mode === 'customize' && (
+      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
         <div className="customize-ui">
           <div className="customize-rotation">
             <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={!selectedObjectId && !placingObjectId}>
@@ -6849,7 +7482,7 @@ function App() {
           )}
         </div>
       )}
-      {showCaptureUi && currentZone !== ZONES.outside && mode === 'customize' && (
+      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
         <ObjectInventorySheet
           open={isObjectInventoryOpen}
           cards={inventoryCards}
