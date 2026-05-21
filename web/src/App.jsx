@@ -2335,56 +2335,53 @@ function PlayerAvatar({ motion }) {
   )
 }
 
-function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTimeOffsetRef = null }) {
+function RemotePlayer({ stateRef, label = 'Visiteur', transport = 'none', serverTimeOffsetRef = null }) {
   const groupRef = useRef(null)
   const samplesRef = useRef([])
   const lastSeqRef = useRef(-1)
-  const displayedMotionRef = useRef(state?.motion ?? 'idle')
+  const displayedMotionRef = useRef('idle')
   const motionSwitchAtRef = useRef(0)
-  const [, forceMotionRender] = useState(0)
+  const [displayedMotion, setDisplayedMotion] = useState('idle')
   const targetRef = useRef({
-    position: state?.position ?? [0, PLAYER_HEIGHT, 2.2],
-    rotationY: state?.rotationY ?? 0,
+    position: stateRef.current?.position ?? [0, PLAYER_HEIGHT, 2.2],
+    rotationY: stateRef.current?.rotationY ?? 0,
     velocity: [0, 0, 0],
     receivedAt: Date.now(),
-    motion: state?.motion ?? 'idle',
+    motion: 'idle',
   })
 
-  // Initialize group position imperatively on mount so R3F never resets it via JSX props on re-renders
+  // Initialize group position imperatively on mount — never via JSX props
   useLayoutEffect(() => {
     const group = groupRef.current
+    const state = stateRef.current
     if (!group || !state?.position) return
     group.position.fromArray(state.position)
     group.rotation.y = state.rotationY ?? 0
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (!state?.position) return
-    const seq = state.seq ?? 0
-    if (seq <= lastSeqRef.current) return
-    lastSeqRef.current = seq
-    const sample = {
-      position: state.position,
-      rotationY: Number.isFinite(state.rotationY) ? state.rotationY : 0,
-      velocity: Array.isArray(state.velocity) ? state.velocity : [0, 0, 0],
-      motion: state.motion || 'idle',
-      time: transport === 'colyseus' && Number.isFinite(state.serverTime) ? state.serverTime : Date.now(),
-    }
-    samplesRef.current.push(sample)
-    if (samplesRef.current.length > 14) samplesRef.current.splice(0, samplesRef.current.length - 14)
-
-    targetRef.current = {
-      position: sample.position,
-      rotationY: sample.rotationY,
-      velocity: sample.velocity,
-      motion: sample.motion,
-      receivedAt: Date.now(),
-    }
-  }, [state, transport])
-
   useFrame((_, delta) => {
     const group = groupRef.current
     if (!group) return
+
+    // Process new network samples directly from ref — no React cycle involved
+    const state = stateRef.current
+    if (state?.position) {
+      const seq = state.seq ?? 0
+      if (seq > lastSeqRef.current) {
+        lastSeqRef.current = seq
+        const sample = {
+          position: state.position,
+          rotationY: Number.isFinite(state.rotationY) ? state.rotationY : 0,
+          velocity: Array.isArray(state.velocity) ? state.velocity : [0, 0, 0],
+          motion: state.motion || 'idle',
+          time: transport === 'colyseus' && Number.isFinite(state.serverTime) ? state.serverTime : Date.now(),
+        }
+        samplesRef.current.push(sample)
+        if (samplesRef.current.length > 14) samplesRef.current.splice(0, samplesRef.current.length - 14)
+        targetRef.current = { position: sample.position, rotationY: sample.rotationY, velocity: sample.velocity, motion: sample.motion, receivedAt: Date.now() }
+      }
+    }
+
     let x
     let y
     let z
@@ -2456,15 +2453,13 @@ function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTim
     if (nextMotion !== displayedMotionRef.current && now - motionSwitchAtRef.current > 110) {
       displayedMotionRef.current = nextMotion
       motionSwitchAtRef.current = now
-      forceMotionRender((value) => value + 1)
+      setDisplayedMotion(nextMotion)
     }
   })
 
-  if (!state?.position) return null
-
   return (
     <group ref={groupRef}>
-      <PlayerAvatar motion={displayedMotionRef.current || 'idle'} />
+      <PlayerAvatar motion={displayedMotion} />
       <Html position={[0, 1.65, 0]} center distanceFactor={8} occlude>
         <div className="remote-player-label">{label}</div>
       </Html>
@@ -2857,7 +2852,7 @@ function MultiplayerPanel({
   outgoingRequest,
   sessionConnectionState,
   sessionTransport,
-  remotePlayerState,
+  hasRemotePlayer,
   message,
   onToggle,
   onRequestVisit,
@@ -2889,7 +2884,7 @@ function MultiplayerPanel({
                 Canal: {sessionConnectionState === 'connected' ? 'connecte' : 'connexion...'}
                 {sessionTransport !== 'none' ? ` (${sessionTransport})` : ''}
                 {' / '}
-                Joueur distant: {remotePlayerState?.position ? 'recu' : 'en attente'}
+                Joueur distant: {hasRemotePlayer ? 'recu' : 'en attente'}
               </span>
               <button type="button" onClick={onLeaveSession}>Quitter</button>
             </div>
@@ -2948,7 +2943,7 @@ function MultiplayerBridge({
   playerPositionRef,
   playerVelocityRef,
   localPlayerStateRef,
-  remoteBallState,
+  remoteBallStateRef,
   ballRef,
   guestKickQueueRef,
   hostTimeOffsetRef,
@@ -3014,6 +3009,7 @@ function MultiplayerBridge({
       return
     }
 
+    const remoteBallState = remoteBallStateRef.current
     if (
       role === 'guest' &&
       remoteBallState?.position &&
@@ -6202,8 +6198,11 @@ function App() {
   const [outgoingVisitRequest, setOutgoingVisitRequest] = useState(null)
   const [multiplayerRole, setMultiplayerRole] = useState('solo')
   const [multiplayerSession, setMultiplayerSession] = useState(null)
-  const [remotePlayerState, setRemotePlayerState] = useState(null)
-  const [remoteBallState, setRemoteBallState] = useState(null)
+  // Refs instead of state: network updates 20x/sec must not trigger React re-renders
+  const remotePlayerStateRef = useRef(null)
+  const remoteBallStateRef = useRef(null)
+  const [hasRemotePlayer, setHasRemotePlayer] = useState(false)
+  const hasRemotePlayerRef = useRef(false)
   const [sessionConnectionState, setSessionConnectionState] = useState('idle')
   const [sessionTransport, setSessionTransport] = useState('none')
   const [multiplayerMessage, setMultiplayerMessage] = useState('')
@@ -6484,8 +6483,9 @@ function App() {
         setMultiplayerMessage('La visite est terminee.')
         setMultiplayerRole('solo')
         setMultiplayerSession(null)
-        setRemotePlayerState(null)
-        setRemoteBallState(null)
+        remotePlayerStateRef.current = null
+        remoteBallStateRef.current = null
+        if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
         setSessionConnectionState('idle')
         if (authUserRef.current) {
           loadPlayerProgress({ scope: progressScope })
@@ -6507,8 +6507,9 @@ function App() {
   useEffect(() => {
     multiplayerChannelRef.current?.disconnect()
     multiplayerChannelRef.current = null
-    setRemotePlayerState(null)
-    setRemoteBallState(null)
+    remotePlayerStateRef.current = null
+    remoteBallStateRef.current = null
+    if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
     setSessionConnectionState('idle')
     setSessionTransport('none')
     guestKickQueueRef.current = []
@@ -6518,13 +6519,29 @@ function App() {
     let cancelled = false
     let activeChannel = null
 
+    const applyRemotePlayerState = (msg) => {
+      remotePlayerStateRef.current = msg
+      if (!hasRemotePlayerRef.current) {
+        hasRemotePlayerRef.current = true
+        setHasRemotePlayer(true)
+      }
+    }
+    const clearRemoteState = () => {
+      remotePlayerStateRef.current = null
+      remoteBallStateRef.current = null
+      if (hasRemotePlayerRef.current) {
+        hasRemotePlayerRef.current = false
+        setHasRemotePlayer(false)
+      }
+    }
+
     const connectFallbackSupabase = () => {
       const channel = connectMultiplayerSession({
         sessionId: multiplayerSession.id,
         userId: authUser.id,
         role: multiplayerRole,
-        onRemotePlayerState: setRemotePlayerState,
-        onRemoteBallState: setRemoteBallState,
+        onRemotePlayerState: applyRemotePlayerState,
+        onRemoteBallState: (msg) => { remoteBallStateRef.current = msg },
         onGuestKick: (payload) => {
           if (payload?.impulse) guestKickQueueRef.current.push(payload)
         },
@@ -6533,10 +6550,9 @@ function App() {
           hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
         },
         onSessionEnded: () => {
+          clearRemoteState()
           setMultiplayerRole('solo')
           setMultiplayerSession(null)
-          setRemotePlayerState(null)
-          setRemoteBallState(null)
           setSessionConnectionState('idle')
           setSessionTransport('none')
           setMultiplayerMessage('La visite est terminee.')
@@ -6552,13 +6568,13 @@ function App() {
       user: authUser,
       role: multiplayerRole,
       displayName: displayName || authUser.email?.split('@')[0] || '',
-      onRemotePlayerState: setRemotePlayerState,
-      onRemoteBallState: setRemoteBallState,
+      onRemotePlayerState: applyRemotePlayerState,
+      onRemoteBallState: (msg) => { remoteBallStateRef.current = msg },
       onGuestKick: (payload) => {
         if (payload?.impulse) guestKickQueueRef.current.push(payload)
       },
       onPlayerLeft: () => {
-        setRemotePlayerState(null)
+        clearRemoteState()
         setMultiplayerMessage('Le joueur distant a quitte la visite.')
       },
       onStatusChange: setSessionConnectionState,
@@ -7197,8 +7213,9 @@ function App() {
 
     setMultiplayerRole('solo')
     setMultiplayerSession(null)
-    setRemotePlayerState(null)
-    setRemoteBallState(null)
+    remotePlayerStateRef.current = null
+    remoteBallStateRef.current = null
+    if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
     setIncomingVisitRequest(null)
     setOutgoingVisitRequest(null)
     setMultiplayerMessage('Visite terminee.')
@@ -7275,7 +7292,7 @@ function App() {
           playerPositionRef={playerPositionRef}
           playerVelocityRef={playerVelocityRef}
           localPlayerStateRef={localPlayerStateRef}
-          remoteBallState={remoteBallState}
+          remoteBallStateRef={remoteBallStateRef}
           ballRef={ballRef}
           guestKickQueueRef={guestKickQueueRef}
           hostTimeOffsetRef={hostTimeOffsetRef}
@@ -7330,12 +7347,14 @@ function App() {
           castShadows={!isDebugMode || debugToggles.shadows}
           showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
         />
-        <RemotePlayer
-          state={remotePlayerState}
-          label={multiplayerRole === 'host' ? multiplayerSession?.guestDisplayName : multiplayerSession?.hostDisplayName}
-          transport={sessionTransport}
-          serverTimeOffsetRef={hostTimeOffsetRef}
-        />
+        {hasRemotePlayer && (
+          <RemotePlayer
+            stateRef={remotePlayerStateRef}
+            label={multiplayerRole === 'host' ? multiplayerSession?.guestDisplayName : multiplayerSession?.hostDisplayName}
+            transport={sessionTransport}
+            serverTimeOffsetRef={hostTimeOffsetRef}
+          />
+        )}
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
@@ -7491,7 +7510,7 @@ function App() {
           outgoingRequest={outgoingVisitRequest}
           sessionConnectionState={sessionConnectionState}
           sessionTransport={sessionTransport}
-          remotePlayerState={remotePlayerState}
+          hasRemotePlayer={hasRemotePlayer}
           message={multiplayerMessage}
           onToggle={() => setIsMultiplayerOpen((current) => !current)}
           onRequestVisit={requestVisitPlayer}
