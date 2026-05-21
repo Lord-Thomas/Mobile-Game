@@ -2460,7 +2460,7 @@ function RemotePlayer({ stateRef, label = 'Visiteur', transport = 'none', server
   return (
     <group ref={groupRef}>
       <PlayerAvatar motion={displayedMotion} />
-      <Html position={[0, 1.65, 0]} center distanceFactor={8} occlude>
+      <Html position={[0, 1.65, 0]} center distanceFactor={8}>
         <div className="remote-player-label">{label}</div>
       </Html>
     </group>
