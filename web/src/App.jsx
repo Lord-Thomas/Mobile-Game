@@ -48,6 +48,7 @@ const MULTIPLAYER_BALL_ACTIVE_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL = 1 / 5
 const MULTIPLAYER_MAX_EXTRAPOLATION_MS = 180
 const MULTIPLAYER_REMOTE_SNAP_DISTANCE = 4
+const MULTIPLAYER_REMOTE_VISUAL_SMOOTHING = 10
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -2338,6 +2339,9 @@ function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTim
   const groupRef = useRef(null)
   const samplesRef = useRef([])
   const lastSeqRef = useRef(-1)
+  const displayedMotionRef = useRef(state?.motion ?? 'idle')
+  const motionSwitchAtRef = useRef(0)
+  const [, forceMotionRender] = useState(0)
   const targetRef = useRef({
     position: state?.position ?? [0, PLAYER_HEIGHT, 2.2],
     rotationY: state?.rotationY ?? 0,
@@ -2422,19 +2426,27 @@ function RemotePlayer({ state, label = 'Visiteur', transport = 'none', serverTim
     if (distance > MULTIPLAYER_REMOTE_SNAP_DISTANCE) {
       group.position.set(x, y, z)
     } else {
-      const smoothing = transport === 'colyseus' ? 18 : 10
+      const smoothing = transport === 'colyseus' ? MULTIPLAYER_REMOTE_VISUAL_SMOOTHING : 10
       group.position.x = MathUtils.damp(group.position.x, x, smoothing, delta)
       group.position.y = MathUtils.damp(group.position.y, y, smoothing, delta)
       group.position.z = MathUtils.damp(group.position.z, z, smoothing, delta)
     }
-    group.rotation.y = dampAngle(group.rotation.y, rotationY, transport === 'colyseus' ? 18 : 12, delta)
+    group.rotation.y = dampAngle(group.rotation.y, rotationY, transport === 'colyseus' ? 10 : 12, delta)
+
+    const nextMotion = targetRef.current.motion || 'idle'
+    const now = Date.now()
+    if (nextMotion !== displayedMotionRef.current && now - motionSwitchAtRef.current > 110) {
+      displayedMotionRef.current = nextMotion
+      motionSwitchAtRef.current = now
+      forceMotionRender((value) => value + 1)
+    }
   })
 
   if (!state?.position) return null
 
   return (
     <group ref={groupRef} position={state.position} rotation={[0, state.rotationY ?? 0, 0]}>
-      <PlayerAvatar motion={state.motion || targetRef.current.motion || 'idle'} />
+      <PlayerAvatar motion={displayedMotionRef.current || 'idle'} />
       <Html position={[0, 1.65, 0]} center distanceFactor={8} occlude>
         <div className="remote-player-label">{label}</div>
       </Html>
