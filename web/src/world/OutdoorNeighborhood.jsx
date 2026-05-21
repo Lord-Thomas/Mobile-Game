@@ -1,3 +1,4 @@
+import React from 'react'
 import { Environment } from '@react-three/drei'
 import { useEffect, useRef } from 'react'
 import OutdoorGround from './OutdoorGround'
@@ -59,7 +60,7 @@ export function OutdoorLighting({ active, showSky, castShadows }) {
   )
 }
 
-function OutdoorNeighborhood({
+const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   lightingActive = true,
   playerPositionRef,
   ballRef,
@@ -85,6 +86,6 @@ function OutdoorNeighborhood({
       {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} />}
     </group>
   )
-}
+})
 
 export default OutdoorNeighborhood

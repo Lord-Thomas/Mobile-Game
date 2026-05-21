@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, MathUtils, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
@@ -443,8 +443,7 @@ function buildGrassHandleBeforeCompile(shaderRef) {
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   const rocks = useMemo(() => createRockCover(), [])
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
-  const [grassChunks, setGrassChunks] = useState({})
-  const [distantGrass, setDistantGrass] = useState(null)
+  const distantGrassWrittenRef = useRef(false)
   const ref = useRef()
   const activeGrassCenterRef = useRef(null)
   const grassChunkCacheRef = useRef(new Map())
@@ -501,10 +500,60 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   }, [grassTexture])
   useEffect(() => () => grassMaterial.dispose(), [grassMaterial])
 
+  // Initialize mesh counts to 0 on mount to avoid showing uninitialized instances
+  useLayoutEffect(() => {
+    grassMeshRefs.current.forEach((mesh) => { if (mesh) mesh.count = 0 })
+  }, [])
+
+  // Write a single chunk directly into the correct quadrant GPU buffer — no React state involved
+  const writeChunkToGPU = (key, items) => {
+    const [cx, cz] = key.split(':').map(Number)
+    const qi = getChunkQuadrantIndex(cx, cz)
+    if (writtenChunkKeysRefs.current[qi].has(key)) return
+    const mesh = grassMeshRefs.current[qi]
+    if (!mesh) return
+    items.forEach((grass) => {
+      if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
+      dummy.position.set(...grass.position)
+      dummy.rotation.set(0, 0, 0)
+      dummy.scale.setScalar(grass.scale)
+      dummy.updateMatrix()
+      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
+      nextGrassOffsetRefs.current[qi] += 1
+    })
+    writtenChunkKeysRefs.current[qi].add(key)
+    mesh.count = nextGrassOffsetRefs.current[qi]
+    mesh.instanceMatrix.needsUpdate = true
+  }
+
+  // Write all distant grass instances directly into quadrant GPU buffers — called once
+  const writeDistantGrassToGPU = (grass) => {
+    if (distantGrassWrittenRef.current) return
+    const meshes = grassMeshRefs.current
+    grass.forEach((item) => {
+      const [x, , z] = item.position
+      const qi = (x >= 0 ? 0 : 1) + (z >= 0 ? 0 : 2)
+      const mesh = meshes[qi]
+      if (!mesh || nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
+      dummy.position.set(...item.position)
+      dummy.rotation.set(0, 0, 0)
+      dummy.scale.setScalar(item.scale)
+      dummy.updateMatrix()
+      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
+      nextGrassOffsetRefs.current[qi] += 1
+    })
+    distantGrassWrittenRef.current = true
+    meshes.forEach((mesh, qi) => {
+      if (!mesh) return
+      mesh.count = nextGrassOffsetRefs.current[qi]
+      mesh.instanceMatrix.needsUpdate = true
+    })
+  }
+
   const publishGrassDebugStats = () => {
     if (typeof window === 'undefined') return
     const completedChunks = grassChunkCacheRef.current.size
-    const mountedChunks = Object.keys(grassChunks).length
+    const writtenChunks = writtenChunkKeysRefs.current.reduce((sum, set) => sum + set.size, 0)
     let completedBlades = 0
     grassChunkCacheRef.current.forEach((items) => {
       completedBlades += items.length
@@ -514,7 +563,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       pendingChunks: pendingGrassChunksRef.current.size,
       activeChunk: activeGrassChunkJobRef.current?.key ?? null,
       completedChunks,
-      mountedChunks,
+      mountedChunks: writtenChunks,
       completedBlades,
     }
   }
@@ -564,14 +613,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
           grassChunkCacheRef.current.set(job.key, job.grass)
           pendingGrassChunksRef.current.delete(job.key)
           activeGrassChunkJobRef.current = null
-
-          setGrassChunks((current) => (
-            current[job.key]
-              ? current
-              : residentGrassKeysRef.current.has(job.key)
-                ? { ...current, [job.key]: job.grass }
-                : current
-          ))
+          if (residentGrassKeysRef.current.has(job.key)) writeChunkToGPU(job.key, job.grass)
         }
       }
 
@@ -594,22 +636,11 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
 
     if (active) {
       residentGrassKeysRef.current = new Set(allGrassChunkKeys)
-
-      setGrassChunks((current) => {
-        let changed = false
-        const next = { ...current }
-        allGrassChunkKeys.forEach((key) => {
-          if (!next[key]) {
-            const cached = grassChunkCacheRef.current.get(key)
-            if (cached) {
-              next[key] = cached
-              changed = true
-            }
-          }
-        })
-        return changed ? next : current
+      // Write any already-cached chunks directly to GPU (no React state)
+      allGrassChunkKeys.forEach((key) => {
+        const cached = grassChunkCacheRef.current.get(key)
+        if (cached) writeChunkToGPU(key, cached)
       })
-
       publishGrassDebugStats()
       return
     }
@@ -641,15 +672,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     activeGrassCenterRef.current = nextCenterKey
     residentGrassKeysRef.current = new Set(allGrassChunkKeys)
 
-    setGrassChunks((current) => {
-      const next = { ...current }
-
-      allGrassChunkKeys.forEach((key) => {
-        const cached = grassChunkCacheRef.current.get(key)
-        if (cached) next[key] = cached
-      })
-
-      return next
+    // Write any cached chunks that haven't been written yet
+    allGrassChunkKeys.forEach((key) => {
+      const cached = grassChunkCacheRef.current.get(key)
+      if (cached) writeChunkToGPU(key, cached)
     })
 
     allGrassChunkKeys.forEach((key) => {
@@ -666,10 +692,6 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     publishGrassDebugStats()
     scheduleGrassChunkBuild()
   })
-
-  useEffect(() => {
-    publishGrassDebugStats()
-  }, [grassChunks])
 
   // Single useFrame for all grass uniforms (replaces one-per-chunk pattern)
   useFrame((state) => {
@@ -688,61 +710,6 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     shader.uniforms.uCameraForward.value.copy(_cameraForward)
   })
 
-  // Write newly built chunks into the correct quadrant buffer (incremental — only new chunks).
-  useLayoutEffect(() => {
-    const meshes = grassMeshRefs.current
-    let dirtyQuadrants = 0
-    Object.entries(grassChunks).forEach(([key, items]) => {
-      const [cx, cz] = key.split(':').map(Number)
-      const qi = getChunkQuadrantIndex(cx, cz)
-      if (writtenChunkKeysRefs.current[qi].has(key)) return
-      const mesh = meshes[qi]
-      if (!mesh) return
-      items.forEach((grass) => {
-        if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
-        dummy.position.set(...grass.position)
-        dummy.rotation.set(0, 0, 0)
-        dummy.scale.setScalar(grass.scale)
-        dummy.updateMatrix()
-        dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
-        nextGrassOffsetRefs.current[qi] += 1
-      })
-      writtenChunkKeysRefs.current[qi].add(key)
-      dirtyQuadrants |= 1 << qi
-    })
-    if (dirtyQuadrants) {
-      meshes.forEach((mesh, qi) => {
-        if (!(dirtyQuadrants & (1 << qi)) || !mesh) return
-        mesh.count = nextGrassOffsetRefs.current[qi]
-        mesh.instanceMatrix.needsUpdate = true
-      })
-    }
-  }, [grassChunks])
-
-  // Write distant grass into the correct quadrant buffers (once)
-  useLayoutEffect(() => {
-    const meshes = grassMeshRefs.current
-    if (!distantGrass || writtenDistantGrassRef.current) return
-    distantGrass.forEach((grass) => {
-      const [x, , z] = grass.position
-      const qi = (x >= 0 ? 0 : 1) + (z >= 0 ? 0 : 2)
-      const mesh = meshes[qi]
-      if (!mesh || nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
-      dummy.position.set(...grass.position)
-      dummy.rotation.set(0, 0, 0)
-      dummy.scale.setScalar(grass.scale)
-      dummy.updateMatrix()
-      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
-      nextGrassOffsetRefs.current[qi] += 1
-    })
-    writtenDistantGrassRef.current = true
-    meshes.forEach((mesh, qi) => {
-      if (!mesh) return
-      mesh.count = nextGrassOffsetRefs.current[qi]
-      mesh.instanceMatrix.needsUpdate = true
-    })
-  }, [distantGrass])
-
   useEffect(() => () => {
     if (grassChunkTimerRef.current === null || typeof window === 'undefined') return
     if ('cancelIdleCallback' in window) window.cancelIdleCallback(grassChunkTimerRef.current)
@@ -750,7 +717,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   }, [])
 
   useEffect(() => {
-    if (distantGrass) return undefined
+    if (distantGrassWrittenRef.current) return undefined
 
     let cancelled = false
     const nextGrass = []
@@ -784,7 +751,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       if (xi <= DISTANT_GRASS_AREA_MAX) {
         schedule(runBatch)
       } else {
-        setDistantGrass(nextGrass)
+        writeDistantGrassToGPU(nextGrass)
       }
     }
 
@@ -797,7 +764,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
         window.cancelIdleCallback(idleId)
       }
     }
-  }, [distantGrass])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useLayoutEffect(() => {
     rocks.forEach((rock, index) => {
