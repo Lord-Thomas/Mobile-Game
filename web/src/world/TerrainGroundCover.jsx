@@ -512,6 +512,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     if (writtenChunkKeysRefs.current[qi].has(key)) return
     const mesh = grassMeshRefs.current[qi]
     if (!mesh) return
+    const startIndex = nextGrassOffsetRefs.current[qi]
     items.forEach((grass) => {
       if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
       dummy.position.set(...grass.position)
@@ -522,7 +523,11 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       nextGrassOffsetRefs.current[qi] += 1
     })
     writtenChunkKeysRefs.current[qi].add(key)
-    mesh.count = nextGrassOffsetRefs.current[qi]
+    const endIndex = nextGrassOffsetRefs.current[qi]
+    mesh.count = endIndex
+    if (endIndex > startIndex) {
+      mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
+    }
     mesh.instanceMatrix.needsUpdate = true
   }
 
@@ -530,6 +535,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   const writeDistantGrassToGPU = (grass) => {
     if (distantGrassWrittenRef.current) return
     const meshes = grassMeshRefs.current
+    const startIndexes = nextGrassOffsetRefs.current.slice()
     grass.forEach((item) => {
       const [x, , z] = item.position
       const qi = (x >= 0 ? 0 : 1) + (z >= 0 ? 0 : 2)
@@ -545,7 +551,12 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     distantGrassWrittenRef.current = true
     meshes.forEach((mesh, qi) => {
       if (!mesh) return
-      mesh.count = nextGrassOffsetRefs.current[qi]
+      const endIndex = nextGrassOffsetRefs.current[qi]
+      mesh.count = endIndex
+      const startIndex = startIndexes[qi]
+      if (endIndex > startIndex) {
+        mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
+      }
       mesh.instanceMatrix.needsUpdate = true
     })
   }
