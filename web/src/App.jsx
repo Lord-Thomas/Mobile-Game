@@ -2399,7 +2399,15 @@ function PlayerChatAnchor({ playerPositionRef, bubblesRef, version }) {
   )
 }
 
-function RemotePlayer({ stateRef, label = 'Visiteur', transport = 'none', serverTimeOffsetRef = null, chatBubblesRef = null, chatVersion = 0 }) {
+function RemotePlayer({
+  stateRef,
+  label = 'Visiteur',
+  transport = 'none',
+  serverTimeOffsetRef = null,
+  chatBubblesRef = null,
+  chatVersion = 0,
+  showOverlays = true,
+}) {
   const groupRef = useRef(null)
   const samplesRef = useRef([])
   const lastSeqRef = useRef(-1)
@@ -2524,10 +2532,12 @@ function RemotePlayer({ stateRef, label = 'Visiteur', transport = 'none', server
   return (
     <group ref={groupRef}>
       <PlayerAvatar motion={displayedMotion} />
-      <Html position={[0, 1.65, 0]} center distanceFactor={8}>
-        <div className="remote-player-label">{label}</div>
-      </Html>
-      {chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
+      {showOverlays && (
+        <Html position={[0, 1.65, 0]} center distanceFactor={8}>
+          <div className="remote-player-label">{label}</div>
+        </Html>
+      )}
+      {showOverlays && chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
     </group>
   )
 }
@@ -7852,6 +7862,7 @@ function App() {
             serverTimeOffsetRef={hostTimeOffsetRef}
             chatBubblesRef={remoteChatBubblesRef}
             chatVersion={chatBubbleVersion}
+            showOverlays={mode !== 'customize'}
           />
         )}
         {isMultiplayerSession && (
