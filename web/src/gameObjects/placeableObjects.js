@@ -2,6 +2,57 @@ const OBJECT_FRONT_AXIS = '+x'
 const OBJECT_FRONT_ROTATION_Y = Math.PI / 2
 let nextObjectInstanceId = 1
 
+const rugImageModules = import.meta.glob('./tapis/*.{avif,jpeg,jpg,png,svg,webp}', {
+  eager: true,
+  import: 'default',
+  query: '?url',
+})
+
+function getRugFileStem(path) {
+  return path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'tapis'
+}
+
+function normalizeObjectId(value) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function getRugName(fileStem) {
+  const cleanedName = fileStem
+    .replace(/^tapis[-_ ]*/i, '')
+    .replace(/[-_]+/g, ' ')
+    .trim()
+
+  if (!cleanedName) return 'Tapis'
+
+  return `Tapis ${cleanedName.replace(/\b\w/g, (letter) => letter.toUpperCase())}`
+}
+
+const rugCatalog = Object.fromEntries(
+  Object.entries(rugImageModules)
+    .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
+    .map(([path, imageUrl]) => {
+      const fileStem = getRugFileStem(path)
+      const objectId = `rug_${normalizeObjectId(fileStem)}`
+
+      return [objectId, {
+        id: objectId,
+        type: 'rug',
+        name: getRugName(fileStem),
+        category: 'rugs',
+        thumbnail: imageUrl,
+        imageUrl,
+        price: 55,
+        targetLongSideMeters: 2.15,
+        frontAxis: OBJECT_FRONT_AXIS,
+      }]
+    }),
+)
+
 function generateSeats({
   objectId,
   width,
@@ -137,8 +188,8 @@ export const objectCatalog = {
     category: 'furniture',
     modelUrl: '/models/placeables/modern_chair/model.glb',
     thumbnail: '/ui/object-thumbnails/modern_chair.webp',
-    price: 95,
-    targetWidthMeters: 0.42,
+    price: 285,
+    targetWidthMeters: 0.38,
     frontAxis: OBJECT_FRONT_AXIS,
     modelRotationY: Math.PI,
     thumbnailRotationY: Math.PI * 1.65,
@@ -159,7 +210,7 @@ export const objectCatalog = {
     modelUrl: '/models/placeables/orange_chair/model.glb',
     thumbnail: '/ui/object-thumbnails/orange_chair.webp',
     price: 95,
-    targetWidthMeters: 0.5,
+    targetWidthMeters: 0.45,
     frontAxis: OBJECT_FRONT_AXIS,
     modelRotationY: Math.PI,
     thumbnailRotationY: Math.PI * 1.65,
@@ -341,6 +392,30 @@ export const objectCatalog = {
     thumbnailRotationY: Math.PI * 0.15,
     thumbnailScale: 1.0,
   },
+  wooden_cabinet: {
+    id: 'wooden_cabinet',
+    type: 'decoration',
+    name: 'Armoire bois',
+    category: 'furniture',
+    modelUrl: '/models/placeables/wooden_cabinet/model.glb',
+    price: 350,
+    targetHeightMeters: 1.38,
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 1.65,
+    thumbnailScale: 0.92,
+  },
+  penguin_toy: {
+    id: 'penguin_toy',
+    type: 'decoration',
+    name: 'Pingouin',
+    category: 'decoration',
+    modelUrl: '/models/placeables/penguin_toy/model.glb',
+    price: 285,
+    targetHeightMeters: 0.62,
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 1.65,
+    thumbnailScale: 1.0,
+  },
   cat: {
     id: 'cat',
     type: 'animal',
@@ -352,6 +427,7 @@ export const objectCatalog = {
     thumbnailRotationY: Math.PI * 1.7,
     thumbnailScale: 1.0,
   },
+  ...rugCatalog,
 }
 
 export const defaultEditableObjects = [
@@ -385,6 +461,9 @@ export const shopObjectIds = [
   'monstera_plant',
   'crystal_egg',
   'crystal_rock',
+  'wooden_cabinet',
+  'penguin_toy',
+  ...Object.keys(rugCatalog),
 ]
 
 export function createEditableObjectInstance(objectId, overrides = {}) {

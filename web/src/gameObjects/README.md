@@ -22,3 +22,11 @@ Exemple :
 ```
 
 Plus tard, ce dossier pourra aussi accueillir un catalogue d'objets achetables, des prix, des tailles de collision, ou des chemins vers des modeles 3D.
+
+## Tapis
+
+Les images placees dans `tapis/` deviennent automatiquement des objets placables de type `rug`.
+
+- Formats pris en charge : AVIF, JPEG, JPG, PNG, SVG et WebP.
+- Le nom de fichier sert a creer l'identifiant et le nom visible du tapis.
+- Le rendu du tapis conserve le ratio de l'image. Sa plus grande dimension vaut environ 2,15 m en V1.

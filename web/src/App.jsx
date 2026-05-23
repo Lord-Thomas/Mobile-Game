@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, Shape, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -3872,9 +3872,107 @@ function InteractiveTvModel({ objectId, placedObjectId }) {
   )
 }
 
+function RugModel({ objectId }) {
+  const catalogItem = objectCatalog[objectId]
+  const texture = useTexture(catalogItem.imageUrl)
+  const imageWidth = texture.image?.naturalWidth ?? texture.image?.width ?? 1
+  const imageHeight = texture.image?.naturalHeight ?? texture.image?.height ?? 1
+  const aspect = Math.max(imageWidth / Math.max(imageHeight, 1), 0.01)
+  const longSide = (catalogItem.targetLongSideMeters ?? 2.15) * WORLD_UNITS_PER_METER
+  const width = aspect >= 1 ? longSide : longSide * aspect
+  const depth = aspect >= 1 ? longSide / aspect : longSide
+  const thickness = 0.009 * WORLD_UNITS_PER_METER
+  const cornerRadius = Math.min(width, depth) * 0.055
+  const rugShape = useMemo(() => {
+    const shape = new Shape()
+    const halfWidth = width / 2
+    const halfDepth = depth / 2
+
+    shape.moveTo(-halfWidth + cornerRadius, -halfDepth)
+    shape.lineTo(halfWidth - cornerRadius, -halfDepth)
+    shape.quadraticCurveTo(halfWidth, -halfDepth, halfWidth, -halfDepth + cornerRadius)
+    shape.lineTo(halfWidth, halfDepth - cornerRadius)
+    shape.quadraticCurveTo(halfWidth, halfDepth, halfWidth - cornerRadius, halfDepth)
+    shape.lineTo(-halfWidth + cornerRadius, halfDepth)
+    shape.quadraticCurveTo(-halfWidth, halfDepth, -halfWidth, halfDepth - cornerRadius)
+    shape.lineTo(-halfWidth, -halfDepth + cornerRadius)
+    shape.quadraticCurveTo(-halfWidth, -halfDepth, -halfWidth + cornerRadius, -halfDepth)
+
+    return shape
+  }, [cornerRadius, depth, width])
+  const rugCornerMask = useMemo(() => {
+    const maskCanvas = document.createElement('canvas')
+    const maskSize = 256
+    const maskContext = maskCanvas.getContext('2d')
+    const maskRadius = maskSize * (cornerRadius / Math.min(width, depth))
+
+    maskCanvas.width = maskSize
+    maskCanvas.height = maskSize
+    maskContext.fillStyle = '#fff'
+    maskContext.beginPath()
+    maskContext.moveTo(maskRadius, 0)
+    maskContext.lineTo(maskSize - maskRadius, 0)
+    maskContext.quadraticCurveTo(maskSize, 0, maskSize, maskRadius)
+    maskContext.lineTo(maskSize, maskSize - maskRadius)
+    maskContext.quadraticCurveTo(maskSize, maskSize, maskSize - maskRadius, maskSize)
+    maskContext.lineTo(maskRadius, maskSize)
+    maskContext.quadraticCurveTo(0, maskSize, 0, maskSize - maskRadius)
+    maskContext.lineTo(0, maskRadius)
+    maskContext.quadraticCurveTo(0, 0, maskRadius, 0)
+    maskContext.closePath()
+    maskContext.fill()
+
+    const mask = new CanvasTexture(maskCanvas)
+    mask.minFilter = LinearFilter
+    mask.magFilter = LinearFilter
+    return mask
+  }, [cornerRadius, depth, width])
+  const rugExtrudeSettings = useMemo(() => ({
+    bevelEnabled: true,
+    bevelSegments: 3,
+    bevelSize: thickness * 0.38,
+    bevelThickness: thickness * 0.36,
+    curveSegments: 10,
+    depth: thickness,
+    steps: 1,
+  }), [thickness])
+  const edgeColor = '#7d725c'
+  const undersideColor = '#564f43'
+
+  return (
+    <group position={[0, 0.006, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <extrudeGeometry args={[rugShape, rugExtrudeSettings]} />
+        <meshStandardMaterial color={edgeColor} roughness={0.98} />
+      </mesh>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, thickness + rugExtrudeSettings.bevelThickness + 0.002, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[width, depth]} />
+        <meshStandardMaterial
+          map={texture}
+          alphaMap={rugCornerMask}
+          alphaTest={0.01}
+          roughness={0.98}
+          metalness={0}
+          side={DoubleSide}
+          transparent
+        />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -0.002, 0]}>
+        <shapeGeometry args={[rugShape]} />
+        <meshStandardMaterial color={undersideColor} roughness={1} side={DoubleSide} />
+      </mesh>
+    </group>
+  )
+}
+
 function PlaceableModel({ objectId, type, placedObjectId }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
+  if (type === 'rug' || catalogItem?.type === 'rug') return <RugModel objectId={objectId} />
   if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} placedObjectId={placedObjectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
   if (type === 'sofa' || catalogItem?.type === 'sofa') return <SofaModel />
@@ -5132,7 +5230,11 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
 
 function EditableObject({ object, selected, mode, onSelect, onStartDragging, onObjectRef }) {
   const isCustomizeMode = mode === 'customize'
-  const selectionRing = object.type === 'sofa' || object.type === 'desk' ? [1.05, 1.12] : [0.62, 0.68]
+  const selectionRing = object.type === 'rug'
+    ? [1.45, 1.54]
+    : object.type === 'sofa' || object.type === 'desk'
+      ? [1.05, 1.12]
+      : [0.62, 0.68]
   const groupRef = useRef(null)
 
   useEffect(() => {
@@ -5350,12 +5452,28 @@ function CustomizationLayer({
     return { hx: size.x / 2, hz: size.z / 2 }
   }, [])
 
+  const getFloorPlacementY = useCallback((x, z) => {
+    const insideHouse = houseLayout.rooms.some((room) => {
+      const [rx, , rz] = room.position
+      return (
+        Math.abs(x - rx) <= room.size[0] * 0.5 &&
+        Math.abs(z - rz) <= room.size[2] * 0.5
+      )
+    })
+    return insideHouse ? 0 : getTerrainHeight(x, z)
+  }, [])
+
   const getPlacementY = useCallback((x, z, ignoredObjectId) => {
+    const movingObject = objects.find((object) => object.id === ignoredObjectId)
+    if (movingObject?.type === 'rug' || objectCatalog[movingObject?.objectId]?.type === 'rug') {
+      return getFloorPlacementY(x, z)
+    }
+
     const supportObjects = Array.from(placeableRefs.current.entries())
       .filter(([id]) => id !== ignoredObjectId)
       .map(([, object3D]) => object3D)
 
-    if (supportObjects.length === 0) return 0
+    if (supportObjects.length === 0) return getFloorPlacementY(x, z)
 
     supportObjects.forEach((object3D) => object3D.updateMatrixWorld(true))
     placementRayOrigin.set(x, CUSTOM_PLACEMENT_RAY_START_Y, z)
@@ -5369,15 +5487,8 @@ function CustomizationLayer({
       })
 
     if (hit) return hit.point.y
-    const insideHouse = houseLayout.rooms.some((room) => {
-      const [rx, , rz] = room.position
-      return (
-        Math.abs(x - rx) <= room.size[0] * 0.5 &&
-        Math.abs(z - rz) <= room.size[2] * 0.5
-      )
-    })
-    return insideHouse ? 0 : getTerrainHeight(x, z)
-  }, [])
+    return getFloorPlacementY(x, z)
+  }, [getFloorPlacementY, objects])
 
   return (
     <>
@@ -8526,6 +8637,7 @@ Object.values(objectCatalog).forEach((item) => {
   if (item.modelUrl) useGLTF.preload(item.modelUrl)
   if (item.thumbnailModelUrl?.endsWith('.fbx')) useFBX.preload(item.thumbnailModelUrl)
   if (item.thumbnailTextureUrl) useTexture.preload(item.thumbnailTextureUrl)
+  if (item.imageUrl) useTexture.preload(item.imageUrl)
 })
 ballSkins.forEach((skin) => useTexture.preload(skin.texture))
 floorSkins.forEach((skin) => useTexture.preload(skin.texture))
