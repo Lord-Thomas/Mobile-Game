@@ -4124,7 +4124,7 @@ function applyTrainingDummyBendMaterial(material, uniforms, minY, maxY) {
   return nextMaterial
 }
 
-function TrainingDummyModel({ object, registerCombatTarget }) {
+function TrainingDummyModel({ object, registerCombatTarget, onDefeated }) {
   const catalogItem = objectCatalog[object.objectId]
   const gltf = useGLTF(catalogItem.modelUrl)
   const maxHp = catalogItem.combat?.maxHp ?? 100
@@ -4189,8 +4189,8 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
     const sin = Math.sin(rotationY)
     const localX = direction.x * cos - direction.z * sin
     const localZ = direction.x * sin + direction.z * cos
-    leanVelocityRef.current.x += localX * 3.8
-    leanVelocityRef.current.z += localZ * 3.8
+    leanVelocityRef.current.x -= localX * 7.2
+    leanVelocityRef.current.z -= localZ * 7.2
 
     setHudVisible(true)
     setFlash(true)
@@ -4219,6 +4219,11 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
       if (nextHp <= 0 && !defeatedRef.current) {
         defeatedRef.current = true
         setDefeated(true)
+        onDefeated?.({
+          objectId: object.id,
+          position: object.position ?? [0, 0, 0],
+          reward: 50,
+        })
         if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
         if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
         resetTimerRef.current = window.setTimeout(() => {
@@ -4241,7 +4246,7 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
     })
 
     return true
-  }, [maxHp, object.rotationY, uniforms.uDummyLean])
+  }, [maxHp, object.id, object.position, object.rotationY, onDefeated, uniforms.uDummyLean])
 
   useEffect(() => {
     if (!registerCombatTarget) return undefined
@@ -4259,16 +4264,16 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
   useFrame((_, delta) => {
     const lean = leanRef.current
     const velocity = leanVelocityRef.current
-    const spring = 34
-    const damping = 8.5
+    const spring = 42
+    const damping = 6.4
 
     velocity.x += -lean.x * spring * delta
     velocity.z += -lean.z * spring * delta
     const dampingFactor = Math.exp(-damping * delta)
     velocity.x *= dampingFactor
     velocity.z *= dampingFactor
-    lean.x = MathUtils.clamp(lean.x + velocity.x * delta, -0.38, 0.38)
-    lean.z = MathUtils.clamp(lean.z + velocity.z * delta, -0.38, 0.38)
+    lean.x = MathUtils.clamp(lean.x + velocity.x * delta, -0.62, 0.62)
+    lean.z = MathUtils.clamp(lean.z + velocity.z * delta, -0.62, 0.62)
     uniforms.uDummyLean.value.set(lean.x, lean.z)
   })
 
@@ -5571,7 +5576,7 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   )
 }
 
-function EditableObject({ object, selected, mode, onSelect, onStartDragging, onObjectRef, registerCombatTarget }) {
+function EditableObject({ object, selected, mode, onSelect, onStartDragging, onObjectRef, registerCombatTarget, onTrainingDummyDefeated }) {
   const isCustomizeMode = mode === 'customize'
   const catalogItem = objectCatalog[object.objectId]
   const isTrainingDummy = catalogItem?.combat?.kind === 'training_dummy'
@@ -5613,7 +5618,11 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
     >
       <Suspense fallback={null}>
         {isTrainingDummy ? (
-          <TrainingDummyModel object={object} registerCombatTarget={registerCombatTarget} />
+          <TrainingDummyModel
+            object={object}
+            registerCombatTarget={registerCombatTarget}
+            onDefeated={onTrainingDummyDefeated}
+          />
         ) : (
           <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
         )}
@@ -5776,6 +5785,7 @@ function CustomizationLayer({
   onUpdatePlacementPreview,
   onLockPlacement,
   registerCombatTarget,
+  onTrainingDummyDefeated,
 }) {
   const placedObjects = objects.filter((object) => object.status !== 'stored')
   const placingObject = objects.find((object) => object.id === placingObjectId)
@@ -5887,6 +5897,7 @@ function CustomizationLayer({
           onStartDragging={onStartDragging}
           onObjectRef={registerPlaceableRef}
           registerCombatTarget={registerCombatTarget}
+          onTrainingDummyDefeated={onTrainingDummyDefeated}
         />
       ))}
       <PlacementPreview object={placingObject} preview={placementPreview} groupRef={previewGroupRef} />
@@ -7737,6 +7748,24 @@ function App() {
     }, 1000)
   }
 
+  const handleTrainingDummyDefeated = async ({ position, reward = 50 }) => {
+    const rewarded = await applyCoinDelta(reward)
+    if (!rewarded) return
+
+    setScorePopups((previous) => [
+      ...previous,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        value: reward,
+        x: position?.[0] ?? 0,
+        y: (position?.[1] ?? 0) + 1.55,
+        z: position?.[2] ?? 0,
+        startAt: Date.now(),
+        duration: 700,
+      },
+    ])
+  }
+
   const handleBallZoneEnter = () => {
     if (scoreCooldownRef.current) return
     handleGoal()
@@ -8380,6 +8409,7 @@ function App() {
             onUpdatePlacementPreview={updatePlacementPreview}
             onLockPlacement={() => setPlacementLocked(true)}
             registerCombatTarget={registerCombatTarget}
+            onTrainingDummyDefeated={handleTrainingDummyDefeated}
           />
         </PlayerHouse>
         )}

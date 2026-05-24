@@ -1018,11 +1018,11 @@ canvas {
 }
 
 .training-damage-number {
-  color: #ffd447;
+  color: #ff4f57;
   font-size: 15px;
   font-weight: 950;
   text-align: center;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.46);
   pointer-events: none;
   user-select: none;
   animation-name: training-damage-pop;
