@@ -632,58 +632,6 @@ canvas {
   margin-top: 10px;
 }
 
-.multiplayer-transport-badge {
-  position: absolute;
-  top: 124px;
-  right: 14px;
-  z-index: 7;
-  width: min(250px, calc(100vw - 28px));
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 12px;
-  padding: 9px 11px;
-  color: #edf7ff;
-  background: rgba(8, 12, 20, 0.78);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
-  backdrop-filter: blur(12px);
-  display: grid;
-  gap: 2px;
-  pointer-events: none;
-}
-
-.multiplayer-transport-badge strong {
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.multiplayer-transport-badge span,
-.multiplayer-transport-badge small,
-.multiplayer-transport-badge em {
-  color: #b7c7d7;
-  font-size: 10px;
-  line-height: 1.25;
-  font-style: normal;
-  overflow-wrap: anywhere;
-}
-
-.multiplayer-transport-badge.colyseus {
-  border-color: rgba(120, 240, 160, 0.38);
-  background: rgba(7, 38, 28, 0.78);
-}
-
-.multiplayer-transport-badge.colyseus strong {
-  color: #78f0a0;
-}
-
-.multiplayer-transport-badge.fallback {
-  border-color: rgba(255, 193, 102, 0.42);
-  background: rgba(48, 31, 8, 0.82);
-}
-
-.multiplayer-transport-badge.fallback strong,
-.multiplayer-transport-badge.fallback em {
-  color: #ffc166;
-}
-
 .social-player-actions {
   display: grid;
   gap: 8px;

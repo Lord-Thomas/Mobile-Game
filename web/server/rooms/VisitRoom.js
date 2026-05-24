@@ -91,6 +91,8 @@ export class VisitRoom extends Room {
       guestUserId: options.guestUserId,
     })
 
+    console.log(`[colyseus] room created session=${this.sessionId}`)
+
     this.setSimulationInterval(() => this.flushNetworkState(), 1000 / 30)
 
     this.onMessage('player-state', (client, message) => this.handlePlayerState(client, message))
@@ -127,6 +129,8 @@ export class VisitRoom extends Room {
     this.players.set(client.sessionId, player)
     if (role === 'host') this.hostClient = client
 
+    console.log(`[colyseus] join session=${this.sessionId} role=${role} user=${player.userId}`)
+
     client.send('joined', {
       sessionId: this.sessionId,
       roomId: this.roomId,
@@ -151,6 +155,8 @@ export class VisitRoom extends Room {
     const player = this.players.get(client.sessionId)
     this.players.delete(client.sessionId)
     if (this.hostClient?.sessionId === client.sessionId) this.hostClient = null
+
+    console.log(`[colyseus] leave session=${this.sessionId} role=${player?.role ?? 'unknown'} user=${player?.userId ?? client.sessionId}`)
 
     this.broadcast('player-left', {
       sessionId: client.sessionId,

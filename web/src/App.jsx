@@ -3119,38 +3119,6 @@ function MultiplayerPanel({
   )
 }
 
-function MultiplayerTransportBadge({
-  role,
-  sessionConnectionState,
-  sessionTransport,
-  hasRemotePlayer,
-  message,
-}) {
-  if (role === 'solo') return null
-
-  const isColyseus = sessionTransport === 'colyseus'
-  const isFallback = sessionTransport === 'supabase'
-  const label = isColyseus ? 'Colyseus' : isFallback ? 'Supabase fallback' : 'Connexion...'
-  const detail = isColyseus
-    ? getColyseusConnectionLabel()
-    : isFallback
-      ? 'Colyseus indisponible'
-      : 'Recherche du canal'
-
-  return (
-    <div className={`multiplayer-transport-badge ${isColyseus ? 'colyseus' : isFallback ? 'fallback' : ''}`}>
-      <strong>{label}</strong>
-      <span>
-        {sessionConnectionState === 'connected' ? 'connecte' : 'connexion'}
-        {' / '}
-        joueur distant {hasRemotePlayer ? 'recu' : 'en attente'}
-      </span>
-      <small>{detail}</small>
-      {message && <em>{message}</em>}
-    </div>
-  )
-}
-
 function GameChatPanel({
   open,
   value,
@@ -7162,11 +7130,12 @@ function App() {
         activeChannel = connectFallbackSupabase()
         multiplayerChannelRef.current = activeChannel
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
         activeChannel = connectFallbackSupabase()
         multiplayerChannelRef.current = activeChannel
-        setMultiplayerMessage('Colyseus indisponible: fallback Supabase actif.')
+        const errorMessage = error?.message ? ` (${error.message})` : ''
+        setMultiplayerMessage(`Colyseus indisponible sur ${getColyseusConnectionLabel()}: fallback Supabase actif.${errorMessage}`)
       })
 
     return () => {
@@ -8180,15 +8149,6 @@ function App() {
           onRequestFriend={requestFriend}
           onAcceptFriend={acceptFriendRequest}
           onRejectFriend={rejectFriendRequest}
-        />
-      )}
-      {showCaptureUi && isMultiplayerSession && (
-        <MultiplayerTransportBadge
-          role={multiplayerRole}
-          sessionConnectionState={sessionConnectionState}
-          sessionTransport={sessionTransport}
-          hasRemotePlayer={hasRemotePlayer}
-          message={multiplayerMessage}
         />
       )}
       {showCaptureUi && isMultiplayerSession && (
