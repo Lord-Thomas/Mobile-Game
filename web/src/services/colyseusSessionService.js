@@ -11,6 +11,14 @@ export function getColyseusUrl() {
   return import.meta.env.VITE_COLYSEUS_URL || getDefaultColyseusUrl()
 }
 
+export function getColyseusConnectionLabel() {
+  try {
+    return new URL(getColyseusUrl()).host
+  } catch {
+    return getColyseusUrl()
+  }
+}
+
 export async function connectColyseusVisitSession({
   session,
   user,

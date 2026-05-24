@@ -8,7 +8,7 @@ import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, sh
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
-import { connectColyseusVisitSession } from './services/colyseusSessionService'
+import { connectColyseusVisitSession, getColyseusConnectionLabel } from './services/colyseusSessionService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
@@ -3115,6 +3115,38 @@ function MultiplayerPanel({
           {message && <div className="multiplayer-message">{message}</div>}
         </div>
       )}
+    </div>
+  )
+}
+
+function MultiplayerTransportBadge({
+  role,
+  sessionConnectionState,
+  sessionTransport,
+  hasRemotePlayer,
+  message,
+}) {
+  if (role === 'solo') return null
+
+  const isColyseus = sessionTransport === 'colyseus'
+  const isFallback = sessionTransport === 'supabase'
+  const label = isColyseus ? 'Colyseus' : isFallback ? 'Supabase fallback' : 'Connexion...'
+  const detail = isColyseus
+    ? getColyseusConnectionLabel()
+    : isFallback
+      ? 'Colyseus indisponible'
+      : 'Recherche du canal'
+
+  return (
+    <div className={`multiplayer-transport-badge ${isColyseus ? 'colyseus' : isFallback ? 'fallback' : ''}`}>
+      <strong>{label}</strong>
+      <span>
+        {sessionConnectionState === 'connected' ? 'connecte' : 'connexion'}
+        {' / '}
+        joueur distant {hasRemotePlayer ? 'recu' : 'en attente'}
+      </span>
+      <small>{detail}</small>
+      {message && <em>{message}</em>}
     </div>
   )
 }
@@ -8148,6 +8180,15 @@ function App() {
           onRequestFriend={requestFriend}
           onAcceptFriend={acceptFriendRequest}
           onRejectFriend={rejectFriendRequest}
+        />
+      )}
+      {showCaptureUi && isMultiplayerSession && (
+        <MultiplayerTransportBadge
+          role={multiplayerRole}
+          sessionConnectionState={sessionConnectionState}
+          sessionTransport={sessionTransport}
+          hasRemotePlayer={hasRemotePlayer}
+          message={multiplayerMessage}
         />
       )}
       {showCaptureUi && isMultiplayerSession && (
