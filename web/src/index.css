@@ -9,6 +9,7 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
+  overscroll-behavior: none;
 }
 
 body:has(.thumbnail-capture-page) {
@@ -38,9 +39,10 @@ body {
 }
 
 .app {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: fixed;
+  inset: 0;
+  width: var(--app-viewport-width, 100%);
+  height: var(--app-viewport-height, 100%);
   overflow: hidden;
   isolation: isolate;
   contain: layout paint;

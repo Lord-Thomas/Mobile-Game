@@ -6034,6 +6034,65 @@ function getEvenPixelSize(value) {
   return rounded % 2 === 0 ? rounded : rounded - 1
 }
 
+function getActiveViewportSize() {
+  if (typeof window === 'undefined') {
+    return { width: 1, height: 1 }
+  }
+
+  const visualViewport = window.visualViewport
+  return {
+    width: Math.max(1, Math.round(visualViewport?.width ?? window.innerWidth ?? 1)),
+    height: Math.max(1, Math.round(visualViewport?.height ?? window.innerHeight ?? 1)),
+  }
+}
+
+function getViewportOrientation() {
+  const { width, height } = getActiveViewportSize()
+  return width > height ? 'landscape' : 'portrait'
+}
+
+function useMobileViewportSync() {
+  const [orientation, setOrientation] = useState(() => getViewportOrientation())
+
+  useLayoutEffect(() => {
+    let frame = null
+
+    const updateViewport = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const { width, height } = getActiveViewportSize()
+        const nextOrientation = width > height ? 'landscape' : 'portrait'
+
+        document.documentElement.style.setProperty('--app-viewport-width', `${width}px`)
+        document.documentElement.style.setProperty('--app-viewport-height', `${height}px`)
+        document.documentElement.dataset.orientation = nextOrientation
+        setOrientation((current) => (current === nextOrientation ? current : nextOrientation))
+      })
+    }
+
+    updateViewport()
+    window.addEventListener('resize', updateViewport)
+    window.addEventListener('orientationchange', updateViewport)
+    window.visualViewport?.addEventListener('resize', updateViewport)
+    window.visualViewport?.addEventListener('scroll', updateViewport)
+    window.screen?.orientation?.addEventListener?.('change', updateViewport)
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener('resize', updateViewport)
+      window.removeEventListener('orientationchange', updateViewport)
+      window.visualViewport?.removeEventListener('resize', updateViewport)
+      window.visualViewport?.removeEventListener('scroll', updateViewport)
+      window.screen?.orientation?.removeEventListener?.('change', updateViewport)
+      document.documentElement.style.removeProperty('--app-viewport-width')
+      document.documentElement.style.removeProperty('--app-viewport-height')
+      delete document.documentElement.dataset.orientation
+    }
+  }, [])
+
+  return orientation
+}
+
 function useVerticalFrameSize(active) {
   const [frameSize, setFrameSize] = useState(null)
 
@@ -6086,8 +6145,7 @@ function getViewportRenderSettings(renderScale = MAX_DYNAMIC_RENDER_SCALE) {
     return { dpr: 1, antialias: true }
   }
 
-  const width = Math.max(1, window.innerWidth || 1)
-  const height = Math.max(1, window.innerHeight || 1)
+  const { width, height } = getActiveViewportSize()
   const nativeDpr = Math.min(MAX_RENDER_DPR, Math.max(MIN_RENDER_DPR, window.devicePixelRatio || 1))
   const viewportPixels = width * height
   const targetPixels = TARGET_MAX_RENDER_PIXELS * renderScale
@@ -6380,6 +6438,7 @@ function AdaptiveCameraFov() {
 }
 
 function App() {
+  const viewportOrientation = useMobileViewportSync()
   const isThumbnailTool = useMemo(() => {
     try {
       const params = new URLSearchParams(window.location.search)
@@ -7882,7 +7941,7 @@ function App() {
   }
 
   const gameView = (
-    <main className="app">
+    <main className={`app app-${viewportOrientation}`}>
       <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
       <Canvas
         dpr={renderSettings.dpr}
