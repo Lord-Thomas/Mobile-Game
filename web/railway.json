@@ -1,0 +1,15 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "watchPatterns": [
+      "/web/server/**",
+      "/web/package.json",
+      "/web/package-lock.json",
+      "/web/railway.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "npm run multiplayer",
+    "healthcheckPath": "/health"
+  }
+}

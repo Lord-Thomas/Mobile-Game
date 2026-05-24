@@ -44,6 +44,48 @@ Build production:
 - Chaque `push` sur `main` declenche un redeploiement automatique en production
 - Chaque `push` sur une autre branche declenche un lien preview
 
+## Multijoueur Colyseus en ligne
+
+Vercel sert le jeu React, mais le serveur Colyseus doit tourner sur un hebergeur Node separe qui garde un process WebSocket vivant.
+
+Guide Railway detaille: `DEPLOYMENT_RAILWAY.md`.
+
+Architecture:
+
+- Vercel: frontend du jeu
+- Render, Railway, Fly.io ou autre hebergeur Node: `web/server/index.js`
+- Supabase: comptes et sauvegardes
+
+Configuration du serveur Colyseus:
+
+```bash
+Root Directory: web
+Build Command: npm install
+Start Command: npm run multiplayer
+Health Check Path: /health
+```
+
+Le serveur ecoute `PORT` en production et `COLYSEUS_PORT` ou `2567` en local.
+
+Configuration Vercel:
+
+```bash
+VITE_COLYSEUS_URL=wss://URL_DE_TON_SERVEUR_COLYSEUS
+```
+
+En local, tu peux garder:
+
+```bash
+VITE_COLYSEUS_URL=ws://127.0.0.1:2567
+```
+
+Apres chaque changement de code:
+
+- un push sur `main` redeploie Vercel
+- le meme push redeploie le service Colyseus si l'hebergeur est connecte au meme repo
+- si tu changes seulement le frontend, seul Vercel a besoin de redeployer
+- si tu changes `web/server`, le service Colyseus doit aussi redeployer
+
 ## Sauvegarde joueur Supabase
 
 1. Creer un projet Supabase.

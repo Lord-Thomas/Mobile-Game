@@ -3,7 +3,7 @@ import { Server } from 'colyseus'
 import { WebSocketTransport } from '@colyseus/ws-transport'
 import { VisitRoom } from './rooms/VisitRoom.js'
 
-const port = Number(process.env.COLYSEUS_PORT ?? 2567)
+const port = Number(process.env.PORT ?? process.env.COLYSEUS_PORT ?? 2567)
 const host = process.env.COLYSEUS_HOST ?? '0.0.0.0'
 
 const server = http.createServer((req, res) => {
