@@ -8307,8 +8307,9 @@ function App() {
     resetGuestProgress()
   }
 
+  const isFramedViewport = isAdminMode || isVerticalFrameMode
   const gameView = (
-    <main className={`app app-${viewportOrientation}`}>
+    <main className={`app app-${viewportOrientation}${isFramedViewport ? ' app-framed' : ''}`}>
       <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
       <Canvas
         dpr={renderSettings.dpr}
