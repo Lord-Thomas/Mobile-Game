@@ -64,6 +64,13 @@ const PLAYER_KICK_LATERAL_RANGE = 0.55
 const PLAYER_KICK_FOOT_FORWARD_OFFSET = 0.46
 const PLAYER_KICK_FOOT_SIDE_OFFSET = 0.1
 const PLAYER_KICK_FOOT_CONTACT_RADIUS = 0.28
+const PLAYER_PUNCH_DURATION = 0.72
+const PLAYER_PUNCH_CONTACT_DELAY = 0.28
+const PLAYER_PUNCH_CONTACT_WINDOW = 0.14
+const PLAYER_PUNCH_DAMAGE = 10
+const PLAYER_PUNCH_RANGE = 1.15
+const PLAYER_PUNCH_FRONT_MIN = 0.15
+const PLAYER_PUNCH_LATERAL_RANGE = 0.62
 const PLAYER_JUMP_START_DURATION = 0.62
 const PLAYER_JUMP_LAND_DURATION = 0.38
 const PLAYER_LANDING_PREPARE_DISTANCE = 0.95
@@ -549,6 +556,54 @@ function getKickContact({ playerX, playerZ, yaw, ballX, ballZ }) {
       Math.abs(lateralDistance) < PLAYER_KICK_LATERAL_RANGE,
     isTouchingFoot: distanceToFoot < PLAYER_KICK_FOOT_CONTACT_RADIUS + BALL_RADIUS,
   }
+}
+
+function getPunchContact({ playerX, playerZ, yaw, targetX, targetZ, targetRadius = 0.45 }) {
+  const forwardX = Math.sin(yaw)
+  const forwardZ = Math.cos(yaw)
+  const rightX = Math.cos(yaw)
+  const rightZ = -Math.sin(yaw)
+  const dx = targetX - playerX
+  const dz = targetZ - playerZ
+  const forwardDistance = dx * forwardX + dz * forwardZ
+  const lateralDistance = dx * rightX + dz * rightZ
+
+  return {
+    forwardX,
+    forwardZ,
+    forwardDistance,
+    lateralDistance,
+    isInPunchArc:
+      forwardDistance > PLAYER_PUNCH_FRONT_MIN &&
+      forwardDistance < PLAYER_PUNCH_RANGE + targetRadius &&
+      Math.abs(lateralDistance) < PLAYER_PUNCH_LATERAL_RANGE + targetRadius,
+  }
+}
+
+function getNearestPunchTarget({ targets, playerX, playerZ, yaw }) {
+  let nearest = null
+  let nearestDistance = Infinity
+
+  targets?.forEach((target) => {
+    if (!target || target.disabled) return
+    const position = target.position
+    if (!position) return
+
+    const contact = getPunchContact({
+      playerX,
+      playerZ,
+      yaw,
+      targetX: position.x,
+      targetZ: position.z,
+      targetRadius: target.radius,
+    })
+
+    if (!contact.isInPunchArc || contact.forwardDistance >= nearestDistance) return
+    nearestDistance = contact.forwardDistance
+    nearest = { target, contact }
+  })
+
+  return nearest
 }
 
 function useKeyboardInput() {
@@ -1626,6 +1681,8 @@ function Player({
   catPositionRef = null,
   localPlayerStateRef = null,
   onKickIntent = null,
+  combatTargetsRef = null,
+  onCombatHit = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -1635,6 +1692,8 @@ function Player({
   const cameraLookRef = useRef({ x: 0, y: PLAYER_HEIGHT + 0.55, z: 2.2 })
   const kickUntilRef = useRef(0)
   const pendingKickRef = useRef(null)
+  const punchUntilRef = useRef(0)
+  const pendingPunchRef = useRef(null)
   const jumpStartUntilRef = useRef(0)
   const jumpLandUntilRef = useRef(0)
   const waveUntilRef = useRef(0)
@@ -1958,6 +2017,8 @@ function Player({
       pointingUpUntilRef.current = 0
       kickUntilRef.current = 0
       pendingKickRef.current = null
+      punchUntilRef.current = 0
+      pendingPunchRef.current = null
       jumpStartUntilRef.current = 0
       jumpLandUntilRef.current = 0
       planarVelocityRef.current.x = 0
@@ -1970,6 +2031,8 @@ function Player({
       pointingUpUntilRef.current = 0
       kickUntilRef.current = 0
       pendingKickRef.current = null
+      punchUntilRef.current = 0
+      pendingPunchRef.current = null
       jumpStartUntilRef.current = 0
       jumpLandUntilRef.current = 0
       planarVelocityRef.current.x = 0
@@ -1982,6 +2045,8 @@ function Player({
       danceUntilRef.current = 0
       kickUntilRef.current = 0
       pendingKickRef.current = null
+      punchUntilRef.current = 0
+      pendingPunchRef.current = null
       jumpStartUntilRef.current = 0
       jumpLandUntilRef.current = 0
       planarVelocityRef.current.x = 0
@@ -1989,6 +2054,23 @@ function Player({
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
     } else if (wantsAction) {
+      const punchTarget = getNearestPunchTarget({
+        targets: combatTargetsRef?.current,
+        playerX: nextX,
+        playerZ: nextZ,
+        yaw: visualRef.current.rotation.y,
+      })
+
+      if (punchTarget && onGroundRef.current) {
+        const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
+        punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
+        pendingPunchRef.current = {
+          targetId: punchTarget.target.id,
+          contactAt,
+          expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
+          fired: false,
+        }
+      } else {
       const ball = ballRef.current
       if (ball) {
         const ballPos = ball.translation()
@@ -2022,6 +2104,7 @@ function Player({
         jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
         jumpLandUntilRef.current = 0
         landingPreparedRef.current = false
+      }
       }
     }
 
@@ -2098,6 +2181,38 @@ function Player({
       visualRef.current.position.set(nextX, nextY, nextZ)
     }
 
+    const pendingPunch = pendingPunchRef.current
+    if (pendingPunch && !pendingPunch.fired && state.clock.elapsedTime >= pendingPunch.contactAt) {
+      const target = combatTargetsRef?.current?.get(pendingPunch.targetId)
+      if (target && !target.disabled && state.clock.elapsedTime <= pendingPunch.expiresAt) {
+        const contact = getPunchContact({
+          playerX: nextX,
+          playerZ: nextZ,
+          yaw: visualRef.current.rotation.y,
+          targetX: target.position.x,
+          targetZ: target.position.z,
+          targetRadius: target.radius,
+        })
+
+        if (contact.isInPunchArc) {
+          onCombatHit?.({
+            targetId: target.id,
+            damage: PLAYER_PUNCH_DAMAGE,
+            direction: { x: contact.forwardX, z: contact.forwardZ },
+            hitPoint: [
+              target.position.x,
+              (target.position.y ?? 0) + Math.min(target.height ?? 1.4, 1.25),
+              target.position.z,
+            ],
+          })
+        }
+      }
+      pendingPunch.fired = true
+      pendingPunchRef.current = null
+    } else if (pendingPunch && state.clock.elapsedTime > pendingPunch.expiresAt) {
+      pendingPunchRef.current = null
+    }
+
     const pendingKick = pendingKickRef.current
     if (pendingKick && !pendingKick.fired && state.clock.elapsedTime >= pendingKick.contactAt) {
       const ball = ballRef.current
@@ -2140,6 +2255,8 @@ function Player({
                 ? 'dance'
                 : state.clock.elapsedTime < pointingUpUntilRef.current
                   ? 'pointingUp'
+                  : state.clock.elapsedTime < punchUntilRef.current
+                    ? 'punch'
                   : state.clock.elapsedTime < kickUntilRef.current
                     ? 'kick'
                     : isMoving
@@ -2229,6 +2346,7 @@ function PlayerAvatar({ motion }) {
   const walk = useFBX('/models/player/player-walk.fbx')
   const run = useFBX('/models/player/player-run.fbx')
   const kick = useFBX('/models/player/player-kick.fbx')
+  const punch = useFBX('/models/player/player-punch.fbx')
   const wave = useFBX('/models/Waving.fbx')
   const dance = useFBX('/models/Wave Hip Hop Dance.fbx')
   const pointingUp = useFBX('/models/player/pointing-up.fbx')
@@ -2269,6 +2387,7 @@ function PlayerAvatar({ motion }) {
       { source: walk.animations[0], name: 'walk' },
       { source: run.animations[0], name: 'run' },
       { source: kick.animations[0], name: 'kick' },
+      { source: punch.animations[0], name: 'punch' },
       { source: wave.animations[0], name: 'wave' },
       { source: dance.animations[0], name: 'dance' },
       { source: pointingUp.animations[0], name: 'pointingUp' },
@@ -2293,7 +2412,7 @@ function PlayerAvatar({ motion }) {
         }
         return clip
       })
-  }, [idle.animations, walk.animations, run.animations, kick.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [idle.animations, walk.animations, run.animations, kick.animations, punch.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const { actions } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
@@ -2309,7 +2428,7 @@ function PlayerAvatar({ motion }) {
 
     if (previousAction === nextAction) return
 
-    const isOneShot = nextMotion === 'kick' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
+    const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
     const fadeDuration =
       previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
         ? PLAYER_JUMP_TO_FALL_ANIMATION_FADE
@@ -2325,7 +2444,7 @@ function PlayerAvatar({ motion }) {
       .reset()
       .setLoop(isOneShot ? LoopOnce : LoopRepeat, isOneShot ? 1 : Infinity)
       .setEffectiveWeight(1)
-      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : 1)
+      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : nextMotion === 'punch' ? 1.35 : 1)
       .play()
     nextAction.clampWhenFinished = isOneShot
 
@@ -3979,6 +4098,220 @@ function PlaceableModel({ objectId, type, placedObjectId }) {
   return null
 }
 
+function applyTrainingDummyBendMaterial(material, uniforms, minY, maxY) {
+  const nextMaterial = material.clone()
+  nextMaterial.onBeforeCompile = (shader) => {
+    shader.uniforms.uDummyLean = uniforms.uDummyLean
+    shader.uniforms.uDummyMinY = { value: minY }
+    shader.uniforms.uDummyMaxY = { value: maxY }
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+      uniform vec2 uDummyLean;
+      uniform float uDummyMinY;
+      uniform float uDummyMaxY;`,
+    )
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      float dummyHeightT = clamp((position.y - uDummyMinY) / max(uDummyMaxY - uDummyMinY, 0.0001), 0.0, 1.0);
+      float dummyBend = smoothstep(0.24, 1.0, dummyHeightT);
+      transformed.x += uDummyLean.x * dummyBend * dummyBend;
+      transformed.z += uDummyLean.y * dummyBend * dummyBend;`,
+    )
+  }
+  nextMaterial.needsUpdate = true
+  return nextMaterial
+}
+
+function TrainingDummyModel({ object, registerCombatTarget }) {
+  const catalogItem = objectCatalog[object.objectId]
+  const gltf = useGLTF(catalogItem.modelUrl)
+  const maxHp = catalogItem.combat?.maxHp ?? 100
+  const [hp, setHp] = useState(maxHp)
+  const [damageNumbers, setDamageNumbers] = useState([])
+  const [flash, setFlash] = useState(false)
+  const [defeated, setDefeated] = useState(false)
+  const hpRef = useRef(maxHp)
+  const defeatedRef = useRef(false)
+  const resetTimerRef = useRef(null)
+  const flashTimerRef = useRef(null)
+  const leanRef = useRef({ x: 0, z: 0 })
+  const leanVelocityRef = useRef({ x: 0, z: 0 })
+  const targetRef = useRef({
+    id: object.id,
+    position: { x: 0, y: 0, z: 0 },
+    radius: catalogItem.combat?.radius ?? 0.5,
+    height: catalogItem.combat?.height ?? 1.9,
+    disabled: false,
+    takeDamage: null,
+  })
+  const uniforms = useMemo(() => ({
+    uDummyLean: { value: new Vector2(0, 0) },
+  }), [])
+
+  const model = useMemo(() => {
+    const source = clone(gltf.scene)
+    source.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(source)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const targetHeight = (catalogItem.targetHeightMeters ?? 1.55) * WORLD_UNITS_PER_METER
+    const scale = targetHeight / Math.max(size.y, 0.001)
+
+    source.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+        child.frustumCulled = false
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map((material) => applyTrainingDummyBendMaterial(material, uniforms, box.min.y, box.max.y))
+        } else if (child.material) {
+          child.material = applyTrainingDummyBendMaterial(child.material, uniforms, box.min.y, box.max.y)
+        }
+      }
+    })
+
+    return {
+      object: source,
+      offset: [-center.x, -box.min.y, -center.z],
+      scale,
+    }
+  }, [catalogItem.modelUrl, catalogItem.targetHeightMeters, gltf.scene, uniforms])
+
+  const takeDamage = useCallback(({ damage = PLAYER_PUNCH_DAMAGE, direction = { x: 0, z: 1 } }) => {
+    if (defeatedRef.current) return false
+
+    const rotationY = object.rotationY ?? 0
+    const cos = Math.cos(rotationY)
+    const sin = Math.sin(rotationY)
+    const localX = direction.x * cos - direction.z * sin
+    const localZ = direction.x * sin + direction.z * cos
+    leanVelocityRef.current.x += localX * 3.8
+    leanVelocityRef.current.z += localZ * 3.8
+
+    setFlash(true)
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = window.setTimeout(() => setFlash(false), 130)
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    setDamageNumbers((current) => [
+      ...current,
+      {
+        id,
+        value: damage,
+        x: (Math.random() - 0.5) * 0.34,
+        y: 1.42 + Math.random() * 0.18,
+        z: (Math.random() - 0.5) * 0.22,
+        duration: 680,
+      },
+    ])
+    window.setTimeout(() => {
+      setDamageNumbers((current) => current.filter((number) => number.id !== id))
+    }, 720)
+
+    setHp((current) => {
+      const nextHp = Math.max(0, current - damage)
+      hpRef.current = nextHp
+      if (nextHp <= 0 && !defeatedRef.current) {
+        defeatedRef.current = true
+        setDefeated(true)
+        if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
+        resetTimerRef.current = window.setTimeout(() => {
+          defeatedRef.current = false
+          hpRef.current = maxHp
+          leanRef.current.x = 0
+          leanRef.current.z = 0
+          leanVelocityRef.current.x = 0
+          leanVelocityRef.current.z = 0
+          uniforms.uDummyLean.value.set(0, 0)
+          setHp(maxHp)
+          setDefeated(false)
+        }, 1200)
+      }
+      return nextHp
+    })
+
+    return true
+  }, [maxHp, object.rotationY, uniforms.uDummyLean])
+
+  useEffect(() => {
+    if (!registerCombatTarget) return undefined
+    return registerCombatTarget(object.id, targetRef.current)
+  }, [object.id, registerCombatTarget])
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
+    }
+  }, [])
+
+  useFrame((_, delta) => {
+    const lean = leanRef.current
+    const velocity = leanVelocityRef.current
+    const spring = 34
+    const damping = 8.5
+
+    velocity.x += -lean.x * spring * delta
+    velocity.z += -lean.z * spring * delta
+    const dampingFactor = Math.exp(-damping * delta)
+    velocity.x *= dampingFactor
+    velocity.z *= dampingFactor
+    lean.x = MathUtils.clamp(lean.x + velocity.x * delta, -0.38, 0.38)
+    lean.z = MathUtils.clamp(lean.z + velocity.z * delta, -0.38, 0.38)
+    uniforms.uDummyLean.value.set(lean.x, lean.z)
+  })
+
+  const position = object.position ?? [0, 0, 0]
+  targetRef.current.id = object.id
+  targetRef.current.position.x = position[0]
+  targetRef.current.position.y = position[1]
+  targetRef.current.position.z = position[2]
+  targetRef.current.radius = catalogItem.combat?.radius ?? 0.5
+  targetRef.current.height = catalogItem.combat?.height ?? 1.9
+  targetRef.current.disabled = object.status === 'stored' || defeated
+  targetRef.current.takeDamage = takeDamage
+
+  const hpRatio = MathUtils.clamp(hp / maxHp, 0, 1)
+
+  return (
+    <group scale={model.scale} rotation={[0, catalogItem.modelRotationY ?? 0, 0]}>
+      <mesh position={[0, 0.05 / model.scale, 0]} receiveShadow>
+        <cylinderGeometry args={[0.5 / model.scale, 0.62 / model.scale, 0.1 / model.scale, 32]} />
+        <meshStandardMaterial color={defeated ? '#6d7680' : '#272f37'} roughness={0.78} metalness={0.15} />
+      </mesh>
+      <mesh position={[0, 0.28 / model.scale, 0]} castShadow>
+        <cylinderGeometry args={[0.13 / model.scale, 0.19 / model.scale, 0.34 / model.scale, 20]} />
+        <meshStandardMaterial color="#c4ced8" roughness={0.42} metalness={0.35} />
+      </mesh>
+      <primitive object={model.object} position={model.offset} />
+      {flash && (
+        <mesh position={[0, 1.16 / model.scale, 0.02 / model.scale]}>
+          <sphereGeometry args={[0.22 / model.scale, 18, 12]} />
+          <meshBasicMaterial color="#ffd447" transparent opacity={0.42} depthWrite={false} />
+        </mesh>
+      )}
+      <Html position={[0, 2.12 / model.scale, 0]} center transform sprite distanceFactor={5.2}>
+        <div className={`training-dummy-hud ${defeated ? 'is-defeated' : ''}`}>
+          <div className="training-dummy-name">{defeated ? 'Recharge...' : 'Mannequin'}</div>
+          <div className="training-dummy-bar">
+            <span style={{ width: `${hpRatio * 100}%` }} />
+          </div>
+          <div className="training-dummy-hp">{hp} / {maxHp}</div>
+        </div>
+      </Html>
+      {damageNumbers.map((number) => (
+        <Html key={number.id} position={[number.x / model.scale, number.y / model.scale, number.z / model.scale]} center transform sprite distanceFactor={4.6}>
+          <div className="training-damage-number" style={{ animationDuration: `${number.duration}ms` }}>
+            -{number.value}
+          </div>
+        </Html>
+      ))}
+    </group>
+  )
+}
+
 function getTwitchParentHost() {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -5228,8 +5561,10 @@ function InteractiveTvScreen({ screenInfo, tvInstanceId }) {
   )
 }
 
-function EditableObject({ object, selected, mode, onSelect, onStartDragging, onObjectRef }) {
+function EditableObject({ object, selected, mode, onSelect, onStartDragging, onObjectRef, registerCombatTarget }) {
   const isCustomizeMode = mode === 'customize'
+  const catalogItem = objectCatalog[object.objectId]
+  const isTrainingDummy = catalogItem?.combat?.kind === 'training_dummy'
   const selectionRing = object.type === 'rug'
     ? [1.45, 1.54]
     : object.type === 'sofa' || object.type === 'desk'
@@ -5267,7 +5602,11 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
       onPointerDown={handlePointerDown}
     >
       <Suspense fallback={null}>
-        <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
+        {isTrainingDummy ? (
+          <TrainingDummyModel object={object} registerCombatTarget={registerCombatTarget} />
+        ) : (
+          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
+        )}
       </Suspense>
       {selected && (
         <mesh
@@ -5426,6 +5765,7 @@ function CustomizationLayer({
   onUpdatePosition,
   onUpdatePlacementPreview,
   onLockPlacement,
+  registerCombatTarget,
 }) {
   const placedObjects = objects.filter((object) => object.status !== 'stored')
   const placingObject = objects.find((object) => object.id === placingObjectId)
@@ -5536,6 +5876,7 @@ function CustomizationLayer({
           onSelect={onSelect}
           onStartDragging={onStartDragging}
           onObjectRef={registerPlaceableRef}
+          registerCombatTarget={registerCombatTarget}
         />
       ))}
       <PlacementPreview object={placingObject} preview={placementPreview} groupRef={previewGroupRef} />
@@ -6534,6 +6875,7 @@ function App() {
   const ballRef = useRef()
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
   const playerVelocityRef = useRef({ x: 0, z: 0 })
+  const combatTargetsRef = useRef(new Map())
   const catPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const catGroupRef = useRef(null)
   const catTapCallbackRef = useRef(null)
@@ -7546,6 +7888,21 @@ function App() {
     window.dispatchEvent(new CustomEvent(TV_MENU_EVENT, { detail: { objectId: nearbyTv.id } }))
   }
 
+  const registerCombatTarget = useCallback((id, target) => {
+    if (!id || !target) return undefined
+    combatTargetsRef.current.set(id, target)
+    return () => {
+      if (combatTargetsRef.current.get(id) === target) {
+        combatTargetsRef.current.delete(id)
+      }
+    }
+  }, [])
+
+  const handleCombatHit = useCallback((hit) => {
+    const target = combatTargetsRef.current.get(hit.targetId)
+    target?.takeDamage?.(hit)
+  }, [])
+
   const transitionToZone = (nextZone) => {
     if (zoneFadeActive || currentZone === nextZone) return
     setZoneFadeActive(true)
@@ -8011,6 +8368,7 @@ function App() {
             onUpdatePosition={updateEditableObjectPosition}
             onUpdatePlacementPreview={updatePlacementPreview}
             onLockPlacement={() => setPlacementLocked(true)}
+            registerCombatTarget={registerCombatTarget}
           />
         </PlayerHouse>
         )}
@@ -8096,6 +8454,8 @@ function App() {
                   return false
                 }
                 : null}
+              combatTargetsRef={combatTargetsRef}
+              onCombatHit={handleCombatHit}
             />
           )}
           <OutdoorDoorTrigger
@@ -8682,6 +9042,7 @@ useFBX.preload('/models/player/player-idle.fbx')
 useFBX.preload('/models/player/player-walk.fbx')
 useFBX.preload('/models/player/player-run.fbx')
 useFBX.preload('/models/player/player-kick.fbx')
+useFBX.preload('/models/player/player-punch.fbx')
 useFBX.preload('/models/Waving.fbx')
 useFBX.preload('/models/Wave Hip Hop Dance.fbx')
 useFBX.preload('/models/player/pointing-up.fbx')

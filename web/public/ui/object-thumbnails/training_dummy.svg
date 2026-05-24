@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Mannequin d entrainement">
+  <defs>
+    <linearGradient id="bg" x1="42" y1="28" x2="214" y2="230" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#eef6ff"/>
+      <stop offset="1" stop-color="#d7e3ee"/>
+    </linearGradient>
+    <linearGradient id="body" x1="98" y1="56" x2="160" y2="186" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff93a7"/>
+      <stop offset="1" stop-color="#d95b78"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="26" fill="url(#bg)"/>
+  <ellipse cx="128" cy="218" rx="70" ry="16" fill="#a6b7c8" opacity=".42"/>
+  <rect x="112" y="168" width="32" height="46" rx="10" fill="#bfcad5"/>
+  <rect x="82" y="208" width="92" height="18" rx="9" fill="#2d3843"/>
+  <rect x="101" y="180" width="54" height="22" rx="11" fill="#d8e1ea"/>
+  <circle cx="128" cy="61" r="22" fill="#ef7890"/>
+  <path d="M101 96c0-18 13-31 27-31s27 13 27 31v49c0 20-12 35-27 35s-27-15-27-35z" fill="url(#body)"/>
+  <path d="M105 99c-20 6-34 18-43 36-4 8 0 18 8 22 8 3 16 0 21-8 6-11 13-18 23-22z" fill="#ea6e88"/>
+  <path d="M151 99c20 6 34 18 43 36 4 8 0 18-8 22-8 3-16 0-21-8-6-11-13-18-23-22z" fill="#ea6e88"/>
+  <path d="M113 89c7 7 23 7 30 0" fill="none" stroke="#ffd6de" stroke-width="7" stroke-linecap="round"/>
+  <path d="M128 180v32" fill="none" stroke="#8997a5" stroke-width="8" stroke-linecap="round"/>
+  <path d="M86 53c-18 8-30 23-34 42" fill="none" stroke="#ffd447" stroke-width="8" stroke-linecap="round" opacity=".9"/>
+  <path d="M170 36c16 9 27 23 32 42" fill="none" stroke="#ffd447" stroke-width="8" stroke-linecap="round" opacity=".65"/>
+</svg>

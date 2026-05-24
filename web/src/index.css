@@ -970,6 +970,88 @@ canvas {
   }
 }
 
+.training-dummy-hud {
+  width: 116px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(12, 18, 24, 0.84);
+  color: #f8fbff;
+  text-align: center;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(5px);
+}
+
+.training-dummy-hud.is-defeated {
+  border-color: rgba(255, 212, 71, 0.55);
+}
+
+.training-dummy-name {
+  font-size: 10px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.training-dummy-bar {
+  width: 100%;
+  height: 7px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.training-dummy-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff595e, #ffd447);
+  transition: width 150ms ease;
+}
+
+.training-dummy-hp {
+  margin-top: 3px;
+  font-size: 9px;
+  color: #d9e4ef;
+}
+
+.training-damage-number {
+  min-width: 34px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(18, 22, 28, 0.78);
+  color: #ffd447;
+  font-size: 15px;
+  font-weight: 950;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  user-select: none;
+  animation-name: training-damage-pop;
+  animation-timing-function: cubic-bezier(0.18, 0.72, 0.2, 1);
+  animation-fill-mode: both;
+}
+
+@keyframes training-damage-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(0.28rem) scale(0.74);
+  }
+  16% {
+    opacity: 1;
+    transform: translateY(-0.08rem) scale(1.14);
+  }
+  68% {
+    opacity: 1;
+    transform: translateY(-0.5rem) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-0.92rem) scale(0.96);
+  }
+}
+
 .skin-open-btn {
   position: absolute;
   left: 50%;
