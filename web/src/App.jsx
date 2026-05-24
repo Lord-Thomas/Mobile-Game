@@ -4132,10 +4132,12 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
   const [damageNumbers, setDamageNumbers] = useState([])
   const [flash, setFlash] = useState(false)
   const [defeated, setDefeated] = useState(false)
+  const [hudVisible, setHudVisible] = useState(false)
   const hpRef = useRef(maxHp)
   const defeatedRef = useRef(false)
   const resetTimerRef = useRef(null)
   const flashTimerRef = useRef(null)
+  const hudTimerRef = useRef(null)
   const leanRef = useRef({ x: 0, z: 0 })
   const leanVelocityRef = useRef({ x: 0, z: 0 })
   const targetRef = useRef({
@@ -4190,6 +4192,7 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
     leanVelocityRef.current.x += localX * 3.8
     leanVelocityRef.current.z += localZ * 3.8
 
+    setHudVisible(true)
     setFlash(true)
     if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
     flashTimerRef.current = window.setTimeout(() => setFlash(false), 130)
@@ -4216,6 +4219,7 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
       if (nextHp <= 0 && !defeatedRef.current) {
         defeatedRef.current = true
         setDefeated(true)
+        if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
         if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
         resetTimerRef.current = window.setTimeout(() => {
           defeatedRef.current = false
@@ -4227,7 +4231,11 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
           uniforms.uDummyLean.value.set(0, 0)
           setHp(maxHp)
           setDefeated(false)
+          setHudVisible(false)
         }, 1200)
+      } else if (nextHp > 0) {
+        if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
+        hudTimerRef.current = window.setTimeout(() => setHudVisible(false), 2200)
       }
       return nextHp
     })
@@ -4244,6 +4252,7 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
     return () => {
       if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
       if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
+      if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
     }
   }, [])
 
@@ -4292,19 +4301,20 @@ function TrainingDummyModel({ object, registerCombatTarget }) {
           <meshBasicMaterial color="#ffd447" transparent opacity={0.42} depthWrite={false} />
         </mesh>
       )}
-      <Html position={[0, 2.12 / model.scale, 0]} center transform sprite distanceFactor={5.2}>
-        <div className={`training-dummy-hud ${defeated ? 'is-defeated' : ''}`}>
-          <div className="training-dummy-name">{defeated ? 'Recharge...' : 'Mannequin'}</div>
-          <div className="training-dummy-bar">
-            <span style={{ width: `${hpRatio * 100}%` }} />
+      {hudVisible && (
+        <Html position={[0, 2.04 / model.scale, 0]} center transform sprite distanceFactor={5.2}>
+          <div className={`training-dummy-hud ${defeated ? 'is-defeated' : ''}`}>
+            <div className="training-dummy-bar">
+              <span style={{ width: `${hpRatio * 100}%` }} />
+              <div className="training-dummy-hp">{hp} / {maxHp}</div>
+            </div>
           </div>
-          <div className="training-dummy-hp">{hp} / {maxHp}</div>
-        </div>
-      </Html>
+        </Html>
+      )}
       {damageNumbers.map((number) => (
         <Html key={number.id} position={[number.x / model.scale, number.y / model.scale, number.z / model.scale]} center transform sprite distanceFactor={4.6}>
           <div className="training-damage-number" style={{ animationDuration: `${number.duration}ms` }}>
-            -{number.value}
+            {number.value}
           </div>
         </Html>
       ))}
