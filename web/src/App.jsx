@@ -12,7 +12,7 @@ import { connectColyseusVisitSession, getColyseusConnectionLabel } from './servi
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
-import { OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE } from './world/outdoorData'
+import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -73,10 +73,24 @@ const PLAYER_PUNCH_FRONT_MIN = 0.15
 const PLAYER_PUNCH_LATERAL_RANGE = 0.62
 const MUSHROOM_ENEMY_ID = 'mushroom_enemy_01'
 const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
-const MUSHROOM_ENEMY_SPAWN = [-6.2, 0, 7.4]
 const MUSHROOM_ENEMY_MAX_HP = 30
 const MUSHROOM_ENEMY_REWARD_COINS = 5
 const MUSHROOM_ENEMY_RESPAWN_MS = 10000
+const MUSHROOM_ENEMY_VISIBILITY_RANGE = 6.2
+const MUSHROOM_ENEMY_VIEW_CONE_DEGREES = 95
+const MUSHROOM_ENEMY_CLOSE_ALERT_RANGE = 1.35
+const MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS = 0.75
+const MUSHROOM_ENEMY_LOSE_INTEREST_RANGE = 7.5
+const MUSHROOM_ENEMY_LEASH_RANGE = 9
+const MUSHROOM_ENEMY_STOP_DISTANCE = 0.95
+const MUSHROOM_ENEMY_MOVE_SPEED = 1.25
+const MUSHROOM_ENEMY_RETURN_SPEED = 1.65
+const MUSHROOM_ENEMY_RESPAWN_PLAYER_SAFE_RANGE = 4
+const MUSHROOM_ENEMY_SPAWN_TREE_RADIUS = 6.8
+const MUSHROOM_ENEMY_MIN_TREES_NEAR_SPAWN = 5
+const MUSHROOM_ENEMY_HOUSE_CLEARANCE = 8.5
+const MUSHROOM_ENEMY_SPAWN_CLEARANCE = 1.35
+const MUSHROOM_ENEMY_SPAWN_YAW = Math.PI * 0.72
 const MUSHROOM_ENEMY_ATTACK_DAMAGE = 10
 const MUSHROOM_ENEMY_ATTACK_RANGE = 1.2
 const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
@@ -4370,12 +4384,144 @@ function TrainingDummyModel({ object, registerCombatTarget, onDefeated }) {
   )
 }
 
+function getDistanceToRotatedFootprint(x, z, footprint) {
+  const rotationY = footprint.rotationY ?? 0
+  const dx = x - footprint.x
+  const dz = z - footprint.z
+  const cos = Math.cos(-rotationY)
+  const sin = Math.sin(-rotationY)
+  const localX = dx * cos - dz * sin
+  const localZ = dx * sin + dz * cos
+  const outsideX = Math.max(Math.abs(localX) - footprint.hx, 0)
+  const outsideZ = Math.max(Math.abs(localZ) - footprint.hz, 0)
+
+  return Math.hypot(outsideX, outsideZ)
+}
+
+function getDistanceToPlayerHouse(x, z) {
+  return houseLayout.rooms.reduce((closest, room) => {
+    const footprint = {
+      x: room.position[0],
+      z: room.position[2],
+      hx: room.size[0] * 0.5 + houseLayout.wallThickness,
+      hz: room.size[2] * 0.5 + houseLayout.wallThickness,
+    }
+
+    return Math.min(closest, getDistanceToRotatedFootprint(x, z, footprint))
+  }, Infinity)
+}
+
+function getDistanceToNeighborHouses(x, z) {
+  return NEIGHBOR_HOUSES.reduce((closest, house) => {
+    const cos = Math.cos(house.rotationY)
+    const sin = Math.sin(house.rotationY)
+    const houseDistance = getNeighborHouseParts(house).reduce((partClosest, part) => {
+      const footprint = {
+        x: house.position[0] + part.offset[0] * cos - part.offset[1] * sin,
+        z: house.position[2] + part.offset[0] * sin + part.offset[1] * cos,
+        hx: part.size[0] * 0.5,
+        hz: part.size[2] * 0.5,
+        rotationY: house.rotationY,
+      }
+
+      return Math.min(partClosest, getDistanceToRotatedFootprint(x, z, footprint))
+    }, Infinity)
+
+    return Math.min(closest, houseDistance)
+  }, Infinity)
+}
+
+function getDistanceToNearestHouse(x, z) {
+  return Math.min(getDistanceToPlayerHouse(x, z), getDistanceToNeighborHouses(x, z))
+}
+
+function getNearbyTreeCount(x, z, radius = MUSHROOM_ENEMY_SPAWN_TREE_RADIUS) {
+  return AUTHORED_TREES.reduce((count, tree) => {
+    const treePosition = tree.config.position
+    return count + (Math.hypot(treePosition.x - x, treePosition.z - z) <= radius ? 1 : 0)
+  }, 0)
+}
+
+function isMushroomEnemySpawnCandidateValid(x, z) {
+  const insideWorld = Math.abs(x) < OUTDOOR_HALF_SIZE - 1.5 && Math.abs(z) < OUTDOOR_HALF_SIZE - 1.5
+  if (!insideWorld) return false
+  if (getNearbyTreeCount(x, z) < MUSHROOM_ENEMY_MIN_TREES_NEAR_SPAWN) return false
+  if (getDistanceToNearestHouse(x, z) < MUSHROOM_ENEMY_HOUSE_CLEARANCE) return false
+
+  return !OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
+    const expanded = {
+      ...collider,
+      hx: collider.hx + MUSHROOM_ENEMY_SPAWN_CLEARANCE,
+      hz: collider.hz + MUSHROOM_ENEMY_SPAWN_CLEARANCE,
+    }
+
+    return getDistanceToRotatedFootprint(x, z, expanded) <= 0
+  })
+}
+
+function getMushroomEnemySpawnPosition() {
+  const forestTrees = AUTHORED_TREES.filter((tree) => {
+    const area = tree.placement?.area
+    return area === 'dense_forest' || area === 'forest_edge'
+  })
+  const offsets = [
+    [0, 0],
+    [1.8, 0],
+    [-1.8, 0],
+    [0, 1.8],
+    [0, -1.8],
+    [1.35, 1.35],
+    [1.35, -1.35],
+    [-1.35, 1.35],
+    [-1.35, -1.35],
+    [2.45, 0.75],
+    [-2.45, -0.75],
+  ]
+  const candidates = forestTrees.flatMap((tree) => {
+    const position = tree.config.position
+    return offsets.map(([offsetX, offsetZ]) => ({
+      x: position.x + offsetX,
+      z: position.z + offsetZ,
+      areaPriority: tree.placement?.area === 'dense_forest' ? 1 : 0,
+    }))
+  })
+
+  const validCandidates = candidates
+    .filter(({ x, z }) => isMushroomEnemySpawnCandidateValid(x, z))
+    .map((candidate) => {
+      const treeCount = getNearbyTreeCount(candidate.x, candidate.z)
+      const houseDistance = getDistanceToNearestHouse(candidate.x, candidate.z)
+      return {
+        ...candidate,
+        score: treeCount * 16 + candidate.areaPriority * 24 + Math.min(houseDistance, 20),
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+
+  const selected = validCandidates[0] ?? { x: -30.5, z: -29.5 }
+  return [selected.x, getTerrainHeight(selected.x, selected.z), selected.z]
+}
+
+function canMushroomEnemySeePlayer(enemyPosition, enemyYaw, playerPosition) {
+  const dx = playerPosition.x - enemyPosition.x
+  const dz = playerPosition.z - enemyPosition.z
+  const distance = Math.hypot(dx, dz)
+  if (distance <= 0.001 || distance > MUSHROOM_ENEMY_VISIBILITY_RANGE) return false
+
+  const forwardX = Math.sin(enemyYaw)
+  const forwardZ = Math.cos(enemyYaw)
+  const dot = forwardX * (dx / distance) + forwardZ * (dz / distance)
+  const minDot = Math.cos(MathUtils.degToRad(MUSHROOM_ENEMY_VIEW_CONE_DEGREES * 0.5))
+
+  return dot >= minDot
+}
+
 function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, onDefeated, onHitPlayer }) {
   const sourceModel = useFBX(MUSHROOM_ENEMY_MODEL_URL)
   const idle = useFBX('/models/player/player-idle.fbx')
+  const walk = useFBX('/models/player/player-walk.fbx')
   const punch = useFBX('/models/player/player-punch.fbx')
   const groupRef = useRef()
-  const visualRef = useRef()
   const [hp, setHp] = useState(MUSHROOM_ENEMY_MAX_HP)
   const [damageNumbers, setDamageNumbers] = useState([])
   const [hudVisible, setHudVisible] = useState(false)
@@ -4384,17 +4530,23 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
   const [motion, setMotion] = useState('idle')
   const hpRef = useRef(MUSHROOM_ENEMY_MAX_HP)
   const defeatedRef = useRef(false)
+  const stateRef = useRef('idle')
   const attackRef = useRef(null)
   const nextAttackAtRef = useRef(0)
+  const closeAlertTimerRef = useRef(0)
+  const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const respawnTimerRef = useRef(null)
   const hudTimerRef = useRef(null)
   const flashTimerRef = useRef(null)
   const recoilRef = useRef({ x: 0, z: 0, y: 0 })
   const recoilVelocityRef = useRef({ x: 0, z: 0, y: 0 })
-  const spawnPosition = useMemo(() => {
-    const [x, , z] = MUSHROOM_ENEMY_SPAWN
-    return [x, getTerrainHeight(x, z), z]
-  }, [])
+  const spawnPosition = useMemo(() => getMushroomEnemySpawnPosition(), [])
+  useEffect(() => {
+    currentPositionRef.current.x = spawnPosition[0]
+    currentPositionRef.current.y = spawnPosition[1]
+    currentPositionRef.current.z = spawnPosition[2]
+    if (groupRef.current) groupRef.current.rotation.y = MUSHROOM_ENEMY_SPAWN_YAW
+  }, [spawnPosition])
   const targetRef = useRef({
     id: MUSHROOM_ENEMY_ID,
     position: { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] },
@@ -4433,6 +4585,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
   const animationClips = useMemo(() => {
     return [
       { source: idle.animations[0], name: 'idle' },
+      { source: walk.animations[0], name: 'walk' },
       { source: punch.animations[0], name: 'punch' },
     ]
       .filter(({ source }) => source)
@@ -4443,7 +4596,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
         lockHipsPlanarPosition(clip)
         return clip
       })
-  }, [enemyHipsRestHeight, idle.animations, punch.animations])
+  }, [enemyHipsRestHeight, idle.animations, punch.animations, walk.animations])
 
   const { actions } = useAnimations(animationClips, model.object)
   const currentActionRef = useRef(null)
@@ -4473,8 +4626,14 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
 
   const resetEnemy = useCallback(() => {
     defeatedRef.current = false
+    stateRef.current = 'idle'
     attackRef.current = null
     nextAttackAtRef.current = 0
+    closeAlertTimerRef.current = 0
+    currentPositionRef.current.x = spawnPosition[0]
+    currentPositionRef.current.y = spawnPosition[1]
+    currentPositionRef.current.z = spawnPosition[2]
+    if (groupRef.current) groupRef.current.rotation.y = MUSHROOM_ENEMY_SPAWN_YAW
     hpRef.current = MUSHROOM_ENEMY_MAX_HP
     recoilRef.current.x = 0
     recoilRef.current.y = 0
@@ -4487,7 +4646,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     setHudVisible(false)
     setMotion('idle')
     setDamageNumbers([])
-  }, [])
+  }, [spawnPosition])
 
   const takeDamage = useCallback(({ damage = PLAYER_PUNCH_DAMAGE, direction = { x: 0, z: 1 } }) => {
     if (!active || defeatedRef.current) return false
@@ -4520,18 +4679,40 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     setHp((current) => {
       const nextHp = Math.max(0, current - damage)
       hpRef.current = nextHp
+      closeAlertTimerRef.current = 0
+      if (nextHp > 0 && stateRef.current === 'idle') {
+        stateRef.current = 'chase'
+      }
       if (nextHp <= 0 && !defeatedRef.current) {
         defeatedRef.current = true
+        stateRef.current = 'dead'
+        attackRef.current = null
         setDefeated(true)
         setHudVisible(false)
         if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
         onDefeated?.({
           enemyId: MUSHROOM_ENEMY_ID,
-          position: spawnPosition,
+          position: [
+            currentPositionRef.current.x,
+            currentPositionRef.current.y,
+            currentPositionRef.current.z,
+          ],
           reward: MUSHROOM_ENEMY_REWARD_COINS,
         })
         if (respawnTimerRef.current) window.clearTimeout(respawnTimerRef.current)
-        respawnTimerRef.current = window.setTimeout(resetEnemy, MUSHROOM_ENEMY_RESPAWN_MS)
+        const tryRespawn = () => {
+          const playerPosition = playerPositionRef?.current
+          const playerDistance = playerPosition
+            ? Math.hypot(playerPosition.x - spawnPosition[0], playerPosition.z - spawnPosition[2])
+            : Infinity
+
+          if (playerDistance < MUSHROOM_ENEMY_RESPAWN_PLAYER_SAFE_RANGE) {
+            respawnTimerRef.current = window.setTimeout(tryRespawn, 1200)
+            return
+          }
+          resetEnemy()
+        }
+        respawnTimerRef.current = window.setTimeout(tryRespawn, MUSHROOM_ENEMY_RESPAWN_MS)
       } else {
         if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
         hudTimerRef.current = window.setTimeout(() => setHudVisible(false), 2200)
@@ -4540,12 +4721,21 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     })
 
     return true
-  }, [active, onDefeated, resetEnemy, spawnPosition])
+  }, [active, onDefeated, playerPositionRef, resetEnemy, spawnPosition])
 
   useEffect(() => {
     if (!registerCombatTarget) return undefined
     return registerCombatTarget(MUSHROOM_ENEMY_ID, targetRef.current)
   }, [registerCombatTarget])
+
+  useEffect(() => {
+    if (active) return undefined
+    stateRef.current = defeatedRef.current ? 'dead' : 'idle'
+    attackRef.current = null
+    closeAlertTimerRef.current = 0
+    setMotion('idle')
+    return undefined
+  }, [active])
 
   useEffect(() => {
     return () => {
@@ -4560,6 +4750,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
       playEnemyMotion(motion)
     }
 
+    const enemyPosition = currentPositionRef.current
     const recoil = recoilRef.current
     const velocity = recoilVelocityRef.current
     velocity.x += -recoil.x * 30 * delta
@@ -4575,19 +4766,21 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
 
     if (groupRef.current) {
       groupRef.current.position.set(
-        spawnPosition[0] + recoil.x,
-        spawnPosition[1] + recoil.y,
-        spawnPosition[2] + recoil.z,
+        enemyPosition.x + recoil.x,
+        enemyPosition.y + recoil.y,
+        enemyPosition.z + recoil.z,
       )
       const playerPosition = playerPositionRef?.current
-      if (playerPosition && !defeated) {
-        const dx = playerPosition.x - spawnPosition[0]
-        const dz = playerPosition.z - spawnPosition[2]
+      const shouldFacePlayer = stateRef.current === 'chase' || stateRef.current === 'attack' || Boolean(attackRef.current)
+      const lookTarget = stateRef.current === 'return'
+        ? { x: spawnPosition[0], z: spawnPosition[2] }
+        : shouldFacePlayer ? playerPosition : null
+      if (lookTarget && !defeated) {
+        const dx = lookTarget.x - enemyPosition.x
+        const dz = lookTarget.z - enemyPosition.z
         if (Math.hypot(dx, dz) > 0.001) {
           groupRef.current.rotation.y = dampAngle(groupRef.current.rotation.y, Math.atan2(dx, dz), 10, delta)
         }
-      } else {
-        groupRef.current.rotation.y = 0
       }
     }
 
@@ -4595,11 +4788,100 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
 
     const playerPosition = playerPositionRef.current
     const distanceToPlayer = Math.hypot(
-      playerPosition.x - spawnPosition[0],
-      playerPosition.z - spawnPosition[2],
+      playerPosition.x - enemyPosition.x,
+      playerPosition.z - enemyPosition.z,
     )
+    const distanceToSpawn = Math.hypot(enemyPosition.x - spawnPosition[0], enemyPosition.z - spawnPosition[2])
+    const canAct = !attackRef.current
 
-    if (!attackRef.current && distanceToPlayer <= MUSHROOM_ENEMY_ATTACK_RANGE && state.clock.elapsedTime >= nextAttackAtRef.current) {
+    if (stateRef.current === 'idle') {
+      const enemyYaw = groupRef.current?.rotation.y ?? MUSHROOM_ENEMY_SPAWN_YAW
+      const seesPlayer = canMushroomEnemySeePlayer(enemyPosition, enemyYaw, playerPosition)
+
+      if (seesPlayer) {
+        closeAlertTimerRef.current = 0
+        stateRef.current = 'chase'
+      } else if (distanceToPlayer <= MUSHROOM_ENEMY_CLOSE_ALERT_RANGE) {
+        closeAlertTimerRef.current += delta
+        if (closeAlertTimerRef.current >= MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS) {
+          closeAlertTimerRef.current = 0
+          stateRef.current = 'chase'
+        }
+      } else {
+        closeAlertTimerRef.current = 0
+      }
+    }
+
+    if (
+      (stateRef.current === 'chase' || stateRef.current === 'attack') &&
+      (distanceToSpawn > MUSHROOM_ENEMY_LEASH_RANGE || distanceToPlayer > MUSHROOM_ENEMY_LOSE_INTEREST_RANGE)
+    ) {
+      stateRef.current = 'return'
+      attackRef.current = null
+      closeAlertTimerRef.current = 0
+      setMotion('walk')
+    }
+
+    if (stateRef.current === 'attack' && canAct && distanceToPlayer > MUSHROOM_ENEMY_ATTACK_RANGE) {
+      stateRef.current = 'chase'
+    }
+
+    if (stateRef.current === 'idle') {
+      setMotion('idle')
+    }
+
+    if (stateRef.current === 'chase' && canAct) {
+      if (distanceToPlayer > MUSHROOM_ENEMY_ATTACK_RANGE) {
+        const desiredGap = MUSHROOM_ENEMY_STOP_DISTANCE
+        const moveDistance = Math.max(0, distanceToPlayer - desiredGap)
+        const step = Math.min(MUSHROOM_ENEMY_MOVE_SPEED * delta, moveDistance)
+        if (step > 0.001) {
+          const nx = (playerPosition.x - enemyPosition.x) / distanceToPlayer
+          const nz = (playerPosition.z - enemyPosition.z) / distanceToPlayer
+          const nextX = enemyPosition.x + nx * step
+          const nextZ = enemyPosition.z + nz * step
+          if (!collidesWithOutdoorObstacle(nextX, nextZ)) {
+            enemyPosition.x = nextX
+            enemyPosition.z = nextZ
+            enemyPosition.y = getTerrainHeight(nextX, nextZ)
+          }
+        }
+        setMotion('walk')
+      } else {
+        stateRef.current = 'attack'
+        setMotion('idle')
+      }
+    }
+
+    if (stateRef.current === 'return' && canAct) {
+      const returnDistance = Math.hypot(spawnPosition[0] - enemyPosition.x, spawnPosition[2] - enemyPosition.z)
+      if (returnDistance <= 0.08) {
+        enemyPosition.x = spawnPosition[0]
+        enemyPosition.y = spawnPosition[1]
+        enemyPosition.z = spawnPosition[2]
+        stateRef.current = 'idle'
+        closeAlertTimerRef.current = 0
+        if (groupRef.current) groupRef.current.rotation.y = MUSHROOM_ENEMY_SPAWN_YAW
+        setMotion('idle')
+      } else {
+        const step = Math.min(MUSHROOM_ENEMY_RETURN_SPEED * delta, returnDistance)
+        const nx = (spawnPosition[0] - enemyPosition.x) / returnDistance
+        const nz = (spawnPosition[2] - enemyPosition.z) / returnDistance
+        const nextX = enemyPosition.x + nx * step
+        const nextZ = enemyPosition.z + nz * step
+        enemyPosition.x = nextX
+        enemyPosition.z = nextZ
+        enemyPosition.y = getTerrainHeight(nextX, nextZ)
+        setMotion('walk')
+      }
+    }
+
+    if (
+      stateRef.current === 'attack' &&
+      !attackRef.current &&
+      distanceToPlayer <= MUSHROOM_ENEMY_ATTACK_RANGE &&
+      state.clock.elapsedTime >= nextAttackAtRef.current
+    ) {
       attackRef.current = {
         contactAt: state.clock.elapsedTime + MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY,
         endsAt: state.clock.elapsedTime + MUSHROOM_ENEMY_ATTACK_DURATION,
@@ -4609,32 +4891,40 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
       setMotion('punch')
     }
 
+    targetRef.current.position.x = enemyPosition.x
+    targetRef.current.position.y = enemyPosition.y
+    targetRef.current.position.z = enemyPosition.z
+
     const attack = attackRef.current
     if (!attack) return
 
     if (!attack.fired && state.clock.elapsedTime >= attack.contactAt) {
       attack.fired = true
       const currentDistance = Math.hypot(
-        playerPosition.x - spawnPosition[0],
-        playerPosition.z - spawnPosition[2],
+        playerPosition.x - enemyPosition.x,
+        playerPosition.z - enemyPosition.z,
       )
       if (currentDistance <= MUSHROOM_ENEMY_ATTACK_RANGE + 0.15) {
         onHitPlayer?.({
           damage: MUSHROOM_ENEMY_ATTACK_DAMAGE,
-          sourcePosition: spawnPosition,
+          sourcePosition: [enemyPosition.x, enemyPosition.y, enemyPosition.z],
         })
       }
     }
 
     if (state.clock.elapsedTime >= attack.endsAt) {
       attackRef.current = null
-      setMotion('idle')
+      if (stateRef.current === 'attack') {
+        stateRef.current = distanceToPlayer > MUSHROOM_ENEMY_ATTACK_RANGE ? 'chase' : 'attack'
+      }
+      setMotion(stateRef.current === 'chase' ? 'walk' : 'idle')
     }
+
   })
 
-  targetRef.current.position.x = spawnPosition[0]
-  targetRef.current.position.y = spawnPosition[1]
-  targetRef.current.position.z = spawnPosition[2]
+  targetRef.current.position.x = currentPositionRef.current.x
+  targetRef.current.position.y = currentPositionRef.current.y
+  targetRef.current.position.z = currentPositionRef.current.z
   targetRef.current.disabled = !active || defeated
   targetRef.current.takeDamage = takeDamage
 
@@ -4643,11 +4933,11 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
   if (!active) return null
 
   return (
-    <group ref={groupRef} position={spawnPosition}>
+    <group ref={groupRef} position={spawnPosition} rotation={[0, MUSHROOM_ENEMY_SPAWN_YAW, 0]}>
       {!defeated && (
         <>
           <group scale={model.scale}>
-            <primitive ref={visualRef} object={model.object} position={model.offset} />
+            <primitive object={model.object} position={model.offset} />
           </group>
           {hitFlash && (
             <mesh position={[0, 0.78, 0.02]}>
@@ -7264,6 +7554,7 @@ function App() {
   const [scorePopups, setScorePopups] = useState([])
   const [coins, setCoins] = useState(isAdminMode ? 850 : 0)
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP)
+  const playerHpRef = useRef(PLAYER_MAX_HP)
   const playerDamageLockRef = useRef(false)
   const playerRespawnTimerRef = useRef(null)
   const [ownedSkins, setOwnedSkins] = useState(['classic'])
@@ -7684,6 +7975,10 @@ function App() {
   useEffect(() => {
     authUserRef.current = authUser
   }, [authUser])
+
+  useEffect(() => {
+    playerHpRef.current = playerHp
+  }, [playerHp])
 
   useEffect(() => {
     outgoingVisitRequestIdRef.current = outgoingVisitRequest?.id ?? null
@@ -8152,7 +8447,7 @@ function App() {
   }
 
   const handlePlayerHit = useCallback(({ damage = MUSHROOM_ENEMY_ATTACK_DAMAGE } = {}) => {
-    if (playerDamageLockRef.current || playerHp <= 0) return false
+    if (playerDamageLockRef.current || playerHpRef.current <= 0) return false
     playerDamageLockRef.current = true
     window.setTimeout(() => {
       playerDamageLockRef.current = false
@@ -8160,9 +8455,12 @@ function App() {
 
     setPlayerHp((current) => {
       const nextHp = Math.max(0, current - damage)
+      playerHpRef.current = nextHp
       if (nextHp <= 0 && !playerRespawnTimerRef.current) {
         playerRespawnTimerRef.current = window.setTimeout(() => {
           playerRespawnTimerRef.current = null
+          playerDamageLockRef.current = false
+          playerHpRef.current = PLAYER_MAX_HP
           setPlayerHp(PLAYER_MAX_HP)
           const spawn = PLAYER_SPAWNS.outside
           setSpawnRequest({ zone: ZONES.outside, position: spawn, token: Date.now() })
@@ -8176,7 +8474,7 @@ function App() {
     })
 
     return true
-  }, [playerHp])
+  }, [])
 
   const handleBallZoneEnter = () => {
     if (scoreCooldownRef.current) return
