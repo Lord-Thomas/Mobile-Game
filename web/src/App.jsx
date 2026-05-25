@@ -64,13 +64,26 @@ const PLAYER_KICK_LATERAL_RANGE = 0.55
 const PLAYER_KICK_FOOT_FORWARD_OFFSET = 0.46
 const PLAYER_KICK_FOOT_SIDE_OFFSET = 0.1
 const PLAYER_KICK_FOOT_CONTACT_RADIUS = 0.28
-const PLAYER_PUNCH_DURATION = 0.72
+const PLAYER_PUNCH_DURATION = 0.82
 const PLAYER_PUNCH_CONTACT_DELAY = 0.28
 const PLAYER_PUNCH_CONTACT_WINDOW = 0.14
 const PLAYER_PUNCH_DAMAGE = 10
 const PLAYER_PUNCH_RANGE = 1.15
 const PLAYER_PUNCH_FRONT_MIN = 0.15
 const PLAYER_PUNCH_LATERAL_RANGE = 0.62
+const MUSHROOM_ENEMY_ID = 'mushroom_enemy_01'
+const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
+const MUSHROOM_ENEMY_SPAWN = [-6.2, 0, 7.4]
+const MUSHROOM_ENEMY_MAX_HP = 30
+const MUSHROOM_ENEMY_REWARD_COINS = 5
+const MUSHROOM_ENEMY_RESPAWN_MS = 10000
+const MUSHROOM_ENEMY_ATTACK_DAMAGE = 10
+const MUSHROOM_ENEMY_ATTACK_RANGE = 1.2
+const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
+const MUSHROOM_ENEMY_ATTACK_DURATION = 0.82
+const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
+const PLAYER_MAX_HP = 100
+const PLAYER_DAMAGE_INVULNERABILITY_MS = 420
 const PLAYER_JUMP_START_DURATION = 0.62
 const PLAYER_JUMP_LAND_DURATION = 0.38
 const PLAYER_LANDING_PREPARE_DISTANCE = 0.95
@@ -469,6 +482,20 @@ function lockHipsPlanarPosition(clip) {
     track.values[index + 2] = baseZ
   }
   return clip
+}
+
+function getObjectHipsRestHeight(object) {
+  const hips = object?.getObjectByName?.('mixamorigHips')
+  if (hips) return hips.position.y
+
+  let fallback = null
+  object?.traverse?.((child) => {
+    if (fallback !== null) return
+    if (typeof child.name === 'string' && child.name.toLowerCase().endsWith('hips')) {
+      fallback = child.position.y
+    }
+  })
+  return fallback
 }
 
 function dampAngle(current, target, damping, delta) {
@@ -2010,7 +2037,10 @@ function Player({
     nextZ = MathUtils.clamp(nextZ, limits.minZ, limits.maxZ)
 
     const wantsEmote = touch.emoteQueued
-    const wantsAction = !isEmoting && (key.actionQueued || touch.actionQueued)
+    const isAttackLocked =
+      state.clock.elapsedTime < punchUntilRef.current ||
+      state.clock.elapsedTime < kickUntilRef.current
+    const wantsAction = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
     if (wantsEmote === 'wave' && onGroundRef.current) {
       waveUntilRef.current = state.clock.elapsedTime + PLAYER_WAVE_DURATION
       danceUntilRef.current = 0
@@ -2912,6 +2942,19 @@ function CoinsOverlay({ coins }) {
       <div className="score">
         <img className="score-coin-icon" src="/ui/coins.png" alt="Pieces" />
         <span className="score-value">{coins}</span>
+      </div>
+    </div>
+  )
+}
+
+function PlayerHealthOverlay({ hp }) {
+  const ratio = MathUtils.clamp(hp / PLAYER_MAX_HP, 0, 1)
+
+  return (
+    <div className={`player-health-wrap ${hp <= 0 ? 'is-down' : ''}`}>
+      <div className="player-health-bar">
+        <span style={{ width: `${ratio * 100}%` }} />
+        <strong>{hp} / {PLAYER_MAX_HP}</strong>
       </div>
     </div>
   )
@@ -4318,6 +4361,320 @@ function TrainingDummyModel({ object, registerCombatTarget, onDefeated }) {
       )}
       {damageNumbers.map((number) => (
         <Html key={number.id} position={[number.x / model.scale, number.y / model.scale, number.z / model.scale]} center transform sprite distanceFactor={4.6}>
+          <div className="training-damage-number" style={{ animationDuration: `${number.duration}ms` }}>
+            {number.value}
+          </div>
+        </Html>
+      ))}
+    </group>
+  )
+}
+
+function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, onDefeated, onHitPlayer }) {
+  const sourceModel = useFBX(MUSHROOM_ENEMY_MODEL_URL)
+  const idle = useFBX('/models/player/player-idle.fbx')
+  const punch = useFBX('/models/player/player-punch.fbx')
+  const groupRef = useRef()
+  const visualRef = useRef()
+  const [hp, setHp] = useState(MUSHROOM_ENEMY_MAX_HP)
+  const [damageNumbers, setDamageNumbers] = useState([])
+  const [hudVisible, setHudVisible] = useState(false)
+  const [hitFlash, setHitFlash] = useState(false)
+  const [defeated, setDefeated] = useState(false)
+  const [motion, setMotion] = useState('idle')
+  const hpRef = useRef(MUSHROOM_ENEMY_MAX_HP)
+  const defeatedRef = useRef(false)
+  const attackRef = useRef(null)
+  const nextAttackAtRef = useRef(0)
+  const respawnTimerRef = useRef(null)
+  const hudTimerRef = useRef(null)
+  const flashTimerRef = useRef(null)
+  const recoilRef = useRef({ x: 0, z: 0, y: 0 })
+  const recoilVelocityRef = useRef({ x: 0, z: 0, y: 0 })
+  const spawnPosition = useMemo(() => {
+    const [x, , z] = MUSHROOM_ENEMY_SPAWN
+    return [x, getTerrainHeight(x, z), z]
+  }, [])
+  const targetRef = useRef({
+    id: MUSHROOM_ENEMY_ID,
+    position: { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] },
+    radius: 0.48,
+    height: 1.2,
+    disabled: true,
+    takeDamage: null,
+  })
+
+  const model = useMemo(() => {
+    const source = clone(sourceModel)
+    source.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(source)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const targetHeight = 1.15 * WORLD_UNITS_PER_METER
+    const scale = targetHeight / Math.max(size.y, 0.001)
+
+    source.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+        child.frustumCulled = false
+      }
+    })
+
+    return {
+      object: source,
+      offset: [-center.x, -box.min.y, -center.z],
+      scale,
+    }
+  }, [sourceModel])
+
+  const enemyHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
+
+  const animationClips = useMemo(() => {
+    return [
+      { source: idle.animations[0], name: 'idle' },
+      { source: punch.animations[0], name: 'punch' },
+    ]
+      .filter(({ source }) => source)
+      .map(({ source, name }) => {
+        const clip = source.clone()
+        clip.name = name
+        lockEmoteHipsHeight(clip, enemyHipsRestHeight)
+        lockHipsPlanarPosition(clip)
+        return clip
+      })
+  }, [enemyHipsRestHeight, idle.animations, punch.animations])
+
+  const { actions } = useAnimations(animationClips, model.object)
+  const currentActionRef = useRef(null)
+  const currentMotionRef = useRef(null)
+
+  const playEnemyMotion = useCallback((nextMotion) => {
+    const nextAction = actions[nextMotion]
+    if (!nextAction || currentActionRef.current === nextAction) return
+
+    const previousAction = currentActionRef.current
+    const isOneShot = nextMotion === 'punch'
+    nextAction
+      .reset()
+      .setLoop(isOneShot ? LoopOnce : LoopRepeat, isOneShot ? 1 : Infinity)
+      .setEffectiveWeight(1)
+      .setEffectiveTimeScale(nextMotion === 'punch' ? 1.35 : 1)
+      .play()
+    nextAction.clampWhenFinished = isOneShot
+
+    if (previousAction) {
+      nextAction.crossFadeFrom(previousAction, nextMotion === 'punch' ? 0.08 : 0.16, false)
+    }
+
+    currentActionRef.current = nextAction
+    currentMotionRef.current = nextMotion
+  }, [actions])
+
+  const resetEnemy = useCallback(() => {
+    defeatedRef.current = false
+    attackRef.current = null
+    nextAttackAtRef.current = 0
+    hpRef.current = MUSHROOM_ENEMY_MAX_HP
+    recoilRef.current.x = 0
+    recoilRef.current.y = 0
+    recoilRef.current.z = 0
+    recoilVelocityRef.current.x = 0
+    recoilVelocityRef.current.y = 0
+    recoilVelocityRef.current.z = 0
+    setHp(MUSHROOM_ENEMY_MAX_HP)
+    setDefeated(false)
+    setHudVisible(false)
+    setMotion('idle')
+    setDamageNumbers([])
+  }, [])
+
+  const takeDamage = useCallback(({ damage = PLAYER_PUNCH_DAMAGE, direction = { x: 0, z: 1 } }) => {
+    if (!active || defeatedRef.current) return false
+
+    recoilVelocityRef.current.x -= direction.x * 2.4
+    recoilVelocityRef.current.z -= direction.z * 2.4
+    recoilVelocityRef.current.y += 1.2
+
+    setHudVisible(true)
+    setHitFlash(true)
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = window.setTimeout(() => setHitFlash(false), 120)
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    setDamageNumbers((current) => [
+      ...current,
+      {
+        id,
+        value: damage,
+        x: (Math.random() - 0.5) * 0.34,
+        y: 1.18 + Math.random() * 0.18,
+        z: (Math.random() - 0.5) * 0.22,
+        duration: 680,
+      },
+    ])
+    window.setTimeout(() => {
+      setDamageNumbers((current) => current.filter((number) => number.id !== id))
+    }, 720)
+
+    setHp((current) => {
+      const nextHp = Math.max(0, current - damage)
+      hpRef.current = nextHp
+      if (nextHp <= 0 && !defeatedRef.current) {
+        defeatedRef.current = true
+        setDefeated(true)
+        setHudVisible(false)
+        if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
+        onDefeated?.({
+          enemyId: MUSHROOM_ENEMY_ID,
+          position: spawnPosition,
+          reward: MUSHROOM_ENEMY_REWARD_COINS,
+        })
+        if (respawnTimerRef.current) window.clearTimeout(respawnTimerRef.current)
+        respawnTimerRef.current = window.setTimeout(resetEnemy, MUSHROOM_ENEMY_RESPAWN_MS)
+      } else {
+        if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
+        hudTimerRef.current = window.setTimeout(() => setHudVisible(false), 2200)
+      }
+      return nextHp
+    })
+
+    return true
+  }, [active, onDefeated, resetEnemy, spawnPosition])
+
+  useEffect(() => {
+    if (!registerCombatTarget) return undefined
+    return registerCombatTarget(MUSHROOM_ENEMY_ID, targetRef.current)
+  }, [registerCombatTarget])
+
+  useEffect(() => {
+    return () => {
+      if (respawnTimerRef.current) window.clearTimeout(respawnTimerRef.current)
+      if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
+    }
+  }, [])
+
+  useFrame((state, delta) => {
+    if (currentMotionRef.current !== motion) {
+      playEnemyMotion(motion)
+    }
+
+    const recoil = recoilRef.current
+    const velocity = recoilVelocityRef.current
+    velocity.x += -recoil.x * 30 * delta
+    velocity.z += -recoil.z * 30 * delta
+    velocity.y += -recoil.y * 36 * delta
+    const damping = Math.exp(-8.5 * delta)
+    velocity.x *= damping
+    velocity.z *= damping
+    velocity.y *= damping
+    recoil.x = MathUtils.clamp(recoil.x + velocity.x * delta, -0.28, 0.28)
+    recoil.z = MathUtils.clamp(recoil.z + velocity.z * delta, -0.28, 0.28)
+    recoil.y = MathUtils.clamp(recoil.y + velocity.y * delta, 0, 0.18)
+
+    if (groupRef.current) {
+      groupRef.current.position.set(
+        spawnPosition[0] + recoil.x,
+        spawnPosition[1] + recoil.y,
+        spawnPosition[2] + recoil.z,
+      )
+      const playerPosition = playerPositionRef?.current
+      if (playerPosition && !defeated) {
+        const dx = playerPosition.x - spawnPosition[0]
+        const dz = playerPosition.z - spawnPosition[2]
+        if (Math.hypot(dx, dz) > 0.001) {
+          groupRef.current.rotation.y = dampAngle(groupRef.current.rotation.y, Math.atan2(dx, dz), 10, delta)
+        }
+      } else {
+        groupRef.current.rotation.y = 0
+      }
+    }
+
+    if (!active || defeatedRef.current || !playerPositionRef?.current) return
+
+    const playerPosition = playerPositionRef.current
+    const distanceToPlayer = Math.hypot(
+      playerPosition.x - spawnPosition[0],
+      playerPosition.z - spawnPosition[2],
+    )
+
+    if (!attackRef.current && distanceToPlayer <= MUSHROOM_ENEMY_ATTACK_RANGE && state.clock.elapsedTime >= nextAttackAtRef.current) {
+      attackRef.current = {
+        contactAt: state.clock.elapsedTime + MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY,
+        endsAt: state.clock.elapsedTime + MUSHROOM_ENEMY_ATTACK_DURATION,
+        fired: false,
+      }
+      nextAttackAtRef.current = state.clock.elapsedTime + MUSHROOM_ENEMY_ATTACK_COOLDOWN
+      setMotion('punch')
+    }
+
+    const attack = attackRef.current
+    if (!attack) return
+
+    if (!attack.fired && state.clock.elapsedTime >= attack.contactAt) {
+      attack.fired = true
+      const currentDistance = Math.hypot(
+        playerPosition.x - spawnPosition[0],
+        playerPosition.z - spawnPosition[2],
+      )
+      if (currentDistance <= MUSHROOM_ENEMY_ATTACK_RANGE + 0.15) {
+        onHitPlayer?.({
+          damage: MUSHROOM_ENEMY_ATTACK_DAMAGE,
+          sourcePosition: spawnPosition,
+        })
+      }
+    }
+
+    if (state.clock.elapsedTime >= attack.endsAt) {
+      attackRef.current = null
+      setMotion('idle')
+    }
+  })
+
+  targetRef.current.position.x = spawnPosition[0]
+  targetRef.current.position.y = spawnPosition[1]
+  targetRef.current.position.z = spawnPosition[2]
+  targetRef.current.disabled = !active || defeated
+  targetRef.current.takeDamage = takeDamage
+
+  const hpRatio = MathUtils.clamp(hp / MUSHROOM_ENEMY_MAX_HP, 0, 1)
+
+  if (!active) return null
+
+  return (
+    <group ref={groupRef} position={spawnPosition}>
+      {!defeated && (
+        <>
+          <group scale={model.scale}>
+            <primitive ref={visualRef} object={model.object} position={model.offset} />
+          </group>
+          {hitFlash && (
+            <mesh position={[0, 0.78, 0.02]}>
+              <sphereGeometry args={[0.24, 18, 12]} />
+              <meshBasicMaterial color="#ff4f57" transparent opacity={0.34} depthWrite={false} />
+            </mesh>
+          )}
+          {hudVisible && (
+            <Html position={[0, 1.55, 0]} center transform sprite distanceFactor={5.2}>
+              <div className="training-dummy-hud enemy-hud">
+                <div className="training-dummy-bar enemy-hp-bar">
+                  <span style={{ width: `${hpRatio * 100}%` }} />
+                  <div className="training-dummy-hp">{hp} / {MUSHROOM_ENEMY_MAX_HP}</div>
+                </div>
+              </div>
+            </Html>
+          )}
+        </>
+      )}
+      {defeated && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
+          <ringGeometry args={[0.28, 0.42, 32]} />
+          <meshBasicMaterial color="#83d37b" transparent opacity={0.34} />
+        </mesh>
+      )}
+      {damageNumbers.map((number) => (
+        <Html key={number.id} position={[number.x, number.y, number.z]} center transform sprite distanceFactor={4.6}>
           <div className="training-damage-number" style={{ animationDuration: `${number.duration}ms` }}>
             {number.value}
           </div>
@@ -6906,6 +7263,9 @@ function App() {
   const outRespawnCooldownRef = useRef(false)
   const [scorePopups, setScorePopups] = useState([])
   const [coins, setCoins] = useState(isAdminMode ? 850 : 0)
+  const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP)
+  const playerDamageLockRef = useRef(false)
+  const playerRespawnTimerRef = useRef(null)
   const [ownedSkins, setOwnedSkins] = useState(['classic'])
   const [selectedSkinId, setSelectedSkinId] = useState('classic')
   const [previewSkinId, setPreviewSkinId] = useState('classic')
@@ -7165,6 +7525,7 @@ function App() {
     setSeatedState(null)
     setOwnedCat(false)
     setCatActive(false)
+    setPlayerHp(PLAYER_MAX_HP)
   }
 
   const applyProgressSnapshot = (parsed, { includeCoins = true } = {}) => {
@@ -7678,6 +8039,12 @@ function App() {
   }, [])
 
   useEffect(() => {
+    return () => {
+      if (playerRespawnTimerRef.current) window.clearTimeout(playerRespawnTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
     const preventContextMenu = (event) => event.preventDefault()
     window.addEventListener('contextmenu', preventContextMenu)
     return () => window.removeEventListener('contextmenu', preventContextMenu)
@@ -7765,6 +8132,51 @@ function App() {
       },
     ])
   }
+
+  const handleSmallEnemyDefeated = async ({ position, reward = MUSHROOM_ENEMY_REWARD_COINS }) => {
+    const rewarded = await applyCoinDelta(reward)
+    if (!rewarded) return
+
+    setScorePopups((previous) => [
+      ...previous,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        value: reward,
+        x: position?.[0] ?? 0,
+        y: (position?.[1] ?? 0) + 1.05,
+        z: position?.[2] ?? 0,
+        startAt: Date.now(),
+        duration: 700,
+      },
+    ])
+  }
+
+  const handlePlayerHit = useCallback(({ damage = MUSHROOM_ENEMY_ATTACK_DAMAGE } = {}) => {
+    if (playerDamageLockRef.current || playerHp <= 0) return false
+    playerDamageLockRef.current = true
+    window.setTimeout(() => {
+      playerDamageLockRef.current = false
+    }, PLAYER_DAMAGE_INVULNERABILITY_MS)
+
+    setPlayerHp((current) => {
+      const nextHp = Math.max(0, current - damage)
+      if (nextHp <= 0 && !playerRespawnTimerRef.current) {
+        playerRespawnTimerRef.current = window.setTimeout(() => {
+          playerRespawnTimerRef.current = null
+          setPlayerHp(PLAYER_MAX_HP)
+          const spawn = PLAYER_SPAWNS.outside
+          setSpawnRequest({ zone: ZONES.outside, position: spawn, token: Date.now() })
+          touchRef.current.moveX = 0
+          touchRef.current.moveY = 0
+          touchRef.current.actionQueued = false
+          touchRef.current.emoteQueued = null
+        }, 900)
+      }
+      return nextHp
+    })
+
+    return true
+  }, [playerHp])
 
   const handleBallZoneEnter = () => {
     if (scoreCooldownRef.current) return
@@ -8474,6 +8886,13 @@ function App() {
             })()}
           />
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
+          <SmallMushroomEnemy
+            active={currentZone === ZONES.outside}
+            playerPositionRef={playerPositionRef}
+            registerCombatTarget={registerCombatTarget}
+            onDefeated={handleSmallEnemyDefeated}
+            onHitPlayer={handlePlayerHit}
+          />
           {(!isDebugMode || debugToggles.player) && (
             <Player
               touchRef={touchRef}
@@ -8554,6 +8973,7 @@ function App() {
         />
       )}
       {showCaptureUi && <CoinsOverlay coins={coins} />}
+      {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
       {showCaptureUi && isLocalNetwork && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
           +500
@@ -9078,6 +9498,7 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
 useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
 useGLTF.preload('/models/cat.glb')
+useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
 useFBX.preload('/models/player/player-boy01.fbx')
 useFBX.preload('/models/player/player-idle.fbx')
 useFBX.preload('/models/player/player-walk.fbx')
