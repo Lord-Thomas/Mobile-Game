@@ -73,6 +73,7 @@ const PLAYER_PUNCH_FRONT_MIN = 0.15
 const PLAYER_PUNCH_LATERAL_RANGE = 0.62
 const MUSHROOM_ENEMY_ID = 'mushroom_enemy_01'
 const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
+const MUSHROOM_ENEMY_COUNT = 4
 const MUSHROOM_ENEMY_MAX_HP = 30
 const MUSHROOM_ENEMY_REWARD_COINS = 5
 const MUSHROOM_ENEMY_RESPAWN_MS = 10000
@@ -90,7 +91,13 @@ const MUSHROOM_ENEMY_SPAWN_TREE_RADIUS = 6.8
 const MUSHROOM_ENEMY_MIN_TREES_NEAR_SPAWN = 5
 const MUSHROOM_ENEMY_HOUSE_CLEARANCE = 8.5
 const MUSHROOM_ENEMY_SPAWN_CLEARANCE = 1.35
+const MUSHROOM_ENEMY_MIN_SPAWN_SPACING = 6.5
 const MUSHROOM_ENEMY_SPAWN_YAW = Math.PI * 0.72
+const MUSHROOM_ENEMY_WANDER_RADIUS = 3.8
+const MUSHROOM_ENEMY_WANDER_SPEED = 0.72
+const MUSHROOM_ENEMY_WANDER_MIN_WAIT = 1.2
+const MUSHROOM_ENEMY_WANDER_MAX_WAIT = 3.2
+const MUSHROOM_ENEMY_WANDER_TARGET_REACHED_DISTANCE = 0.18
 const MUSHROOM_ENEMY_ATTACK_DAMAGE = 10
 const MUSHROOM_ENEMY_ATTACK_RANGE = 1.2
 const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
@@ -4459,7 +4466,7 @@ function isMushroomEnemySpawnCandidateValid(x, z) {
   })
 }
 
-function getMushroomEnemySpawnPosition() {
+function getMushroomEnemySpawnCandidates() {
   const forestTrees = AUTHORED_TREES.filter((tree) => {
     const area = tree.placement?.area
     return area === 'dense_forest' || area === 'forest_edge'
@@ -4486,7 +4493,7 @@ function getMushroomEnemySpawnPosition() {
     }))
   })
 
-  const validCandidates = candidates
+  return candidates
     .filter(({ x, z }) => isMushroomEnemySpawnCandidateValid(x, z))
     .map((candidate) => {
       const treeCount = getNearbyTreeCount(candidate.x, candidate.z)
@@ -4497,9 +4504,77 @@ function getMushroomEnemySpawnPosition() {
       }
     })
     .sort((a, b) => b.score - a.score)
+}
 
-  const selected = validCandidates[0] ?? { x: -30.5, z: -29.5 }
-  return [selected.x, getTerrainHeight(selected.x, selected.z), selected.z]
+function getMushroomEnemySpawnPositions(count = MUSHROOM_ENEMY_COUNT) {
+  const selected = []
+  const candidates = getMushroomEnemySpawnCandidates()
+
+  for (const candidate of candidates) {
+    if (selected.length >= count) break
+    const hasSpacing = selected.every((spawn) => Math.hypot(spawn.x - candidate.x, spawn.z - candidate.z) >= MUSHROOM_ENEMY_MIN_SPAWN_SPACING)
+    if (hasSpacing) selected.push(candidate)
+  }
+
+  if (selected.length < count) {
+    for (const candidate of candidates) {
+      if (selected.length >= count) break
+      const alreadySelected = selected.some((spawn) => Math.hypot(spawn.x - candidate.x, spawn.z - candidate.z) < 0.1)
+      if (!alreadySelected) selected.push(candidate)
+    }
+  }
+
+  if (selected.length === 0) selected.push({ x: -30.5, z: -29.5 })
+
+  return selected.map(({ x, z }) => [x, getTerrainHeight(x, z), z])
+}
+
+function getMushroomEnemySpawnPosition(spawnIndex = 0) {
+  const positions = getMushroomEnemySpawnPositions(Math.max(MUSHROOM_ENEMY_COUNT, spawnIndex + 1))
+  const selected = positions[spawnIndex] ?? positions[0]
+  return selected
+}
+
+function getSeededUnitValue(seed) {
+  const value = Math.sin(seed * 12.9898) * 43758.5453
+  return value - Math.floor(value)
+}
+
+function getMushroomEnemyWanderPoint(spawnPosition, seed) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const angle = getSeededUnitValue(seed + attempt * 2.31) * Math.PI * 2
+    const distance = 1.1 + getSeededUnitValue(seed + attempt * 5.17) * (MUSHROOM_ENEMY_WANDER_RADIUS - 1.1)
+    const x = spawnPosition[0] + Math.sin(angle) * distance
+    const z = spawnPosition[2] + Math.cos(angle) * distance
+
+    if (
+      Math.hypot(x - spawnPosition[0], z - spawnPosition[2]) <= MUSHROOM_ENEMY_WANDER_RADIUS &&
+      isMushroomEnemySpawnCandidateValid(x, z)
+    ) {
+      return { x, y: getTerrainHeight(x, z), z }
+    }
+  }
+
+  return { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] }
+}
+
+function moveMushroomEnemyToward(enemyPosition, target, speed, delta, stopDistance = 0) {
+  const dx = target.x - enemyPosition.x
+  const dz = target.z - enemyPosition.z
+  const distance = Math.hypot(dx, dz)
+  if (distance <= stopDistance + 0.001) return distance
+
+  const step = Math.min(speed * delta, distance - stopDistance)
+  const nextX = enemyPosition.x + (dx / distance) * step
+  const nextZ = enemyPosition.z + (dz / distance) * step
+
+  if (!collidesWithOutdoorObstacle(nextX, nextZ)) {
+    enemyPosition.x = nextX
+    enemyPosition.z = nextZ
+    enemyPosition.y = getTerrainHeight(nextX, nextZ)
+  }
+
+  return distance
 }
 
 function canMushroomEnemySeePlayer(enemyPosition, enemyYaw, playerPosition) {
@@ -4516,7 +4591,7 @@ function canMushroomEnemySeePlayer(enemyPosition, enemyYaw, playerPosition) {
   return dot >= minDot
 }
 
-function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, onDefeated, onHitPlayer }) {
+function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef, registerCombatTarget, onDefeated, onHitPlayer }) {
   const sourceModel = useFBX(MUSHROOM_ENEMY_MODEL_URL)
   const idle = useFBX('/models/player/player-idle.fbx')
   const walk = useFBX('/models/player/player-walk.fbx')
@@ -4534,13 +4609,16 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
   const attackRef = useRef(null)
   const nextAttackAtRef = useRef(0)
   const closeAlertTimerRef = useRef(0)
+  const wanderTargetRef = useRef(null)
+  const nextWanderAtRef = useRef(0)
+  const wanderSeedRef = useRef(spawnIndex * 37 + 11)
   const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const respawnTimerRef = useRef(null)
   const hudTimerRef = useRef(null)
   const flashTimerRef = useRef(null)
   const recoilRef = useRef({ x: 0, z: 0, y: 0 })
   const recoilVelocityRef = useRef({ x: 0, z: 0, y: 0 })
-  const spawnPosition = useMemo(() => getMushroomEnemySpawnPosition(), [])
+  const spawnPosition = useMemo(() => getMushroomEnemySpawnPosition(spawnIndex), [spawnIndex])
   useEffect(() => {
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
@@ -4548,7 +4626,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     if (groupRef.current) groupRef.current.rotation.y = MUSHROOM_ENEMY_SPAWN_YAW
   }, [spawnPosition])
   const targetRef = useRef({
-    id: MUSHROOM_ENEMY_ID,
+    id: enemyId,
     position: { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] },
     radius: 0.48,
     height: 1.2,
@@ -4630,6 +4708,8 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     attackRef.current = null
     nextAttackAtRef.current = 0
     closeAlertTimerRef.current = 0
+    wanderTargetRef.current = null
+    nextWanderAtRef.current = 0
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
     currentPositionRef.current.z = spawnPosition[2]
@@ -4691,7 +4771,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
         setHudVisible(false)
         if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current)
         onDefeated?.({
-          enemyId: MUSHROOM_ENEMY_ID,
+          enemyId,
           position: [
             currentPositionRef.current.x,
             currentPositionRef.current.y,
@@ -4721,18 +4801,19 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     })
 
     return true
-  }, [active, onDefeated, playerPositionRef, resetEnemy, spawnPosition])
+  }, [active, enemyId, onDefeated, playerPositionRef, resetEnemy, spawnPosition])
 
   useEffect(() => {
     if (!registerCombatTarget) return undefined
-    return registerCombatTarget(MUSHROOM_ENEMY_ID, targetRef.current)
-  }, [registerCombatTarget])
+    return registerCombatTarget(enemyId, targetRef.current)
+  }, [enemyId, registerCombatTarget])
 
   useEffect(() => {
     if (active) return undefined
     stateRef.current = defeatedRef.current ? 'dead' : 'idle'
     attackRef.current = null
     closeAlertTimerRef.current = 0
+    wanderTargetRef.current = null
     setMotion('idle')
     return undefined
   }, [active])
@@ -4774,7 +4855,8 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
       const shouldFacePlayer = stateRef.current === 'chase' || stateRef.current === 'attack' || Boolean(attackRef.current)
       const lookTarget = stateRef.current === 'return'
         ? { x: spawnPosition[0], z: spawnPosition[2] }
-        : shouldFacePlayer ? playerPosition : null
+        : stateRef.current === 'wander' ? wanderTargetRef.current
+          : shouldFacePlayer ? playerPosition : null
       if (lookTarget && !defeated) {
         const dx = lookTarget.x - enemyPosition.x
         const dz = lookTarget.z - enemyPosition.z
@@ -4794,17 +4876,19 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     const distanceToSpawn = Math.hypot(enemyPosition.x - spawnPosition[0], enemyPosition.z - spawnPosition[2])
     const canAct = !attackRef.current
 
-    if (stateRef.current === 'idle') {
+    if (stateRef.current === 'idle' || stateRef.current === 'wander') {
       const enemyYaw = groupRef.current?.rotation.y ?? MUSHROOM_ENEMY_SPAWN_YAW
       const seesPlayer = canMushroomEnemySeePlayer(enemyPosition, enemyYaw, playerPosition)
 
       if (seesPlayer) {
         closeAlertTimerRef.current = 0
+        wanderTargetRef.current = null
         stateRef.current = 'chase'
       } else if (distanceToPlayer <= MUSHROOM_ENEMY_CLOSE_ALERT_RANGE) {
         closeAlertTimerRef.current += delta
         if (closeAlertTimerRef.current >= MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS) {
           closeAlertTimerRef.current = 0
+          wanderTargetRef.current = null
           stateRef.current = 'chase'
         }
       } else {
@@ -4827,24 +4911,50 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
     }
 
     if (stateRef.current === 'idle') {
-      setMotion('idle')
+      if (state.clock.elapsedTime >= nextWanderAtRef.current) {
+        wanderSeedRef.current += 1
+        wanderTargetRef.current = getMushroomEnemyWanderPoint(spawnPosition, wanderSeedRef.current)
+        const targetDistance = Math.hypot(wanderTargetRef.current.x - enemyPosition.x, wanderTargetRef.current.z - enemyPosition.z)
+        if (targetDistance > MUSHROOM_ENEMY_WANDER_TARGET_REACHED_DISTANCE) {
+          stateRef.current = 'wander'
+          setMotion('walk')
+        } else {
+          nextWanderAtRef.current = state.clock.elapsedTime + MUSHROOM_ENEMY_WANDER_MIN_WAIT
+          setMotion('idle')
+        }
+      } else {
+        setMotion('idle')
+      }
+    }
+
+    if (stateRef.current === 'wander' && canAct) {
+      const wanderTarget = wanderTargetRef.current
+      const tooFarFromSpawn = distanceToSpawn > MUSHROOM_ENEMY_WANDER_RADIUS + 0.6
+
+      if (!wanderTarget || tooFarFromSpawn) {
+        stateRef.current = 'return'
+        wanderTargetRef.current = null
+        setMotion('walk')
+      } else {
+        const distanceToTarget = moveMushroomEnemyToward(enemyPosition, wanderTarget, MUSHROOM_ENEMY_WANDER_SPEED, delta)
+        if (distanceToTarget <= MUSHROOM_ENEMY_WANDER_TARGET_REACHED_DISTANCE) {
+          stateRef.current = 'idle'
+          wanderTargetRef.current = null
+          const waitRange = MUSHROOM_ENEMY_WANDER_MAX_WAIT - MUSHROOM_ENEMY_WANDER_MIN_WAIT
+          nextWanderAtRef.current = state.clock.elapsedTime + MUSHROOM_ENEMY_WANDER_MIN_WAIT + getSeededUnitValue(wanderSeedRef.current + 9.4) * waitRange
+          setMotion('idle')
+        } else {
+          setMotion('walk')
+        }
+      }
     }
 
     if (stateRef.current === 'chase' && canAct) {
       if (distanceToPlayer > MUSHROOM_ENEMY_ATTACK_RANGE) {
         const desiredGap = MUSHROOM_ENEMY_STOP_DISTANCE
         const moveDistance = Math.max(0, distanceToPlayer - desiredGap)
-        const step = Math.min(MUSHROOM_ENEMY_MOVE_SPEED * delta, moveDistance)
-        if (step > 0.001) {
-          const nx = (playerPosition.x - enemyPosition.x) / distanceToPlayer
-          const nz = (playerPosition.z - enemyPosition.z) / distanceToPlayer
-          const nextX = enemyPosition.x + nx * step
-          const nextZ = enemyPosition.z + nz * step
-          if (!collidesWithOutdoorObstacle(nextX, nextZ)) {
-            enemyPosition.x = nextX
-            enemyPosition.z = nextZ
-            enemyPosition.y = getTerrainHeight(nextX, nextZ)
-          }
+        if (moveDistance > 0.001) {
+          moveMushroomEnemyToward(enemyPosition, playerPosition, MUSHROOM_ENEMY_MOVE_SPEED, delta, desiredGap)
         }
         setMotion('walk')
       } else {
@@ -4864,14 +4974,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
         if (groupRef.current) groupRef.current.rotation.y = MUSHROOM_ENEMY_SPAWN_YAW
         setMotion('idle')
       } else {
-        const step = Math.min(MUSHROOM_ENEMY_RETURN_SPEED * delta, returnDistance)
-        const nx = (spawnPosition[0] - enemyPosition.x) / returnDistance
-        const nz = (spawnPosition[2] - enemyPosition.z) / returnDistance
-        const nextX = enemyPosition.x + nx * step
-        const nextZ = enemyPosition.z + nz * step
-        enemyPosition.x = nextX
-        enemyPosition.z = nextZ
-        enemyPosition.y = getTerrainHeight(nextX, nextZ)
+        moveMushroomEnemyToward(enemyPosition, { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] }, MUSHROOM_ENEMY_RETURN_SPEED, delta)
         setMotion('walk')
       }
     }
@@ -4925,6 +5028,7 @@ function SmallMushroomEnemy({ active, playerPositionRef, registerCombatTarget, o
   targetRef.current.position.x = currentPositionRef.current.x
   targetRef.current.position.y = currentPositionRef.current.y
   targetRef.current.position.z = currentPositionRef.current.z
+  targetRef.current.id = enemyId
   targetRef.current.disabled = !active || defeated
   targetRef.current.takeDamage = takeDamage
 
@@ -9184,13 +9288,18 @@ function App() {
             })()}
           />
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
-          <SmallMushroomEnemy
-            active={currentZone === ZONES.outside}
-            playerPositionRef={playerPositionRef}
-            registerCombatTarget={registerCombatTarget}
-            onDefeated={handleSmallEnemyDefeated}
-            onHitPlayer={handlePlayerHit}
-          />
+          {Array.from({ length: MUSHROOM_ENEMY_COUNT }, (_, index) => (
+            <SmallMushroomEnemy
+              key={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
+              enemyId={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
+              spawnIndex={index}
+              active={currentZone === ZONES.outside}
+              playerPositionRef={playerPositionRef}
+              registerCombatTarget={registerCombatTarget}
+              onDefeated={handleSmallEnemyDefeated}
+              onHitPlayer={handlePlayerHit}
+            />
+          ))}
           {(!isDebugMode || debugToggles.player) && (
             <Player
               touchRef={touchRef}
