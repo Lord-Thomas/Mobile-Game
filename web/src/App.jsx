@@ -1764,6 +1764,7 @@ function Player({
   const cameraLookRef = useRef({ x: 0, y: PLAYER_HEIGHT + 0.55, z: 2.2 })
   const kickUntilRef = useRef(0)
   const pendingKickRef = useRef(null)
+  const handBoneRef = useRef(null)
   const punchUntilRef = useRef(0)
   const pendingPunchRef = useRef(null)
   const jumpStartUntilRef = useRef(0)
@@ -2408,16 +2409,16 @@ function Player({
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
       <group ref={visualRef} position={PLAYER_SPAWNS.interior} visible={isPlayerVisible}>
-        <PlayerAvatar motion={playerMotion} />
+        <PlayerAvatar motion={playerMotion} handBoneRef={handBoneRef} equippedWeapon={equippedWeapon} />
         {equippedWeapon === 'magic_book' && (
-          <FloatingMagicBook />
+          <FloatingMagicBook handBoneRef={handBoneRef} playerGroupRef={visualRef} />
         )}
       </group>
     </>
   )
 }
 
-function PlayerAvatar({ motion }) {
+function PlayerAvatar({ motion, handBoneRef, equippedWeapon }) {
   const { gl } = useThree()
   const model = useFBX('/models/player/player-boy01.fbx')
   const idle = useFBX('/models/player/player-idle.fbx')
@@ -2497,6 +2498,27 @@ function PlayerAvatar({ motion }) {
   const currentMotionRef = useRef(null)
   const revealFramesRef = useRef(0)
 
+  const rightArmBoneRef = useRef(null)
+  const rightForeArmBoneRef = useRef(null)
+  const rightHandBoneRef = useRef(null)
+  const fingerBonesRef = useRef([])
+
+  useEffect(() => {
+    const fingers = []
+    avatar.traverse((child) => {
+      if (!child.isBone) return
+      if (child.name === 'mixamorigRightArm') rightArmBoneRef.current = child
+      else if (child.name === 'mixamorigRightForeArm') rightForeArmBoneRef.current = child
+      else if (child.name === 'mixamorigRightHand') {
+        rightHandBoneRef.current = child
+        if (handBoneRef) handBoneRef.current = child
+      } else if (child.name.startsWith('mixamorigRightHand')) {
+        fingers.push(child)
+      }
+    })
+    fingerBonesRef.current = fingers
+  }, [avatar, handBoneRef])
+
   const playMotion = (nextMotion) => {
     const nextAction = actions[nextMotion]
     const previousAction = currentActionRef.current
@@ -2552,6 +2574,39 @@ function PlayerAvatar({ motion }) {
     }
   })
 
+  useFrame(() => {
+    if (equippedWeapon !== 'magic_book') return
+    const arm = rightArmBoneRef.current
+    const foreArm = rightForeArmBoneRef.current
+    const hand = rightHandBoneRef.current
+    // lerp 0.9 pour dominer l'animation de marche qui reécrit les rotations chaque frame
+    if (arm) {
+      arm.rotation.x = MathUtils.lerp(arm.rotation.x, -0.3, 0.9)
+      arm.rotation.y = MathUtils.lerp(arm.rotation.y, -0.8, 0.9)  // twist coude vers le bas
+      arm.rotation.z = MathUtils.lerp(arm.rotation.z, -1.0, 0.9)  // bras vers l'avant
+    }
+    if (foreArm) {
+      foreArm.rotation.x = MathUtils.lerp(foreArm.rotation.x, -0.75, 0.9) // coude plié
+      foreArm.rotation.y = MathUtils.lerp(foreArm.rotation.y, 1.5, 0.9)   // supination = paume vers le ciel
+      foreArm.rotation.z = MathUtils.lerp(foreArm.rotation.z, 0.0, 0.9)
+    }
+    if (hand) {
+      hand.rotation.x = MathUtils.lerp(hand.rotation.x, 0.0, 0.9)
+      hand.rotation.y = MathUtils.lerp(hand.rotation.y, 1.6, 0.9)   // rotation poignet pour paume vers le haut
+      hand.rotation.z = MathUtils.lerp(hand.rotation.z, 0.0, 0.9)
+    }
+    for (const finger of fingerBonesRef.current) {
+      const spread = finger.name.includes('Index') ? -0.2
+        : finger.name.includes('Pinky') ? 0.25
+        : finger.name.includes('Ring') ? 0.12
+        : finger.name.includes('Thumb') ? -0.15
+        : 0.0
+      finger.rotation.x = MathUtils.lerp(finger.rotation.x, 0.0, 0.9)
+      finger.rotation.y = MathUtils.lerp(finger.rotation.y, spread, 0.9)
+      finger.rotation.z = MathUtils.lerp(finger.rotation.z, 0.0, 0.9)
+    }
+  })
+
   return (
     <primitive
       object={avatar}
@@ -2574,17 +2629,41 @@ function MagicBookMesh() {
     })
     return next
   }, [scene])
-  return <primitive object={bookScene} scale={0.55} />
+  return <primitive object={bookScene} scale={0.35} />
 }
 
-function FloatingMagicBook() {
+function FloatingMagicBook({ handBoneRef, playerGroupRef }) {
   const groupRef = useRef(null)
+  const worldPos = useRef(new Vector3())
+  const localTarget = useRef(new Vector3(0.4, 0.9, 0))
+
   useFrame((state, delta) => {
     const g = groupRef.current
     if (!g) return
-    g.rotation.y += delta * 1.2
-    g.position.y = 0.9 + Math.sin(state.clock.elapsedTime * 2.5) * 0.04
+
+    const hand = handBoneRef?.current
+    const playerGroup = playerGroupRef?.current
+
+    if (hand && playerGroup) {
+      hand.getWorldPosition(worldPos.current)
+      playerGroup.worldToLocal(worldPos.current)
+      localTarget.current.set(
+        worldPos.current.x,
+        worldPos.current.y + 0.18 + Math.sin(state.clock.elapsedTime * 2.5) * 0.04,
+        worldPos.current.z + 0.18,
+      )
+    } else {
+      localTarget.current.set(
+        0.4,
+        0.9 + Math.sin(state.clock.elapsedTime * 2.5) * 0.04,
+        0.1,
+      )
+    }
+
+    g.position.lerp(localTarget.current, 0.18)
+    g.rotation.y = Math.PI
   })
+
   return (
     <group ref={groupRef} position={[0.4, 0.9, 0]}>
       <MagicBookMesh />
@@ -2609,7 +2688,7 @@ function FireballProjectile({ position }) {
   )
 }
 
-function FireballManager({ projectilesRef, onRemoveProjectile, onHitEnemy, combatTargetsRef }) {
+function FireballManager({ projectilesRef, combatTargetsRef }) {
   const [renderTick, setRenderTick] = useState(0)
 
   useFrame((_, delta) => {
@@ -2629,7 +2708,6 @@ function FireballManager({ projectilesRef, onRemoveProjectile, onHitEnemy, comba
           const dz = nz - target.position.z
           if (Math.hypot(dx, dz) < FIREBALL_COLLISION_RADIUS) {
             target.takeDamage?.({ damage: FIREBALL_DAMAGE })
-            onHitEnemy?.({ position: [nx, target.position.y ?? 0, nz] })
             hit = true
             break
           }
@@ -9856,7 +9934,6 @@ function App() {
           <FireballManager
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
-            onHitEnemy={handleSmallEnemyDefeated}
           />
           {(!isDebugMode || debugToggles.player) && (
             <Player
@@ -9951,7 +10028,7 @@ function App() {
           📖
         </button>
       )}
-      {showCaptureUi && currentZone === ZONES.outside && mode === 'play' && (
+      {showCaptureUi && equippedWeapon === 'magic_book' && currentZone === ZONES.outside && mode === 'play' && (
         <button
           className="fireball-btn"
           type="button"
