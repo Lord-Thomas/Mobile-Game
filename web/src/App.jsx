@@ -2612,14 +2612,13 @@ function FireballProjectile({ position }) {
 function FireballManager({ projectilesRef, onRemoveProjectile, onHitEnemy, combatTargetsRef }) {
   const [renderTick, setRenderTick] = useState(0)
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     const projs = projectilesRef.current
     if (!projs.length) return
     const now = Date.now()
-    let changed = false
     const next = []
     for (const p of projs) {
-      if (now - p.startedAt > FIREBALL_LIFETIME_MS) { changed = true; continue }
+      if (now - p.startedAt > FIREBALL_LIFETIME_MS) continue
       const nx = p.x + p.dirX * FIREBALL_SPEED * delta
       const nz = p.z + p.dirZ * FIREBALL_SPEED * delta
       let hit = false
@@ -2632,17 +2631,14 @@ function FireballManager({ projectilesRef, onRemoveProjectile, onHitEnemy, comba
             target.takeDamage?.({ damage: FIREBALL_DAMAGE })
             onHitEnemy?.({ position: [nx, target.position.y ?? 0, nz] })
             hit = true
-            changed = true
             break
           }
         }
       }
-      if (!hit) { next.push({ ...p, x: nx, z: nz }); changed = true }
+      if (!hit) next.push({ ...p, x: nx, z: nz })
     }
-    if (changed) {
-      projectilesRef.current = next
-      setRenderTick((t) => t + 1)
-    }
+    projectilesRef.current = next
+    setRenderTick((t) => t + 1)
   })
 
   const projs = projectilesRef.current
@@ -9226,12 +9222,12 @@ function App() {
     setOwnedMagicBook(true)
   }
 
-  const launchFireball = () => {
-    if (equippedWeapon !== 'magic_book') return
+  const launchFireball = useCallback(() => {
     if (currentZone !== ZONES.outside) return
+    if (mode !== 'play') return
     const now = Date.now()
     if (now - fireballCooldownRef.current < FIREBALL_COOLDOWN_MS) return
-    if (projectiles.length >= MAX_ACTIVE_FIREBALLS) return
+    if (projectilesRef.current.length >= MAX_ACTIVE_FIREBALLS) return
     fireballCooldownRef.current = now
     const pos = playerPositionRef.current
     const yaw = touchRef.current?.cameraYaw ?? 0
@@ -9247,7 +9243,7 @@ function App() {
         startedAt: now,
       },
     ]
-  }
+  }, [currentZone, mode])
 
   const toggleCat = () => {
     if (!canModifyWorld) return
@@ -9331,6 +9327,21 @@ function App() {
       return { ...current, phase }
     })
   }
+
+  useEffect(() => {
+    const onFireKey = (event) => {
+      if (event.repeat) return
+      if (getKeyboardKey(event) !== 'f') return
+      const target = event.target
+      const isTyping = target instanceof HTMLElement &&
+        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      if (isTyping) return
+      event.preventDefault()
+      launchFireball()
+    }
+    window.addEventListener('keydown', onFireKey)
+    return () => window.removeEventListener('keydown', onFireKey)
+  }, [launchFireball])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -9940,7 +9951,7 @@ function App() {
           📖
         </button>
       )}
-      {showCaptureUi && equippedWeapon === 'magic_book' && currentZone === ZONES.outside && mode === 'play' && (
+      {showCaptureUi && currentZone === ZONES.outside && mode === 'play' && (
         <button
           className="fireball-btn"
           type="button"
