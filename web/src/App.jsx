@@ -105,6 +105,13 @@ const MUSHROOM_ENEMY_ATTACK_RANGE = 1.2
 const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
 const MUSHROOM_ENEMY_ATTACK_DURATION = 0.82
 const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
+const MAGIC_BOOK_PRICE = 1000
+const FIREBALL_DAMAGE = 20
+const FIREBALL_SPEED = 12
+const FIREBALL_LIFETIME_MS = 2500
+const FIREBALL_COOLDOWN_MS = 800
+const FIREBALL_COLLISION_RADIUS = 0.9
+const MAX_ACTIVE_FIREBALLS = 5
 const PLAYER_MAX_HP = 100
 const PLAYER_DAMAGE_INVULNERABILITY_MS = 420
 const PLAYER_JUMP_START_DURATION = 0.62
@@ -1747,6 +1754,7 @@ function Player({
   onKickIntent = null,
   combatTargetsRef = null,
   onCombatHit = null,
+  equippedWeapon = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -2401,6 +2409,9 @@ function Player({
       </RigidBody>
       <group ref={visualRef} position={PLAYER_SPAWNS.interior} visible={isPlayerVisible}>
         <PlayerAvatar motion={playerMotion} />
+        {equippedWeapon === 'magic_book' && (
+          <FloatingMagicBook />
+        )}
       </group>
     </>
   )
@@ -2529,7 +2540,7 @@ function PlayerAvatar({ motion }) {
     return true
   }
 
-  useFrame(() => {
+  useFrame((state, delta) => {
     if (currentMotionRef.current !== motion) {
       playMotion(motion)
     }
@@ -2548,6 +2559,99 @@ function PlayerAvatar({ motion }) {
       rotation={[0, 0, 0]}
       scale={PLAYER_MODEL_SCALE}
     />
+  )
+}
+
+function MagicBookMesh() {
+  const { scene } = useGLTF('/models/weapons/magic_book.glb')
+  const bookScene = useMemo(() => {
+    const next = scene.clone(true)
+    next.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.frustumCulled = false
+      }
+    })
+    return next
+  }, [scene])
+  return <primitive object={bookScene} scale={0.55} />
+}
+
+function FloatingMagicBook() {
+  const groupRef = useRef(null)
+  useFrame((state, delta) => {
+    const g = groupRef.current
+    if (!g) return
+    g.rotation.y += delta * 1.2
+    g.position.y = 0.9 + Math.sin(state.clock.elapsedTime * 2.5) * 0.04
+  })
+  return (
+    <group ref={groupRef} position={[0.4, 0.9, 0]}>
+      <MagicBookMesh />
+      <pointLight color="#7c3aed" intensity={1.2} distance={2.5} />
+    </group>
+  )
+}
+
+function FireballProjectile({ position }) {
+  return (
+    <group position={position}>
+      <mesh>
+        <sphereGeometry args={[0.22, 14, 14]} />
+        <meshStandardMaterial color="#ff7a1a" emissive="#ff3300" emissiveIntensity={3} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[0.42, 12, 12]} />
+        <meshBasicMaterial color="#ff9a00" transparent opacity={0.22} depthWrite={false} />
+      </mesh>
+      <pointLight color="#ff6a00" intensity={1.8} distance={4} />
+    </group>
+  )
+}
+
+function FireballManager({ projectilesRef, onRemoveProjectile, onHitEnemy, combatTargetsRef }) {
+  const [renderTick, setRenderTick] = useState(0)
+
+  useFrame((state, delta) => {
+    const projs = projectilesRef.current
+    if (!projs.length) return
+    const now = Date.now()
+    let changed = false
+    const next = []
+    for (const p of projs) {
+      if (now - p.startedAt > FIREBALL_LIFETIME_MS) { changed = true; continue }
+      const nx = p.x + p.dirX * FIREBALL_SPEED * delta
+      const nz = p.z + p.dirZ * FIREBALL_SPEED * delta
+      let hit = false
+      if (combatTargetsRef?.current) {
+        for (const [, target] of combatTargetsRef.current) {
+          if (!target?.position || target.disabled) continue
+          const dx = nx - target.position.x
+          const dz = nz - target.position.z
+          if (Math.hypot(dx, dz) < FIREBALL_COLLISION_RADIUS) {
+            target.takeDamage?.({ damage: FIREBALL_DAMAGE })
+            onHitEnemy?.({ position: [nx, target.position.y ?? 0, nz] })
+            hit = true
+            changed = true
+            break
+          }
+        }
+      }
+      if (!hit) { next.push({ ...p, x: nx, z: nz }); changed = true }
+    }
+    if (changed) {
+      projectilesRef.current = next
+      setRenderTick((t) => t + 1)
+    }
+  })
+
+  const projs = projectilesRef.current
+  return (
+    <>
+      {projs.map((p) => (
+        <FireballProjectile key={p.id} position={[p.x, p.y, p.z]} />
+      ))}
+    </>
   )
 }
 
@@ -3016,6 +3120,40 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
           <span className="action-symbol">{'\u2423'}</span>
         </button>
       )}
+    </div>
+  )
+}
+
+function WeaponInventoryPanel({ open, ownedMagicBook, equippedWeapon, onEquip, onClose }) {
+  if (!open) return null
+  return (
+    <div className="weapon-inventory-overlay">
+      <div className="weapon-inventory-panel">
+        <div className="weapon-inventory-header">
+          <span>Armes</span>
+          <button type="button" className="weapon-inventory-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="weapon-inventory-list">
+          {ownedMagicBook ? (
+            <div className="weapon-inventory-item">
+              <div className="weapon-inventory-icon">📖</div>
+              <div className="weapon-inventory-info">
+                <span className="weapon-inventory-name">Livre Magique</span>
+                <span className="weapon-inventory-desc">Lance des boules de feu</span>
+              </div>
+              <button
+                type="button"
+                className={`weapon-equip-btn ${equippedWeapon === 'magic_book' ? 'equipped' : ''}`}
+                onClick={() => onEquip(equippedWeapon === 'magic_book' ? null : 'magic_book')}
+              >
+                {equippedWeapon === 'magic_book' ? 'Équipé ✓' : 'Équiper'}
+              </button>
+            </div>
+          ) : (
+            <div className="weapon-inventory-empty">Aucune arme. Achète-en une à la boutique !</div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -7142,10 +7280,13 @@ function EnvironmentMenu({
   catActive,
   onBuyCat,
   onToggleCat,
+  ownedMagicBook,
+  onBuyMagicBook,
 }) {
   if (!open) return null
 
   const isAnimalsTab = activeTab === 'animals'
+  const isWeaponsTab = activeTab === 'weapons'
   const isFurnitureTab = activeTab === 'furniture'
   const isFloorTab = activeTab === 'floor'
   const skins = isFloorTab ? floorSkins : wallSkins
@@ -7193,8 +7334,41 @@ function EnvironmentMenu({
           >
             Animaux
           </button>
+          <button
+            type="button"
+            className={`env-tab-btn ${isWeaponsTab ? 'active' : ''}`}
+            onClick={() => onTabChange('weapons')}
+          >
+            Armes
+          </button>
         </div>
-        {isAnimalsTab ? (
+        {isWeaponsTab ? (
+          <>
+            <div className="skin-title">Armes</div>
+            <div className="animals-shop-grid">
+              <div className="animal-shop-card">
+                <div className="animal-shop-preview" style={{ fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📖</div>
+                <span className="animal-shop-name">Livre Magique</span>
+                <span style={{ fontSize: '0.7rem', color: '#aaa', textAlign: 'center', marginBottom: 4 }}>Lance des boules de feu</span>
+                {!ownedMagicBook ? (
+                  <>
+                    <span className="animal-shop-price">{MAGIC_BOOK_PRICE} pieces</span>
+                    <button
+                      type="button"
+                      className="animal-buy-btn"
+                      onClick={onBuyMagicBook}
+                      disabled={coins < MAGIC_BOOK_PRICE}
+                    >
+                      Acheter
+                    </button>
+                  </>
+                ) : (
+                  <span className="animal-toggle-btn summon" style={{ pointerEvents: 'none' }}>Possédé ✓</span>
+                )}
+              </div>
+            </div>
+          </>
+        ) : isAnimalsTab ? (
           <>
             <div className="skin-title">Animaux</div>
             <div className="animals-shop-grid">
@@ -7896,6 +8070,11 @@ function App() {
   const [isNearOutdoorDoor, setIsNearOutdoorDoor] = useState(false)
   const [ownedCat, setOwnedCat] = useState(false)
   const [catActive, setCatActive] = useState(false)
+  const [ownedMagicBook, setOwnedMagicBook] = useState(false)
+  const [equippedWeapon, setEquippedWeapon] = useState(null)
+  const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
+  const projectilesRef = useRef([])
+  const fireballCooldownRef = useRef(0)
   const [nearbySeat, setNearbySeat] = useState(null)
   const [nearbyTv, setNearbyTv] = useState(null)
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
@@ -8123,6 +8302,8 @@ function App() {
     editableObjects,
     ownedCat,
     catActive,
+    ownedMagicBook,
+    equippedWeapon,
     equippedTitleId,
   })
 
@@ -8151,6 +8332,10 @@ function App() {
     setSeatedState(null)
     setOwnedCat(false)
     setCatActive(false)
+    setOwnedMagicBook(false)
+    setEquippedWeapon(null)
+    setIsWeaponMenuOpen(false)
+    projectilesRef.current = []
     setOwnedTitleIds([])
     setEquippedTitleId(null)
     setAchievementToast(null)
@@ -8249,6 +8434,8 @@ function App() {
     }
     if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
     if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
+    if (typeof parsed.ownedMagicBook === 'boolean') setOwnedMagicBook(parsed.ownedMagicBook)
+    if (typeof parsed.equippedWeapon === 'string') setEquippedWeapon(parsed.equippedWeapon)
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
   }
 
@@ -9030,6 +9217,38 @@ function App() {
     setOwnedCat(true)
   }
 
+  const buyMagicBook = async () => {
+    if (!canModifyWorld) return
+    if (ownedMagicBook) return
+    if (!isAdminMode && coins < MAGIC_BOOK_PRICE) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-MAGIC_BOOK_PRICE)
+    if (!paid) return
+    setOwnedMagicBook(true)
+  }
+
+  const launchFireball = () => {
+    if (equippedWeapon !== 'magic_book') return
+    if (currentZone !== ZONES.outside) return
+    const now = Date.now()
+    if (now - fireballCooldownRef.current < FIREBALL_COOLDOWN_MS) return
+    if (projectiles.length >= MAX_ACTIVE_FIREBALLS) return
+    fireballCooldownRef.current = now
+    const pos = playerPositionRef.current
+    const yaw = touchRef.current?.cameraYaw ?? 0
+    projectilesRef.current = [
+      ...projectilesRef.current,
+      {
+        id: `fb_${now}_${Math.random().toString(36).slice(2, 6)}`,
+        x: pos.x,
+        y: pos.y + 1.0,
+        z: pos.z,
+        dirX: -Math.sin(yaw),
+        dirZ: -Math.cos(yaw),
+        startedAt: now,
+      },
+    ]
+  }
+
   const toggleCat = () => {
     if (!canModifyWorld) return
     if (!ownedCat) return
@@ -9623,6 +9842,11 @@ function App() {
               onHitPlayer={handlePlayerHit}
             />
           ))}
+          <FireballManager
+            projectilesRef={projectilesRef}
+            combatTargetsRef={combatTargetsRef}
+            onHitEnemy={handleSmallEnemyDefeated}
+          />
           {(!isDebugMode || debugToggles.player) && (
             <Player
               touchRef={touchRef}
@@ -9646,6 +9870,7 @@ function App() {
                 : null}
               combatTargetsRef={combatTargetsRef}
               onCombatHit={handleCombatHit}
+              equippedWeapon={equippedWeapon}
             />
           )}
           <OutdoorDoorTrigger
@@ -9705,6 +9930,35 @@ function App() {
       {showCaptureUi && <CoinsOverlay coins={coins} />}
       {showCaptureUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
+      {showCaptureUi && ownedMagicBook && mode === 'play' && (
+        <button
+          className="weapon-inventory-btn"
+          type="button"
+          onClick={() => setIsWeaponMenuOpen((v) => !v)}
+          aria-label="Armes"
+        >
+          📖
+        </button>
+      )}
+      {showCaptureUi && equippedWeapon === 'magic_book' && currentZone === ZONES.outside && mode === 'play' && (
+        <button
+          className="fireball-btn"
+          type="button"
+          onPointerDown={launchFireball}
+          aria-label="Lancer boule de feu"
+        >
+          🔥
+        </button>
+      )}
+      {showCaptureUi && (
+        <WeaponInventoryPanel
+          open={isWeaponMenuOpen}
+          ownedMagicBook={ownedMagicBook}
+          equippedWeapon={equippedWeapon}
+          onEquip={(weapon) => { setEquippedWeapon(weapon); setIsWeaponMenuOpen(false) }}
+          onClose={() => setIsWeaponMenuOpen(false)}
+        />
+      )}
       {showCaptureUi && isLocalNetwork && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
           +500
@@ -9916,6 +10170,8 @@ function App() {
         catActive={catActive}
         onBuyCat={buyCat}
         onToggleCat={toggleCat}
+        ownedMagicBook={ownedMagicBook}
+        onBuyMagicBook={buyMagicBook}
       />
       <div className={`zone-fade${zoneFadeActive ? ' active' : ''}`} />
     </main>

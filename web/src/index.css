@@ -2379,3 +2379,145 @@ canvas {
     padding-inline: 12px;
   }
 }
+
+/* ── Weapon system ───────────────────────────────────────── */
+
+.weapon-inventory-btn {
+  position: fixed;
+  bottom: 140px;
+  right: 20px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(124, 58, 237, 0.7);
+  background: rgba(20, 10, 40, 0.85);
+  font-size: 1.4rem;
+  cursor: pointer;
+  z-index: 110;
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  transition: transform 0.12s;
+}
+.weapon-inventory-btn:active { transform: scale(0.92); }
+
+.fireball-btn {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 120, 0, 0.8);
+  background: rgba(40, 15, 5, 0.88);
+  font-size: 1.7rem;
+  cursor: pointer;
+  z-index: 110;
+  box-shadow: 0 0 16px rgba(255, 100, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  transition: transform 0.1s;
+}
+.fireball-btn:active { transform: scale(0.9); }
+
+.weapon-inventory-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.weapon-inventory-panel {
+  background: #1a1030;
+  border: 1.5px solid rgba(124, 58, 237, 0.5);
+  border-radius: 16px;
+  padding: 20px 24px 24px;
+  min-width: 300px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 20px rgba(124, 58, 237, 0.3);
+}
+
+.weapon-inventory-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e2d9ff;
+}
+
+.weapon-inventory-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 4px;
+}
+.weapon-inventory-close:hover { color: #fff; }
+
+.weapon-inventory-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.weapon-inventory-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.weapon-inventory-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.weapon-inventory-name {
+  font-weight: 600;
+  color: #e2d9ff;
+  font-size: 0.95rem;
+}
+
+.weapon-inventory-desc {
+  color: #9ca3af;
+  font-size: 0.78rem;
+}
+
+.weapon-equip-btn {
+  background: rgba(124, 58, 237, 0.6);
+  border: 1.5px solid rgba(124, 58, 237, 0.8);
+  color: #fff;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.weapon-equip-btn:hover { background: rgba(124, 58, 237, 0.85); }
+.weapon-equip-btn.equipped {
+  background: rgba(34, 197, 94, 0.5);
+  border-color: rgba(34, 197, 94, 0.8);
+}
+
+.weapon-inventory-empty {
+  color: #9ca3af;
+  text-align: center;
+  padding: 20px 0;
+  font-size: 0.9rem;
+}

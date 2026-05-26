@@ -13,7 +13,14 @@
       "Bash(node -e ' *)",
       "Bash(xargs grep -l \"player.*state\\\\|sync\\\\|network\\\\|broadcast\\\\|channel\")",
       "Bash(xargs grep -l \"MultiplayerPanel\\\\|MultiplayerUI\\\\|remotePlayerState\")",
-      "Bash(xargs wc -l)"
+      "Bash(xargs wc -l)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\thoma\\\\Documents\\\\New project\" -Force)",
+      "Bash(Select-Object Name, FullName, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(xargs grep -l \"shop\\\\|store\\\\|inventory\\\\|ui\\\\|hud\")",
+      "Bash(npx vite *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp"
     ]
   }
 }
