@@ -700,31 +700,29 @@ canvas {
 }
 
 .remote-player-label {
-  padding: 4px 7px;
-  border-radius: 999px;
-  color: #06111c;
-  background: rgba(159, 214, 255, 0.92);
-  font-size: 11px;
-  font-weight: 900;
+  color: #ffffff;
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 1.05;
   white-space: nowrap;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.78), 0 0 5px rgba(0, 0, 0, 0.48);
 }
 
 .remote-player-nameplate {
   display: grid;
   justify-items: center;
-  gap: 1px;
+  gap: 2px;
   pointer-events: none;
 }
 
 .remote-player-title {
-  color: color-mix(in srgb, var(--title-color) 82%, #ffffff);
-  font-size: 8px;
-  font-weight: 850;
+  color: var(--title-color);
+  font-size: 7px;
+  font-weight: 950;
   line-height: 1.15;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.88), 0 0 6px rgba(0, 0, 0, 0.58);
   white-space: nowrap;
-  opacity: 0.78;
+  opacity: 1;
 }
 
 .chat-bubble-stack {
@@ -1815,7 +1813,8 @@ canvas {
 
 .account-sync-form input,
 .account-sync-form button,
-.account-sync-out {
+.account-sync-out,
+.solo-name-toggle {
   min-height: 32px;
   border: 0;
   border-radius: 9px;
@@ -1830,7 +1829,8 @@ canvas {
 }
 
 .account-sync-form button,
-.account-sync-out {
+.account-sync-out,
+.solo-name-toggle {
   padding: 0 10px;
   background: #f2c14e;
   color: #17202a;
@@ -1852,6 +1852,11 @@ canvas {
   color: #9aa8b8;
   font-size: 11px;
   font-weight: 900;
+}
+
+.solo-name-toggle {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fbff;
 }
 
 .achievement-panel {

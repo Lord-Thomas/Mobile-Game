@@ -54,6 +54,7 @@ const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
 const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends']
+const SOLO_NAMEPLATE_STORAGE_KEY = 'lab_show_solo_nameplate_v1'
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -156,6 +157,20 @@ const PLAY_AREA_LIMITS = {
   secondRoom: { minX: -ROOM_LIMIT, maxX: ROOM_LIMIT, minZ: -ROOM_LIMIT, maxZ: ROOM_LIMIT },
   outside: { minX: -38, maxX: 38, minZ: -38, maxZ: 38 },
 }
+
+function getUserDisplayName(user) {
+  return (
+    user?.user_metadata?.display_name ||
+    user?.user_metadata?.name ||
+    user?.user_metadata?.full_name ||
+    ''
+  )
+}
+
+function getVisiblePlayerName(displayName, user, fallback = 'Joueur') {
+  return displayName?.trim() || getUserDisplayName(user)?.trim() || fallback
+}
+
 const CAMERA_SETTINGS = {
   interior: { distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, minY: 0.35, maxY: 4.7 },
   secondRoom: { distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, minY: 0.35, maxY: 4.7 },
@@ -2585,7 +2600,7 @@ function PlayerNameplateAnchor({ playerPositionRef, label, title }) {
 
   return (
     <group ref={groupRef}>
-      <Html position={[0, 1.65, 0]} center distanceFactor={8} zIndexRange={[70, 0]}>
+      <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={[70, 0]}>
         <div className="remote-player-nameplate">
           {label && <div className="remote-player-label">{label}</div>}
           {title && (
@@ -2602,6 +2617,7 @@ function PlayerNameplateAnchor({ playerPositionRef, label, title }) {
 function RemotePlayer({
   stateRef,
   label = 'Visiteur',
+  fallbackTitleId = null,
   transport = 'none',
   serverTimeOffsetRef = null,
   chatBubblesRef = null,
@@ -2737,13 +2753,13 @@ function RemotePlayer({
     }
   })
 
-  const displayedTitle = getTitleDefinition(displayedTitleId)
+  const displayedTitle = getTitleDefinition(displayedTitleId ?? fallbackTitleId)
 
   return (
     <group ref={groupRef}>
       <PlayerAvatar motion={displayedMotion} />
       {showOverlays && (
-        <Html position={[0, 1.65, 0]} center distanceFactor={8}>
+        <Html position={[0, 1.08, 0]} center distanceFactor={8}>
           <div className="remote-player-nameplate">
             <div className="remote-player-label">{label}</div>
             {displayedTitle && (
@@ -3068,6 +3084,7 @@ function GameMenuPanel({
   ownedTitleIds,
   equippedTitleId,
   titleActionState,
+  soloNameplateVisible,
   onToggle,
   onTabChange,
   onEmailChange,
@@ -3085,6 +3102,7 @@ function GameMenuPanel({
   onAcceptFriend,
   onRejectFriend,
   onToggleTitle,
+  onToggleSoloNameplate,
 }) {
   const isConnected = Boolean(user)
   const statusText = configured
@@ -3171,6 +3189,11 @@ function GameMenuPanel({
                     <br />
                     Progression sauvegardee en ligne.
                   </div>
+                  {role === 'solo' && (
+                    <button className="solo-name-toggle" type="button" onClick={onToggleSoloNameplate}>
+                      Pseudo en solo: {soloNameplateVisible ? 'affiche' : 'masque'}
+                    </button>
+                  )}
                   <button className="account-sync-out" type="button" onClick={onSignOut}>Deconnexion</button>
                 </>
               )}
@@ -4723,7 +4746,17 @@ function canMushroomEnemySeePlayer(enemyPosition, enemyYaw, playerPosition) {
   return dot >= minDot
 }
 
-function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef, registerCombatTarget, onDefeated, onHitPlayer }) {
+function SmallMushroomEnemy({
+  enemyId,
+  spawnIndex = 0,
+  spawnPositionOverride = null,
+  passive = false,
+  active,
+  playerPositionRef,
+  registerCombatTarget,
+  onDefeated,
+  onHitPlayer,
+}) {
   const sourceModel = useFBX(MUSHROOM_ENEMY_MODEL_URL)
   const idle = useFBX('/models/player/player-idle.fbx')
   const walk = useFBX('/models/player/player-walk.fbx')
@@ -4750,7 +4783,7 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
   const flashTimerRef = useRef(null)
   const recoilRef = useRef({ x: 0, z: 0, y: 0 })
   const recoilVelocityRef = useRef({ x: 0, z: 0, y: 0 })
-  const spawnPosition = useMemo(() => getMushroomEnemySpawnPosition(spawnIndex), [spawnIndex])
+  const spawnPosition = useMemo(() => spawnPositionOverride ?? getMushroomEnemySpawnPosition(spawnIndex), [spawnIndex, spawnPositionOverride])
   useEffect(() => {
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
@@ -4808,13 +4841,15 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
       })
   }, [enemyHipsRestHeight, idle.animations, punch.animations, walk.animations])
 
-  const { actions } = useAnimations(animationClips, model.object)
+  const { actions, mixer } = useAnimations(animationClips, model.object)
   const currentActionRef = useRef(null)
   const currentMotionRef = useRef(null)
+  const revealFramesRef = useRef(0)
 
-  const playEnemyMotion = useCallback((nextMotion) => {
+  const playEnemyMotion = useCallback((nextMotion, options = {}) => {
+    const { force = false, startTime = 0 } = options
     const nextAction = actions[nextMotion]
-    if (!nextAction || currentActionRef.current === nextAction) return
+    if (!nextAction || (!force && currentActionRef.current === nextAction)) return false
 
     const previousAction = currentActionRef.current
     const isOneShot = nextMotion === 'punch'
@@ -4824,15 +4859,31 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
       .setEffectiveWeight(1)
       .setEffectiveTimeScale(nextMotion === 'punch' ? 1.35 : 1)
       .play()
+    if (startTime > 0) nextAction.time = startTime
     nextAction.clampWhenFinished = isOneShot
 
-    if (previousAction) {
+    if (previousAction && previousAction !== nextAction) {
       nextAction.crossFadeFrom(previousAction, nextMotion === 'punch' ? 0.08 : 0.16, false)
     }
 
     currentActionRef.current = nextAction
     currentMotionRef.current = nextMotion
+    return true
   }, [actions])
+
+  useLayoutEffect(() => {
+    if (!passive || !active || !actions.idle) return undefined
+    model.object.visible = false
+    const started = playEnemyMotion('idle', { force: true, startTime: 0.35 })
+    if (started) {
+      mixer.update(1 / 30)
+      model.object.updateMatrixWorld(true)
+      revealFramesRef.current = 2
+    } else {
+      model.object.visible = true
+    }
+    return undefined
+  }, [actions.idle, active, mixer, model.object, passive, playEnemyMotion])
 
   const resetEnemy = useCallback(() => {
     defeatedRef.current = false
@@ -4861,7 +4912,7 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
   }, [spawnPosition])
 
   const takeDamage = useCallback(({ damage = PLAYER_PUNCH_DAMAGE, direction = { x: 0, z: 1 } }) => {
-    if (!active || defeatedRef.current) return false
+    if (!active || passive || defeatedRef.current) return false
 
     recoilVelocityRef.current.x -= direction.x * 2.4
     recoilVelocityRef.current.z -= direction.z * 2.4
@@ -4933,12 +4984,12 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
     })
 
     return true
-  }, [active, enemyId, onDefeated, playerPositionRef, resetEnemy, spawnPosition])
+  }, [active, enemyId, onDefeated, passive, playerPositionRef, resetEnemy, spawnPosition])
 
   useEffect(() => {
-    if (!registerCombatTarget) return undefined
+    if (!registerCombatTarget || passive) return undefined
     return registerCombatTarget(enemyId, targetRef.current)
-  }, [enemyId, registerCombatTarget])
+  }, [enemyId, passive, registerCombatTarget])
 
   useEffect(() => {
     if (active) return undefined
@@ -4961,6 +5012,13 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
   useFrame((state, delta) => {
     if (currentMotionRef.current !== motion) {
       playEnemyMotion(motion)
+    }
+
+    if (revealFramesRef.current > 0) {
+      revealFramesRef.current -= 1
+      if (revealFramesRef.current <= 0 && currentActionRef.current) {
+        model.object.visible = true
+      }
     }
 
     const enemyPosition = currentPositionRef.current
@@ -4996,6 +5054,16 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
           groupRef.current.rotation.y = dampAngle(groupRef.current.rotation.y, Math.atan2(dx, dz), 10, delta)
         }
       }
+    }
+
+    if (passive) {
+      stateRef.current = 'idle'
+      attackRef.current = null
+      wanderTargetRef.current = null
+      targetRef.current.position.x = enemyPosition.x
+      targetRef.current.position.y = enemyPosition.y
+      targetRef.current.position.z = enemyPosition.z
+      return
     }
 
     if (!active || defeatedRef.current || !playerPositionRef?.current) return
@@ -5161,7 +5229,7 @@ function SmallMushroomEnemy({ enemyId, spawnIndex = 0, active, playerPositionRef
   targetRef.current.position.y = currentPositionRef.current.y
   targetRef.current.position.z = currentPositionRef.current.z
   targetRef.current.id = enemyId
-  targetRef.current.disabled = !active || defeated
+  targetRef.current.disabled = passive || !active || defeated
   targetRef.current.takeDamage = takeDamage
 
   const hpRatio = MathUtils.clamp(hp / MUSHROOM_ENEMY_MAX_HP, 0, 1)
@@ -7845,6 +7913,13 @@ function App() {
   const [equippedTitleId, setEquippedTitleId] = useState(null)
   const [titleActionState, setTitleActionState] = useState(null)
   const [achievementToast, setAchievementToast] = useState(null)
+  const [soloNameplateVisible, setSoloNameplateVisible] = useState(() => {
+    try {
+      return localStorage.getItem(SOLO_NAMEPLATE_STORAGE_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
   const achievementToastTimerRef = useRef(null)
   const hasLoadedCloudProgressRef = useRef(false)
   const skipNextCloudSaveRef = useRef(false)
@@ -7959,6 +8034,12 @@ function App() {
     if (!authUser?.id) return
     localStorage.setItem(`lab_friends_v1:${authUser.id}`, JSON.stringify(friends))
   }, [authUser?.id, friends])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SOLO_NAMEPLATE_STORAGE_KEY, soloNameplateVisible ? '1' : '0')
+    } catch {}
+  }, [soloNameplateVisible])
 
   useEffect(() => {
     if (!incomingVisitRequest && !outgoingVisitRequest) return undefined
@@ -8298,6 +8379,7 @@ function App() {
     const connection = connectOnlinePresence({
       user: authUser,
       displayName,
+      equippedTitleId,
       status: multiplayerRole === 'solo' ? 'available' : 'busy',
       onPlayers: setOnlinePlayers,
       onVisitRequest: (request) => {
@@ -8387,7 +8469,7 @@ function App() {
       connection.disconnect()
       if (onlinePresenceRef.current === connection) onlinePresenceRef.current = null
     }
-  }, [addFriend, authUser, clearChatBubbles, displayName, multiplayerRole, progressScope])
+  }, [addFriend, authUser, clearChatBubbles, displayName, equippedTitleId, multiplayerRole, progressScope])
 
   useEffect(() => {
     multiplayerChannelRef.current?.disconnect()
@@ -8465,7 +8547,7 @@ function App() {
       session: multiplayerSession,
       user: authUser,
       role: multiplayerRole,
-      displayName: displayName || authUser.email?.split('@')[0] || '',
+      displayName: getVisiblePlayerName(displayName, authUser, ''),
       onRemotePlayerState: applyRemotePlayerState,
       onRemoteBallState: (msg) => { remoteBallStateRef.current = msg },
       onGuestKick: (payload) => {
@@ -8526,7 +8608,7 @@ function App() {
         setEquippedTitleId(null)
         return
       }
-      setDisplayName(user.user_metadata?.display_name ?? '')
+      setDisplayName((current) => current || getUserDisplayName(user))
 
       setCloudSaveState('loading')
       try {
@@ -8557,7 +8639,7 @@ function App() {
           setEquippedTitleId(null)
           return null
         }
-        setDisplayName(user.user_metadata?.display_name ?? '')
+        setDisplayName((current) => current || getUserDisplayName(user))
         setCloudSaveState('loading')
         const cloudProgress = await loadPlayerProgress({ scope: progressScope })
         if (cloudProgress) {
@@ -8813,6 +8895,15 @@ function App() {
   const activeSkinId = isSkinMenuOpen ? previewSkinId : selectedSkinId
   const activeSkin = ballSkins.find((skin) => skin.id === activeSkinId) || ballSkins[0]
   const equippedTitle = getTitleDefinition(equippedTitleId)
+  const showLocalNameplate = mode !== 'customize' &&
+    (isMultiplayerSession || soloNameplateVisible) &&
+    (authUser || displayName || equippedTitle)
+  const remoteUserId = multiplayerRole === 'host'
+    ? multiplayerSession?.guestUserId
+    : multiplayerRole === 'guest'
+      ? multiplayerSession?.hostUserId
+      : null
+  const remotePresenceTitleId = onlinePlayers.find((player) => player.userId === remoteUserId)?.equippedTitleId ?? null
   const availableWallSkins = (isAdminMode || isLocalNetwork) ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
   const previewFloorIndex = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
   const previewWallIndex = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
@@ -9191,7 +9282,7 @@ function App() {
     await saveCurrentProgressToCloud()
     const session = createSessionFromRequest({
       ...incomingVisitRequest,
-      toDisplayName: displayName || authUser.email?.split('@')[0] || 'Hote',
+      toDisplayName: getVisiblePlayerName(displayName, authUser, 'Hote'),
     })
     session.worldSnapshot = latestProgressRef.current ?? createCurrentProgressSnapshot()
     const response = {
@@ -9242,7 +9333,7 @@ function App() {
     const request = {
       id: `friend-${authUser.id}-${player.userId}-${Date.now()}`,
       fromUserId: authUser.id,
-      fromDisplayName: displayName || authUser.email?.split('@')[0] || 'Joueur',
+      fromDisplayName: getVisiblePlayerName(displayName, authUser, 'Joueur'),
       toUserId: player.userId,
       toDisplayName: player.displayName,
       createdAt: new Date().toISOString(),
@@ -9265,7 +9356,7 @@ function App() {
       requestId: request.id,
       toUserId: request.fromUserId,
       fromUserId: authUser.id,
-      fromDisplayName: displayName || authUser.email?.split('@')[0] || 'Joueur',
+      fromDisplayName: getVisiblePlayerName(displayName, authUser, 'Joueur'),
     })
   }
 
@@ -9278,7 +9369,7 @@ function App() {
       requestId: request.id,
       toUserId: request.fromUserId,
       fromUserId: authUser.id,
-      fromDisplayName: displayName || authUser.email?.split('@')[0] || 'Joueur',
+      fromDisplayName: getVisiblePlayerName(displayName, authUser, 'Joueur'),
     })
   }
 
@@ -9466,6 +9557,7 @@ function App() {
           <RemotePlayer
             stateRef={remotePlayerStateRef}
             label={multiplayerRole === 'host' ? multiplayerSession?.guestDisplayName : multiplayerSession?.hostDisplayName}
+            fallbackTitleId={remotePresenceTitleId}
             transport={sessionTransport}
             serverTimeOffsetRef={hostTimeOffsetRef}
             chatBubblesRef={remoteChatBubblesRef}
@@ -9480,10 +9572,10 @@ function App() {
             version={chatBubbleVersion}
           />
         )}
-        {isMultiplayerSession && mode !== 'customize' && (
+        {showLocalNameplate && (
           <PlayerNameplateAnchor
             playerPositionRef={playerPositionRef}
-            label={displayName || authUser?.email?.split('@')[0] || 'Joueur'}
+            label={getVisiblePlayerName(displayName, authUser)}
             title={equippedTitle}
           />
         )}
@@ -9652,6 +9744,7 @@ function App() {
           ownedTitleIds={ownedTitleIds}
           equippedTitleId={equippedTitleId}
           titleActionState={titleActionState}
+          soloNameplateVisible={soloNameplateVisible}
           onToggle={() => setIsAccountOpen((current) => !current)}
           onTabChange={setMainMenuTab}
           onEmailChange={setAuthEmail}
@@ -9672,6 +9765,7 @@ function App() {
           onAcceptFriend={acceptFriendRequest}
           onRejectFriend={rejectFriendRequest}
           onToggleTitle={toggleEquippedTitle}
+          onToggleSoloNameplate={() => setSoloNameplateVisible((current) => !current)}
         />
       )}
       {showCaptureUi && isMultiplayerSession && (

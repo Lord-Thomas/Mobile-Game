@@ -27,6 +27,7 @@ function flattenPresenceState(state, currentUserId) {
       userId: latest.userId,
       displayName: latest.displayName || 'Joueur',
       status: latest.status || 'available',
+      equippedTitleId: typeof latest.equippedTitleId === 'string' ? latest.equippedTitleId : null,
       onlineAt: latest.onlineAt,
     })
   })
@@ -64,6 +65,7 @@ export function createSessionFromRequest(request) {
 export function connectOnlinePresence({
   user,
   displayName,
+  equippedTitleId = null,
   status = 'available',
   onPlayers,
   onVisitRequest,
@@ -94,6 +96,7 @@ export function connectOnlinePresence({
   const presencePayload = () => ({
     userId: user.id,
     displayName: displayName || getDisplayName(user),
+    equippedTitleId: typeof equippedTitleId === 'string' ? equippedTitleId : null,
     status,
     onlineAt: nowIso(),
   })
