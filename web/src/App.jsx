@@ -2596,12 +2596,15 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon }) {
       hand.rotation.z = MathUtils.lerp(hand.rotation.z, 0.0, 0.9)
     }
     for (const finger of fingerBonesRef.current) {
-      const spread = finger.name.includes('Index') ? -0.2
-        : finger.name.includes('Pinky') ? 0.25
-        : finger.name.includes('Ring') ? 0.12
-        : finger.name.includes('Thumb') ? -0.15
+      const isBase = finger.name.endsWith('1')
+      const spread = isBase
+        ? finger.name.includes('Index') ? -0.3
+          : finger.name.includes('Pinky') ? 0.35
+          : finger.name.includes('Ring') ? 0.18
+          : finger.name.includes('Thumb') ? -0.2
+          : 0.0
         : 0.0
-      finger.rotation.x = MathUtils.lerp(finger.rotation.x, 0.0, 0.9)
+      finger.rotation.x = MathUtils.lerp(finger.rotation.x, 0.25, 0.9)  // légère pliure
       finger.rotation.y = MathUtils.lerp(finger.rotation.y, spread, 0.9)
       finger.rotation.z = MathUtils.lerp(finger.rotation.z, 0.0, 0.9)
     }
