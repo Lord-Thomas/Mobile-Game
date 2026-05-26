@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, Shape, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, Shape, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -2670,29 +2670,324 @@ function FloatingMagicBook({ handBoneRef, playerGroupRef }) {
   return (
     <group ref={groupRef} position={[0.4, 0.9, 0]}>
       <MagicBookMesh />
-      <pointLight color="#7c3aed" intensity={1.2} distance={2.5} />
+      <pointLight color="#ff5a00" intensity={1.35} distance={2.7} />
     </group>
   )
 }
 
-function FireballProjectile({ position }) {
+const fireballFlameVertexShader = `
+  varying vec3 vLocalPosition;
+  varying vec3 vViewNormal;
+  varying vec3 vViewDirection;
+
+  uniform float uTime;
+  uniform float uDistortion;
+
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+
+  vec3 fade(vec3 f) {
+    return f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  }
+
+  float noise(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = fade(f);
+
+    return mix(
+      mix(
+        mix(hash(i + vec3(0.0, 0.0, 0.0)), hash(i + vec3(1.0, 0.0, 0.0)), f.x),
+        mix(hash(i + vec3(0.0, 1.0, 0.0)), hash(i + vec3(1.0, 1.0, 0.0)), f.x),
+        f.y
+      ),
+      mix(
+        mix(hash(i + vec3(0.0, 0.0, 1.0)), hash(i + vec3(1.0, 0.0, 1.0)), f.x),
+        mix(hash(i + vec3(0.0, 1.0, 1.0)), hash(i + vec3(1.0, 1.0, 1.0)), f.x),
+        f.y
+      ),
+      f.z
+    );
+  }
+
+  float fbm(vec3 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+
+    for (int i = 0; i < 4; i++) {
+      value += amplitude * noise(p);
+      p = p * 2.03 + vec3(13.7, 7.1, 4.9);
+      amplitude *= 0.5;
+    }
+
+    return value;
+  }
+
+  float ridgedFbm(vec3 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+
+    for (int i = 0; i < 3; i++) {
+      float n = noise(p);
+      n = 1.0 - abs(n * 2.0 - 1.0);
+      value += n * amplitude;
+      p = p * 2.18 + vec3(5.2, 1.3, 9.4);
+      amplitude *= 0.52;
+    }
+
+    return value;
+  }
+
+  vec2 rotate2d(vec2 p, float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c) * p;
+  }
+
+  void main() {
+    vLocalPosition = position;
+
+    vec3 flowPosition = position;
+    flowPosition.xz = rotate2d(flowPosition.xz, noise(position * 2.1 + uTime * 0.3) * 1.8);
+    flowPosition.y += uTime * 0.42;
+
+    float body = fbm(flowPosition * 3.2 + vec3(0.0, uTime * 1.9, 0.0));
+    float tongues = ridgedFbm(flowPosition * 6.8 + vec3(uTime * 0.3, -uTime * 2.8, uTime * 0.18));
+    float displacement = ((body - 0.34) * 0.74 + tongues * 0.46) * uDistortion;
+    vec3 displaced = position + normal * displacement;
+
+    vec4 mvPosition = modelViewMatrix * vec4(displaced, 1.0);
+    vViewNormal = normalize(normalMatrix * normal);
+    vViewDirection = normalize(-mvPosition.xyz);
+
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`
+
+const fireballFlameFragmentShader = `
+  varying vec3 vLocalPosition;
+  varying vec3 vViewNormal;
+  varying vec3 vViewDirection;
+
+  uniform float uTime;
+  uniform float uOpacity;
+  uniform float uRadius;
+
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+
+  vec3 fade(vec3 f) {
+    return f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  }
+
+  float noise(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = fade(f);
+
+    return mix(
+      mix(
+        mix(hash(i + vec3(0.0, 0.0, 0.0)), hash(i + vec3(1.0, 0.0, 0.0)), f.x),
+        mix(hash(i + vec3(0.0, 1.0, 0.0)), hash(i + vec3(1.0, 1.0, 0.0)), f.x),
+        f.y
+      ),
+      mix(
+        mix(hash(i + vec3(0.0, 0.0, 1.0)), hash(i + vec3(1.0, 0.0, 1.0)), f.x),
+        mix(hash(i + vec3(0.0, 1.0, 1.0)), hash(i + vec3(1.0, 1.0, 1.0)), f.x),
+        f.y
+      ),
+      f.z
+    );
+  }
+
+  float fbm(vec3 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+
+    for (int i = 0; i < 4; i++) {
+      value += amplitude * noise(p);
+      p = p * 2.03 + vec3(11.7, 3.1, 8.3);
+      amplitude *= 0.5;
+    }
+
+    return value;
+  }
+
+  float turbulence(vec3 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+
+    for (int i = 0; i < 4; i++) {
+      value += abs(noise(p) * 2.0 - 1.0) * amplitude;
+      p = p * 2.11 + vec3(6.4, 2.8, 12.1);
+      amplitude *= 0.48;
+    }
+
+    return value;
+  }
+
+  float ridgedFbm(vec3 p) {
+    float value = 0.0;
+    float amplitude = 0.55;
+
+    for (int i = 0; i < 4; i++) {
+      float n = noise(p);
+      n = 1.0 - abs(n * 2.0 - 1.0);
+      n *= n;
+      value += n * amplitude;
+      p = p * 2.17 + vec3(4.2, 10.8, 1.7);
+      amplitude *= 0.5;
+    }
+
+    return value;
+  }
+
+  vec2 rotate2d(vec2 p, float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c) * p;
+  }
+
+  void main() {
+    vec3 normal = normalize(vViewNormal);
+    vec3 viewDirection = normalize(vViewDirection);
+    float fresnel = pow(1.0 - max(dot(normal, viewDirection), 0.0), 1.25);
+    float radial = clamp(length(vLocalPosition) / max(uRadius, 0.001), 0.0, 1.0);
+
+    vec3 flowPosition = vLocalPosition;
+    float swirl = fbm(flowPosition * 2.1 + vec3(0.0, uTime * 0.55, 0.0));
+    flowPosition.xz = rotate2d(flowPosition.xz, (swirl - 0.5) * 2.3 + uTime * 0.28);
+    flowPosition.y += uTime * 0.62;
+
+    float body = fbm(flowPosition * 3.35 + vec3(uTime * 0.15, uTime * 2.25, -uTime * 0.08));
+    float flameTongues = ridgedFbm(flowPosition * 6.8 + vec3(-uTime * 0.38, uTime * 3.55, uTime * 0.24));
+    float tornEdge = turbulence(flowPosition * 9.4 + vec3(uTime * 0.9, -uTime * 2.2, uTime * 0.35));
+    float fireNoise = body * 0.48 + flameTongues * 0.42 + (1.0 - tornEdge) * 0.1;
+    float innerHeat = smoothstep(0.92, 0.18, radial);
+    float heat = smoothstep(0.12, 1.0, fireNoise + fresnel * 0.36 + innerHeat * 0.34);
+
+    vec3 hotColor = vec3(1.0, 0.92, 0.38);
+    vec3 midColor = vec3(1.0, 0.28, 0.02);
+    vec3 darkColor = vec3(0.42, 0.025, 0.0);
+
+    vec3 color = mix(darkColor, midColor, heat);
+    color = mix(color, hotColor, smoothstep(0.72, 1.0, heat));
+
+    float holes = smoothstep(0.36, 0.72, tornEdge - body * 0.18);
+    float edgeBreakup = smoothstep(0.18, 0.94, fireNoise + fresnel * 0.32);
+    float shellFade = smoothstep(0.08, 0.92, radial) * (1.0 - smoothstep(1.08, 1.26, radial));
+    float alpha = edgeBreakup * shellFade * (1.0 - holes * 0.42) * uOpacity;
+
+    if (alpha < 0.025) discard;
+    gl_FragColor = vec4(color, alpha);
+  }
+`
+
+function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = false }) {
+  const meshRef = useRef(null)
+  const materialRef = useRef(null)
+  const uniforms = useMemo(() => ({
+    uTime: { value: 0 },
+    uOpacity: { value: opacity },
+    uRadius: { value: radius },
+    uDistortion: { value: wake ? 0.045 : 0.075 },
+  }), [opacity, radius, wake])
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime + phase
+    if (materialRef.current) {
+      materialRef.current.uniforms.uTime.value = t
+      materialRef.current.uniforms.uOpacity.value = opacity
+    }
+    if (meshRef.current) {
+      meshRef.current.rotation.x += wake ? 0.025 : 0.035
+      meshRef.current.rotation.y += wake ? -0.042 : 0.058
+      meshRef.current.scale.set(
+        (wake ? 0.9 : 1.06) + Math.sin(t * 17.0) * 0.08,
+        (wake ? 0.7 : 0.86) + Math.cos(t * 14.0) * 0.07,
+        (wake ? 1.25 : 1.15) + Math.sin(t * 12.0) * 0.08,
+      )
+    }
+  })
+
   return (
-    <group position={position}>
-      <mesh>
-        <sphereGeometry args={[0.22, 16, 16]} />
-        <meshStandardMaterial color="#ff7a1a" emissive="#ff3300" emissiveIntensity={3} />
+    <mesh ref={meshRef}>
+      <sphereGeometry args={[radius, 32, 32]} />
+      <shaderMaterial
+        ref={materialRef}
+        uniforms={uniforms}
+        vertexShader={fireballFlameVertexShader}
+        fragmentShader={fireballFlameFragmentShader}
+        transparent
+        depthWrite={false}
+        blending={AdditiveBlending}
+        side={DoubleSide}
+        toneMapped={false}
+      />
+    </mesh>
+  )
+}
+
+function FireballProjectile({ projectile }) {
+  const groupRef = useRef(null)
+  const coreRef = useRef(null)
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime + (projectile.phase ?? 0)
+    if (groupRef.current) groupRef.current.rotation.z = 0
+    if (coreRef.current) {
+      const pulse = 1 + Math.sin(t * 24) * 0.07
+      coreRef.current.scale.setScalar(pulse)
+    }
+  })
+
+  return (
+    <group ref={groupRef} position={[projectile.x, projectile.y, projectile.z]}>
+      <mesh ref={coreRef}>
+        <sphereGeometry args={[0.08, 16, 16]} />
+        <meshBasicMaterial color="#fff2aa" toneMapped={false} />
       </mesh>
       <mesh>
-        <sphereGeometry args={[0.42, 16, 16]} />
-        <meshBasicMaterial color="#ff9a00" transparent opacity={0.22} depthWrite={false} />
+        <sphereGeometry args={[0.13, 18, 18]} />
+        <meshBasicMaterial color="#ffb31a" transparent opacity={0.48} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
       </mesh>
-      <pointLight color="#ff6a00" intensity={1.5} distance={4} />
+      <FireballFlameShell radius={0.18} opacity={0.62} phase={projectile.phase ?? 0} />
+      <pointLight color="#ff7a00" intensity={1.2} distance={2.6} />
+    </group>
+  )
+}
+
+function FireballImpact({ impact }) {
+  const age = MathUtils.clamp((Date.now() - impact.createdAt) / 520, 0, 1)
+  const flashScale = 0.5 + age * 1.05
+  return (
+    <group position={[impact.x, impact.y, impact.z]}>
+      <mesh scale={flashScale}>
+        <sphereGeometry args={[0.14, 14, 14]} />
+        <meshBasicMaterial color="#fff1a6" transparent opacity={(1 - age) * 0.44} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} scale={0.55 + age * 1.35}>
+        <ringGeometry args={[0.12, 0.2, 32]} />
+        <meshBasicMaterial color="#ff6a00" transparent opacity={(1 - age) * 0.24} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
+      </mesh>
+      <pointLight color="#ff7a00" intensity={(1 - age) * 0.85} distance={1.8} />
+      <Html position={[0, 0.5 + age * 1.2, 0]} center occlude={false}>
+        <div style={{ color: '#ff3300', fontWeight: 'bold', fontSize: '22px', opacity: 1 - age, textShadow: '0 0 6px #000, 0 0 3px #000', pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap' }}>
+          -{FIREBALL_DAMAGE}
+        </div>
+      </Html>
     </group>
   )
 }
 
 function FireballManager({ projectilesRef, combatTargetsRef }) {
-  const [renderTick, setRenderTick] = useState(0)
+  const [, setRenderTick] = useState(0)
   const impactsRef = useRef([])
 
   useFrame((_, delta) => {
@@ -2717,71 +3012,32 @@ function FireballManager({ projectilesRef, combatTargetsRef }) {
               id: `imp_${now}_${Math.random().toString(36).slice(2, 5)}`,
               x: nx, y: p.y + 0.8, z: nz,
               createdAt: now,
-              dirs: Array.from({ length: 10 }, () => ({
-                dx: (Math.random() - 0.5) * 3,
-                dy: Math.random() * 2 + 0.5,
-                dz: (Math.random() - 0.5) * 3,
-              })),
             })
             break
           }
         }
       }
       if (!hit) {
-        const newTrail = [
-          { x: p.x, y: p.y, z: p.z, age: 0 },
-          ...(p.trail || []).map((t) => ({ ...t, age: t.age + delta })).filter((t) => t.age < 0.4),
-        ].slice(0, 12)
-        next.push({ ...p, x: nx, z: nz, trail: newTrail })
+        next.push({ ...p, x: nx, z: nz })
       }
     }
 
-    impactsRef.current = impactsRef.current.filter((imp) => now - imp.createdAt < 500)
+    impactsRef.current = impactsRef.current.filter((imp) => now - imp.createdAt < 520)
     projectilesRef.current = next
     setRenderTick((t) => t + 1)
   })
 
   const projs = projectilesRef.current
   const impacts = impactsRef.current
-  const now = Date.now()
 
   return (
     <>
       {projs.map((p) => (
-        <FireballProjectile key={p.id} position={[p.x, p.y, p.z]} />
+        <FireballProjectile key={p.id} projectile={p} />
       ))}
-      {projs.flatMap((p) =>
-        (p.trail || []).map((t, i) => {
-          const progress = t.age / 0.4
-          const opacity = (1 - progress) * 0.7
-          return (
-            <mesh key={`${p.id}_t${i}`} position={[t.x, t.y, t.z]} scale={1 - progress * 0.6}>
-              <sphereGeometry args={[0.12, 6, 6]} />
-              <meshBasicMaterial color="#ff5a00" transparent opacity={opacity} depthWrite={false} />
-            </mesh>
-          )
-        })
-      )}
-      {impacts.flatMap((imp) => {
-        const age = (now - imp.createdAt) / 500
-        return [
-          ...imp.dirs.map((dir, i) => (
-            <mesh
-              key={`${imp.id}_p${i}`}
-              position={[imp.x + dir.dx * age * 1.5, imp.y + dir.dy * age * 1.5, imp.z + dir.dz * age * 1.5]}
-              scale={1 - age}
-            >
-              <sphereGeometry args={[0.14, 5, 5]} />
-              <meshBasicMaterial color={i % 2 === 0 ? '#ff4400' : '#ffaa00'} transparent opacity={(1 - age) * 0.9} depthWrite={false} />
-            </mesh>
-          )),
-          <Html key={`${imp.id}_dmg`} position={[imp.x, imp.y + 0.5 + age * 1.2, imp.z]} center occlude={false}>
-            <div style={{ color: '#ff3300', fontWeight: 'bold', fontSize: '22px', opacity: 1 - age, textShadow: '0 0 6px #000, 0 0 3px #000', pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap' }}>
-              -{FIREBALL_DAMAGE}
-            </div>
-          </Html>,
-        ]
-      })}
+      {impacts.map((impact) => (
+        <FireballImpact key={impact.id} impact={impact} />
+      ))}
     </>
   )
 }
@@ -8391,7 +8647,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, equippedTitleId])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -8434,6 +8690,7 @@ function App() {
     ownedCat,
     catActive,
     ownedMagicBook,
+    ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
     equippedWeapon,
     equippedTitleId,
   })
@@ -8565,8 +8822,14 @@ function App() {
     }
     if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
     if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
-    if (typeof parsed.ownedMagicBook === 'boolean') setOwnedMagicBook(parsed.ownedMagicBook)
-    if (typeof parsed.equippedWeapon === 'string') setEquippedWeapon(parsed.equippedWeapon)
+    const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
+    const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
+    setOwnedMagicBook(hasMagicBook)
+    if (typeof parsed.equippedWeapon === 'string') {
+      setEquippedWeapon(parsed.equippedWeapon === 'magic_book' && hasMagicBook ? parsed.equippedWeapon : null)
+    } else if (parsed.equippedWeapon === null) {
+      setEquippedWeapon(null)
+    }
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
   }
 
@@ -8657,7 +8920,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, equippedTitleId])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -9001,7 +9264,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, equippedTitleId])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -9376,6 +9639,7 @@ function App() {
         dirX: -Math.sin(yaw),
         dirZ: -Math.cos(yaw),
         startedAt: now,
+        phase: Math.random() * Math.PI * 2,
       },
     ]
   }, [currentZone, mode])
