@@ -2679,26 +2679,27 @@ function FireballProjectile({ position }) {
   return (
     <group position={position}>
       <mesh>
-        <sphereGeometry args={[0.22, 14, 14]} />
+        <sphereGeometry args={[0.22, 16, 16]} />
         <meshStandardMaterial color="#ff7a1a" emissive="#ff3300" emissiveIntensity={3} />
       </mesh>
       <mesh>
-        <sphereGeometry args={[0.42, 12, 12]} />
+        <sphereGeometry args={[0.42, 16, 16]} />
         <meshBasicMaterial color="#ff9a00" transparent opacity={0.22} depthWrite={false} />
       </mesh>
-      <pointLight color="#ff6a00" intensity={1.8} distance={4} />
+      <pointLight color="#ff6a00" intensity={1.5} distance={4} />
     </group>
   )
 }
 
 function FireballManager({ projectilesRef, combatTargetsRef }) {
   const [renderTick, setRenderTick] = useState(0)
+  const impactsRef = useRef([])
 
   useFrame((_, delta) => {
-    const projs = projectilesRef.current
-    if (!projs.length) return
     const now = Date.now()
+    const projs = projectilesRef.current
     const next = []
+
     for (const p of projs) {
       if (now - p.startedAt > FIREBALL_LIFETIME_MS) continue
       const nx = p.x + p.dirX * FIREBALL_SPEED * delta
@@ -2712,22 +2713,75 @@ function FireballManager({ projectilesRef, combatTargetsRef }) {
           if (Math.hypot(dx, dz) < FIREBALL_COLLISION_RADIUS) {
             target.takeDamage?.({ damage: FIREBALL_DAMAGE })
             hit = true
+            impactsRef.current.push({
+              id: `imp_${now}_${Math.random().toString(36).slice(2, 5)}`,
+              x: nx, y: p.y + 0.8, z: nz,
+              createdAt: now,
+              dirs: Array.from({ length: 10 }, () => ({
+                dx: (Math.random() - 0.5) * 3,
+                dy: Math.random() * 2 + 0.5,
+                dz: (Math.random() - 0.5) * 3,
+              })),
+            })
             break
           }
         }
       }
-      if (!hit) next.push({ ...p, x: nx, z: nz })
+      if (!hit) {
+        const newTrail = [
+          { x: p.x, y: p.y, z: p.z, age: 0 },
+          ...(p.trail || []).map((t) => ({ ...t, age: t.age + delta })).filter((t) => t.age < 0.4),
+        ].slice(0, 12)
+        next.push({ ...p, x: nx, z: nz, trail: newTrail })
+      }
     }
+
+    impactsRef.current = impactsRef.current.filter((imp) => now - imp.createdAt < 500)
     projectilesRef.current = next
     setRenderTick((t) => t + 1)
   })
 
   const projs = projectilesRef.current
+  const impacts = impactsRef.current
+  const now = Date.now()
+
   return (
     <>
       {projs.map((p) => (
         <FireballProjectile key={p.id} position={[p.x, p.y, p.z]} />
       ))}
+      {projs.flatMap((p) =>
+        (p.trail || []).map((t, i) => {
+          const progress = t.age / 0.4
+          const opacity = (1 - progress) * 0.7
+          return (
+            <mesh key={`${p.id}_t${i}`} position={[t.x, t.y, t.z]} scale={1 - progress * 0.6}>
+              <sphereGeometry args={[0.12, 6, 6]} />
+              <meshBasicMaterial color="#ff5a00" transparent opacity={opacity} depthWrite={false} />
+            </mesh>
+          )
+        })
+      )}
+      {impacts.flatMap((imp) => {
+        const age = (now - imp.createdAt) / 500
+        return [
+          ...imp.dirs.map((dir, i) => (
+            <mesh
+              key={`${imp.id}_p${i}`}
+              position={[imp.x + dir.dx * age * 1.5, imp.y + dir.dy * age * 1.5, imp.z + dir.dz * age * 1.5]}
+              scale={1 - age}
+            >
+              <sphereGeometry args={[0.14, 5, 5]} />
+              <meshBasicMaterial color={i % 2 === 0 ? '#ff4400' : '#ffaa00'} transparent opacity={(1 - age) * 0.9} depthWrite={false} />
+            </mesh>
+          )),
+          <Html key={`${imp.id}_dmg`} position={[imp.x, imp.y + 0.5 + age * 1.2, imp.z]} center occlude={false}>
+            <div style={{ color: '#ff3300', fontWeight: 'bold', fontSize: '22px', opacity: 1 - age, textShadow: '0 0 6px #000, 0 0 3px #000', pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap' }}>
+              -{FIREBALL_DAMAGE}
+            </div>
+          </Html>,
+        ]
+      })}
     </>
   )
 }
