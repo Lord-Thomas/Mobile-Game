@@ -176,6 +176,7 @@ export function fromProgressRow(row) {
     applyWallToCeiling: Boolean(row.world_settings?.applyWallToCeiling),
     ownedCat: Boolean(row.world_settings?.ownedCat),
     catActive: Boolean(row.world_settings?.catActive),
+    equippedTitleId: row.equipped_title_id ?? null,
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],
   }
 }
@@ -268,6 +269,48 @@ export async function addPlayerCoins(delta, { scope = DEFAULT_PROGRESS_SCOPE } =
     if (legacyError) throw legacyError
     return legacyData
   }
+  if (error) throw error
+  return data
+}
+
+export async function loadPlayerTitles({ scope = DEFAULT_PROGRESS_SCOPE } = {}) {
+  const user = await getCurrentUser()
+  if (!user) return null
+
+  const { data, error } = await supabase.rpc('get_player_titles', {
+    requested_scope: normalizeProgressScope(scope),
+  })
+  if (error) throw error
+  return data
+}
+
+export async function equipPlayerTitle(titleId, { scope = DEFAULT_PROGRESS_SCOPE } = {}) {
+  const user = await getCurrentUser()
+  if (!user) return false
+
+  const { data, error } = await supabase.rpc('equip_player_title', {
+    p_title_id: titleId,
+    requested_scope: normalizeProgressScope(scope),
+  })
+  if (error) throw error
+  return Boolean(data)
+}
+
+export async function claimFirstMobDefeatRewards({ scope = DEFAULT_PROGRESS_SCOPE } = {}) {
+  const user = await getCurrentUser()
+  if (!user) {
+    return {
+      ok: false,
+      reason: 'not_authenticated',
+      achievementUnlocked: false,
+      titleUnlocked: false,
+      claimNumber: null,
+    }
+  }
+
+  const { data, error } = await supabase.rpc('claim_first_mob_defeat_rewards', {
+    requested_scope: normalizeProgressScope(scope),
+  })
   if (error) throw error
   return data
 }

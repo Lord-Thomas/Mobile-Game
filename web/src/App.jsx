@@ -6,10 +6,11 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
-import { addPlayerCoins, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
+import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
 import { connectColyseusVisitSession, getColyseusConnectionLabel } from './services/colyseusSessionService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
+import { TITLES, getTitleDefinition, getTitleRarity } from './gameProgress/titles'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
@@ -52,7 +53,7 @@ const MULTIPLAYER_REMOTE_VISUAL_SMOOTHING = 10
 const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
-const SOCIAL_MENU_TABS = ['account', 'social', 'friends']
+const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends']
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -2569,6 +2570,35 @@ function PlayerChatAnchor({ playerPositionRef, bubblesRef, version }) {
   )
 }
 
+function PlayerNameplateAnchor({ playerPositionRef, label, title }) {
+  const groupRef = useRef(null)
+  const rarity = getTitleRarity(title)
+
+  useFrame(() => {
+    const group = groupRef.current
+    const position = playerPositionRef.current
+    if (!group || !position) return
+    group.position.set(position.x, position.y, position.z)
+  })
+
+  if (!label && !title) return null
+
+  return (
+    <group ref={groupRef}>
+      <Html position={[0, 1.65, 0]} center distanceFactor={8} zIndexRange={[70, 0]}>
+        <div className="remote-player-nameplate">
+          {label && <div className="remote-player-label">{label}</div>}
+          {title && (
+            <div className="remote-player-title" style={{ '--title-color': rarity.color }}>
+              {title.name}
+            </div>
+          )}
+        </div>
+      </Html>
+    </group>
+  )
+}
+
 function RemotePlayer({
   stateRef,
   label = 'Visiteur',
@@ -2583,7 +2613,9 @@ function RemotePlayer({
   const lastSeqRef = useRef(-1)
   const displayedMotionRef = useRef('idle')
   const motionSwitchAtRef = useRef(0)
+  const displayedTitleIdRef = useRef(stateRef.current?.equippedTitleId ?? null)
   const [displayedMotion, setDisplayedMotion] = useState('idle')
+  const [displayedTitleId, setDisplayedTitleId] = useState(stateRef.current?.equippedTitleId ?? null)
   const targetRef = useRef({
     position: stateRef.current?.position ?? [0, PLAYER_HEIGHT, 2.2],
     rotationY: stateRef.current?.rotationY ?? 0,
@@ -2621,6 +2653,12 @@ function RemotePlayer({
         samplesRef.current.push(sample)
         if (samplesRef.current.length > 14) samplesRef.current.splice(0, samplesRef.current.length - 14)
         targetRef.current = { position: sample.position, rotationY: sample.rotationY, velocity: sample.velocity, motion: sample.motion, receivedAt: Date.now() }
+      }
+
+      const nextTitleId = typeof state.equippedTitleId === 'string' ? state.equippedTitleId : null
+      if (nextTitleId !== displayedTitleIdRef.current) {
+        displayedTitleIdRef.current = nextTitleId
+        setDisplayedTitleId(nextTitleId)
       }
     }
 
@@ -2699,12 +2737,21 @@ function RemotePlayer({
     }
   })
 
+  const displayedTitle = getTitleDefinition(displayedTitleId)
+
   return (
     <group ref={groupRef}>
       <PlayerAvatar motion={displayedMotion} />
       {showOverlays && (
         <Html position={[0, 1.65, 0]} center distanceFactor={8}>
-          <div className="remote-player-label">{label}</div>
+          <div className="remote-player-nameplate">
+            <div className="remote-player-label">{label}</div>
+            {displayedTitle && (
+              <div className="remote-player-title" style={{ '--title-color': getTitleRarity(displayedTitle).color }}>
+                {displayedTitle.name}
+              </div>
+            )}
+          </div>
         </Html>
       )}
       {showOverlays && chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
@@ -2981,6 +3028,18 @@ function PlayerHealthOverlay({ hp }) {
   )
 }
 
+function AchievementToast({ toast }) {
+  if (!toast) return null
+
+  return (
+    <div className="achievement-toast" role="status">
+      <span className="achievement-toast-kicker">Titre rare obtenu</span>
+      <strong>{toast.titleName}</strong>
+      <span>Tu fais partie des 50 premiers joueurs. Rang #{toast.claimNumber}.</span>
+    </div>
+  )
+}
+
 function GameMenuPanel({
   configured,
   user,
@@ -3006,6 +3065,9 @@ function GameMenuPanel({
   friends,
   incomingFriendRequests,
   pendingFriendRequests,
+  ownedTitleIds,
+  equippedTitleId,
+  titleActionState,
   onToggle,
   onTabChange,
   onEmailChange,
@@ -3022,6 +3084,7 @@ function GameMenuPanel({
   onRequestFriend,
   onAcceptFriend,
   onRejectFriend,
+  onToggleTitle,
 }) {
   const isConnected = Boolean(user)
   const statusText = configured
@@ -3065,7 +3128,7 @@ function GameMenuPanel({
                 className={activeTab === tab ? 'active' : ''}
                 onClick={() => onTabChange(tab)}
               >
-                {tab === 'account' ? 'Compte' : tab === 'social' ? 'Social' : 'Amis'}
+                {tab === 'account' ? 'Compte' : tab === 'achievements' ? 'Haut fait' : tab === 'social' ? 'Social' : 'Amis'}
               </button>
             ))}
           </div>
@@ -3113,6 +3176,17 @@ function GameMenuPanel({
               )}
               {message && <div className="account-sync-message">{message}</div>}
             </>
+          )}
+
+          {activeTab === 'achievements' && (
+            <AchievementsPanel
+              configured={configured}
+              user={user}
+              ownedTitleIds={ownedTitleIds}
+              equippedTitleId={equippedTitleId}
+              titleActionState={titleActionState}
+              onToggleTitle={onToggleTitle}
+            />
           )}
 
           {activeTab === 'social' && (
@@ -3211,6 +3285,62 @@ function GameMenuPanel({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function AchievementsPanel({
+  configured,
+  user,
+  ownedTitleIds,
+  equippedTitleId,
+  titleActionState,
+  onToggleTitle,
+}) {
+  const ownedSet = new Set(ownedTitleIds)
+  const titles = Object.values(TITLES)
+
+  if (!configured) {
+    return <p className="multiplayer-help">Supabase doit etre configure pour les hauts faits.</p>
+  }
+
+  if (!user) {
+    return <p className="multiplayer-help">Connecte ton compte pour debloquer et equiper des titres.</p>
+  }
+
+  return (
+    <div className="achievement-panel">
+      <div className="multiplayer-title">Titres</div>
+      <div className="title-list">
+        {titles.map((title) => {
+          const unlocked = ownedSet.has(title.id)
+          const equipped = equippedTitleId === title.id
+          const rarity = getTitleRarity(title)
+          const busy = titleActionState === title.id
+
+          return (
+            <button
+              key={title.id}
+              type="button"
+              className={`title-card ${unlocked ? 'unlocked' : 'locked'} ${equipped ? 'equipped' : ''}`}
+              style={{ '--title-color': rarity.color }}
+              disabled={!unlocked || busy}
+              onClick={() => onToggleTitle(title.id)}
+            >
+              <span className="title-card-name">{title.name}</span>
+              <span className="title-card-meta">
+                {unlocked ? equipped ? 'Equipe' : 'Debloque' : 'Verrouille'} / {rarity.label}
+              </span>
+              <span className="title-card-desc">{title.description}</span>
+              {unlocked && (
+                <span className="title-card-action">
+                  {busy ? '...' : equipped ? 'Retirer' : 'Equiper'}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -3366,6 +3496,7 @@ function MultiplayerBridge({
   ballRef,
   guestKickQueueRef,
   hostTimeOffsetRef,
+  equippedTitleId,
 }) {
   const lastSendRef = useRef(0)
   const lastBallSendRef = useRef(0)
@@ -3394,6 +3525,7 @@ function MultiplayerBridge({
         grounded: true,
         motion: localPlayerStateRef.current.motion,
         zone: localPlayerStateRef.current.zone,
+        equippedTitleId,
         sentAt: estimatedHostTime,
       })
       lastSendRef.current = now
@@ -7709,6 +7841,11 @@ function App() {
   const [authMessage, setAuthMessage] = useState('')
   const [cloudSaveState, setCloudSaveState] = useState(isSupabaseConfigured ? 'offline' : 'local')
   const [mainMenuTab, setMainMenuTab] = useState('account')
+  const [ownedTitleIds, setOwnedTitleIds] = useState([])
+  const [equippedTitleId, setEquippedTitleId] = useState(null)
+  const [titleActionState, setTitleActionState] = useState(null)
+  const [achievementToast, setAchievementToast] = useState(null)
+  const achievementToastTimerRef = useRef(null)
   const hasLoadedCloudProgressRef = useRef(false)
   const skipNextCloudSaveRef = useRef(false)
   const authUserRef = useRef(null)
@@ -7786,8 +7923,20 @@ function App() {
     chatBubbleTimersRef.current.set(id, timerId)
   }, [])
 
+  const showAchievementToast = useCallback((toast) => {
+    setAchievementToast(toast)
+    if (achievementToastTimerRef.current) window.clearTimeout(achievementToastTimerRef.current)
+    achievementToastTimerRef.current = window.setTimeout(() => {
+      achievementToastTimerRef.current = null
+      setAchievementToast(null)
+    }, 4200)
+  }, [])
+
   useEffect(() => {
-    return () => clearChatBubbles()
+    return () => {
+      clearChatBubbles()
+      if (achievementToastTimerRef.current) window.clearTimeout(achievementToastTimerRef.current)
+    }
   }, [clearChatBubbles])
 
   useEffect(() => {
@@ -7851,7 +8000,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, equippedTitleId])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -7893,6 +8042,7 @@ function App() {
     editableObjects,
     ownedCat,
     catActive,
+    equippedTitleId,
   })
 
   const resetGuestProgress = () => {
@@ -7920,12 +8070,15 @@ function App() {
     setSeatedState(null)
     setOwnedCat(false)
     setCatActive(false)
+    setOwnedTitleIds([])
+    setEquippedTitleId(null)
+    setAchievementToast(null)
     setPlayerHp(PLAYER_MAX_HP)
   }
 
-  const applyProgressSnapshot = (parsed, { includeCoins = true } = {}) => {
+  const applyProgressSnapshot = (parsed, { includeCoins = true, includeIdentity = includeCoins } = {}) => {
     if (!parsed) return
-    if (typeof parsed.displayName === 'string') setDisplayName(parsed.displayName)
+    if (includeIdentity && typeof parsed.displayName === 'string') setDisplayName(parsed.displayName)
     if (includeCoins && typeof parsed.coins === 'number') {
       setCoins(isAdminMode ? 850 : Math.max(0, parsed.coins))
     } else if (includeCoins) {
@@ -8015,6 +8168,21 @@ function App() {
     }
     if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
     if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
+    if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
+  }
+
+  const refreshPlayerTitles = async () => {
+    if (!isSupabaseConfigured || !authUserRef.current) {
+      setOwnedTitleIds([])
+      setEquippedTitleId(null)
+      return null
+    }
+
+    const titleState = await loadPlayerTitles({ scope: progressScope })
+    const ownedTitles = Array.isArray(titleState?.ownedTitles) ? titleState.ownedTitles : []
+    setOwnedTitleIds(ownedTitles.map((title) => title.titleId).filter(Boolean))
+    setEquippedTitleId(titleState?.equippedTitleId ?? null)
+    return titleState
   }
 
   const saveCurrentProgressToCloud = async () => {
@@ -8058,6 +8226,22 @@ function App() {
     }
   }
 
+  const toggleEquippedTitle = async (titleId) => {
+    if (!isSupabaseConfigured || !authUserRef.current || !ownedTitleIds.includes(titleId)) return
+    const nextTitleId = equippedTitleId === titleId ? null : titleId
+    setTitleActionState(titleId)
+    try {
+      await equipPlayerTitle(nextTitleId, { scope: progressScope })
+      setEquippedTitleId(nextTitleId)
+      setCloudSaveState('synced')
+      await refreshPlayerTitles()
+    } catch {
+      setCloudSaveState('error')
+    } finally {
+      setTitleActionState(null)
+    }
+  }
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(progressStorageKey)
@@ -8074,7 +8258,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, equippedTitleId])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -8334,9 +8518,12 @@ function App() {
 
     const loadCloudProgress = async (user) => {
       setAuthUser(user)
+      authUserRef.current = user
       if (!user) {
         hasLoadedCloudProgressRef.current = false
         setCloudSaveState('offline')
+        setOwnedTitleIds([])
+        setEquippedTitleId(null)
         return
       }
       setDisplayName(user.user_metadata?.display_name ?? '')
@@ -8351,6 +8538,7 @@ function App() {
         } else {
           await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
         }
+        await refreshPlayerTitles()
         hasLoadedCloudProgressRef.current = true
         setCloudSaveState('synced')
       } catch {
@@ -8362,8 +8550,11 @@ function App() {
       .then(async (user) => {
         if (cancelled) return
         setAuthUser(user)
+        authUserRef.current = user
         if (!user) {
           setCloudSaveState('offline')
+          setOwnedTitleIds([])
+          setEquippedTitleId(null)
           return null
         }
         setDisplayName(user.user_metadata?.display_name ?? '')
@@ -8375,6 +8566,7 @@ function App() {
         } else {
           await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
         }
+        await refreshPlayerTitles()
         hasLoadedCloudProgressRef.current = true
         setCloudSaveState('synced')
         return cloudProgress
@@ -8409,7 +8601,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, equippedTitleId])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -8536,6 +8728,36 @@ function App() {
     const rewarded = await applyCoinDelta(reward)
     if (!rewarded) return
 
+    if (!isAdminMode && !isGuestVisit && authUserRef.current) {
+      try {
+        const rewardResult = await claimFirstMobDefeatRewards({ scope: progressScope })
+        if (rewardResult?.titleUnlocked) {
+          const title = getTitleDefinition('first_mob_slayer_founder')
+          await refreshPlayerTitles()
+          setAuthMessage(`Titre rare obtenu: ${title?.name ?? 'Chasseur Originel'} #${rewardResult.claimNumber}.`)
+          showAchievementToast({
+            titleName: title?.name ?? 'Chasseur Originel',
+            claimNumber: rewardResult.claimNumber,
+          })
+        } else if (rewardResult?.reason === 'limit_reached') {
+          setAuthMessage('Premier monstre vaincu. Les 50 titres limites ont deja ete attribues.')
+        } else if (rewardResult?.reason === 'already_claimed') {
+          await refreshPlayerTitles()
+        }
+      } catch (error) {
+        setCloudSaveState('error')
+        const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`
+        const readableMessage = message.trim() || 'erreur inconnue'
+        setAuthMessage(
+          message.includes('claim_first_mob_defeat_rewards') || message.includes('Could not find the function')
+            ? 'Haut fait indisponible: lance le SQL Supabase mis a jour.'
+            : `Haut fait indisponible: ${readableMessage}`,
+        )
+      }
+    } else if (!isAdminMode && !isGuestVisit && !authUserRef.current) {
+      setAuthMessage('Connecte ton compte pour debloquer les hauts faits limites.')
+    }
+
     setScorePopups((previous) => [
       ...previous,
       {
@@ -8590,6 +8812,7 @@ function App() {
   const previewIndex = Math.max(0, ballSkins.findIndex((skin) => skin.id === previewSkinId))
   const activeSkinId = isSkinMenuOpen ? previewSkinId : selectedSkinId
   const activeSkin = ballSkins.find((skin) => skin.id === activeSkinId) || ballSkins[0]
+  const equippedTitle = getTitleDefinition(equippedTitleId)
   const availableWallSkins = (isAdminMode || isLocalNetwork) ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
   const previewFloorIndex = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
   const previewWallIndex = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
@@ -9185,6 +9408,7 @@ function App() {
           ballRef={ballRef}
           guestKickQueueRef={guestKickQueueRef}
           hostTimeOffsetRef={hostTimeOffsetRef}
+          equippedTitleId={equippedTitleId}
         />
         <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} roomLightOn={roomLightOn} lightColor={lightColor} />
         {(!isDebugMode || debugToggles.house) && (
@@ -9254,6 +9478,13 @@ function App() {
             playerPositionRef={playerPositionRef}
             bubblesRef={localChatBubblesRef}
             version={chatBubbleVersion}
+          />
+        )}
+        {isMultiplayerSession && mode !== 'customize' && (
+          <PlayerNameplateAnchor
+            playerPositionRef={playerPositionRef}
+            label={displayName || authUser?.email?.split('@')[0] || 'Joueur'}
+            title={equippedTitle}
           />
         )}
         <Physics gravity={[0, -9.81, 0]}>
@@ -9380,6 +9611,7 @@ function App() {
         />
       )}
       {showCaptureUi && <CoinsOverlay coins={coins} />}
+      {showCaptureUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
       {showCaptureUi && isLocalNetwork && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
@@ -9417,6 +9649,9 @@ function App() {
           friends={friends}
           incomingFriendRequests={incomingFriendRequests}
           pendingFriendRequests={pendingFriendRequests}
+          ownedTitleIds={ownedTitleIds}
+          equippedTitleId={equippedTitleId}
+          titleActionState={titleActionState}
           onToggle={() => setIsAccountOpen((current) => !current)}
           onTabChange={setMainMenuTab}
           onEmailChange={setAuthEmail}
@@ -9436,6 +9671,7 @@ function App() {
           onRequestFriend={requestFriend}
           onAcceptFriend={acceptFriendRequest}
           onRejectFriend={rejectFriendRequest}
+          onToggleTitle={toggleEquippedTitle}
         />
       )}
       {showCaptureUi && isMultiplayerSession && (

@@ -24,6 +24,10 @@ function sanitizeVector(value, fallback = [0, 0, 0]) {
 }
 
 function sanitizePlayerState(message, client, player) {
+  const equippedTitleId = typeof message?.equippedTitleId === 'string'
+    ? message.equippedTitleId.slice(0, 80)
+    : null
+
   return {
     seq: Number.isFinite(message?.seq) ? message.seq : player.lastSeq + 1,
     serverTime: now(),
@@ -37,6 +41,7 @@ function sanitizePlayerState(message, client, player) {
     grounded: Boolean(message?.grounded ?? true),
     motion: typeof message?.motion === 'string' ? message.motion.slice(0, 32) : 'idle',
     zone: typeof message?.zone === 'string' ? message.zone.slice(0, 32) : 'interior',
+    equippedTitleId,
   }
 }
 
@@ -122,6 +127,7 @@ export class VisitRoom extends Room {
       grounded: true,
       motion: 'idle',
       zone: 'interior',
+      equippedTitleId: null,
       lastUpdateAt: 0,
       lastBroadcastAt: 0,
     }
@@ -181,6 +187,7 @@ export class VisitRoom extends Room {
     player.grounded = state.grounded
     player.motion = state.motion
     player.zone = state.zone
+    player.equippedTitleId = state.equippedTitleId
     player.lastUpdateAt = now()
   }
 
@@ -264,6 +271,7 @@ export class VisitRoom extends Room {
         grounded: player.grounded,
         motion: player.motion,
         zone: player.zone,
+        equippedTitleId: player.equippedTitleId,
       }, { except: sourceClient })
       player.lastBroadcastAt = time
     })
