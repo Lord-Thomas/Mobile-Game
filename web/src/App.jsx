@@ -112,6 +112,8 @@ const FIREBALL_LIFETIME_MS = 2500
 const FIREBALL_COOLDOWN_MS = 800
 const FIREBALL_COLLISION_RADIUS = 0.9
 const MAX_ACTIVE_FIREBALLS = 5
+const CHARGE_TIME_MS = 1200
+const MIN_CHARGE_RATIO = 0.2
 const PLAYER_MAX_HP = 100
 const PLAYER_DAMAGE_INVULNERABILITY_MS = 420
 const PLAYER_JUMP_START_DURATION = 0.62
@@ -1755,6 +1757,7 @@ function Player({
   combatTargetsRef = null,
   onCombatHit = null,
   equippedWeapon = null,
+  playerBodyYawRef = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -2077,6 +2080,7 @@ function Player({
       const targetYaw = Math.atan2(worldX, worldZ)
       visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 12, delta)
     }
+    if (playerBodyYawRef) playerBodyYawRef.current = visualRef.current.rotation.y
 
     const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
     nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
@@ -2959,6 +2963,62 @@ function FireballProjectile({ projectile }) {
       </mesh>
       <FireballFlameShell radius={0.18} opacity={0.62} phase={projectile.phase ?? 0} />
       <pointLight color="#ff7a00" intensity={1.2} distance={2.6} />
+    </group>
+  )
+}
+
+function ChargingFireball({ playerPositionRef, touchRef, chargeYawRef, chargeAimYawRef, chargeProgressRef, chargeStartTimeRef, chargePosRef, setChargeProgress, onCancel, onLaunch }) {
+  const groupRef = useRef(null)
+  const frameRef = useRef(0)
+  const launchedRef = useRef(false)
+  const phase = useMemo(() => Math.random() * Math.PI * 2, [])
+
+  useFrame(() => {
+    const g = groupRef.current
+    if (!g || launchedRef.current) return
+    const elapsed = Date.now() - chargeStartTimeRef.current
+    const progress = Math.min(elapsed / CHARGE_TIME_MS, 1.0)
+    chargeProgressRef.current = progress
+
+    // Annuler si le joueur bouge
+    const pos = playerPositionRef.current
+    const start = chargePosRef.current
+    if (Math.hypot(pos.x - start.x, pos.z - start.z) > 0.12) { onCancel(); return }
+
+    // Auto-lancement à 100%
+    if (progress >= 1.0) {
+      launchedRef.current = true
+      onLaunch()
+      return
+    }
+
+    // Clamper la direction caméra dans un cône ±90° autour du "devant"
+    const rawYaw = touchRef.current?.cameraYaw ?? chargeYawRef.current
+    const center = chargeYawRef.current
+    let diff = rawYaw - center
+    while (diff > Math.PI) diff -= 2 * Math.PI
+    while (diff < -Math.PI) diff += 2 * Math.PI
+    diff = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, diff)) // ±45°
+    const yaw = center + diff
+    chargeAimYawRef.current = yaw
+
+    // Mettre à jour la barre (throttlé)
+    frameRef.current++
+    if (frameRef.current % 2 === 0) setChargeProgress(progress)
+
+    // Positionner la boule dans le cône devant le joueur, plus basse
+    g.position.set(pos.x - Math.sin(yaw) * 0.85, pos.y + 0.3, pos.z - Math.cos(yaw) * 0.85)
+    g.scale.setScalar(0.12 + progress * 1.3)
+  })
+
+  return (
+    <group ref={groupRef}>
+      <mesh>
+        <sphereGeometry args={[0.08, 14, 14]} />
+        <meshBasicMaterial color="#fff2aa" toneMapped={false} />
+      </mesh>
+      <FireballFlameShell radius={0.18} opacity={0.75} phase={phase} />
+      <pointLight color="#ff7a00" intensity={1.0} distance={2.5} />
     </group>
   )
 }
@@ -8462,6 +8522,15 @@ function App() {
   const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
   const projectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
+  const isChargingRef = useRef(false)
+  const [isCharging, setIsCharging] = useState(false)
+  const chargeProgressRef = useRef(0)
+  const [chargeProgress, setChargeProgress] = useState(0)
+  const chargeStartTimeRef = useRef(0)
+  const chargePosRef = useRef({ x: 0, z: 0 })
+  const chargeYawRef = useRef(0)    // centre du cône = direction du corps joueur
+  const chargeAimYawRef = useRef(0) // direction courante clampée dans le cône
+  const playerBodyYawRef = useRef(0) // yaw du corps joueur (mis à jour par Player)
   const [nearbySeat, setNearbySeat] = useState(null)
   const [nearbyTv, setNearbyTv] = useState(null)
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
@@ -9620,29 +9689,55 @@ function App() {
     setOwnedMagicBook(true)
   }
 
-  const launchFireball = useCallback(() => {
+  const startCharge = useCallback(() => {
     if (currentZone !== ZONES.outside) return
     if (mode !== 'play') return
-    const now = Date.now()
-    if (now - fireballCooldownRef.current < FIREBALL_COOLDOWN_MS) return
+    if (equippedWeapon !== 'magic_book') return
+    if (isChargingRef.current) return
+    if (Date.now() - fireballCooldownRef.current < FIREBALL_COOLDOWN_MS) return
     if (projectilesRef.current.length >= MAX_ACTIVE_FIREBALLS) return
+    isChargingRef.current = true
+    setIsCharging(true)
+    chargeStartTimeRef.current = Date.now()
+    chargeProgressRef.current = 0
+    setChargeProgress(0)
+    const pos = playerPositionRef.current
+    chargePosRef.current = { x: pos.x, z: pos.z }
+    chargeYawRef.current = playerBodyYawRef.current + Math.PI // +π car conventions opposées entre body yaw et direction fireball
+  }, [currentZone, mode, equippedWeapon])
+
+  const launchFromCharge = useCallback(() => {
+    isChargingRef.current = false
+    setIsCharging(false)
+    chargeProgressRef.current = 0
+    setChargeProgress(0)
+    if (projectilesRef.current.length >= MAX_ACTIVE_FIREBALLS) return
+    const now = Date.now()
     fireballCooldownRef.current = now
     const pos = playerPositionRef.current
-    const yaw = touchRef.current?.cameraYaw ?? 0
+    const yaw = chargeAimYawRef.current // direction clampée dans le cône
     projectilesRef.current = [
       ...projectilesRef.current,
       {
         id: `fb_${now}_${Math.random().toString(36).slice(2, 6)}`,
-        x: pos.x,
-        y: pos.y + 1.0,
-        z: pos.z,
+        x: pos.x - Math.sin(yaw) * 0.85,
+        y: pos.y + 0.3,
+        z: pos.z - Math.cos(yaw) * 0.85,
         dirX: -Math.sin(yaw),
         dirZ: -Math.cos(yaw),
         startedAt: now,
         phase: Math.random() * Math.PI * 2,
       },
     ]
-  }, [currentZone, mode])
+  }, [])
+
+  const cancelCharge = useCallback(() => {
+    if (!isChargingRef.current) return
+    isChargingRef.current = false
+    setIsCharging(false)
+    chargeProgressRef.current = 0
+    setChargeProgress(0)
+  }, [])
 
   const toggleCat = () => {
     if (!canModifyWorld) return
@@ -9728,7 +9823,7 @@ function App() {
   }
 
   useEffect(() => {
-    const onFireKey = (event) => {
+    const onKeyDown = (event) => {
       if (event.repeat) return
       if (getKeyboardKey(event) !== 'f') return
       const target = event.target
@@ -9736,11 +9831,11 @@ function App() {
         (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
       if (isTyping) return
       event.preventDefault()
-      launchFireball()
+      startCharge()
     }
-    window.addEventListener('keydown', onFireKey)
-    return () => window.removeEventListener('keydown', onFireKey)
-  }, [launchFireball])
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [startCharge])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -10256,6 +10351,21 @@ function App() {
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
           />
+          {isCharging && equippedWeapon === 'magic_book' && (
+            <ChargingFireball
+              playerPositionRef={playerPositionRef}
+              touchRef={touchRef}
+              touchRef={touchRef}
+              chargeYawRef={chargeYawRef}
+              chargeAimYawRef={chargeAimYawRef}
+              chargeProgressRef={chargeProgressRef}
+              chargeStartTimeRef={chargeStartTimeRef}
+              chargePosRef={chargePosRef}
+              setChargeProgress={setChargeProgress}
+              onCancel={cancelCharge}
+              onLaunch={launchFromCharge}
+            />
+          )}
           {(!isDebugMode || debugToggles.player) && (
             <Player
               touchRef={touchRef}
@@ -10280,6 +10390,7 @@ function App() {
               combatTargetsRef={combatTargetsRef}
               onCombatHit={handleCombatHit}
               equippedWeapon={equippedWeapon}
+              playerBodyYawRef={playerBodyYawRef}
             />
           )}
           <OutdoorDoorTrigger
@@ -10349,11 +10460,17 @@ function App() {
           📖
         </button>
       )}
+      {showCaptureUi && isCharging && (
+        <div className="charge-bar-wrap">
+          <div className="charge-bar-fill" style={{ width: `${chargeProgress * 100}%` }} />
+          <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
+        </div>
+      )}
       {showCaptureUi && equippedWeapon === 'magic_book' && currentZone === ZONES.outside && mode === 'play' && (
         <button
           className="fireball-btn"
           type="button"
-          onPointerDown={launchFireball}
+          onPointerDown={startCharge}
           aria-label="Lancer boule de feu"
         >
           🔥

@@ -2429,6 +2429,40 @@ canvas {
   box-shadow: 0 0 32px rgba(255, 100, 0, 0.9);
 }
 
+.charge-bar-wrap {
+  position: fixed;
+  bottom: 180px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 100, 0, 0.7);
+  box-shadow: 0 0 10px rgba(255, 80, 0, 0.5);
+  overflow: hidden;
+  z-index: 100;
+}
+.charge-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #cc1100, #ff6600, #ffdd00);
+  border-radius: 12px;
+  transition: width 0.05s linear;
+}
+.charge-bar-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 0 4px #000;
+  pointer-events: none;
+  user-select: none;
+}
+
 .weapon-inventory-overlay {
   position: fixed;
   inset: 0;
