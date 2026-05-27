@@ -20,7 +20,13 @@
       "Bash(xargs grep -l \"shop\\\\|store\\\\|inventory\\\\|ui\\\\|hud\")",
       "Bash(npx vite *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
-      "mcp__Claude_in_Chrome__tabs_context_mcp"
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(Select-Object Name, Mode)",
+      "Bash(cd \"/c/Users/thoma/Documents/New project\" && ls -la)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3.exe -c \"print\\('ok'\\)\")",
+      "Bash(python -c \"print\\('ok'\\)\")",
+      "Bash(node -e \"console.log\\('node ok'\\)\")"
     ]
   }
 }

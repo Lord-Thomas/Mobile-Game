@@ -143,6 +143,7 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       ownedMagicBook: progress.ownedMagicBook ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       equippedWeapon: progress.equippedWeapon ?? null,
+      characterAppearance: progress.characterAppearance ?? null,
     },
     updated_at: new Date().toISOString(),
   }
@@ -204,6 +205,7 @@ export function fromProgressRow(row) {
     equippedWeapon: typeof row.world_settings?.equippedWeapon === 'string' ? row.world_settings.equippedWeapon : null,
     equippedTitleId: row.equipped_title_id ?? null,
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],
+    characterAppearance: row.world_settings?.characterAppearance ?? null,
   }
 }
 

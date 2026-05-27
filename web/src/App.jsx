@@ -217,6 +217,43 @@ const ballSkins = [
   { id: 'planet-x', name: 'Planete X', price: 150, texture: '/models/ball/textures/ballon-planete-x.png' },
 ]
 
+const SKIN_TONE_PALETTE = ['#FDDBB4', '#F5C5A3', '#E8A87C', '#D4895A', '#C06840', '#8D4A2B']
+const HAIR_COLOR_PALETTE = [
+  '#cf973a', '#E8B84A', '#FFD700', '#F5DEB3', '#C19A6B', '#8B4513',
+  '#5C3317', '#2C1810', '#1A0A00', '#CC2200', '#4B0082', '#FFFFFF',
+]
+const EYE_COLOR_PALETTE = [
+  '#2C1810', '#4A2E1A', '#3B82C4', '#1E4D8C', '#2ECC71', '#1A7A3A',
+  '#808080', '#5C5C5C', '#9B59B6', '#CC7722',
+]
+const CLOTHING_COLOR_PALETTE = [
+  '#CC3333', '#E67E22', '#F1C40F', '#2ECC71', '#3498DB', '#9B59B6',
+  '#1A1A2E', '#FFFFFF', '#95A5A6', '#2C3E50', '#E91E63', '#00BCD4',
+]
+// Couleurs moyennes réelles du modèle — extraites programmatiquement de la texture
+const CHARACTER_BASE_COLORS = {
+  skin: '#d39a5f',
+  hair: '#cf973a',
+  shirt: '#b33229',
+  pants: '#292725',
+}
+const CHARACTER_DEFAULT_APPEARANCE = {
+  skinColor: CHARACTER_BASE_COLORS.skin,
+  hairColor: CHARACTER_BASE_COLORS.hair,
+  eyeColor: EYE_COLOR_PALETTE[2],
+  shirtColor: CHARACTER_BASE_COLORS.shirt,
+  pantsColor: CHARACTER_BASE_COLORS.pants,
+}
+
+// Convertit un hex color en triplet [r, g, b] normalisé 0-1
+function charHexToVec(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255,
+  ]
+}
+
 const floorSkins = [
   {
     id: 'floor-classic',
@@ -1758,6 +1795,7 @@ function Player({
   onCombatHit = null,
   equippedWeapon = null,
   playerBodyYawRef = null,
+  appearance = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -2413,7 +2451,7 @@ function Player({
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
       <group ref={visualRef} position={PLAYER_SPAWNS.interior} visible={isPlayerVisible}>
-        <PlayerAvatar motion={playerMotion} handBoneRef={handBoneRef} equippedWeapon={equippedWeapon} />
+        <PlayerAvatar motion={playerMotion} handBoneRef={handBoneRef} equippedWeapon={equippedWeapon} appearance={appearance} />
         {equippedWeapon === 'magic_book' && (
           <FloatingMagicBook handBoneRef={handBoneRef} playerGroupRef={visualRef} />
         )}
@@ -2422,7 +2460,7 @@ function Player({
   )
 }
 
-function PlayerAvatar({ motion, handBoneRef, equippedWeapon }) {
+function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   const { gl } = useThree()
   const model = useFBX('/models/player/player-boy01.fbx')
   const idle = useFBX('/models/player/player-idle.fbx')
@@ -2462,6 +2500,70 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon }) {
     })
     return next
   }, [model, gl])
+
+  const maskTex = useTexture('/models/player/masks/parts-mask.png')
+
+  // Uniforms partagés entre le shader et les mises à jour d'apparence
+  const shaderUniformsRef = useRef({
+    partsMap: { value: null },
+    uSkinColor: { value: new Vector3(1, 1, 1) },
+    uHairColor: { value: new Vector3(1, 1, 1) },
+    uShirtColor: { value: new Vector3(1, 1, 1) },
+    uPantsColor: { value: new Vector3(1, 1, 1) },
+    uSkinBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.skin)) },
+    uHairBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.hair)) },
+    uShirtBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.shirt)) },
+    uPantsBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.pants)) },
+  })
+
+  // Injecte le shader de teinte une fois que le modèle et le masque sont prêts
+  useEffect(() => {
+    // Ne pas modifier flipY : laisser la valeur par défaut (true) pour aligner avec la texture du modèle
+    const u = shaderUniformsRef.current
+    u.partsMap.value = maskTex
+
+    avatar.traverse((obj) => {
+      if (!(obj instanceof Mesh) || obj._charShaderApplied) return
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+      mats.forEach((mat) => {
+        if (!mat) return
+        obj._charShaderApplied = true
+        mat.customProgramCacheKey = () => 'char-tint-v3'
+        mat.onBeforeCompile = (shader) => {
+          Object.assign(shader.uniforms, u)
+          // Injecter les déclarations APRÈS #include <common> (pas avant precision)
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            `#include <common>
+            uniform sampler2D partsMap;
+            uniform vec3 uSkinColor,uHairColor,uShirtColor,uPantsColor;
+            uniform vec3 uSkinBase,uHairBase,uShirtBase,uPantsBase;
+            vec3 charTint(vec3 c,vec3 b,vec3 t){return clamp(c*(t/max(b,vec3(0.01))),0.,1.);}`
+          ).replace(
+            '#include <map_fragment>',
+            `#include <map_fragment>
+            vec4 pm=texture2D(partsMap,vMapUv);
+            vec3 raw=diffuseColor.rgb;
+            if(pm.r>0.5)diffuseColor.rgb=mix(raw,charTint(raw,uSkinBase,uSkinColor),pm.r);
+            else if(pm.g>0.5&&pm.b<0.5)diffuseColor.rgb=mix(raw,charTint(raw,uHairBase,uHairColor),pm.g);
+            else if(pm.b>0.5)diffuseColor.rgb=mix(raw,charTint(raw,uShirtBase,uShirtColor),pm.b);
+            else if(pm.a>0.5)diffuseColor.rgb=mix(raw,charTint(raw,uPantsBase,uPantsColor),pm.a);`
+          )
+        }
+        mat.needsUpdate = true
+      })
+    })
+  }, [avatar, maskTex])
+
+  // Met à jour les couleurs dans les uniforms sans recompiler le shader
+  useEffect(() => {
+    const u = shaderUniformsRef.current
+    if (!appearance) return
+    u.uSkinColor.value.set(...charHexToVec(appearance.skinColor))
+    u.uHairColor.value.set(...charHexToVec(appearance.hairColor))
+    u.uShirtColor.value.set(...charHexToVec(appearance.shirtColor))
+    u.uPantsColor.value.set(...charHexToVec(appearance.pantsColor))
+  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor])
 
   const animationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
@@ -3181,8 +3283,10 @@ function RemotePlayer({
   const displayedMotionRef = useRef('idle')
   const motionSwitchAtRef = useRef(0)
   const displayedTitleIdRef = useRef(stateRef.current?.equippedTitleId ?? null)
+  const displayedAppearanceRef = useRef(stateRef.current?.characterAppearance ?? null)
   const [displayedMotion, setDisplayedMotion] = useState('idle')
   const [displayedTitleId, setDisplayedTitleId] = useState(stateRef.current?.equippedTitleId ?? null)
+  const [displayedAppearance, setDisplayedAppearance] = useState(stateRef.current?.characterAppearance ?? null)
   const targetRef = useRef({
     position: stateRef.current?.position ?? [0, PLAYER_HEIGHT, 2.2],
     rotationY: stateRef.current?.rotationY ?? 0,
@@ -3226,6 +3330,20 @@ function RemotePlayer({
       if (nextTitleId !== displayedTitleIdRef.current) {
         displayedTitleIdRef.current = nextTitleId
         setDisplayedTitleId(nextTitleId)
+      }
+
+      const nextAppearance = state.characterAppearance
+      if (nextAppearance) {
+        const cur = displayedAppearanceRef.current
+        if (!cur ||
+          nextAppearance.skinColor !== cur.skinColor ||
+          nextAppearance.hairColor !== cur.hairColor ||
+          nextAppearance.eyeColor !== cur.eyeColor ||
+          nextAppearance.shirtColor !== cur.shirtColor ||
+          nextAppearance.pantsColor !== cur.pantsColor) {
+          displayedAppearanceRef.current = nextAppearance
+          setDisplayedAppearance({ ...nextAppearance })
+        }
       }
     }
 
@@ -3308,7 +3426,7 @@ function RemotePlayer({
 
   return (
     <group ref={groupRef}>
-      <PlayerAvatar motion={displayedMotion} />
+      <PlayerAvatar motion={displayedMotion} appearance={displayedAppearance} />
       {showOverlays && (
         <Html position={[0, 1.08, 0]} center distanceFactor={8}>
           <div className="remote-player-nameplate">
@@ -4105,6 +4223,7 @@ function MultiplayerBridge({
   guestKickQueueRef,
   hostTimeOffsetRef,
   equippedTitleId,
+  characterAppearance,
 }) {
   const lastSendRef = useRef(0)
   const lastBallSendRef = useRef(0)
@@ -4134,6 +4253,7 @@ function MultiplayerBridge({
         motion: localPlayerStateRef.current.motion,
         zone: localPlayerStateRef.current.zone,
         equippedTitleId,
+        characterAppearance,
         sentAt: estimatedHostTime,
       })
       lastSendRef.current = now
@@ -7700,6 +7820,54 @@ function SkinMenu({
   )
 }
 
+function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
+  const [local, setLocal] = useState(appearance)
+
+  useEffect(() => { setLocal(appearance) }, [appearance])
+
+  if (!open) return null
+
+  const sections = [
+    { key: 'skinColor', label: 'Teinte de peau', palette: SKIN_TONE_PALETTE },
+    { key: 'hairColor', label: 'Cheveux', palette: HAIR_COLOR_PALETTE },
+    { key: 'shirtColor', label: 'Haut', palette: CLOTHING_COLOR_PALETTE },
+    { key: 'pantsColor', label: 'Bas', palette: CLOTHING_COLOR_PALETTE },
+  ]
+
+  return (
+    <div className="char-menu-overlay">
+      <div className="char-menu">
+        <div className="char-menu-title">Personnage</div>
+        {sections.map(({ key, label, palette }) => (
+          <div key={key} className="char-menu-section">
+            <div className="char-menu-label">{label}</div>
+            <div className="char-color-palette">
+              {palette.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={`char-color-swatch${local[key] === color ? ' selected' : ''}`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => setLocal((prev) => ({ ...prev, [key]: color }))}
+                  aria-label={color}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+        <div className="char-menu-actions">
+          <button type="button" className="char-apply-btn" onClick={() => { onApply(local); onClose() }}>
+            Appliquer
+          </button>
+          <button type="button" className="char-close-btn" onClick={onClose}>
+            Annuler
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function EnvironmentMenu({
   open,
   coins,
@@ -8520,6 +8688,8 @@ function App() {
   const [ownedMagicBook, setOwnedMagicBook] = useState(false)
   const [equippedWeapon, setEquippedWeapon] = useState(null)
   const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
+  const [characterAppearance, setCharacterAppearance] = useState(CHARACTER_DEFAULT_APPEARANCE)
+  const [isCharacterMenuOpen, setIsCharacterMenuOpen] = useState(false)
   const projectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
   const isChargingRef = useRef(false)
@@ -8762,6 +8932,7 @@ function App() {
     ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
     equippedWeapon,
     equippedTitleId,
+    characterAppearance,
   })
 
   const resetGuestProgress = () => {
@@ -8792,6 +8963,7 @@ function App() {
     setOwnedMagicBook(false)
     setEquippedWeapon(null)
     setIsWeaponMenuOpen(false)
+    setCharacterAppearance(CHARACTER_DEFAULT_APPEARANCE)
     projectilesRef.current = []
     setOwnedTitleIds([])
     setEquippedTitleId(null)
@@ -8814,6 +8986,9 @@ function App() {
     }
     if (typeof parsed.roomLightOn === 'boolean') setRoomLightOn(parsed.roomLightOn)
     if (typeof parsed.lightColor === 'string') setLightColor(parsed.lightColor)
+    if (parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
+      setCharacterAppearance({ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
+    }
 
     const validFloorSkinIds = new Set(floorSkins.map((skin) => skin.id))
     const validWallSkinIds = new Set(wallSkins.map((skin) => skin.id))
@@ -10224,6 +10399,7 @@ function App() {
           guestKickQueueRef={guestKickQueueRef}
           hostTimeOffsetRef={hostTimeOffsetRef}
           equippedTitleId={equippedTitleId}
+          characterAppearance={characterAppearance}
         />
         <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} roomLightOn={roomLightOn} lightColor={lightColor} />
         {(!isDebugMode || debugToggles.house) && (
@@ -10391,6 +10567,7 @@ function App() {
               onCombatHit={handleCombatHit}
               equippedWeapon={equippedWeapon}
               playerBodyYawRef={playerBodyYawRef}
+              appearance={characterAppearance}
             />
           )}
           <OutdoorDoorTrigger
@@ -10450,6 +10627,16 @@ function App() {
       {showCaptureUi && <CoinsOverlay coins={coins} />}
       {showCaptureUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
+      {showCaptureUi && mode === 'play' && (
+        <button
+          className="char-customization-btn"
+          type="button"
+          onClick={() => setIsCharacterMenuOpen((v) => !v)}
+          aria-label="Personnage"
+        >
+          👤
+        </button>
+      )}
       {showCaptureUi && ownedMagicBook && mode === 'play' && (
         <button
           className="weapon-inventory-btn"
@@ -10475,6 +10662,14 @@ function App() {
         >
           🔥
         </button>
+      )}
+      {showCaptureUi && (
+        <CharacterCustomizationMenu
+          open={isCharacterMenuOpen}
+          appearance={characterAppearance}
+          onApply={setCharacterAppearance}
+          onClose={() => setIsCharacterMenuOpen(false)}
+        />
       )}
       {showCaptureUi && (
         <WeaponInventoryPanel

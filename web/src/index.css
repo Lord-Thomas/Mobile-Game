@@ -2560,3 +2560,126 @@ canvas {
   padding: 20px 0;
   font-size: 0.9rem;
 }
+
+/* ── Character Customization ─────────────────────────── */
+.char-customization-btn {
+  position: absolute;
+  bottom: 88px;
+  right: 16px;
+  z-index: 7;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  background: rgba(16,24,34,0.82);
+  backdrop-filter: blur(6px);
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s, background 0.12s;
+}
+.char-customization-btn:active { transform: scale(0.92); }
+
+.char-menu-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: rgba(7,10,15,0.6);
+  backdrop-filter: blur(5px);
+}
+
+.char-menu {
+  width: min(92vw, 380px);
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: 18px;
+  padding: 20px 18px;
+  background: rgba(14,20,30,0.97);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #f0f6ff;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.char-menu-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.04em;
+  color: #c8deff;
+}
+
+.char-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.char-menu-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8aa4c8;
+}
+
+.char-color-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.char-color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+}
+.char-color-swatch:hover { transform: scale(1.15); }
+.char-color-swatch.selected {
+  border-color: #ffffff;
+  transform: scale(1.2);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.35);
+}
+
+.char-menu-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.char-apply-btn {
+  flex: 1;
+  padding: 10px 0;
+  border-radius: 10px;
+  border: none;
+  background: #3a7bd5;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.char-apply-btn:hover { background: #4a8ce5; }
+
+.char-close-btn {
+  flex: 1;
+  padding: 10px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: transparent;
+  color: #aac3e8;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.char-close-btn:hover { background: rgba(255,255,255,0.08); }
