@@ -230,16 +230,14 @@ const CLOTHING_COLOR_PALETTE = [
   '#CC3333', '#E67E22', '#F1C40F', '#2ECC71', '#3498DB', '#9B59B6',
   '#1A1A2E', '#FFFFFF', '#95A5A6', '#2C3E50', '#E91E63', '#00BCD4',
 ]
-// Couleurs moyennes réelles du modèle — extraites programmatiquement de la texture (player-boy02.fbx)
+// Couleurs moyennes réelles du modèle — extraites programmatiquement de la texture (player.glb)
 // skin H=28° S=0.40 L=0.63 | hair H=37° S=0.63 L=0.54 | shirt H=5° S=0.59 L=0.44 | pants H=45° S=0.06 L=0.14
 const CHARACTER_BASE_COLORS = {
   skin:          '#c79e7b',
   hair:          '#d39b3f',
   shirt:         '#b4392e',
   pants:         '#252421',
-  pants_details: '#252421',  // même zone couleur que pantalon dans la texture
-  shoes:         '#F0F0F0',  // pas de pixels UV détectés → solide Blender blanc/clair
-  socks:         '#F0F0F0',  // idem
+  shoes:         '#F0F0F0',
 }
 const CHARACTER_DEFAULT_APPEARANCE = {
   skinColor:        CHARACTER_BASE_COLORS.skin,
@@ -247,9 +245,7 @@ const CHARACTER_DEFAULT_APPEARANCE = {
   eyeColor:         EYE_COLOR_PALETTE[2],
   shirtColor:       CHARACTER_BASE_COLORS.shirt,
   pantsColor:       CHARACTER_BASE_COLORS.pants,
-  pantsDetailsColor: CHARACTER_BASE_COLORS.pants_details,
   shoesColor:       CHARACTER_BASE_COLORS.shoes,
-  socksColor:       CHARACTER_BASE_COLORS.socks,
 }
 
 // Convertit un hex color en triplet [r, g, b] normalisé 0-1 pour les uniforms Three.js
@@ -261,36 +257,32 @@ function charHexToVec(hex) {
   ]
 }
 
-const PLAYER_MODEL_URL = '/models/player/player-boy02.fbx'
+const PLAYER_MODEL_URL = '/models/player/player.glb'
 const CHARACTER_MATERIAL_COLOR_KEYS = {
   skin:          'skinColor',
   hair:          'hairColor',
   shirt:         'shirtColor',
   pants:         'pantsColor',
-  pants_details: 'pantsDetailsColor',  // couleur indépendante (ceinture, boutons…)
   shoes:         'shoesColor',
-  socks:         'socksColor',         // couleur indépendante des chaussures
 }
 
 function getCharacterMaterialKey(materialName = '') {
   const normalized = materialName.toLowerCase().replace(/[^a-z0-9]+/g, '_')
-  if (normalized.includes('eye') || normalized.includes('mouth') || normalized.includes('socket')) return null
+  if (normalized.includes('detail') || normalized.includes('eye') || normalized.includes('mouth') || normalized.includes('socket')) return null
   if (normalized.includes('skin')) return 'skin'
   if (normalized.includes('hair')) return 'hair'
   if (normalized.includes('shirt')) return 'shirt'
-  // "pants details" → pants_details doit être testé AVANT "pants"
-  if (normalized.includes('pants') && normalized.includes('detail')) return 'pants_details'
   if (normalized.includes('pants')) return 'pants'
   if (normalized.includes('shoe') || normalized.includes('boot')) return 'shoes'
-  if (normalized.includes('sock')) return 'socks'
   return null
 }
 
-// Shader de recoloration par zone : approche MULTIPLICATION PAR RATIO RGB
-// Principe : result = pixel * (target / base)
-//   → le pixel moyen (≈ base) devient exactement la couleur cible
-//   → les ombres/hautes-lumières sont préservées proportionnellement sur tous les canaux
-//   → fonctionne pour toutes les teintes (rouge→vert, etc.) ET pour les matériaux sans texture
+function normalizeMixamoObjectName(name = '') {
+  return name.replace(/^mixamorig:/, 'mixamorig')
+}
+
+// Shader de recoloration par zone : remplace la teinte, conserve la luminosité.
+// Ça évite qu'un t-shirt rouge devienne kaki quand on choisit du vert.
 
 // Déclaration de l'uniform dans le fragment shader (inséré après #include <common>)
 const TINT_RECOLOR_UNIFORM_DECL = `#include <common>
@@ -302,8 +294,11 @@ function makeTintApplyGlsl(baseR, baseG, baseB) {
   const br = baseR.toFixed(5), bg = baseG.toFixed(5), bb = baseB.toFixed(5)
   return `#include <map_fragment>
 vec3 _bC=vec3(${br},${bg},${bb});
-vec3 _tR=uZoneColor/max(_bC,vec3(0.001));
-diffuseColor.rgb=clamp(diffuseColor.rgb*_tR,0.,1.);`
+vec3 _luma=vec3(0.2126,0.7152,0.0722);
+float _baseL=max(dot(_bC,_luma),0.001);
+float _pixelL=dot(diffuseColor.rgb,_luma);
+float _shade=clamp(_pixelL/_baseL,0.,2.4);
+diffuseColor.rgb=clamp(uZoneColor*_shade,0.,1.);`
 }
 
 const floorSkins = [
@@ -2514,7 +2509,7 @@ function Player({
 
 function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   const { gl } = useThree()
-  const model = useFBX(PLAYER_MODEL_URL)
+  const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
   const idle = useFBX('/models/player/player-idle.fbx')
   const walk = useFBX('/models/player/player-walk.fbx')
   const run = useFBX('/models/player/player-run.fbx')
@@ -2530,10 +2525,15 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   const sittingIdle = useFBX('/models/player/Sitting Idle.fbx')
   const standUp = useFBX('/models/player/Stand Up.fbx')
   const avatar = useMemo(() => {
-    const next = clone(model)
+    const next = clone(modelScene)
     next.visible = false
     const maxAnisotropy = gl.capabilities.getMaxAnisotropy()
     next.traverse((object) => {
+      object.name = normalizeMixamoObjectName(object.name)
+      if (object.name === 'Armature') {
+        object.rotation.set(0, 0, 0)
+        object.scale.set(1, 1, 1)
+      }
       if (object instanceof Mesh) {
         object.castShadow = true
         object.receiveShadow = true
@@ -2555,7 +2555,7 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       }
     })
     return next
-  }, [model, gl])
+  }, [modelScene, gl])
 
   // Uniforms de couleur par zone matériau — stables entre les deux effects
   const zoneColorRefs = useRef({})
@@ -2563,20 +2563,6 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   // Effect 1 : injecter le shader de recoloration une fois par matériau (au chargement du modèle)
   useEffect(() => {
     const app = appearance ?? CHARACTER_DEFAULT_APPEARANCE
-
-    // --- DEBUG : liste tous les matériaux détectés (à lire dans la console navigateur) ---
-    console.group('[PlayerAvatar] Matériaux détectés :')
-    avatar.traverse((obj) => {
-      if (!(obj instanceof Mesh)) return
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
-      mats.forEach((mat) => {
-        if (!mat) return
-        const key = mat.userData.characterMaterialKey ?? getCharacterMaterialKey(mat.name)
-        console.log(`  mesh="${obj.name}" mat="${mat.name}" → key=${key} colorKey=${CHARACTER_MATERIAL_COLOR_KEYS[key] ?? 'null'}`)
-      })
-    })
-    console.groupEnd()
-    // --- FIN DEBUG ---
 
     avatar.traverse((obj) => {
       if (!(obj instanceof Mesh)) return
@@ -2620,7 +2606,7 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       const hex = app[colorKey] ?? CHARACTER_DEFAULT_APPEARANCE[colorKey] ?? '#808080'
       ref.value.set(...charHexToVec(hex))
     })
-  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.pantsDetailsColor, appearance?.shoesColor, appearance?.socksColor])
+  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.shoesColor])
 
   const animationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
@@ -3398,9 +3384,7 @@ function RemotePlayer({
           nextAppearance.eyeColor !== cur.eyeColor ||
           nextAppearance.shirtColor !== cur.shirtColor ||
           nextAppearance.pantsColor !== cur.pantsColor ||
-          nextAppearance.pantsDetailsColor !== cur.pantsDetailsColor ||
-          nextAppearance.shoesColor !== cur.shoesColor ||
-          nextAppearance.socksColor !== cur.socksColor) {
+          nextAppearance.shoesColor !== cur.shoesColor) {
           displayedAppearanceRef.current = nextAppearance
           setDisplayedAppearance({ ...nextAppearance })
         }
@@ -7892,9 +7876,7 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
     { key: 'hairColor',         label: 'Cheveux',           palette: HAIR_COLOR_PALETTE },
     { key: 'shirtColor',        label: 'Haut',              palette: CLOTHING_COLOR_PALETTE },
     { key: 'pantsColor',        label: 'Bas',               palette: CLOTHING_COLOR_PALETTE },
-    { key: 'pantsDetailsColor', label: 'Détails du bas',    palette: CLOTHING_COLOR_PALETTE },
     { key: 'shoesColor',        label: 'Chaussures',        palette: CLOTHING_COLOR_PALETTE },
-    { key: 'socksColor',        label: 'Chaussettes',       palette: CLOTHING_COLOR_PALETTE },
   ]
 
   return (
@@ -11275,7 +11257,7 @@ useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
 useGLTF.preload('/models/cat.glb')
 useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
-useFBX.preload(PLAYER_MODEL_URL)
+useGLTF.preload(PLAYER_MODEL_URL)
 useFBX.preload('/models/player/player-idle.fbx')
 useFBX.preload('/models/player/player-walk.fbx')
 useFBX.preload('/models/player/player-run.fbx')
