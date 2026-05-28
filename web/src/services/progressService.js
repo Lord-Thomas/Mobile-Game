@@ -30,9 +30,7 @@ function mergeProgressRow(existingRow, progress) {
   const ownedMagicBook = Boolean(existing.ownedMagicBook || progress.ownedMagicBook || ownedWeapons.includes('magic_book'))
   const equippedWeapon = ownedWeapons.includes(progress.equippedWeapon) || (progress.equippedWeapon === 'magic_book' && ownedMagicBook)
     ? progress.equippedWeapon
-    : ownedWeapons.includes(existing.equippedWeapon) || (existing.equippedWeapon === 'magic_book' && ownedMagicBook)
-      ? existing.equippedWeapon
-      : null
+    : null
 
   return {
     ...progress,

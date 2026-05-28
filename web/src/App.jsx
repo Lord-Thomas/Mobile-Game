@@ -230,28 +230,80 @@ const CLOTHING_COLOR_PALETTE = [
   '#CC3333', '#E67E22', '#F1C40F', '#2ECC71', '#3498DB', '#9B59B6',
   '#1A1A2E', '#FFFFFF', '#95A5A6', '#2C3E50', '#E91E63', '#00BCD4',
 ]
-// Couleurs moyennes réelles du modèle — extraites programmatiquement de la texture
+// Couleurs moyennes réelles du modèle — extraites programmatiquement de la texture (player-boy02.fbx)
+// skin H=28° S=0.40 L=0.63 | hair H=37° S=0.63 L=0.54 | shirt H=5° S=0.59 L=0.44 | pants H=45° S=0.06 L=0.14
 const CHARACTER_BASE_COLORS = {
-  skin: '#d39a5f',
-  hair: '#cf973a',
-  shirt: '#b33229',
-  pants: '#292725',
+  skin:          '#c79e7b',
+  hair:          '#d39b3f',
+  shirt:         '#b4392e',
+  pants:         '#252421',
+  pants_details: '#252421',  // même zone couleur que pantalon dans la texture
+  shoes:         '#F0F0F0',  // pas de pixels UV détectés → solide Blender blanc/clair
+  socks:         '#F0F0F0',  // idem
 }
 const CHARACTER_DEFAULT_APPEARANCE = {
-  skinColor: CHARACTER_BASE_COLORS.skin,
-  hairColor: CHARACTER_BASE_COLORS.hair,
-  eyeColor: EYE_COLOR_PALETTE[2],
-  shirtColor: CHARACTER_BASE_COLORS.shirt,
-  pantsColor: CHARACTER_BASE_COLORS.pants,
+  skinColor:        CHARACTER_BASE_COLORS.skin,
+  hairColor:        CHARACTER_BASE_COLORS.hair,
+  eyeColor:         EYE_COLOR_PALETTE[2],
+  shirtColor:       CHARACTER_BASE_COLORS.shirt,
+  pantsColor:       CHARACTER_BASE_COLORS.pants,
+  pantsDetailsColor: CHARACTER_BASE_COLORS.pants_details,
+  shoesColor:       CHARACTER_BASE_COLORS.shoes,
+  socksColor:       CHARACTER_BASE_COLORS.socks,
 }
 
-// Convertit un hex color en triplet [r, g, b] normalisé 0-1
+// Convertit un hex color en triplet [r, g, b] normalisé 0-1 pour les uniforms Three.js
 function charHexToVec(hex) {
   return [
     parseInt(hex.slice(1, 3), 16) / 255,
     parseInt(hex.slice(3, 5), 16) / 255,
     parseInt(hex.slice(5, 7), 16) / 255,
   ]
+}
+
+const PLAYER_MODEL_URL = '/models/player/player-boy02.fbx'
+const CHARACTER_MATERIAL_COLOR_KEYS = {
+  skin:          'skinColor',
+  hair:          'hairColor',
+  shirt:         'shirtColor',
+  pants:         'pantsColor',
+  pants_details: 'pantsDetailsColor',  // couleur indépendante (ceinture, boutons…)
+  shoes:         'shoesColor',
+  socks:         'socksColor',         // couleur indépendante des chaussures
+}
+
+function getCharacterMaterialKey(materialName = '') {
+  const normalized = materialName.toLowerCase().replace(/[^a-z0-9]+/g, '_')
+  if (normalized.includes('eye') || normalized.includes('mouth') || normalized.includes('socket')) return null
+  if (normalized.includes('skin')) return 'skin'
+  if (normalized.includes('hair')) return 'hair'
+  if (normalized.includes('shirt')) return 'shirt'
+  // "pants details" → pants_details doit être testé AVANT "pants"
+  if (normalized.includes('pants') && normalized.includes('detail')) return 'pants_details'
+  if (normalized.includes('pants')) return 'pants'
+  if (normalized.includes('shoe') || normalized.includes('boot')) return 'shoes'
+  if (normalized.includes('sock')) return 'socks'
+  return null
+}
+
+// Shader de recoloration par zone : approche MULTIPLICATION PAR RATIO RGB
+// Principe : result = pixel * (target / base)
+//   → le pixel moyen (≈ base) devient exactement la couleur cible
+//   → les ombres/hautes-lumières sont préservées proportionnellement sur tous les canaux
+//   → fonctionne pour toutes les teintes (rouge→vert, etc.) ET pour les matériaux sans texture
+
+// Déclaration de l'uniform dans le fragment shader (inséré après #include <common>)
+const TINT_RECOLOR_UNIFORM_DECL = `#include <common>
+uniform vec3 uZoneColor;`
+
+// Code GLSL appliqué APRÈS le sampling de texture (remplace #include <map_fragment>)
+// On garde #include <map_fragment> INTACT et on ajoute notre logique après
+function makeTintApplyGlsl(baseR, baseG, baseB) {
+  const br = baseR.toFixed(5), bg = baseG.toFixed(5), bb = baseB.toFixed(5)
+  return `#include <map_fragment>
+vec3 _bC=vec3(${br},${bg},${bb});
+vec3 _tR=uZoneColor/max(_bC,vec3(0.001));
+diffuseColor.rgb=clamp(diffuseColor.rgb*_tR,0.,1.);`
 }
 
 const floorSkins = [
@@ -2462,7 +2514,7 @@ function Player({
 
 function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   const { gl } = useThree()
-  const model = useFBX('/models/player/player-boy01.fbx')
+  const model = useFBX(PLAYER_MODEL_URL)
   const idle = useFBX('/models/player/player-idle.fbx')
   const walk = useFBX('/models/player/player-walk.fbx')
   const run = useFBX('/models/player/player-run.fbx')
@@ -2486,9 +2538,13 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
         object.castShadow = true
         object.receiveShadow = true
         object.frustumCulled = false
+        object.material = Array.isArray(object.material)
+          ? object.material.map((mat) => mat?.clone?.() ?? mat)
+          : object.material?.clone?.() ?? object.material
         const materials = Array.isArray(object.material) ? object.material : [object.material]
         materials.forEach((mat) => {
           if (!mat) return
+          mat.userData.characterMaterialKey = getCharacterMaterialKey(mat.name)
           ;[mat.map, mat.normalMap, mat.roughnessMap, mat.metalnessMap, mat.emissiveMap].forEach((tex) => {
             if (tex) {
               tex.anisotropy = maxAnisotropy
@@ -2501,69 +2557,70 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
     return next
   }, [model, gl])
 
-  const maskTex = useTexture('/models/player/masks/parts-mask.png')
+  // Uniforms de couleur par zone matériau — stables entre les deux effects
+  const zoneColorRefs = useRef({})
 
-  // Uniforms partagés entre le shader et les mises à jour d'apparence
-  const shaderUniformsRef = useRef({
-    partsMap: { value: null },
-    uSkinColor: { value: new Vector3(1, 1, 1) },
-    uHairColor: { value: new Vector3(1, 1, 1) },
-    uShirtColor: { value: new Vector3(1, 1, 1) },
-    uPantsColor: { value: new Vector3(1, 1, 1) },
-    uSkinBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.skin)) },
-    uHairBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.hair)) },
-    uShirtBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.shirt)) },
-    uPantsBase: { value: new Vector3(...charHexToVec(CHARACTER_BASE_COLORS.pants)) },
-  })
-
-  // Injecte le shader de teinte une fois que le modèle et le masque sont prêts
+  // Effect 1 : injecter le shader de recoloration une fois par matériau (au chargement du modèle)
   useEffect(() => {
-    // Ne pas modifier flipY : laisser la valeur par défaut (true) pour aligner avec la texture du modèle
-    const u = shaderUniformsRef.current
-    u.partsMap.value = maskTex
+    const app = appearance ?? CHARACTER_DEFAULT_APPEARANCE
 
+    // --- DEBUG : liste tous les matériaux détectés (à lire dans la console navigateur) ---
+    console.group('[PlayerAvatar] Matériaux détectés :')
     avatar.traverse((obj) => {
-      if (!(obj instanceof Mesh) || obj._charShaderApplied) return
+      if (!(obj instanceof Mesh)) return
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
       mats.forEach((mat) => {
         if (!mat) return
-        obj._charShaderApplied = true
-        mat.customProgramCacheKey = () => 'char-tint-v3'
+        const key = mat.userData.characterMaterialKey ?? getCharacterMaterialKey(mat.name)
+        console.log(`  mesh="${obj.name}" mat="${mat.name}" → key=${key} colorKey=${CHARACTER_MATERIAL_COLOR_KEYS[key] ?? 'null'}`)
+      })
+    })
+    console.groupEnd()
+    // --- FIN DEBUG ---
+
+    avatar.traverse((obj) => {
+      if (!(obj instanceof Mesh)) return
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+      mats.forEach((mat) => {
+        if (!mat || mat._tintRecolorApplied) return
+        const materialKey = mat.userData.characterMaterialKey ?? getCharacterMaterialKey(mat.name)
+        const colorKey = CHARACTER_MATERIAL_COLOR_KEYS[materialKey]
+        if (!colorKey) return
+
+        const hex = app[colorKey] ?? CHARACTER_DEFAULT_APPEARANCE[colorKey] ?? '#808080'
+        const colorUniform = { value: new Vector3(...charHexToVec(hex)) }
+        if (!zoneColorRefs.current[colorKey]) {
+          zoneColorRefs.current[colorKey] = colorUniform
+        }
+
+        // Couleur de base bakée dans le GLSL (calcule le ratio une seule fois)
+        const baseHex = CHARACTER_BASE_COLORS[materialKey] ?? '#808080'
+        const [bR, bG, bB] = charHexToVec(baseHex)
+
+        mat._tintRecolorApplied = true
+        mat.color.set('#FFFFFF') // neutre — le shader applique la couleur via le ratio
+        mat.customProgramCacheKey = () => `tint-recolor-${materialKey}-v1`
         mat.onBeforeCompile = (shader) => {
-          Object.assign(shader.uniforms, u)
-          // Injecter les déclarations APRÈS #include <common> (pas avant precision)
-          shader.fragmentShader = shader.fragmentShader.replace(
-            '#include <common>',
-            `#include <common>
-            uniform sampler2D partsMap;
-            uniform vec3 uSkinColor,uHairColor,uShirtColor,uPantsColor;
-            uniform vec3 uSkinBase,uHairBase,uShirtBase,uPantsBase;
-            vec3 charTint(vec3 c,vec3 b,vec3 t){return clamp(c*(t/max(b,vec3(0.01))),0.,1.);}`
-          ).replace(
-            '#include <map_fragment>',
-            `#include <map_fragment>
-            vec4 pm=texture2D(partsMap,vMapUv);
-            vec3 raw=diffuseColor.rgb;
-            if(pm.r>0.5)diffuseColor.rgb=mix(raw,charTint(raw,uSkinBase,uSkinColor),pm.r);
-            else if(pm.g>0.5&&pm.b<0.5)diffuseColor.rgb=mix(raw,charTint(raw,uHairBase,uHairColor),pm.g);
-            else if(pm.b>0.5)diffuseColor.rgb=mix(raw,charTint(raw,uShirtBase,uShirtColor),pm.b);
-            else if(pm.a>0.5)diffuseColor.rgb=mix(raw,charTint(raw,uPantsBase,uPantsColor),pm.a);`
-          )
+          shader.uniforms.uZoneColor = zoneColorRefs.current[colorKey]
+          shader.fragmentShader = shader.fragmentShader
+            .replace('#include <common>', TINT_RECOLOR_UNIFORM_DECL)
+            .replace('#include <map_fragment>', makeTintApplyGlsl(bR, bG, bB))
         }
         mat.needsUpdate = true
       })
     })
-  }, [avatar, maskTex])
+  }, [avatar])
 
-  // Met à jour les couleurs dans les uniforms sans recompiler le shader
+  // Effect 2 : mettre à jour les uniforms quand l'apparence change (sans recompiler le shader)
   useEffect(() => {
-    const u = shaderUniformsRef.current
-    if (!appearance) return
-    u.uSkinColor.value.set(...charHexToVec(appearance.skinColor))
-    u.uHairColor.value.set(...charHexToVec(appearance.hairColor))
-    u.uShirtColor.value.set(...charHexToVec(appearance.shirtColor))
-    u.uPantsColor.value.set(...charHexToVec(appearance.pantsColor))
-  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor])
+    const app = appearance ?? CHARACTER_DEFAULT_APPEARANCE
+    Object.entries(CHARACTER_MATERIAL_COLOR_KEYS).forEach(([, colorKey]) => {
+      const ref = zoneColorRefs.current[colorKey]
+      if (!ref) return
+      const hex = app[colorKey] ?? CHARACTER_DEFAULT_APPEARANCE[colorKey] ?? '#808080'
+      ref.value.set(...charHexToVec(hex))
+    })
+  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.pantsDetailsColor, appearance?.shoesColor, appearance?.socksColor])
 
   const animationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
@@ -3340,7 +3397,10 @@ function RemotePlayer({
           nextAppearance.hairColor !== cur.hairColor ||
           nextAppearance.eyeColor !== cur.eyeColor ||
           nextAppearance.shirtColor !== cur.shirtColor ||
-          nextAppearance.pantsColor !== cur.pantsColor) {
+          nextAppearance.pantsColor !== cur.pantsColor ||
+          nextAppearance.pantsDetailsColor !== cur.pantsDetailsColor ||
+          nextAppearance.shoesColor !== cur.shoesColor ||
+          nextAppearance.socksColor !== cur.socksColor) {
           displayedAppearanceRef.current = nextAppearance
           setDisplayedAppearance({ ...nextAppearance })
         }
@@ -7828,10 +7888,13 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   if (!open) return null
 
   const sections = [
-    { key: 'skinColor', label: 'Teinte de peau', palette: SKIN_TONE_PALETTE },
-    { key: 'hairColor', label: 'Cheveux', palette: HAIR_COLOR_PALETTE },
-    { key: 'shirtColor', label: 'Haut', palette: CLOTHING_COLOR_PALETTE },
-    { key: 'pantsColor', label: 'Bas', palette: CLOTHING_COLOR_PALETTE },
+    { key: 'skinColor',         label: 'Teinte de peau',   palette: SKIN_TONE_PALETTE },
+    { key: 'hairColor',         label: 'Cheveux',           palette: HAIR_COLOR_PALETTE },
+    { key: 'shirtColor',        label: 'Haut',              palette: CLOTHING_COLOR_PALETTE },
+    { key: 'pantsColor',        label: 'Bas',               palette: CLOTHING_COLOR_PALETTE },
+    { key: 'pantsDetailsColor', label: 'Détails du bas',    palette: CLOTHING_COLOR_PALETTE },
+    { key: 'shoesColor',        label: 'Chaussures',        palette: CLOTHING_COLOR_PALETTE },
+    { key: 'socksColor',        label: 'Chaussettes',       palette: CLOTHING_COLOR_PALETTE },
   ]
 
   return (
@@ -7858,6 +7921,9 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
         <div className="char-menu-actions">
           <button type="button" className="char-apply-btn" onClick={() => { onApply(local); onClose() }}>
             Appliquer
+          </button>
+          <button type="button" className="char-reset-btn" onClick={() => setLocal({ ...CHARACTER_DEFAULT_APPEARANCE })}>
+            Réinitialiser
           </button>
           <button type="button" className="char-close-btn" onClick={onClose}>
             Annuler
@@ -8886,7 +8952,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -8930,7 +8996,7 @@ function App() {
     catActive,
     ownedMagicBook,
     ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
-    equippedWeapon,
+    equippedWeapon: null,
     equippedTitleId,
     characterAppearance,
   })
@@ -9069,11 +9135,7 @@ function App() {
     const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
     const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
     setOwnedMagicBook(hasMagicBook)
-    if (typeof parsed.equippedWeapon === 'string') {
-      setEquippedWeapon(parsed.equippedWeapon === 'magic_book' && hasMagicBook ? parsed.equippedWeapon : null)
-    } else if (parsed.equippedWeapon === null) {
-      setEquippedWeapon(null)
-    }
+    setEquippedWeapon(null)
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
   }
 
@@ -9164,7 +9226,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -9508,7 +9570,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -11213,7 +11275,7 @@ useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
 useGLTF.preload('/models/cat.glb')
 useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
-useFBX.preload('/models/player/player-boy01.fbx')
+useFBX.preload(PLAYER_MODEL_URL)
 useFBX.preload('/models/player/player-idle.fbx')
 useFBX.preload('/models/player/player-walk.fbx')
 useFBX.preload('/models/player/player-run.fbx')
