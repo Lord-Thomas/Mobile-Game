@@ -1967,7 +1967,28 @@ function Player({
     cameraLookRef.current.x = x
     cameraLookRef.current.y = y + 0.55
     cameraLookRef.current.z = z
-  }, [spawnRequest, playerPositionRef])
+
+    if (spawnRequest.zone === ZONES.outside) {
+      const touch = touchRef.current
+      const cameraSettings = CAMERA_SETTINGS.outside
+      const cameraDistance = cameraSettings.distance
+      const cameraPitch = MathUtils.clamp(touch.cameraPitch ?? -0.22, -0.8, 0.35)
+      const cameraYaw = -Math.PI / 2
+      const horizontalDistance = cameraDistance * Math.cos(cameraPitch)
+      const targetCamera = clampCameraInPlayableVolume(
+        x + Math.sin(cameraYaw) * horizontalDistance,
+        y + cameraSettings.height + Math.sin(cameraPitch) * cameraDistance,
+        z + Math.cos(cameraYaw) * horizontalDistance,
+        ZONES.outside,
+      )
+
+      touch.cameraYaw = cameraYaw
+      touch.cameraPitch = cameraPitch
+      touch.cameraDistance = cameraDistance
+      camera.position.set(targetCamera.x, targetCamera.y, targetCamera.z)
+      camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
+    }
+  }, [camera, spawnRequest, playerPositionRef, touchRef])
 
   useEffect(() => {
     const onKeyDown = (event) => {
