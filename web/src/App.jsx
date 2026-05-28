@@ -530,6 +530,31 @@ function clampToCustomRoom(x, z) {
   ]
 }
 
+function clampToEditableWorld(x, z) {
+  return [
+    MathUtils.clamp(x, -OUTDOOR_HALF_SIZE + 1, OUTDOOR_HALF_SIZE - 1),
+    MathUtils.clamp(z, -OUTDOOR_HALF_SIZE + 1, OUTDOOR_HALF_SIZE - 1),
+  ]
+}
+
+function normalizeSavedObjectPosition(position, fallbackPosition = [0, 0, 0]) {
+  const source = Array.isArray(position) && position.length === 3 ? position : fallbackPosition
+  const fallback = Array.isArray(fallbackPosition) && fallbackPosition.length === 3 ? fallbackPosition : [0, 0, 0]
+  const rawX = Number(source[0])
+  const rawY = Number(source[1])
+  const rawZ = Number(source[2])
+  const [x, z] = clampToEditableWorld(
+    Number.isFinite(rawX) ? rawX : fallback[0],
+    Number.isFinite(rawZ) ? rawZ : fallback[2],
+  )
+
+  return [
+    x,
+    Number.isFinite(rawY) ? rawY : fallback[1],
+    z,
+  ]
+}
+
 function getRotatedGoalCollider(goalObject, localPosition) {
   const goalPosition = goalObject?.position ?? [0, 0, GOAL_Z]
   const rotationY = goalObject?.rotationY ?? 0
@@ -8191,6 +8216,27 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   )
 }
 
+function CustomizationChoiceMenu({ open, onChooseRoom, onChooseCharacter, onClose }) {
+  if (!open) return null
+
+  return (
+    <div className="skin-menu-overlay">
+      <div className="skin-menu">
+        <div className="skin-title">Personnaliser</div>
+        <button type="button" className="skin-action-btn" onClick={onChooseRoom}>
+          Piece
+        </button>
+        <button type="button" className="skin-action-btn" onClick={onChooseCharacter}>
+          Personnage
+        </button>
+        <button type="button" className="skin-close-btn" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function EnvironmentMenu({
   open,
   coins,
@@ -9040,6 +9086,7 @@ function App() {
   const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
   const [characterAppearance, setCharacterAppearance] = useState(CHARACTER_DEFAULT_APPEARANCE)
   const [isCharacterMenuOpen, setIsCharacterMenuOpen] = useState(false)
+  const [isCustomizationChoiceOpen, setIsCustomizationChoiceOpen] = useState(false)
   const projectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
   const isChargingRef = useRef(false)
@@ -9378,11 +9425,7 @@ function App() {
           status: savedObject.status === 'stored' && baseObject.canStore ? 'stored' : 'placed',
           position: savedObject.status === 'stored' && baseObject.canStore
             ? null
-            : [
-              MathUtils.clamp(Number(position[0]) || baseObject.position[0], CUSTOM_ROOM_BOUNDS.minX, CUSTOM_ROOM_BOUNDS.maxX),
-              Number.isFinite(Number(position[1])) ? Number(position[1]) : baseObject.position[1],
-              MathUtils.clamp(Number(position[2]) || baseObject.position[2], CUSTOM_ROOM_BOUNDS.minZ, CUSTOM_ROOM_BOUNDS.maxZ),
-            ],
+            : normalizeSavedObjectPosition(position, baseObject.position),
           rotationY: Number.isFinite(savedObject.rotationY) ? savedObject.rotationY : baseObject.rotationY,
         }
       })
@@ -9401,11 +9444,7 @@ function App() {
             id: object.id,
             status: object.status === 'placed' ? 'placed' : 'stored',
             position: object.status === 'placed' && position
-              ? [
-                MathUtils.clamp(Number(position[0]) || 0, CUSTOM_ROOM_BOUNDS.minX, CUSTOM_ROOM_BOUNDS.maxX),
-                Number.isFinite(Number(position[1])) ? Number(position[1]) : 0,
-                MathUtils.clamp(Number(position[2]) || 0, CUSTOM_ROOM_BOUNDS.minZ, CUSTOM_ROOM_BOUNDS.maxZ),
-              ]
+              ? normalizeSavedObjectPosition(position, [0, 0, 0])
               : null,
             rotationY: Number.isFinite(object.rotationY) ? object.rotationY : 0,
           })
@@ -10099,6 +10138,8 @@ function App() {
   const openSkinMenu = () => {
     if (!canModifyWorld) return
     setPreviewSkinId(selectedSkinId)
+    setIsCharacterMenuOpen(false)
+    setIsCustomizationChoiceOpen(false)
     setIsSkinMenuOpen(true)
   }
 
@@ -10111,12 +10152,28 @@ function App() {
     setEnvironmentTab('floor')
     setPreviewFloorSkinId(selectedFloorSkinId)
     setPreviewWallSkinId(selectedWallSkinId)
+    setIsCharacterMenuOpen(false)
+    setIsCustomizationChoiceOpen(false)
     setIsEnvironmentMenuOpen(true)
   }
   const closeEnvironmentMenu = () => {
     setPreviewFloorSkinId(selectedFloorSkinId)
     setPreviewWallSkinId(selectedWallSkinId)
     setIsEnvironmentMenuOpen(false)
+  }
+
+  const openCustomizationChoice = () => {
+    if (!canModifyWorld) return
+    setIsSkinMenuOpen(false)
+    setIsEnvironmentMenuOpen(false)
+    setIsCharacterMenuOpen(false)
+    setIsCustomizationChoiceOpen(true)
+  }
+
+  const openCharacterCustomizationFromChoice = () => {
+    if (!canModifyWorld) return
+    setIsCustomizationChoiceOpen(false)
+    setIsCharacterMenuOpen(true)
   }
 
   const goPreview = (direction) => {
@@ -10313,6 +10370,8 @@ function App() {
     setMode('play')
     setIsSkinMenuOpen(false)
     setIsEnvironmentMenuOpen(false)
+    setIsCharacterMenuOpen(false)
+    setIsCustomizationChoiceOpen(false)
     setSelectedObjectId(null)
     setDraggingObjectId(null)
     setPlacingObjectId(null)
@@ -10386,6 +10445,8 @@ function App() {
     if (!canModifyWorld) return
     setIsSkinMenuOpen(false)
     setIsEnvironmentMenuOpen(false)
+    setIsCharacterMenuOpen(false)
+    setIsCustomizationChoiceOpen(false)
     setMode('customize')
     setSelectedObjectId(placedEditableObjects[0]?.id ?? null)
     setDraggingObjectId(null)
@@ -10400,6 +10461,7 @@ function App() {
 
   const closeCustomizationMode = () => {
     setMode('play')
+    setIsCustomizationChoiceOpen(false)
     setSelectedObjectId(null)
     setDraggingObjectId(null)
     setPlacingObjectId(null)
@@ -10973,16 +11035,6 @@ function App() {
       {showCaptureUi && <CoinsOverlay coins={coins} />}
       {showCaptureUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
-      {showCaptureUi && mode === 'play' && (
-        <button
-          className="char-customization-btn"
-          type="button"
-          onClick={() => setIsCharacterMenuOpen((v) => !v)}
-          aria-label="Personnage"
-        >
-          👤
-        </button>
-      )}
       {showCaptureUi && ownedMagicBook && mode === 'play' && (
         <button
           className="weapon-inventory-btn"
@@ -11015,6 +11067,14 @@ function App() {
           appearance={characterAppearance}
           onApply={setCharacterAppearance}
           onClose={() => setIsCharacterMenuOpen(false)}
+        />
+      )}
+      {showCaptureUi && canModifyWorld && (
+        <CustomizationChoiceMenu
+          open={isCustomizationChoiceOpen}
+          onChooseRoom={openCustomizationMode}
+          onChooseCharacter={openCharacterCustomizationFromChoice}
+          onClose={() => setIsCustomizationChoiceOpen(false)}
         />
       )}
       {showCaptureUi && (
@@ -11101,27 +11161,27 @@ function App() {
           onSubmit={submitChatMessage}
         />
       )}
-      {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
         <button className="skin-open-btn outdoor-open-btn" type="button" onClick={requestOutdoorTransition}>
           {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
         </button>
       )}
-      {showCaptureUi && canModifyWorld && isNearSkinStation && !isSkinMenuOpen && mode === 'play' && (
+      {showCaptureUi && canModifyWorld && isNearSkinStation && !isSkinMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
           Personnaliser le ballon
         </button>
       )}
-      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && mode === 'play' && (
+      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
         <button className="skin-open-btn skin-open-btn-right" type="button" onClick={openEnvironmentMenu}>
           Boutique
         </button>
       )}
-      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationMode}>
-          Personnaliser la piece
+      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
+        <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationChoice}>
+          Personnaliser
         </button>
       )}
-      {showCaptureUi && canModifyWorld && isLightMenuOpen && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && canModifyWorld && isLightMenuOpen && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
         <div className="light-panel">
           <button
             className={`light-panel-toggle ${roomLightOn ? 'on' : 'off'}`}
@@ -11136,12 +11196,12 @@ function App() {
           </button>
         </div>
       )}
-      {showCaptureUi && canModifyWorld && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && canModifyWorld && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
         <button className="skin-open-btn tv-open-btn" type="button" onClick={requestTvMenu}>
           TV
         </button>
       )}
-      {showCaptureUi && nearbySeat && mode === 'play' && !seatedState?.phase && !isSkinMenuOpen && !isEnvironmentMenuOpen && (
+      {showCaptureUi && nearbySeat && mode === 'play' && !seatedState?.phase && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
         <button className="skin-open-btn seat-open-btn" type="button" onClick={requestSit}>
           S'asseoir
         </button>
