@@ -2760,10 +2760,11 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       })
   }, [idle.animations, walk.animations, run.animations, kick.animations, punch.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
-  const { actions } = useAnimations(animationClips, avatar)
+  const { actions, mixer } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
   const currentMotionRef = useRef(null)
   const revealFramesRef = useRef(0)
+  const [avatarReady, setAvatarReady] = useState(false)
 
   const rightArmBoneRef = useRef(null)
   const rightForeArmBoneRef = useRef(null)
@@ -2785,6 +2786,14 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
     })
     fingerBonesRef.current = fingers
   }, [avatar, handBoneRef])
+
+  useLayoutEffect(() => {
+    avatar.visible = false
+    currentActionRef.current = null
+    currentMotionRef.current = null
+    revealFramesRef.current = 0
+    setAvatarReady(false)
+  }, [avatar])
 
   const playMotion = (nextMotion) => {
     const nextAction = actions[nextMotion]
@@ -2820,14 +2829,22 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       nextAction.crossFadeFrom(previousAction, fadeDuration, false)
     } else {
       nextAction.setEffectiveWeight(1)
+      mixer.update(0)
+      avatar.updateMatrixWorld(true)
       avatar.visible = false
-      revealFramesRef.current = 2
+      setAvatarReady(false)
+      revealFramesRef.current = 3
     }
 
     currentActionRef.current = nextAction
     currentMotionRef.current = nextMotion
     return true
   }
+
+  useEffect(() => {
+    if (currentActionRef.current || !actions[motion]) return
+    playMotion(motion)
+  }, [actions, motion])
 
   useFrame((state, delta) => {
     if (currentMotionRef.current !== motion) {
@@ -2837,7 +2854,10 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
     if (revealFramesRef.current <= 0) return
     revealFramesRef.current -= 1
     if (revealFramesRef.current <= 0 && currentActionRef.current) {
+      mixer.update(0)
+      avatar.updateMatrixWorld(true)
       avatar.visible = true
+      setAvatarReady(true)
     }
   })
 
@@ -2883,6 +2903,7 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       position={[0, -PLAYER_HEIGHT + PLAYER_MODEL_VERTICAL_OFFSET, 0]}
       rotation={[0, 0, 0]}
       scale={PLAYER_MODEL_SCALE}
+      visible={avatarReady}
     />
   )
 }

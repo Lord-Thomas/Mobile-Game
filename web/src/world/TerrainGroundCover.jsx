@@ -26,6 +26,7 @@ const GRASS_CHUNK_ROWS_PER_IDLE_BATCH = 96
 const GRASS_CHUNK_MIN_ROWS_PER_BATCH = 20
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 8
 const GRASS_BOOTSTRAP_CHUNK_COUNT = 9999
+const GRASS_IMMEDIATE_BOOTSTRAP_RADIUS = 2
 // Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
 // frustum-culls entire quadrants when they fall outside the camera view.
 const QUADRANTS = [
@@ -272,6 +273,17 @@ function getAllGrassChunkKeys() {
 function getGrassChunkDistance(key, centerChunkX, centerChunkZ) {
   const [chunkX, chunkZ] = key.split(':').map(Number)
   return Math.max(Math.abs(chunkX - centerChunkX), Math.abs(chunkZ - centerChunkZ))
+}
+
+function buildGrassChunk(key) {
+  const [chunkX, chunkZ] = key.split(':').map(Number)
+  const bounds = getGrassChunkBounds(chunkX, chunkZ)
+  const grass = []
+  const step = getGrassChunkStep(chunkX, chunkZ)
+  for (let xi = bounds.minX; xi <= bounds.maxX; xi += step) {
+    pushGrassRow(grass, xi, bounds.minZ, bounds.maxZ, step)
+  }
+  return grass
 }
 
 function pushDistantGrassRow(grass, xi) {
@@ -661,17 +673,56 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     grassChunkTimerRef.current = window.setTimeout(() => run(), 0)
   }
 
+  const queueResidentGrassChunks = (playerPosition) => {
+    const centerChunkX = playerPosition ? getGrassChunkIndex(playerPosition.x) : 0
+    const centerChunkZ = playerPosition ? getGrassChunkIndex(playerPosition.z) : 0
+    const nextCenterKey = getGrassChunkKey(centerChunkX, centerChunkZ)
+    activeGrassCenterRef.current = nextCenterKey
+    residentGrassKeysRef.current = new Set(allGrassChunkKeys)
+
+    const immediateKeys = allGrassChunkKeys
+      .filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= GRASS_IMMEDIATE_BOOTSTRAP_RADIUS)
+      .sort((leftKey, rightKey) => (
+        getGrassChunkDistance(leftKey, centerChunkX, centerChunkZ)
+        - getGrassChunkDistance(rightKey, centerChunkX, centerChunkZ)
+      ))
+
+    immediateKeys.forEach((key) => {
+      if (!grassChunkCacheRef.current.has(key)) {
+        const grass = buildGrassChunk(key)
+        grassChunkCacheRef.current.set(key, grass)
+      }
+      pendingGrassChunksRef.current.delete(key)
+      grassChunkQueueRef.current = grassChunkQueueRef.current.filter((queuedKey) => queuedKey !== key)
+      const cached = grassChunkCacheRef.current.get(key)
+      if (cached) writeChunkToGPU(key, cached)
+    })
+
+    allGrassChunkKeys.forEach((key) => {
+      const cached = grassChunkCacheRef.current.get(key)
+      if (cached) writeChunkToGPU(key, cached)
+    })
+
+    allGrassChunkKeys.forEach((key) => {
+      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
+      pendingGrassChunksRef.current.add(key)
+      grassChunkQueueRef.current.push(key)
+    })
+
+    grassChunkQueueRef.current.sort((leftKey, rightKey) => (
+      getGrassChunkDistance(leftKey, centerChunkX, centerChunkZ)
+      - getGrassChunkDistance(rightKey, centerChunkX, centerChunkZ)
+    ))
+
+    publishGrassDebugStats()
+    scheduleGrassChunkBuild()
+  }
+
   useEffect(() => {
     activeGrassCenterRef.current = null
 
     if (active) {
-      residentGrassKeysRef.current = new Set(allGrassChunkKeys)
-      // Write any already-cached chunks directly to GPU (no React state)
-      allGrassChunkKeys.forEach((key) => {
-        const cached = grassChunkCacheRef.current.get(key)
-        if (cached) writeChunkToGPU(key, cached)
-      })
-      publishGrassDebugStats()
+      queueResidentGrassChunks(playerPositionRef?.current)
       return
     }
 
@@ -699,28 +750,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     const centerChunkZ = getGrassChunkIndex(playerPosition.z)
     const nextCenterKey = getGrassChunkKey(centerChunkX, centerChunkZ)
     if (activeGrassCenterRef.current === nextCenterKey) return
-    activeGrassCenterRef.current = nextCenterKey
-    residentGrassKeysRef.current = new Set(allGrassChunkKeys)
-
-    // Write any cached chunks that haven't been written yet
-    allGrassChunkKeys.forEach((key) => {
-      const cached = grassChunkCacheRef.current.get(key)
-      if (cached) writeChunkToGPU(key, cached)
-    })
-
-    allGrassChunkKeys.forEach((key) => {
-      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
-      pendingGrassChunksRef.current.add(key)
-      grassChunkQueueRef.current.push(key)
-    })
-
-    grassChunkQueueRef.current.sort((leftKey, rightKey) => (
-      getGrassChunkDistance(leftKey, centerChunkX, centerChunkZ)
-      - getGrassChunkDistance(rightKey, centerChunkX, centerChunkZ)
-    ))
-
-    publishGrassDebugStats()
-    scheduleGrassChunkBuild()
+    queueResidentGrassChunks(playerPosition)
   })
 
   // Single useFrame for all grass uniforms (replaces one-per-chunk pattern)

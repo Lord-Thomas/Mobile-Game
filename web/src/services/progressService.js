@@ -37,6 +37,16 @@ function mergeProgressRow(existingRow, progress) {
     ownedSkins: mergeUnique(existing.ownedSkins, progress.ownedSkins),
     ownedFloorSkins: mergeUnique(existing.ownedFloorSkins, progress.ownedFloorSkins),
     ownedWallSkins: mergeUnique(existing.ownedWallSkins, progress.ownedWallSkins),
+    selectedFloorSkinId: progress.selectedFloorSkinId === 'floor-classic'
+      && (progress.ownedFloorSkins?.length ?? 0) <= 1
+      && existing.selectedFloorSkinId !== 'floor-classic'
+      ? existing.selectedFloorSkinId
+      : progress.selectedFloorSkinId,
+    selectedWallSkinId: progress.selectedWallSkinId === 'wall-classic'
+      && (progress.ownedWallSkins?.length ?? 0) <= 1
+      && existing.selectedWallSkinId !== 'wall-classic'
+      ? existing.selectedWallSkinId
+      : progress.selectedWallSkinId,
     ownedWeapons,
     ownedCat: Boolean(existing.ownedCat || progress.ownedCat),
     ownedMagicBook,
@@ -171,6 +181,7 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       ownedMagicBook: progress.ownedMagicBook ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       equippedWeapon: progress.equippedWeapon ?? null,
+      characterAppearance: progress.characterAppearance ?? null,
     },
   }
 }
