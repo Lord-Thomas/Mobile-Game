@@ -81,7 +81,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       {NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />
       ))}
-      {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} />}
+      {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} playerPositionRef={playerPositionRef} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />}
       {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} />}
     </group>
