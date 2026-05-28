@@ -53,8 +53,10 @@ const MULTIPLAYER_REMOTE_VISUAL_SMOOTHING = 10
 const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
-const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends']
+const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'settings']
 const SOLO_NAMEPLATE_STORAGE_KEY = 'lab_show_solo_nameplate_v1'
+const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
+const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
@@ -224,6 +226,38 @@ function getUserDisplayName(user) {
 
 function getVisiblePlayerName(displayName, user, fallback = 'Joueur') {
   return displayName?.trim() || getUserDisplayName(user)?.trim() || fallback
+}
+
+function isLikelyMobileDevice() {
+  if (typeof window === 'undefined') return false
+  return (
+    window.matchMedia?.('(pointer: coarse)').matches ||
+    /android|iphone|ipad|ipod/i.test(window.navigator.userAgent)
+  )
+}
+
+function getDefaultPerformanceSettings() {
+  const mobile = isLikelyMobileDevice()
+  return {
+    autoQuality: true,
+    lowResolution: mobile,
+    showFps: false,
+    shadows: !mobile,
+    grass: true,
+    trees: true,
+    sky: true,
+  }
+}
+
+function loadPerformanceSettings() {
+  const defaults = getDefaultPerformanceSettings()
+  if (typeof window === 'undefined') return defaults
+  try {
+    const stored = JSON.parse(localStorage.getItem(PERFORMANCE_SETTINGS_STORAGE_KEY) || '{}')
+    return { ...defaults, ...stored }
+  } catch {
+    return defaults
+  }
 }
 
 const CAMERA_SETTINGS = {
@@ -4200,6 +4234,37 @@ function AchievementToast({ toast }) {
   )
 }
 
+function SettingsPanel({ settings, onToggle }) {
+  const rows = [
+    ['showFps', 'Afficher les FPS', 'Montre un compteur pendant le jeu.'],
+    ['autoQuality', 'Qualite auto', 'Ajuste la resolution si le telephone rame.'],
+    ['lowResolution', 'Basse resolution', 'Reduit fortement le nombre de pixels a calculer.'],
+    ['shadows', 'Ombres', 'Plus joli, mais couteux sur mobile.'],
+    ['grass', 'Herbe', "Desactive les brins d'herbe dehors."],
+    ['trees', 'Arbres', 'Reduit les elements visibles dehors.'],
+    ['sky', 'Ciel anime', 'Desactive les nuages et le ciel detaille.'],
+  ]
+
+  return (
+    <div className="settings-panel">
+      <div className="settings-group-title">Performance</div>
+      {rows.map(([key, label, description]) => (
+        <label className="settings-toggle-row" key={key}>
+          <input
+            type="checkbox"
+            checked={Boolean(settings[key])}
+            onChange={() => onToggle(key)}
+          />
+          <span>
+            <strong>{label}</strong>
+            <small>{description}</small>
+          </span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
 function GameMenuPanel({
   configured,
   user,
@@ -4229,6 +4294,7 @@ function GameMenuPanel({
   equippedTitleId,
   titleActionState,
   soloNameplateVisible,
+  performanceSettings,
   onToggle,
   onTabChange,
   onEmailChange,
@@ -4247,6 +4313,7 @@ function GameMenuPanel({
   onRejectFriend,
   onToggleTitle,
   onToggleSoloNameplate,
+  onTogglePerformanceSetting,
 }) {
   const isConnected = Boolean(user)
   const statusText = configured
@@ -4290,7 +4357,7 @@ function GameMenuPanel({
                 className={activeTab === tab ? 'active' : ''}
                 onClick={() => onTabChange(tab)}
               >
-                {tab === 'account' ? 'Compte' : tab === 'achievements' ? 'Haut fait' : tab === 'social' ? 'Social' : 'Amis'}
+                {tab === 'account' ? 'Compte' : tab === 'achievements' ? 'Haut fait' : tab === 'social' ? 'Social' : tab === 'friends' ? 'Amis' : 'Parametres'}
               </button>
             ))}
           </div>
@@ -4353,6 +4420,13 @@ function GameMenuPanel({
               equippedTitleId={equippedTitleId}
               titleActionState={titleActionState}
               onToggleTitle={onToggleTitle}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <SettingsPanel
+              settings={performanceSettings}
+              onToggle={onTogglePerformanceSetting}
             />
           )}
 
@@ -9097,6 +9171,18 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
   )
 }
 
+function FpsOverlay({ stats }) {
+  if (!stats) return null
+  const fps = Math.round(stats.fps)
+  const level = fps >= 50 ? 'good' : fps >= 30 ? 'ok' : 'low'
+
+  return (
+    <div className={`fps-overlay fps-${level}`} aria-label="FPS">
+      {fps} FPS
+    </div>
+  )
+}
+
 function GpuWarning({ visible, onDismiss }) {
   if (!visible) return null
 
@@ -9193,8 +9279,14 @@ function App() {
   const progressScope = isAdminMode ? 'admin' : 'player'
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
+  const [performanceSettings, setPerformanceSettings] = useState(loadPerformanceSettings)
   const [dynamicRenderScale, setDynamicRenderScale] = useState(MAX_DYNAMIC_RENDER_SCALE)
-  const renderSettings = useViewportRenderSettings(dynamicRenderScale)
+  const effectiveRenderScale = performanceSettings.lowResolution
+    ? Math.min(performanceSettings.autoQuality ? dynamicRenderScale : MAX_DYNAMIC_RENDER_SCALE, LOW_RESOLUTION_RENDER_SCALE)
+    : performanceSettings.autoQuality
+      ? dynamicRenderScale
+      : MAX_DYNAMIC_RENDER_SCALE
+  const renderSettings = useViewportRenderSettings(effectiveRenderScale)
   const [renderStats, setRenderStats] = useState(null)
   const [rendererInfo, setRendererInfo] = useState(null)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
@@ -9210,6 +9302,18 @@ function App() {
     portrait: false,
   })
   const showGpuWarning = Boolean(rendererInfo && isWeakRenderer(rendererInfo) && !gpuWarningDismissed)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PERFORMANCE_SETTINGS_STORAGE_KEY, JSON.stringify(performanceSettings))
+    } catch {
+      // localStorage can be unavailable in private browsing or embedded contexts.
+    }
+  }, [performanceSettings])
+
+  const togglePerformanceSetting = useCallback((key) => {
+    setPerformanceSettings((current) => ({ ...current, [key]: !current[key] }))
+  }, [])
 
   const touchRef = useRef({
     moveX: 0,
@@ -10965,20 +11069,28 @@ function App() {
     const email = authEmail.trim()
     const password = authPassword
     const pseudo = displayName.trim()
-    if (!email || password.length < 8) return
+    if (!email) {
+      setAuthMessage('Entre une adresse email valide.')
+      return
+    }
+    if (authMode === 'signup' && pseudo.length < 2) {
+      setAuthMessage("Choisis un pseudo d'au moins 2 caracteres.")
+      return
+    }
+    if (password.length < 8) {
+      setAuthMessage('Le mot de passe doit contenir au moins 8 caracteres.')
+      return
+    }
     const result = authMode === 'signup'
       ? await signUpWithPassword({ email, password, displayName: pseudo })
       : await signInWithPassword({ email, password })
-    const errorMessage = result.error === 'Invalid login credentials'
-      ? 'Email/mot de passe incorrect, ou compte pas encore confirme.'
-      : result.error
     setAuthMessage(result.ok
       ? authMode === 'signup'
         ? result.needsEmailConfirmation
           ? 'Compte cree. Confirme ton email, ou desactive la confirmation dans Supabase pour le prototype.'
           : 'Compte cree et connecte.'
         : 'Connexion reussie.'
-      : `Connexion impossible: ${errorMessage ?? 'erreur inconnue'}`)
+      : `Connexion impossible: ${result.error ?? 'erreur inconnue'}`)
   }
 
   const requestSignOut = async () => {
@@ -11001,7 +11113,7 @@ function App() {
       <Canvas
         dpr={renderSettings.dpr}
         camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 240 }}
-        shadows={{ enabled: !isDebugMode || debugToggles.shadows, type: PCFShadowMap }}
+        shadows={{ enabled: performanceSettings.shadows && (!isDebugMode || debugToggles.shadows), type: PCFShadowMap }}
         gl={{
           antialias: renderSettings.antialias,
           powerPreference: 'high-performance',
@@ -11016,8 +11128,8 @@ function App() {
         resize={{ debounce: 80 }}
       >
         <AdaptiveCameraFov />
-        <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
-        <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode} />
+        {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
+        <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
         <MultiplayerBridge
           channelRef={multiplayerChannelRef}
           role={multiplayerRole}
@@ -11077,11 +11189,11 @@ function App() {
           lightingActive={currentZone === ZONES.outside}
           playerPositionRef={playerPositionRef}
           ballRef={ballRef}
-          showGrass={!isDebugMode || debugToggles.grass}
-          showTrees={!isDebugMode || debugToggles.trees}
+          showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+          showTrees={performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
           showTerrain={!isDebugMode || debugToggles.terrain}
-          showSky={!isDebugMode || debugToggles.sky}
-          castShadows={!isDebugMode || debugToggles.shadows}
+          showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
+          castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
           showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
         />
         {hasRemotePlayer && (
@@ -11247,6 +11359,7 @@ function App() {
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
         />
       )}
+      {!isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
       <GpuWarning visible={showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
       {mode === 'play' && (
@@ -11351,6 +11464,7 @@ function App() {
           equippedTitleId={equippedTitleId}
           titleActionState={titleActionState}
           soloNameplateVisible={soloNameplateVisible}
+          performanceSettings={performanceSettings}
           onToggle={() => setIsAccountOpen((current) => !current)}
           onTabChange={setMainMenuTab}
           onEmailChange={setAuthEmail}
@@ -11372,6 +11486,7 @@ function App() {
           onRejectFriend={rejectFriendRequest}
           onToggleTitle={toggleEquippedTitle}
           onToggleSoloNameplate={() => setSoloNameplateVisible((current) => !current)}
+          onTogglePerformanceSetting={togglePerformanceSetting}
         />
       )}
       {showCaptureUi && isMultiplayerSession && (

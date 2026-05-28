@@ -168,6 +168,36 @@ canvas {
   background: rgba(230, 240, 248, 0.18);
 }
 
+.fps-overlay {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  z-index: 8;
+  min-width: 70px;
+  padding: 8px 10px;
+  border: 1px solid rgba(230, 240, 248, 0.22);
+  border-radius: 9px;
+  background: rgba(12, 18, 24, 0.78);
+  color: #f6fbff;
+  font-size: 12px;
+  font-weight: 950;
+  text-align: center;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.fps-good {
+  color: #8dffb0;
+}
+
+.fps-ok {
+  color: #ffe56a;
+}
+
+.fps-low {
+  color: #ff8c8c;
+}
+
 .gpu-warning {
   position: absolute;
   left: 50%;
@@ -1744,7 +1774,7 @@ canvas {
 
 .main-menu-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -1852,6 +1882,54 @@ canvas {
   color: #9aa8b8;
   font-size: 11px;
   font-weight: 900;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-group-title {
+  color: #ffe56a;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.settings-toggle-row {
+  min-height: 42px;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #dbe8f6;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-toggle-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #f2c14e;
+}
+
+.settings-toggle-row span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-toggle-row strong {
+  color: #f8fbff;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.settings-toggle-row small {
+  color: #aebccd;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .solo-name-toggle {

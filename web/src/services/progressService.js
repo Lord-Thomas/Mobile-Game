@@ -1,4 +1,4 @@
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { isSupabaseConfigured, supabase, supabaseRedirectUrl } from '../lib/supabase'
 
 function getInventory(objects) {
   return objects.reduce((inventory, object) => {
@@ -225,24 +225,64 @@ export async function getCurrentUser() {
   return data.user ?? null
 }
 
+function getAuthErrorMessage(error) {
+  const message = typeof error === 'string'
+    ? error
+    : error?.message ?? error?.error_description ?? error?.error ?? ''
+  const normalized = message.toLowerCase()
+
+  if (!isSupabaseConfigured) return "La connexion en ligne n'est pas configuree."
+  if (!message) return null
+  if (normalized.includes('invalid login credentials')) {
+    return 'Email ou mot de passe incorrect, ou email pas encore confirme.'
+  }
+  if (normalized.includes('email not confirmed')) {
+    return 'Email pas encore confirme. Ouvre le lien recu par email puis reconnecte-toi.'
+  }
+  if (normalized.includes('user already registered') || normalized.includes('already registered')) {
+    return 'Un compte existe deja avec cet email. Essaie Connexion ou Mot de passe oublie dans Supabase.'
+  }
+  if (normalized.includes('password') && normalized.includes('weak')) {
+    return 'Mot de passe trop faible. Utilise au moins 8 caracteres avec une combinaison plus variee.'
+  }
+  if (normalized.includes('rate limit') || normalized.includes('too many')) {
+    return "Trop d'essais. Attends une minute puis reessaie."
+  }
+  if (normalized.includes('failed to fetch') || normalized.includes('network')) {
+    return 'Impossible de joindre le serveur de connexion. Verifie la connexion internet puis reessaie.'
+  }
+  return message
+}
+
 export async function signUpWithPassword({ email, password, displayName }) {
-  if (!isSupabaseConfigured) return { ok: false, error: 'Supabase is not configured.' }
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { display_name: displayName } },
-  })
-  return {
-    ok: !error,
-    error: error?.message ?? null,
-    needsEmailConfirmation: Boolean(data?.user && !data?.session),
+  if (!isSupabaseConfigured) return { ok: false, error: getAuthErrorMessage() }
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { display_name: displayName },
+        emailRedirectTo: supabaseRedirectUrl,
+      },
+    })
+    return {
+      ok: !error,
+      error: getAuthErrorMessage(error),
+      needsEmailConfirmation: Boolean(data?.user && !data?.session),
+    }
+  } catch (error) {
+    return { ok: false, error: getAuthErrorMessage(error) }
   }
 }
 
 export async function signInWithPassword({ email, password }) {
-  if (!isSupabaseConfigured) return { ok: false, error: 'Supabase is not configured.' }
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
-  return { ok: !error, error: error?.message ?? null }
+  if (!isSupabaseConfigured) return { ok: false, error: getAuthErrorMessage() }
+  try {
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    return { ok: !error, error: getAuthErrorMessage(error) }
+  } catch (error) {
+    return { ok: false, error: getAuthErrorMessage(error) }
+  }
 }
 
 export async function signOut() {
