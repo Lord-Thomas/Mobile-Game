@@ -337,10 +337,13 @@ function guessAttachSide(group, primaryGroup) {
   return dz > 0 ? 'south' : 'north'
 }
 
-function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, doorWall }) {
+function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, doorWall, floorplan: providedFloorplan = null }) {
   const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   const terrainY = getTerrainHeight(position[0], position[2])
-  const floorplan = useMemo(() => createNeighborFloorplan({ parts, size, doorWall, color, trim }), [color, doorWall, parts, size, trim])
+  const floorplan = useMemo(
+    () => providedFloorplan ?? createNeighborFloorplan({ parts, size, doorWall, color, trim }),
+    [color, doorWall, parts, providedFloorplan, size, trim],
+  )
 
   const primaryGroup = floorplan.roofGroups[0] ?? null
 

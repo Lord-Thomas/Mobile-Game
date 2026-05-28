@@ -855,6 +855,14 @@ function useKeyboardInput() {
       keysRef.current.actionQueued = false
     }
 
+    const resetKeysWhenInactive = () => {
+      resetKeys()
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') resetKeys()
+    }
+
     const onKeyDown = (event) => {
       if (isTextInputEvent(event)) {
         resetKeys()
@@ -890,10 +898,16 @@ function useKeyboardInput() {
 
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', resetKeysWhenInactive)
+    window.addEventListener('pagehide', resetKeysWhenInactive)
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', resetKeysWhenInactive)
+      window.removeEventListener('pagehide', resetKeysWhenInactive)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [])
 
@@ -6308,18 +6322,9 @@ function collidesWithOutdoorObstacle(nextX, nextZ) {
     const localX = dx * cos - dz * sin
     const localZ = dx * sin + dz * cos
 
-    return intersectsAabbSphere(
-      localX,
-      PLAYER_HEIGHT,
-      localZ,
-      PLAYER_CAPSULE_RADIUS,
-      0,
-      collider.y ?? PLAYER_HEIGHT,
-      0,
-      collider.hx,
-      collider.hy ?? 0.6,
-      collider.hz,
-    )
+    const outsideX = Math.max(Math.abs(localX) - collider.hx, 0)
+    const outsideZ = Math.max(Math.abs(localZ) - collider.hz, 0)
+    return outsideX * outsideX + outsideZ * outsideZ <= PLAYER_CAPSULE_RADIUS * PLAYER_CAPSULE_RADIUS
   })
 }
 
@@ -8951,6 +8956,33 @@ function App() {
     actionQueued: false,
     emoteQueued: null,
   })
+
+  useEffect(() => {
+    const resetTouchControls = () => {
+      touchRef.current.moveX = 0
+      touchRef.current.moveY = 0
+      touchRef.current.lookX = 0
+      touchRef.current.lookY = 0
+      touchRef.current.lookActive = false
+      touchRef.current.actionQueued = false
+      touchRef.current.emoteQueued = null
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') resetTouchControls()
+    }
+
+    window.addEventListener('blur', resetTouchControls)
+    window.addEventListener('pagehide', resetTouchControls)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      window.removeEventListener('blur', resetTouchControls)
+      window.removeEventListener('pagehide', resetTouchControls)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [])
+
   const ballRef = useRef()
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
   const playerVelocityRef = useRef({ x: 0, z: 0 })

@@ -82,6 +82,13 @@ export const NEIGHBOR_HOUSES = neighborHouseSlots.map((slot) => {
     position: transform.position,
     rotationY: transform.roadFacingRotationY + (slot.doorWall === 'south' ? Math.PI : 0),
     roadPosition: transform.roadPosition,
+    floorplan: createNeighborFloorplan({
+      parts: slot.parts,
+      size: slot.size,
+      doorWall: slot.doorWall,
+      color: slot.color,
+      trim: slot.trim,
+    }),
   }
 })
 
@@ -268,15 +275,7 @@ function createHouseWallColliders(walls, worldTransform = null) {
 }
 
 function createNeighborHouseColliders(house) {
-  const floorplan = createNeighborFloorplan({
-    parts: house.parts,
-    size: house.size,
-    doorWall: house.doorWall,
-    color: house.color,
-    trim: house.trim,
-  })
-
-  return createHouseWallColliders(floorplan.walls, {
+  return createHouseWallColliders(house.floorplan.walls, {
     x: house.position[0],
     z: house.position[2],
     rotationY: house.rotationY,
