@@ -3633,6 +3633,8 @@ function RemotePlayer({
 function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false, onTap }) {
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
+  const lookPointersRef = useRef(new Map())
+  const pinchRef = useRef(null)
   const lookLastRef = useRef({ x: 0, y: 0 })
   const emoteTimerRef = useRef(null)
   const emotePressRef = useRef({ x: 0, y: 0, cancelled: false })
@@ -3662,6 +3664,44 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
     clearEmoteTimer()
     setEmoteMenu(null)
     setActiveEmoteId(null)
+  }
+
+  const setCameraDistance = (distance) => {
+    touchRef.current.cameraDistance = MathUtils.clamp(
+      distance,
+      CAMERA_MIN_DISTANCE,
+      CAMERA_MAX_DISTANCE,
+    )
+  }
+
+  const getPinchDistance = () => {
+    const points = Array.from(lookPointersRef.current.values())
+    if (points.length < 2) return 0
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)
+  }
+
+  const beginPinchZoom = () => {
+    const distance = getPinchDistance()
+    if (distance <= 0) return
+    clearEmoteTimer()
+    setEmoteMenu(null)
+    setActiveEmoteId(null)
+    setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+    touchRef.current.lookActive = false
+    touchRef.current.lookX = 0
+    touchRef.current.lookY = 0
+    pinchRef.current = {
+      distance,
+      cameraDistance: touchRef.current.cameraDistance ?? CAMERA_DISTANCE,
+    }
+  }
+
+  const updatePinchZoom = () => {
+    if (!pinchRef.current) return
+    const distance = getPinchDistance()
+    if (distance <= 0) return
+    const ratio = pinchRef.current.distance / distance
+    setCameraDistance(pinchRef.current.cameraDistance * ratio)
   }
 
   const setJoystick = (event) => {
@@ -3707,11 +3747,18 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   }
 
   const onLookDown = (event) => {
+    lookPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    event.currentTarget.setPointerCapture(event.pointerId)
+    if (event.pointerType === 'touch' && lookPointersRef.current.size >= 2) {
+      lookPointerIdRef.current = null
+      beginPinchZoom()
+      return
+    }
+
     lookPointerIdRef.current = event.pointerId
     lookLastRef.current.x = event.clientX
     lookLastRef.current.y = event.clientY
     emotePressRef.current = { x: event.clientX, y: event.clientY, cancelled: false }
-    event.currentTarget.setPointerCapture(event.pointerId)
     touchRef.current.lookActive = true
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
@@ -3730,6 +3777,13 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   }
 
   const onLookMove = (event) => {
+    if (lookPointersRef.current.has(event.pointerId)) {
+      lookPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    }
+    if (pinchRef.current) {
+      updatePinchZoom()
+      return
+    }
     if (lookPointerIdRef.current !== event.pointerId) return
     if (emoteMenu) {
       setActiveEmoteId(getEmoteSelection(event.clientX - emoteMenu.x, event.clientY - emoteMenu.y))
@@ -3774,6 +3828,20 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   }
 
   const onLookUp = (event) => {
+    lookPointersRef.current.delete(event.pointerId)
+    if (pinchRef.current) {
+      if (lookPointersRef.current.size < 2) {
+        pinchRef.current = null
+      } else {
+        beginPinchZoom()
+      }
+      touchRef.current.lookActive = false
+      touchRef.current.lookX = 0
+      touchRef.current.lookY = 0
+      setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+      event.currentTarget.releasePointerCapture(event.pointerId)
+      return
+    }
     if (lookPointerIdRef.current !== event.pointerId) return
     const selectedEmoteId = emoteMenu ? activeEmoteId : null
     closeEmoteMenu()
@@ -3794,15 +3862,10 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   }
 
   const onCameraWheel = (event) => {
-    if (!adminCameraControls) return
     event.preventDefault()
     const currentDistance = touchRef.current.cameraDistance ?? CAMERA_DISTANCE
     const zoomFactor = 1 + event.deltaY * CAMERA_WHEEL_ZOOM_SENSITIVITY
-    touchRef.current.cameraDistance = MathUtils.clamp(
-      currentDistance * zoomFactor,
-      CAMERA_MIN_DISTANCE,
-      CAMERA_MAX_DISTANCE,
-    )
+    setCameraDistance(currentDistance * zoomFactor)
   }
 
   const triggerAction = () => {
