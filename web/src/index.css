@@ -168,6 +168,13 @@ canvas {
   background: rgba(230, 240, 248, 0.18);
 }
 
+.render-stats-section-title {
+  margin-top: 2px;
+  color: #ffe56a;
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .fps-overlay {
   position: absolute;
   right: 14px;

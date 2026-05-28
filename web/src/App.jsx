@@ -8996,18 +8996,45 @@ function getDebugCategory(object) {
   return 'other'
 }
 
-function getObjectTriangleCount(object) {
-  if (!object.geometry || !object.isMesh) return 0
+function isObjectVisibleInScene(object) {
   let current = object
   while (current) {
-    if (!current.visible) return 0
+    if (!current.visible) return false
     current = current.parent
   }
+  return true
+}
+
+function getObjectTriangleCount(object) {
+  if (!object.geometry || !object.isMesh) return 0
+  if (!isObjectVisibleInScene(object)) return 0
   const geometry = object.geometry
   const indexCount = geometry.index?.count ?? 0
   const positionCount = geometry.attributes.position?.count ?? 0
   const triangleCount = indexCount > 0 ? indexCount / 3 : positionCount / 3
   return triangleCount * (object.isInstancedMesh ? object.count : 1)
+}
+
+function getMaterialDrawCallCount(geometry, material) {
+  if (!material) return 0
+  if (!Array.isArray(material)) return 1
+
+  const groups = geometry?.groups ?? []
+  if (groups.length > 0) {
+    return groups.reduce((count, group) => (
+      material[group.materialIndex] ? count + 1 : count
+    ), 0)
+  }
+
+  return material.filter(Boolean).length
+}
+
+function getObjectDrawCallCount(object) {
+  if (!isObjectVisibleInScene(object)) return 0
+  if (object.isSprite) return object.material ? 1 : 0
+  if (!object.geometry || !object.material) return 0
+  if (!object.isMesh && !object.isLine && !object.isPoints) return 0
+  return getMaterialDrawCallCount(object.geometry, object.material)
 }
 
 function getRendererInfo(gl) {
@@ -9064,11 +9091,17 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
     const fps = framesRef.current / elapsedRef.current
     const averageFrameTimeMs = (elapsedRef.current / framesRef.current) * 1000
     const trianglesByCategory = {}
+    const drawCallsByCategory = {}
 
     scene.traverse((object) => {
+      const category = getDebugCategory(object)
+      const drawCalls = getObjectDrawCallCount(object)
+      if (drawCalls > 0) {
+        drawCallsByCategory[category] = (drawCallsByCategory[category] ?? 0) + drawCalls
+      }
+
       const triangles = getObjectTriangleCount(object)
       if (triangles <= 0) return
-      const category = getDebugCategory(object)
       trianglesByCategory[category] = (trianglesByCategory[category] ?? 0) + triangles
     })
 
@@ -9083,6 +9116,7 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
       dpr: gl.getPixelRatio(),
       drawingBufferWidth: drawingBufferRef.current.x,
       drawingBufferHeight: drawingBufferRef.current.y,
+      drawCallsByCategory,
       trianglesByCategory,
       grassDebug: typeof window !== 'undefined' ? window.__grassDebug ?? null : null,
     })
@@ -9110,6 +9144,9 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
     ['Buffer', `${stats.drawingBufferWidth} x ${stats.drawingBufferHeight}`],
   ]
   const triangleRows = Object.entries(stats.trianglesByCategory ?? {})
+    .sort((left, right) => right[1] - left[1])
+    .map(([label, value]) => [label, value.toLocaleString('fr-FR')])
+  const drawCallRows = Object.entries(stats.drawCallsByCategory ?? {})
     .sort((left, right) => right[1] - left[1])
     .map(([label, value]) => [label, value.toLocaleString('fr-FR')])
   const grassRows = stats.grassDebug
@@ -9161,8 +9198,21 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
         </div>
       ))}
       {grassRows.length > 0 && <div className="render-stats-divider" />}
+      {drawCallRows.length > 0 && (
+        <div className="render-stats-section-title">Draw calls / categorie</div>
+      )}
+      {drawCallRows.map(([label, value]) => (
+        <div className="render-stats-row" key={`draw-${label}`}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+      {drawCallRows.length > 0 && <div className="render-stats-divider" />}
+      {triangleRows.length > 0 && (
+        <div className="render-stats-section-title">Triangles / categorie</div>
+      )}
       {triangleRows.map(([label, value]) => (
-        <div className="render-stats-row" key={label}>
+        <div className="render-stats-row" key={`tri-${label}`}>
           <span>{label}</span>
           <strong>{value}</strong>
         </div>
