@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, Shape, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, RingGeometry, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -3055,6 +3055,19 @@ function FloatingMagicBook({ handBoneRef, playerGroupRef }) {
   )
 }
 
+// Pre-allocated geometries — created once, shared by all fireball instances.
+// Avoids per-cast GPU upload stutter.
+const FIREBALL_GEO_CORE = new SphereGeometry(0.08, 16, 16)
+const FIREBALL_GEO_GLOW = new SphereGeometry(0.13, 18, 18)
+const FIREBALL_GEO_SHELL = new SphereGeometry(0.18, 32, 32)
+const FIREBALL_GEO_CHARGE_CORE = new SphereGeometry(0.08, 14, 14)
+const FIREBALL_GEO_IMPACT_SPHERE = new SphereGeometry(0.14, 14, 14)
+const FIREBALL_GEO_IMPACT_RING = new RingGeometry(0.12, 0.2, 32)
+
+// Shared materials for projectile core/glow (opacity never changes)
+const FIREBALL_MAT_CORE = new MeshBasicMaterial({ color: '#fff2aa', toneMapped: false })
+const FIREBALL_MAT_GLOW = new MeshBasicMaterial({ color: '#ffb31a', transparent: true, opacity: 0.48, depthWrite: false, toneMapped: false, blending: AdditiveBlending })
+
 const fireballFlameVertexShader = `
   varying vec3 vLocalPosition;
   varying vec3 vViewNormal;
@@ -3298,7 +3311,7 @@ function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = f
 
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[radius, 32, 32]} />
+      <primitive object={FIREBALL_GEO_SHELL} attach="geometry" />
       <shaderMaterial
         ref={materialRef}
         uniforms={uniforms}
@@ -3330,12 +3343,12 @@ function FireballProjectile({ projectile }) {
   return (
     <group ref={groupRef} position={[projectile.x, projectile.y, projectile.z]}>
       <mesh ref={coreRef}>
-        <sphereGeometry args={[0.08, 16, 16]} />
-        <meshBasicMaterial color="#fff2aa" toneMapped={false} />
+        <primitive object={FIREBALL_GEO_CORE} attach="geometry" />
+        <primitive object={FIREBALL_MAT_CORE} attach="material" />
       </mesh>
       <mesh>
-        <sphereGeometry args={[0.13, 18, 18]} />
-        <meshBasicMaterial color="#ffb31a" transparent opacity={0.48} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
+        <primitive object={FIREBALL_GEO_GLOW} attach="geometry" />
+        <primitive object={FIREBALL_MAT_GLOW} attach="material" />
       </mesh>
       <FireballFlameShell radius={0.18} opacity={0.62} phase={projectile.phase ?? 0} />
       <pointLight color="#ff7a00" intensity={1.2} distance={2.6} />
@@ -3390,8 +3403,8 @@ function ChargingFireball({ playerPositionRef, touchRef, chargeYawRef, chargeAim
   return (
     <group ref={groupRef}>
       <mesh>
-        <sphereGeometry args={[0.08, 14, 14]} />
-        <meshBasicMaterial color="#fff2aa" toneMapped={false} />
+        <primitive object={FIREBALL_GEO_CHARGE_CORE} attach="geometry" />
+        <primitive object={FIREBALL_MAT_CORE} attach="material" />
       </mesh>
       <FireballFlameShell radius={0.18} opacity={0.75} phase={phase} />
       <pointLight color="#ff7a00" intensity={1.0} distance={2.5} />
@@ -3405,11 +3418,11 @@ function FireballImpact({ impact }) {
   return (
     <group position={[impact.x, impact.y, impact.z]}>
       <mesh scale={flashScale}>
-        <sphereGeometry args={[0.14, 14, 14]} />
+        <primitive object={FIREBALL_GEO_IMPACT_SPHERE} attach="geometry" />
         <meshBasicMaterial color="#fff1a6" transparent opacity={(1 - age) * 0.44} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} scale={0.55 + age * 1.35}>
-        <ringGeometry args={[0.12, 0.2, 32]} />
+        <primitive object={FIREBALL_GEO_IMPACT_RING} attach="geometry" />
         <meshBasicMaterial color="#ff6a00" transparent opacity={(1 - age) * 0.24} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
       </mesh>
       <pointLight color="#ff7a00" intensity={(1 - age) * 0.85} distance={1.8} />
@@ -3468,6 +3481,21 @@ function FireballManager({ projectilesRef, combatTargetsRef }) {
 
   return (
     <>
+      {/* Shader warmup: renders at scale 0.0001 far below the map so Three.js
+          compiles the GLSL program on scene load, not on first cast. */}
+      <mesh scale={0.0001} position={[0, -500, 0]}>
+        <primitive object={FIREBALL_GEO_SHELL} attach="geometry" />
+        <shaderMaterial
+          vertexShader={fireballFlameVertexShader}
+          fragmentShader={fireballFlameFragmentShader}
+          uniforms={{ uTime: { value: 0 }, uOpacity: { value: 0 }, uRadius: { value: 0.18 }, uDistortion: { value: 0.075 } }}
+          transparent
+          depthWrite={false}
+          blending={AdditiveBlending}
+          side={DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
       {projs.map((p) => (
         <FireballProjectile key={p.id} projectile={p} />
       ))}
@@ -4030,34 +4058,60 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   )
 }
 
-function WeaponInventoryPanel({ open, ownedMagicBook, equippedWeapon, onEquip, onClose }) {
+const BAG_ITEM_DEFS = [
+  { id: 'magic_book', icon: '📖', name: 'Livre Magique', desc: 'Lance des boules de feu' },
+]
+
+const BAG_GRID_SIZE = 12
+
+function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose }) {
+  const lastTapRef = useRef({})
+
+  function handleSlotInteraction(itemId) {
+    const now = Date.now()
+    const last = lastTapRef.current[itemId] ?? 0
+    if (now - last < 350) {
+      onEquip(equippedWeapon === itemId ? null : itemId)
+      lastTapRef.current[itemId] = 0
+    } else {
+      lastTapRef.current[itemId] = now
+    }
+  }
+
   if (!open) return null
+
+  const slots = Array.from({ length: BAG_GRID_SIZE }, (_, i) => ownedItems[i] ?? null)
+
   return (
-    <div className="weapon-inventory-overlay">
-      <div className="weapon-inventory-panel">
+    <div className="weapon-inventory-overlay" onClick={onClose}>
+      <div className="bag-panel" onClick={(e) => e.stopPropagation()}>
         <div className="weapon-inventory-header">
-          <span>Armes</span>
+          <span>🎒 Sac</span>
           <button type="button" className="weapon-inventory-close" onClick={onClose}>✕</button>
         </div>
-        <div className="weapon-inventory-list">
-          {ownedMagicBook ? (
-            <div className="weapon-inventory-item">
-              <div className="weapon-inventory-icon">📖</div>
-              <div className="weapon-inventory-info">
-                <span className="weapon-inventory-name">Livre Magique</span>
-                <span className="weapon-inventory-desc">Lance des boules de feu</span>
-              </div>
-              <button
-                type="button"
-                className={`weapon-equip-btn ${equippedWeapon === 'magic_book' ? 'equipped' : ''}`}
-                onClick={() => onEquip(equippedWeapon === 'magic_book' ? null : 'magic_book')}
+        <p className="bag-hint">Double-cliquer pour équiper</p>
+        <div className="bag-grid">
+          {slots.map((item, i) => {
+            const isEquipped = item && equippedWeapon === item.id
+            return (
+              <div
+                key={item ? item.id : `empty-${i}`}
+                className={`bag-slot ${item ? 'has-item' : ''} ${isEquipped ? 'equipped' : ''}`}
+                onClick={() => item && handleSlotInteraction(item.id)}
+                title={item ? `${item.name} — ${item.desc}` : ''}
+                role={item ? 'button' : undefined}
+                tabIndex={item ? 0 : undefined}
+                onKeyDown={item ? (e) => e.key === 'Enter' && handleSlotInteraction(item.id) : undefined}
               >
-                {equippedWeapon === 'magic_book' ? 'Équipé ✓' : 'Équiper'}
-              </button>
-            </div>
-          ) : (
-            <div className="weapon-inventory-empty">Aucune arme. Achète-en une à la boutique !</div>
-          )}
+                {item && (
+                  <>
+                    <span className="bag-slot-icon">{item.icon}</span>
+                    {isEquipped && <span className="bag-slot-equipped-dot" title="Équipé" />}
+                  </>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -9327,7 +9381,7 @@ function App() {
     catActive,
     ownedMagicBook,
     ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
-    equippedWeapon: null,
+    equippedWeapon,
     equippedTitleId,
     characterAppearance,
   })
@@ -9458,7 +9512,8 @@ function App() {
     const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
     const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
     setOwnedMagicBook(hasMagicBook)
-    setEquippedWeapon(null)
+    const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
+    setEquippedWeapon(hasMagicBook && savedEquipped === 'magic_book' ? 'magic_book' : null)
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
   }
 
@@ -11035,14 +11090,14 @@ function App() {
       {showCaptureUi && <CoinsOverlay coins={coins} />}
       {showCaptureUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
-      {showCaptureUi && ownedMagicBook && mode === 'play' && (
+      {showCaptureUi && mode === 'play' && (
         <button
           className="weapon-inventory-btn"
           type="button"
           onClick={() => setIsWeaponMenuOpen((v) => !v)}
-          aria-label="Armes"
+          aria-label="Sac"
         >
-          📖
+          🎒
         </button>
       )}
       {showCaptureUi && isCharging && (
@@ -11078,11 +11133,11 @@ function App() {
         />
       )}
       {showCaptureUi && (
-        <WeaponInventoryPanel
+        <BagPanel
           open={isWeaponMenuOpen}
-          ownedMagicBook={ownedMagicBook}
+          ownedItems={BAG_ITEM_DEFS.filter((def) => def.id === 'magic_book' ? ownedMagicBook : false)}
           equippedWeapon={equippedWeapon}
-          onEquip={(weapon) => { setEquippedWeapon(weapon); setIsWeaponMenuOpen(false) }}
+          onEquip={(weapon) => { setEquippedWeapon(weapon) }}
           onClose={() => setIsWeaponMenuOpen(false)}
         />
       )}

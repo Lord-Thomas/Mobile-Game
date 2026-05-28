@@ -2406,7 +2406,8 @@ canvas {
 .fireball-btn {
   position: fixed;
   bottom: 90px;
-  right: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   width: 66px;
   height: 66px;
   border-radius: 50%;
@@ -2425,7 +2426,7 @@ canvas {
   user-select: none;
 }
 .fireball-btn:active {
-  transform: scale(0.88);
+  transform: translateX(-50%) scale(0.88);
   box-shadow: 0 0 32px rgba(255, 100, 0, 0.9);
 }
 
@@ -2559,6 +2560,75 @@ canvas {
   text-align: center;
   padding: 20px 0;
   font-size: 0.9rem;
+}
+
+/* ── Bag / Inventory Panel ───────────────────────────── */
+.bag-panel {
+  background: #1a1030;
+  border: 1.5px solid rgba(124, 58, 237, 0.5);
+  border-radius: 16px;
+  padding: 20px 20px 24px;
+  width: min(340px, 92vw);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 20px rgba(124, 58, 237, 0.3);
+}
+
+.bag-hint {
+  color: #9ca3af;
+  font-size: 0.73rem;
+  text-align: center;
+  margin: -8px 0 12px;
+}
+
+.bag-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.bag-slot {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.bag-slot.has-item {
+  cursor: pointer;
+  border-color: rgba(124, 58, 237, 0.45);
+  background: rgba(124, 58, 237, 0.1);
+}
+
+.bag-slot.has-item:hover {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(124, 58, 237, 0.7);
+}
+
+.bag-slot.has-item.equipped {
+  border: 2px solid #facc15;
+  background: rgba(250, 204, 21, 0.12);
+  box-shadow: 0 0 10px rgba(250, 204, 21, 0.35), inset 0 0 6px rgba(250, 204, 21, 0.1);
+}
+
+.bag-slot-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.bag-slot-equipped-dot {
+  position: absolute;
+  bottom: 3px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #facc15;
+  box-shadow: 0 0 4px #facc15;
 }
 
 /* ── Character Customization ─────────────────────────── */
