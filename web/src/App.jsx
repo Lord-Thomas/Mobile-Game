@@ -2571,6 +2571,35 @@ function Player({
       }
     }
 
+    // Pull camera before tree trunks (trees have no Rapier colliders)
+    if (currentZone === ZONES.outside) {
+      const treeSegX = targetX - focusX
+      const treeSegZ = targetZ - focusZ
+      const treeSegLen2 = treeSegX * treeSegX + treeSegZ * treeSegZ
+      if (treeSegLen2 > 0.001) {
+        const treeSegLen = Math.sqrt(treeSegLen2)
+        let minSafeT = 1.0
+        for (const tree of AUTHORED_TREES) {
+          const tx = tree.config.position.x
+          const tz = tree.config.position.z
+          const r = (tree.colliderRadius ?? 0.5) + 0.3
+          const ftX = tx - focusX
+          const ftZ = tz - focusZ
+          const tParam = (ftX * treeSegX + ftZ * treeSegZ) / treeSegLen2
+          if (tParam < 0.04 || tParam > 0.97) continue
+          const closestX = focusX + treeSegX * tParam
+          const closestZ = focusZ + treeSegZ * tParam
+          if ((tx - closestX) ** 2 + (tz - closestZ) ** 2 >= r * r) continue
+          minSafeT = Math.min(minSafeT, Math.max(0.05, tParam - r / treeSegLen))
+        }
+        if (minSafeT < 1.0) {
+          targetX = focusX + treeSegX * minSafeT
+          targetY = originY + (targetY - originY) * minSafeT
+          targetZ = focusZ + treeSegZ * minSafeT
+        }
+      }
+    }
+
     const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ, currentZone)
     camera.position.x = MathUtils.damp(camera.position.x, clampedTarget.x, 12, delta)
     camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, 12, delta)

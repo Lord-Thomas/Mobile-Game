@@ -11,10 +11,12 @@ const cameraToPlayer = new Vector3()
 const playerTarget = new Vector3()
 const cameraOrigin = new Vector3()
 
-const TREE_OCCLUSION_MIN_VISIBILITY = 0.22
-const TREE_OCCLUSION_SOFT_RADIUS = 1.45
+const TREE_OCCLUSION_MIN_VISIBILITY = 0.15
+const TREE_OCCLUSION_SOFT_RADIUS = 1.9
 const TREE_OCCLUSION_FADE_IN_SPEED = 10
-const TREE_OCCLUSION_FADE_OUT_SPEED = 5
+const TREE_OCCLUSION_FADE_OUT_SPEED = 4
+const TREE_CAMERA_CLEAR_RADIUS = 2.5
+const TREE_CAMERA_MIN_VISIBILITY = 0.08
 
 function disposeTree(tree) {
   tree.traverse((object) => {
@@ -177,6 +179,15 @@ function InstancedTreeVariant({ variantId, placements, animated, playerPositionR
     placements.forEach((tree, index) => {
       const treeX = tree.config.position.x
       const treeZ = tree.config.position.z
+
+      // Fade trees that are physically close to the camera (camera inside dense cluster)
+      const camDist2D = Math.hypot(treeX - cameraOrigin.x, treeZ - cameraOrigin.z)
+      if (camDist2D < TREE_CAMERA_CLEAR_RADIUS) {
+        const proximityFade = 1 - MathUtils.smoothstep(camDist2D, 0.9, TREE_CAMERA_CLEAR_RADIUS)
+        targets[index] = Math.min(targets[index], MathUtils.lerp(1, TREE_CAMERA_MIN_VISIBILITY, proximityFade))
+      }
+
+      // Fade trees between camera and player (line-of-sight check)
       const treeToCameraX = treeX - cameraOrigin.x
       const treeToCameraZ = treeZ - cameraOrigin.z
       const along = MathUtils.clamp(
