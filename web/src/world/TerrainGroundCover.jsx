@@ -33,9 +33,6 @@ const QUADRANTS = [
   { id: 'sw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
 ]
 const MAX_QUADRANT_INSTANCES = 350_000
-const DISTANT_GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
-const DISTANT_GRASS_AREA_MAX = TERRAIN_HALF_SIZE
-const DISTANT_GRASS_GRID_STEP = 0.72
 const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 2
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
 const grassBottomColor = new Color('#638b0f')
@@ -153,15 +150,6 @@ function makeRockInstance(x, z, seed) {
   }
 }
 
-function makeDistantGrassInstance(x, z, seed) {
-  return {
-    position: [x, getTerrainHeight(x, z) + 0.035, z],
-    rotation: [0, (seededRandom(seed + 18) - 0.5) * Math.PI * 2, 0],
-    scale: 0.16 + seededRandom(seed + 9) * 0.11,
-    colorShift: seededRandom(seed + 41),
-  }
-}
-
 function makeGrassInstance(x, z, seed) {
   const scaleRange = grassPlacementSettings.maxScale - grassPlacementSettings.minScale
   const slope = getTerrainSlope(x, z)
@@ -173,24 +161,6 @@ function makeGrassInstance(x, z, seed) {
     scale: grassPlacementSettings.minScale + seededRandom(seed + 9) * scaleRange,
     colorShift: seededRandom(seed + 41),
   }
-}
-
-function getDistantGrassDensity(x, z, seed) {
-  const maxAxis = Math.max(Math.abs(x), Math.abs(z))
-  if (maxAxis > TERRAIN_HALF_SIZE) return 0
-
-  const farFade = 1 - smoothstep(TERRAIN_HALF_SIZE - 12, TERRAIN_HALF_SIZE, maxAxis)
-  const clumpNoise = seededRandom(Math.floor(x * 0.19) * 131 + Math.floor(z * 0.19) * 197)
-  const clumpVariation = 0.78 + smoothstep(0.18, 0.82, clumpNoise) * 0.22
-  const slope = getTerrainSlope(x, z)
-  const slopeFade = 1 - smoothstep(0.24, 0.58, slope)
-  const mountainFade = 1 - smoothstep(62, 90, maxAxis) * 0.35
-  const visualDensity = getVisualGrassDensity(x, z)
-
-  return Math.max(
-    0.08,
-    visualDensity * 1.2,
-  ) * farFade * clumpVariation * slopeFade * mountainFade * (0.82 + seededRandom(seed + 71) * 0.18)
 }
 
 function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP_NEAR) {
@@ -279,25 +249,6 @@ function buildGrassChunk(key) {
   const step = getGrassChunkStep(chunkX, chunkZ)
   for (let xi = bounds.minX; xi <= bounds.maxX; xi += step) {
     pushGrassRow(grass, xi, bounds.minZ, bounds.maxZ, step)
-  }
-  return grass
-}
-
-function pushDistantGrassRow(grass, xi) {
-  for (let zi = DISTANT_GRASS_AREA_MIN; zi <= DISTANT_GRASS_AREA_MAX; zi += DISTANT_GRASS_GRID_STEP) {
-    const seed = (xi + 119) * 89 + (zi + 97) * 149
-    const x = xi + (seededRandom(seed) - 0.5) * 1.35
-    const z = zi + (seededRandom(seed + 5) - 0.5) * 1.35
-    if (seededRandom(seed + 19) < getDistantGrassDensity(x, z, seed)) {
-      grass.push(makeDistantGrassInstance(x, z, seed))
-    }
-  }
-}
-
-function createDistantGrassCover() {
-  const grass = []
-  for (let xi = DISTANT_GRASS_AREA_MIN; xi <= DISTANT_GRASS_AREA_MAX; xi += DISTANT_GRASS_GRID_STEP) {
-    pushDistantGrassRow(grass, xi)
   }
   return grass
 }
@@ -459,9 +410,7 @@ function buildGrassHandleBeforeCompile(shaderRef) {
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   const rocks = useMemo(() => createRockCover(), [])
-  const distantGrass = useMemo(() => createDistantGrassCover(), [])
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
-  const distantGrassWrittenRef = useRef(false)
   const ref = useRef()
   const activeGrassCenterRef = useRef(null)
   const grassChunkCacheRef = useRef(new Map())
@@ -533,10 +482,6 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     grassMeshRefs.current.forEach((mesh) => { if (mesh) mesh.count = 0 })
   }, [])
 
-  useLayoutEffect(() => {
-    writeDistantGrassItemsToGPU(distantGrass)
-  }, [distantGrass])
-
   // Write a single chunk directly into the correct quadrant GPU buffer — no React state involved.
   // Uses addUpdateRange so Three.js only uploads the new portion to the GPU (not the full 22 MB buffer).
   // After the partial upload we restore mesh.boundingSphere to the full quadrant sphere because
@@ -569,41 +514,6 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     if (sphere) mesh.boundingSphere = sphere
   }
 
-  // Write all distant grass instances directly into quadrant GPU buffers — called once
-  const writeDistantGrassItemsToGPU = (grass) => {
-    if (distantGrassWrittenRef.current) return
-    if (!grass.length) return
-    const meshes = grassMeshRefs.current
-    const startIndexes = nextGrassOffsetRefs.current.slice()
-    const touchedQuadrants = new Set()
-    grass.forEach((item) => {
-      const [x, , z] = item.position
-      const qi = (x >= 0 ? 0 : 1) + (z >= 0 ? 0 : 2)
-      const mesh = meshes[qi]
-      if (!mesh || nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
-      dummy.position.set(...item.position)
-      dummy.rotation.set(0, 0, 0)
-      dummy.scale.setScalar(item.scale)
-      dummy.updateMatrix()
-      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
-      nextGrassOffsetRefs.current[qi] += 1
-      touchedQuadrants.add(qi)
-    })
-    touchedQuadrants.forEach((qi) => {
-      const mesh = meshes[qi]
-      if (!mesh) return
-      const endIndex = nextGrassOffsetRefs.current[qi]
-      const startIndex = startIndexes[qi]
-      if (endIndex <= startIndex) return
-      mesh.count = endIndex
-      mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
-      mesh.instanceMatrix.needsUpdate = true
-      const sphere = grassQuadrantSpheresRef.current?.[qi]
-      if (sphere) mesh.boundingSphere = sphere
-    })
-    distantGrassWrittenRef.current = true
-  }
-
   const publishGrassDebugStats = () => {
     if (typeof window === 'undefined') return
     const completedChunks = grassChunkCacheRef.current.size
@@ -615,7 +525,6 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       pendingChunks: pendingGrassChunksRef.current.size,
       pendingGPUWrites: pendingGPUWriteRef.current.length,
       activeChunk: activeGrassCenterRef.current,
-      distantGrassWritten: distantGrassWrittenRef.current,
       completedChunks,
       mountedChunks: writtenChunks,
       completedBlades,
