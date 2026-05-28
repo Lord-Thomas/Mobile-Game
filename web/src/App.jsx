@@ -235,6 +235,8 @@ const CLOTHING_COLOR_PALETTE = [
 const CHARACTER_BASE_COLORS = {
   skin:          '#c79e7b',
   hair:          '#d39b3f',
+  eyes:          '#3B82C4',
+  eyebrows:      '#d39b3f',
   shirt:         '#b4392e',
   pants:         '#252421',
   pants_details: '#252421',
@@ -245,7 +247,8 @@ const CHARACTER_BASE_COLORS = {
 const CHARACTER_DEFAULT_APPEARANCE = {
   skinColor:        CHARACTER_BASE_COLORS.skin,
   hairColor:        CHARACTER_BASE_COLORS.hair,
-  eyeColor:         EYE_COLOR_PALETTE[2],
+  eyeColor:         CHARACTER_BASE_COLORS.eyes,
+  eyebrowsColor:    CHARACTER_BASE_COLORS.eyebrows,
   shirtColor:       CHARACTER_BASE_COLORS.shirt,
   pantsColor:       CHARACTER_BASE_COLORS.pants,
   pantsDetailsColor: CHARACTER_BASE_COLORS.pants_detail_yellow,
@@ -269,6 +272,7 @@ function charHexToVec(hex) {
 }
 
 const PLAYER_MODEL_URL = '/models/player/player.glb'
+const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png'
 const CHARACTER_MATERIAL_COLOR_KEYS = {
   skin:          'skinColor',
   hair:          'hairColor',
@@ -302,7 +306,10 @@ function normalizeMixamoObjectName(name = '') {
 // Déclaration de l'uniform dans le fragment shader (inséré après #include <common>)
 const TINT_RECOLOR_UNIFORM_DECL = `#include <common>
 uniform vec3 uZoneColor;
-uniform vec3 uDetailColor;`
+uniform vec3 uDetailColor;
+uniform vec3 uEyeColor;
+uniform vec3 uBrowColor;
+uniform sampler2D uFaceDetailMask;`
 
 // Code GLSL appliqué APRÈS le sampling de texture (remplace #include <map_fragment>)
 // On garde #include <map_fragment> INTACT et on ajoute notre logique après
@@ -336,6 +343,35 @@ float _detailMask=smoothstep(0.08,0.28,_yellow+_warm*0.18);
 vec3 _pantsColor=clamp(uZoneColor*_pantsShade,0.,1.);
 vec3 _detailColor=clamp(uDetailColor*_detailShade,0.,1.);
 diffuseColor.rgb=mix(_pantsColor,_detailColor,_detailMask);`
+}
+
+function makeSkinWithDetailsTintApplyGlsl(baseR, baseG, baseB, eyeBaseR, eyeBaseG, eyeBaseB, browBaseR, browBaseG, browBaseB) {
+  const br = baseR.toFixed(5), bg = baseG.toFixed(5), bb = baseB.toFixed(5)
+  const er = eyeBaseR.toFixed(5), eg = eyeBaseG.toFixed(5), eb = eyeBaseB.toFixed(5)
+  const yr = browBaseR.toFixed(5), yg = browBaseG.toFixed(5), yb = browBaseB.toFixed(5)
+  return `#include <map_fragment>
+vec3 _raw=diffuseColor.rgb;
+vec3 _luma=vec3(0.2126,0.7152,0.0722);
+vec3 _skinBase=vec3(${br},${bg},${bb});
+vec3 _eyeBase=vec3(${er},${eg},${eb});
+vec3 _browBase=vec3(${yr},${yg},${yb});
+float _pixelL=dot(_raw,_luma);
+float _skinShade=clamp(_pixelL/max(dot(_skinBase,_luma),0.001),0.,2.4);
+float _skinAmount=smoothstep(0.015,0.09,length(uZoneColor-_skinBase));
+vec3 _detailMask=texture2D(uFaceDetailMask,vMapUv).rgb;
+float _eyeMask=clamp(_detailMask.r,0.,1.);
+float _browMask=clamp(_detailMask.g*(1.0-_eyeMask),0.,1.);
+float _skinProtectMask=clamp(max(max(_detailMask.r,_detailMask.g),_detailMask.b),0.,1.);
+vec3 _skinTinted=mix(_raw,clamp(uZoneColor*_skinShade,0.,1.),_skinAmount);
+vec3 _skinColor=mix(_skinTinted,_raw,_skinProtectMask);
+float _eyeShade=clamp(_pixelL/max(dot(_eyeBase,_luma),0.001),0.,2.4);
+float _browShade=clamp(_pixelL/max(dot(_browBase,_luma),0.001),0.,2.4);
+float _eyeAmount=smoothstep(0.015,0.09,length(uEyeColor-_eyeBase));
+float _browAmount=smoothstep(0.015,0.09,length(uBrowColor-_browBase));
+vec3 _eyeColor=mix(_raw,clamp(uEyeColor*_eyeShade,0.,1.),_eyeAmount);
+vec3 _browColor=mix(_raw,clamp(uBrowColor*_browShade,0.,1.),_browAmount);
+diffuseColor.rgb=mix(_skinColor,_eyeColor,_eyeMask);
+diffuseColor.rgb=mix(diffuseColor.rgb,_browColor,_browMask);`
 }
 
 const floorSkins = [
@@ -2547,6 +2583,7 @@ function Player({
 function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   const { gl } = useThree()
   const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
+  const faceDetailsMask = useTexture(PLAYER_FACE_DETAILS_MASK_URL)
   const idle = useFBX('/models/player/player-idle.fbx')
   const walk = useFBX('/models/player/player-walk.fbx')
   const run = useFBX('/models/player/player-run.fbx')
@@ -2594,6 +2631,14 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
     return next
   }, [modelScene, gl])
 
+  useEffect(() => {
+    if (!faceDetailsMask) return
+    faceDetailsMask.flipY = false
+    faceDetailsMask.minFilter = LinearFilter
+    faceDetailsMask.magFilter = LinearFilter
+    faceDetailsMask.needsUpdate = true
+  }, [faceDetailsMask])
+
   // Uniforms de couleur par zone matériau — stables entre les deux effects
   const zoneColorRefs = useRef({})
 
@@ -2621,6 +2666,16 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
           const detailHex = app.pantsDetailsColor ?? CHARACTER_DEFAULT_APPEARANCE.pantsDetailsColor
           zoneColorRefs.current.pantsDetailsColor = { value: new Vector3(...charHexToVec(detailHex)) }
         }
+        if (materialKey === 'skin') {
+          if (!zoneColorRefs.current.eyeColor) {
+            const eyeHex = app.eyeColor ?? CHARACTER_DEFAULT_APPEARANCE.eyeColor
+            zoneColorRefs.current.eyeColor = { value: new Vector3(...charHexToVec(eyeHex)) }
+          }
+          if (!zoneColorRefs.current.eyebrowsColor) {
+            const browHex = app.eyebrowsColor ?? CHARACTER_DEFAULT_APPEARANCE.eyebrowsColor
+            zoneColorRefs.current.eyebrowsColor = { value: new Vector3(...charHexToVec(browHex)) }
+          }
+        }
 
         // Couleur de base bakée dans le GLSL (calcule le ratio une seule fois)
         const baseHex = materialKey === 'pants_details'
@@ -2628,37 +2683,48 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
           : CHARACTER_BASE_COLORS[materialKey] ?? '#808080'
         const [bR, bG, bB] = charHexToVec(baseHex)
         const [dR, dG, dB] = charHexToVec(CHARACTER_BASE_COLORS.pants_detail_yellow)
+        const [eR, eG, eB] = charHexToVec(CHARACTER_BASE_COLORS.eyes)
+        const [yR, yG, yB] = charHexToVec(CHARACTER_BASE_COLORS.eyebrows)
 
         mat._tintRecolorApplied = true
         mat.color.set('#FFFFFF') // neutre — le shader applique la couleur via le ratio
-        mat.customProgramCacheKey = () => `tint-recolor-${materialKey}-v1`
+        mat.customProgramCacheKey = () => `tint-recolor-${materialKey}-v3`
         mat.onBeforeCompile = (shader) => {
           shader.uniforms.uZoneColor = zoneColorRefs.current[colorKey]
           shader.uniforms.uDetailColor = zoneColorRefs.current.pantsDetailsColor ?? zoneColorRefs.current[colorKey]
+          shader.uniforms.uEyeColor = zoneColorRefs.current.eyeColor ?? zoneColorRefs.current[colorKey]
+          shader.uniforms.uBrowColor = zoneColorRefs.current.eyebrowsColor ?? zoneColorRefs.current[colorKey]
+          shader.uniforms.uFaceDetailMask = { value: faceDetailsMask }
           shader.fragmentShader = shader.fragmentShader
             .replace('#include <common>', TINT_RECOLOR_UNIFORM_DECL)
             .replace(
               '#include <map_fragment>',
               materialKey === 'pants_details'
                 ? makePantsDetailsTintApplyGlsl(bR, bG, bB, dR, dG, dB)
+                : materialKey === 'skin'
+                  ? makeSkinWithDetailsTintApplyGlsl(bR, bG, bB, eR, eG, eB, yR, yG, yB)
                 : makeTintApplyGlsl(bR, bG, bB),
             )
         }
         mat.needsUpdate = true
       })
     })
-  }, [avatar])
+  }, [avatar, faceDetailsMask])
 
   // Effect 2 : mettre à jour les uniforms quand l'apparence change (sans recompiler le shader)
   useEffect(() => {
     const app = appearance ?? CHARACTER_DEFAULT_APPEARANCE
-    Object.entries(CHARACTER_MATERIAL_COLOR_KEYS).forEach(([, colorKey]) => {
+    ;[
+      ...Object.values(CHARACTER_MATERIAL_COLOR_KEYS),
+      'eyeColor',
+      'eyebrowsColor',
+    ].forEach((colorKey) => {
       const ref = zoneColorRefs.current[colorKey]
       if (!ref) return
       const hex = app[colorKey] ?? CHARACTER_DEFAULT_APPEARANCE[colorKey] ?? '#808080'
       ref.value.set(...charHexToVec(hex))
     })
-  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.pantsDetailsColor, appearance?.shoesColor, appearance?.socksColor])
+  }, [appearance?.skinColor, appearance?.hairColor, appearance?.eyeColor, appearance?.eyebrowsColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.pantsDetailsColor, appearance?.shoesColor, appearance?.socksColor])
 
   const animationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
@@ -3434,6 +3500,7 @@ function RemotePlayer({
           nextAppearance.skinColor !== cur.skinColor ||
           nextAppearance.hairColor !== cur.hairColor ||
           nextAppearance.eyeColor !== cur.eyeColor ||
+          nextAppearance.eyebrowsColor !== cur.eyebrowsColor ||
           nextAppearance.shirtColor !== cur.shirtColor ||
           nextAppearance.pantsColor !== cur.pantsColor ||
           nextAppearance.pantsDetailsColor !== cur.pantsDetailsColor ||
@@ -7928,6 +7995,8 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   const sections = [
     { key: 'skinColor',         label: 'Teinte de peau',   palette: SKIN_TONE_PALETTE },
     { key: 'hairColor',         label: 'Cheveux',           palette: HAIR_COLOR_PALETTE },
+    { key: 'eyeColor',          label: 'Yeux',              palette: EYE_COLOR_PALETTE },
+    { key: 'eyebrowsColor',     label: 'Sourcils',          palette: HAIR_COLOR_PALETTE },
     { key: 'shirtColor',        label: 'Haut',              palette: CLOTHING_COLOR_PALETTE },
     { key: 'pantsColor',        label: 'Bas',               palette: CLOTHING_COLOR_PALETTE },
     { key: 'pantsDetailsColor', label: 'Détails du bas',    palette: CLOTHING_COLOR_PALETTE },
