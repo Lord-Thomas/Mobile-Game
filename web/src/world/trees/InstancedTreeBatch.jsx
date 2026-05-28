@@ -11,12 +11,12 @@ const cameraToPlayer = new Vector3()
 const playerTarget = new Vector3()
 const cameraOrigin = new Vector3()
 
-const TREE_OCCLUSION_MIN_VISIBILITY = 0.15
-const TREE_OCCLUSION_SOFT_RADIUS = 1.9
+const TREE_OCCLUSION_MIN_VISIBILITY = 0.22
+const TREE_OCCLUSION_SOFT_RADIUS = 1.45
 const TREE_OCCLUSION_FADE_IN_SPEED = 10
-const TREE_OCCLUSION_FADE_OUT_SPEED = 4
-const TREE_CAMERA_CLEAR_RADIUS = 2.5
-const TREE_CAMERA_MIN_VISIBILITY = 0.08
+const TREE_OCCLUSION_FADE_OUT_SPEED = 5
+const TREE_CAMERA_CLEAR_RADIUS = 1.2
+const TREE_CAMERA_MIN_VISIBILITY = 0.20
 
 function disposeTree(tree) {
   tree.traverse((object) => {
@@ -77,20 +77,40 @@ function makeOcclusionMaterial(material) {
       `
       #include <common>
       varying float vInstanceOcclusionOpacity;
+      float treeBayer4(vec2 p) {
+        int x = int(mod(floor(p.x), 4.0));
+        int y = int(mod(floor(p.y), 4.0));
+        int idx = x + y * 4;
+        if (idx == 0)  return  0.5/16.0;
+        if (idx == 1)  return  8.5/16.0;
+        if (idx == 2)  return  2.5/16.0;
+        if (idx == 3)  return 10.5/16.0;
+        if (idx == 4)  return 12.5/16.0;
+        if (idx == 5)  return  4.5/16.0;
+        if (idx == 6)  return 14.5/16.0;
+        if (idx == 7)  return  6.5/16.0;
+        if (idx == 8)  return  3.5/16.0;
+        if (idx == 9)  return 11.5/16.0;
+        if (idx == 10) return  1.5/16.0;
+        if (idx == 11) return  9.5/16.0;
+        if (idx == 12) return 15.5/16.0;
+        if (idx == 13) return  7.5/16.0;
+        if (idx == 14) return 13.5/16.0;
+        return 5.5/16.0;
+      }
       `,
     )
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <dithering_fragment>',
       `
       if (vInstanceOcclusionOpacity < 0.999) {
-        float treeOcclusionNoise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-        if (treeOcclusionNoise > vInstanceOcclusionOpacity) discard;
+        if (vInstanceOcclusionOpacity < treeBayer4(gl_FragCoord.xy)) discard;
       }
       #include <dithering_fragment>
       `,
     )
   }
-  next.customProgramCacheKey = () => `${previousProgramKey?.() ?? 'tree-base'}-occlusion-dither-v2`
+  next.customProgramCacheKey = () => `${previousProgramKey?.() ?? 'tree-base'}-occlusion-bayer4-v1`
   return next
 }
 
@@ -180,10 +200,10 @@ function InstancedTreeVariant({ variantId, placements, animated, playerPositionR
       const treeX = tree.config.position.x
       const treeZ = tree.config.position.z
 
-      // Fade trees that are physically close to the camera (camera inside dense cluster)
+      // Fade trees physically inside the camera's immediate radius
       const camDist2D = Math.hypot(treeX - cameraOrigin.x, treeZ - cameraOrigin.z)
       if (camDist2D < TREE_CAMERA_CLEAR_RADIUS) {
-        const proximityFade = 1 - MathUtils.smoothstep(camDist2D, 0.9, TREE_CAMERA_CLEAR_RADIUS)
+        const proximityFade = 1 - MathUtils.smoothstep(camDist2D, 0.5, TREE_CAMERA_CLEAR_RADIUS)
         targets[index] = Math.min(targets[index], MathUtils.lerp(1, TREE_CAMERA_MIN_VISIBILITY, proximityFade))
       }
 
