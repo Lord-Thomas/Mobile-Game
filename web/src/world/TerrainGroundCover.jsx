@@ -23,7 +23,8 @@ const GRASS_FAR_DIST = 48
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 2.5
-const GRASS_IMMEDIATE_BOOTSTRAP_RADIUS = 1
+const GRASS_ACTIVE_CHUNK_RADIUS = 6
+const GRASS_IMMEDIATE_BOOTSTRAP_RADIUS = 2
 // Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
 // frustum-culls entire quadrants when they fall outside the camera view.
 const QUADRANTS = [
@@ -33,7 +34,7 @@ const QUADRANTS = [
   { id: 'sw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
 ]
 const MAX_QUADRANT_INSTANCES = 350_000
-const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 2
+const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 4
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
 const grassBottomColor = new Color('#638b0f')
 const grassMiddleColor = new Color('#6f970e')
@@ -242,6 +243,12 @@ function getGrassChunkDistance(key, centerChunkX, centerChunkZ) {
   return Math.max(Math.abs(chunkX - centerChunkX), Math.abs(chunkZ - centerChunkZ))
 }
 
+function getActiveGrassChunkKeys(allKeys, centerChunkX, centerChunkZ) {
+  return allKeys
+    .filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= GRASS_ACTIVE_CHUNK_RADIUS)
+    .sort((a, b) => getGrassChunkDistance(a, centerChunkX, centerChunkZ) - getGrassChunkDistance(b, centerChunkX, centerChunkZ))
+}
+
 function buildGrassChunk(key) {
   const [chunkX, chunkZ] = key.split(':').map(Number)
   const bounds = getGrassChunkBounds(chunkX, chunkZ)
@@ -272,7 +279,7 @@ function createRockCover() {
   return rocks
 }
 
-function buildGrassHandleBeforeCompile(shaderRef) {
+function buildGrassHandleBeforeCompile(onShaderReady) {
   return (shader) => {
     shader.uniforms.uTime = { value: 0 }
     shader.uniforms.uPlayerPosition = { value: new Vector3(9999, 0, 9999) }
@@ -403,8 +410,7 @@ function buildGrassHandleBeforeCompile(shaderRef) {
 `,
     )
 
-    // eslint-disable-next-line no-param-reassign
-    shaderRef.current = shader
+    onShaderReady(shader)
   }
 }
 
@@ -413,6 +419,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
   const ref = useRef()
   const activeGrassCenterRef = useRef(null)
+  const activeGrassTargetKeysRef = useRef(new Set())
   const grassChunkCacheRef = useRef(new Map())
   const pendingGrassChunksRef = useRef(new Set())
   const grassChunkQueueRef = useRef([])
@@ -426,7 +433,6 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   // Quadrant bounding spheres stored so we can re-apply them after each GPU write.
   // Three.js r175+ uses mesh.boundingSphere in priority over geometry.boundingSphere,
   // and may auto-recompute it from newly added instances only → wrong frustum culling.
-  const grassQuadrantSpheresRef = useRef(null)
   const shaderRef = useRef(null)
   const writtenChunkKeysRefs = useRef([new Set(), new Set(), new Set(), new Set()])
   const nextGrassOffsetRefs = useRef([0, 0, 0, 0])
@@ -444,8 +450,8 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
 
   // One geometry clone per quadrant — each carries its own bounding sphere so
   // Three.js frustum-culls correctly (the blade geometry alone is too small to cull by).
-  const grassGeometries = useMemo(() => {
-    const geos = QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
+  const grassGeometryData = useMemo(() => {
+    const geometries = QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
       const geo = grassBaseGeometry.clone()
       const cx = (minX + maxX) / 2
       const cz = (minZ + maxZ) / 2
@@ -454,12 +460,11 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       geo.boundingSphere = new Sphere(new Vector3(cx, 1.5, cz), radius)
       return geo
     })
-    // Cache the quadrant spheres so writeChunkToGPU can re-apply them after partial uploads.
-    // Three.js r175+ may overwrite mesh.boundingSphere from newly added instances only,
-    // causing incorrect frustum culling. We always restore the full-quadrant sphere.
-    grassQuadrantSpheresRef.current = geos.map((geo) => geo.boundingSphere.clone())
-    return geos
+    const spheres = geometries.map((geo) => geo.boundingSphere.clone())
+    return { geometries, spheres }
   }, [grassBaseGeometry])
+  const grassGeometries = grassGeometryData.geometries
+  const grassQuadrantSpheres = grassGeometryData.spheres
 
   // One shared material for all 4 quadrants — single shader compilation, single uniform set.
   const grassMaterial = useMemo(() => {
@@ -472,7 +477,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       color: 0xffffff,
       vertexColors: true,
     })
-    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shaderRef)
+    // eslint-disable-next-line react-hooks/refs
+    mat.onBeforeCompile = buildGrassHandleBeforeCompile((shader) => {
+      shaderRef.current = shader
+    })
     return mat
   }, [grassTexture])
   useEffect(() => () => grassMaterial.dispose(), [grassMaterial])
@@ -481,6 +489,16 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   useLayoutEffect(() => {
     grassMeshRefs.current.forEach((mesh) => { if (mesh) mesh.count = 0 })
   }, [])
+
+  const resetGrassGpuBuffers = () => {
+    grassMeshRefs.current.forEach((mesh) => {
+      if (!mesh) return
+      mesh.count = 0
+      mesh.instanceMatrix.needsUpdate = true
+    })
+    writtenChunkKeysRefs.current.forEach((set) => set.clear())
+    nextGrassOffsetRefs.current = [0, 0, 0, 0]
+  }
 
   // Write a single chunk directly into the correct quadrant GPU buffer — no React state involved.
   // Uses addUpdateRange so Three.js only uploads the new portion to the GPU (not the full 22 MB buffer).
@@ -510,7 +528,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     }
     mesh.instanceMatrix.needsUpdate = true
     // Restore the full-quadrant bounding sphere so frustum culling is never based on a subset
-    const sphere = grassQuadrantSpheresRef.current?.[qi]
+    const sphere = grassQuadrantSpheres?.[qi]
     if (sphere) mesh.boundingSphere = sphere
   }
 
@@ -518,6 +536,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     if (typeof window === 'undefined') return
     const completedChunks = grassChunkCacheRef.current.size
     const writtenChunks = writtenChunkKeysRefs.current.reduce((sum, set) => sum + set.size, 0)
+    const mountedBlades = nextGrassOffsetRefs.current.reduce((sum, count) => sum + count, 0)
     let completedBlades = 0
     grassChunkCacheRef.current.forEach((items) => { completedBlades += items.length })
     window.__grassDebug = {
@@ -525,8 +544,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       pendingChunks: pendingGrassChunksRef.current.size,
       pendingGPUWrites: pendingGPUWriteRef.current.length,
       activeChunk: activeGrassCenterRef.current,
+      targetChunks: activeGrassTargetKeysRef.current.size,
       completedChunks,
       mountedChunks: writtenChunks,
+      mountedBlades,
       completedBlades,
     }
   }
@@ -567,14 +588,20 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   const initGrassQueue = (playerPosition) => {
     const centerChunkX = playerPosition ? getGrassChunkIndex(playerPosition.x) : 0
     const centerChunkZ = playerPosition ? getGrassChunkIndex(playerPosition.z) : 0
+    const activeKeys = getActiveGrassChunkKeys(allGrassChunkKeys, centerChunkX, centerChunkZ)
+    const immediateKeySet = new Set(
+      activeKeys.filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= GRASS_IMMEDIATE_BOOTSTRAP_RADIUS),
+    )
     activeGrassCenterRef.current = getGrassChunkKey(centerChunkX, centerChunkZ)
+    activeGrassTargetKeysRef.current = new Set(activeKeys)
     grassChunkQueueRef.current = []
     pendingGPUWriteRef.current = []
     pendingGrassChunksRef.current.clear()
+    resetGrassGpuBuffers()
 
     // Bootstrap : construire synchrone les chunks proches (ils seront écrits au prochain useFrame)
-    const immediateKeys = allGrassChunkKeys
-      .filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= GRASS_IMMEDIATE_BOOTSTRAP_RADIUS)
+    const immediateKeys = activeKeys
+      .filter((key) => immediateKeySet.has(key))
       .sort((a, b) => getGrassChunkDistance(a, centerChunkX, centerChunkZ) - getGrassChunkDistance(b, centerChunkX, centerChunkZ))
 
     immediateKeys.forEach((key) => {
@@ -590,13 +617,14 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     })
 
     // Mettre aussi en file d'écriture tout chunk déjà en cache (visites précédentes)
-    allGrassChunkKeys.forEach((key) => {
+    activeKeys.forEach((key) => {
+      if (immediateKeySet.has(key)) return
       const cached = grassChunkCacheRef.current.get(key)
       if (cached) pendingGPUWriteRef.current.push({ key, grass: cached })
     })
 
     // Queue le reste pour construction progressive
-    allGrassChunkKeys.forEach((key) => {
+    activeKeys.forEach((key) => {
       if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
       pendingGrassChunksRef.current.add(key)
       grassChunkQueueRef.current.push(key)
@@ -621,8 +649,13 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     grassChunkQueueRef.current = []
     pendingGPUWriteRef.current = []
     pendingGrassChunksRef.current.clear()
+    activeGrassTargetKeysRef.current.clear()
+    resetGrassGpuBuffers()
 
     publishGrassDebugStats()
+  // The queue is deliberately rebuilt only when outdoor grass mounts/unmounts;
+  // player chunk changes are handled in useFrame.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, allGrassChunkKeys])
 
   useFrame(() => {
@@ -650,7 +683,6 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   useFrame((state) => {
     const shader = shaderRef.current
     if (!shader) return
-    // eslint-disable-next-line react-hooks/immutability
     shader.uniforms.uTime.value = state.clock.elapsedTime
     const pp = playerPositionRef?.current
     if (pp) shader.uniforms.uPlayerPosition.value.set(pp.x, pp.y, pp.z)

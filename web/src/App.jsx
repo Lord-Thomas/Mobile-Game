@@ -9287,8 +9287,10 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
         ['G queue', stats.grassDebug.queuedChunks.toLocaleString('fr-FR')],
         ['G pending', stats.grassDebug.pendingChunks.toLocaleString('fr-FR')],
         ['G active', stats.grassDebug.activeChunk ?? '-'],
+        ['G target', (stats.grassDebug.targetChunks ?? 0).toLocaleString('fr-FR')],
         ['G done', stats.grassDebug.completedChunks.toLocaleString('fr-FR')],
         ['G mounted', stats.grassDebug.mountedChunks.toLocaleString('fr-FR')],
+        ['G visible', (stats.grassDebug.mountedBlades ?? 0).toLocaleString('fr-FR')],
         ['G blades', stats.grassDebug.completedBlades.toLocaleString('fr-FR')],
       ]
     : []
