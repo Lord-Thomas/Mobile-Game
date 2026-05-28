@@ -273,6 +273,7 @@ function charHexToVec(hex) {
 
 const PLAYER_MODEL_URL = '/models/player/player.glb'
 const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png'
+const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const CHARACTER_MATERIAL_COLOR_KEYS = {
   skin:          'skinColor',
   hair:          'hairColor',
@@ -2909,7 +2910,7 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
 }
 
 function MagicBookMesh() {
-  const { scene } = useGLTF('/models/weapons/magic_book.glb')
+  const { scene } = useGLTF(MAGIC_BOOK_MODEL_URL)
   const bookScene = useMemo(() => {
     const next = scene.clone(true)
     next.traverse((child) => {
@@ -2957,7 +2958,9 @@ function FloatingMagicBook({ handBoneRef, playerGroupRef }) {
 
   return (
     <group ref={groupRef} position={[0.4, 0.9, 0]}>
-      <MagicBookMesh />
+      <Suspense fallback={null}>
+        <MagicBookMesh />
+      </Suspense>
       <pointLight color="#ff5a00" intensity={1.35} distance={2.7} />
     </group>
   )
@@ -11465,6 +11468,7 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
 useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
 useGLTF.preload('/models/cat.glb')
+useGLTF.preload(MAGIC_BOOK_MODEL_URL)
 useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
 useGLTF.preload(PLAYER_MODEL_URL)
 useFBX.preload('/models/player/player-idle.fbx')

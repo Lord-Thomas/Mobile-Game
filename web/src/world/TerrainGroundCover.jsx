@@ -22,8 +22,8 @@ const GRASS_NEAR_DIST = 24
 const GRASS_FAR_DIST = 48
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_CHUNK_SIZE = 6
-const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 14
-const GRASS_IMMEDIATE_BOOTSTRAP_RADIUS = 2
+const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 2.5
+const GRASS_IMMEDIATE_BOOTSTRAP_RADIUS = 1
 // Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
 // frustum-culls entire quadrants when they fall outside the camera view.
 const QUADRANTS = [
@@ -36,7 +36,7 @@ const MAX_QUADRANT_INSTANCES = 350_000
 const DISTANT_GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const DISTANT_GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const DISTANT_GRASS_GRID_STEP = 0.72
-const DISTANT_GRASS_ROWS_PER_IDLE_BATCH = 10
+const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 2
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
 const grassBottomColor = new Color('#638b0f')
 const grassMiddleColor = new Color('#6f970e')
@@ -534,7 +534,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   }, [])
 
   useLayoutEffect(() => {
-    writeDistantGrassToGPU(distantGrass)
+    writeDistantGrassItemsToGPU(distantGrass)
   }, [distantGrass])
 
   // Write a single chunk directly into the correct quadrant GPU buffer — no React state involved.
@@ -570,10 +570,12 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   }
 
   // Write all distant grass instances directly into quadrant GPU buffers — called once
-  const writeDistantGrassToGPU = (grass) => {
+  const writeDistantGrassItemsToGPU = (grass) => {
     if (distantGrassWrittenRef.current) return
+    if (!grass.length) return
     const meshes = grassMeshRefs.current
     const startIndexes = nextGrassOffsetRefs.current.slice()
+    const touchedQuadrants = new Set()
     grass.forEach((item) => {
       const [x, , z] = item.position
       const qi = (x >= 0 ? 0 : 1) + (z >= 0 ? 0 : 2)
@@ -585,20 +587,21 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       dummy.updateMatrix()
       dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
       nextGrassOffsetRefs.current[qi] += 1
+      touchedQuadrants.add(qi)
     })
-    distantGrassWrittenRef.current = true
-    meshes.forEach((mesh, qi) => {
+    touchedQuadrants.forEach((qi) => {
+      const mesh = meshes[qi]
       if (!mesh) return
       const endIndex = nextGrassOffsetRefs.current[qi]
-      mesh.count = endIndex
       const startIndex = startIndexes[qi]
-      if (endIndex > startIndex) {
-        mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
-      }
+      if (endIndex <= startIndex) return
+      mesh.count = endIndex
+      mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
       mesh.instanceMatrix.needsUpdate = true
       const sphere = grassQuadrantSpheresRef.current?.[qi]
       if (sphere) mesh.boundingSphere = sphere
     })
+    distantGrassWrittenRef.current = true
   }
 
   const publishGrassDebugStats = () => {
@@ -609,7 +612,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     grassChunkCacheRef.current.forEach((items) => { completedBlades += items.length })
     window.__grassDebug = {
       queuedChunks: grassChunkQueueRef.current.length,
+      pendingChunks: pendingGrassChunksRef.current.size,
       pendingGPUWrites: pendingGPUWriteRef.current.length,
+      activeChunk: activeGrassCenterRef.current,
+      distantGrassWritten: distantGrassWrittenRef.current,
       completedChunks,
       mountedChunks: writtenChunks,
       completedBlades,
@@ -621,9 +627,14 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   // Phase 2 : construire de nouveaux chunks depuis la queue (budget 14 ms).
   const processGrassChunkBatch = () => {
     // Phase 1 — écriture GPU des chunks déjà construits (bootstrap ou frame précédente)
-    while (pendingGPUWriteRef.current.length > 0) {
+    let writes = 0
+    while (
+      pendingGPUWriteRef.current.length > 0
+      && writes < GRASS_GPU_CHUNK_WRITES_PER_FRAME
+    ) {
       const { key, grass } = pendingGPUWriteRef.current.shift()
       writeChunkToGPU(key, grass)
+      writes += 1
     }
 
     // Phase 2 — construction de nouveaux chunks (budget temps)
@@ -648,6 +659,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     const centerChunkX = playerPosition ? getGrassChunkIndex(playerPosition.x) : 0
     const centerChunkZ = playerPosition ? getGrassChunkIndex(playerPosition.z) : 0
     activeGrassCenterRef.current = getGrassChunkKey(centerChunkX, centerChunkZ)
+    grassChunkQueueRef.current = []
+    pendingGPUWriteRef.current = []
+    pendingGrassChunksRef.current.clear()
 
     // Bootstrap : construire synchrone les chunks proches (ils seront écrits au prochain useFrame)
     const immediateKeys = allGrassChunkKeys
