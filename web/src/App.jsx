@@ -11107,6 +11107,7 @@ function App() {
   }
 
   const isFramedViewport = isAdminMode || isVerticalFrameMode
+  const renderOutdoorVisualWorld = currentZone === ZONES.outside
   const gameView = (
     <main className={`app app-${viewportOrientation}${isFramedViewport ? ' app-framed' : ''}`}>
       <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
@@ -11153,7 +11154,7 @@ function App() {
               wallTexturePath={activeWallSkin.texture}
               ceilingTexturePath={activeCeilingTexturePath}
               hideCeiling={mode === 'customize'}
-              hideRoof={mode === 'customize'}
+              hideRoof={mode === 'customize' || currentZone !== ZONES.outside}
             />
             <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch && canModifyWorld} onOpen={() => canModifyWorld && setIsLightMenuOpen((v) => !v)} mode={mode} />
             <Dragon playerPositionRef={playerPositionRef} />
@@ -11185,17 +11186,19 @@ function App() {
           />
         </PlayerHouse>
         )}
-        <OutdoorNeighborhood
-          lightingActive={currentZone === ZONES.outside}
-          playerPositionRef={playerPositionRef}
-          ballRef={ballRef}
-          showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
-          showTrees={performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
-          showTerrain={!isDebugMode || debugToggles.terrain}
-          showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
-          castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
-          showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
-        />
+        {renderOutdoorVisualWorld && (
+          <OutdoorNeighborhood
+            lightingActive
+            playerPositionRef={playerPositionRef}
+            ballRef={ballRef}
+            showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+            showTrees={performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
+            showTerrain={!isDebugMode || debugToggles.terrain}
+            showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
+            castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
+            showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
+          />
+        )}
         {hasRemotePlayer && (
           <RemotePlayer
             stateRef={remotePlayerStateRef}
