@@ -1,4 +1,6 @@
-import { getHouseFootprintColliders } from './house/houseLayout'
+import { houseLayout } from './house/houseLayout'
+import { createNeighborFloorplan } from './house/neighborFloorplan'
+import { getWallColliderTransform, splitWallIntoSolidRects } from './house/wallUtils'
 import { roadLayout } from './roads/roadLayout'
 import { getRoadLotTransform } from './roads/roadGeometry'
 import { getLibraryTreeConfig } from './trees/treeLibrary'
@@ -185,41 +187,110 @@ function createTreeEntries(placements, includeCollider = true) {
   variantId,
   rotationY,
   scaleMultiplier,
-  ]) => ({
-    id,
-    ...(includeCollider ? { colliderRadius: 0.42 + scaleMultiplier * 0.18 } : {}),
-    placement: {
-      rule: 'authored_tree',
-      area,
-      x,
-      z,
-    },
-    variantId,
-    config: getLibraryTreeConfig(variantId, { x, z, rotationY, scaleMultiplier }),
-  })).filter(({ config }) => hasTreeRoadClearance(config.position.x, config.position.z))
+  ]) => {
+    const config = getLibraryTreeConfig(variantId, { x, z, rotationY, scaleMultiplier })
+    const trunkRadius = Math.max(0.18, 0.18 + config.scale * 1.25)
+
+    return {
+      id,
+      ...(includeCollider ? { colliderRadius: trunkRadius } : {}),
+      placement: {
+        rule: 'authored_tree',
+        area,
+        x,
+        z,
+      },
+      variantId,
+      config,
+    }
+  }).filter(({ config }) => hasTreeRoadClearance(config.position.x, config.position.z))
 }
 
 export const AUTHORED_TREES = createTreeEntries(naturalTreePlacements)
 export const DISTANT_TREES = createTreeEntries(distantTreePlacements, false)
 
-export const OUTDOOR_PLAYER_COLLIDERS = [
-  ...getHouseFootprintColliders(),
-  ...NEIGHBOR_HOUSES.flatMap((house) => {
-    const cos = Math.cos(house.rotationY)
-    const sin = Math.sin(house.rotationY)
+function createWallCollider(wall, rect, worldTransform = null) {
+  const transform = getWallColliderTransform(wall, rect)
+  const [localX, y, localZ] = transform.position
+  const rotationY = transform.rotation[1] + (worldTransform?.rotationY ?? 0)
 
-    return getNeighborHouseParts(house).map((part) => ({
-      x: house.position[0] + part.offset[0] * cos - part.offset[1] * sin,
-      z: house.position[2] + part.offset[0] * sin + part.offset[1] * cos,
-      hx: part.size[0] * 0.5 + 0.45,
-      hz: part.size[2] * 0.5 + 0.45,
-      rotationY: house.rotationY,
-    }))
-  }),
-  ...AUTHORED_TREES.map(({ config, colliderRadius }) => ({
+  if (!worldTransform) {
+    return {
+      type: 'box',
+      x: localX,
+      y,
+      z: localZ,
+      hx: transform.args[0],
+      hy: transform.args[1],
+      hz: transform.args[2],
+      rotationY,
+    }
+  }
+
+  const cos = Math.cos(worldTransform.rotationY)
+  const sin = Math.sin(worldTransform.rotationY)
+
+  return {
+    type: 'box',
+    x: worldTransform.x + localX * cos - localZ * sin,
+    y,
+    z: worldTransform.z + localX * sin + localZ * cos,
+    hx: transform.args[0],
+    hy: transform.args[1],
+    hz: transform.args[2],
+    rotationY,
+  }
+}
+
+function getDoorColliderRects(wall) {
+  return (wall.openings ?? [])
+    .filter((opening) => opening.type === 'door')
+    .map((opening) => {
+      const bottom = opening.bottom ?? opening.bottomY ?? 0
+      return {
+        id: `${wall.id}-${opening.id}-door`,
+        start: opening.center - opening.width * 0.5,
+        end: opening.center + opening.width * 0.5,
+        center: opening.center,
+        width: opening.width,
+        y: bottom + opening.height * 0.5,
+        height: opening.height,
+      }
+    })
+}
+
+function createHouseWallColliders(walls, worldTransform = null) {
+  return walls.flatMap((wall) => (
+    [...splitWallIntoSolidRects(wall), ...getDoorColliderRects(wall)]
+      .filter((rect) => rect.y - rect.height * 0.5 < 1.2)
+      .map((rect) => createWallCollider(wall, rect, worldTransform))
+  ))
+}
+
+function createNeighborHouseColliders(house) {
+  const floorplan = createNeighborFloorplan({
+    parts: house.parts,
+    size: house.size,
+    doorWall: house.doorWall,
+    color: house.color,
+    trim: house.trim,
+  })
+
+  return createHouseWallColliders(floorplan.walls, {
+    x: house.position[0],
+    z: house.position[2],
+    rotationY: house.rotationY,
+  })
+}
+
+export const OUTDOOR_PLAYER_COLLIDERS = [
+  ...createHouseWallColliders(houseLayout.walls),
+  ...NEIGHBOR_HOUSES.flatMap((house) => createNeighborHouseColliders(house)),
+  ...AUTHORED_TREES.map(({ id, config, colliderRadius }) => ({
+    type: 'circle',
+    id,
     x: config.position.x,
     z: config.position.z,
-    hx: colliderRadius,
-    hz: colliderRadius,
+    radius: colliderRadius,
   })),
 ]

@@ -5618,6 +5618,10 @@ function isMushroomEnemySpawnCandidateValid(x, z) {
   if (getDistanceToNearestHouse(x, z) < MUSHROOM_ENEMY_HOUSE_CLEARANCE) return false
 
   return !OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
+    if (collider.type === 'circle') {
+      return Math.hypot(x - collider.x, z - collider.z) <= collider.radius + MUSHROOM_ENEMY_SPAWN_CLEARANCE
+    }
+
     const expanded = {
       ...collider,
       hx: collider.hx + MUSHROOM_ENEMY_SPAWN_CLEARANCE,
@@ -6292,6 +6296,10 @@ function getTwitchParentHost() {
 
 function collidesWithOutdoorObstacle(nextX, nextZ) {
   return OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
+    if (collider.type === 'circle') {
+      return Math.hypot(nextX - collider.x, nextZ - collider.z) <= collider.radius + PLAYER_CAPSULE_RADIUS
+    }
+
     const rotationY = collider.rotationY ?? 0
     const dx = nextX - collider.x
     const dz = nextZ - collider.z
@@ -6306,10 +6314,10 @@ function collidesWithOutdoorObstacle(nextX, nextZ) {
       localZ,
       PLAYER_CAPSULE_RADIUS,
       0,
-      PLAYER_HEIGHT,
+      collider.y ?? PLAYER_HEIGHT,
       0,
       collider.hx,
-      0.6,
+      collider.hy ?? 0.6,
       collider.hz,
     )
   })
