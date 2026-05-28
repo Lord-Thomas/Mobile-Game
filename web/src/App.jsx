@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, CanvasTexture, DoubleSide, Euler, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, RingGeometry, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, RingGeometry, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -1019,7 +1019,7 @@ function useKeyboardInput() {
   return keysRef
 }
 
-function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof }) {
+function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false }) {
   const floorColorMap = useTexture(floorTexturePath)
   const wallColorMap = useTexture(wallTexturePath)
   const ceilingColorMap = useTexture(ceilingTexturePath)
@@ -1049,16 +1049,22 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
   useEffect(() => () => ceilingTexture.dispose(), [ceilingTexture])
 
   return (
-    <>
-      <HouseWalls wallTexture={wallColorMap} />
-      <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
-        <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
-        <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
-      </mesh>
-      <mesh position={[secondRoom.position[0], secondRoom.size[1] - 0.02, secondRoom.position[2]]} visible={!hideCeiling}>
-        <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
-        <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
-      </mesh>
+    <group userData={{ debugCategory: exteriorOnly ? 'house-exterior' : 'house-shell' }}>
+      {exteriorOnly ? (
+        <MergedPlayerExteriorShell />
+      ) : (
+        <>
+          <HouseWalls wallTexture={wallColorMap} />
+          <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
+            <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
+            <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
+          </mesh>
+          <mesh position={[secondRoom.position[0], secondRoom.size[1] - 0.02, secondRoom.position[2]]} visible={!hideCeiling}>
+            <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
+            <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
+          </mesh>
+        </>
+      )}
       {!hideRoof && (
         <>
           <GableRoof
@@ -1093,23 +1099,139 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
         </>
       )}
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-        <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
-        <meshStandardMaterial
-          map={floorColorMap}
-          roughness={0.66}
-          metalness={0.08}
-          color="#b8ad9b"
-        />
-      </mesh>
+      {!exteriorOnly && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+          <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
+          <meshStandardMaterial
+            map={floorColorMap}
+            roughness={0.66}
+            metalness={0.08}
+            color="#b8ad9b"
+          />
+        </mesh>
+      )}
 
       <gridHelper
         args={[10, 20, '#c3ccd6', '#d8e0e8']}
         position={[0, 0.01, 0]}
-        visible={SHOW_FLOOR_GRID}
+        visible={!exteriorOnly && SHOW_FLOOR_GRID}
       />
 
-    </>
+    </group>
+  )
+}
+
+function createColoredGeometryCollector() {
+  return {
+    positions: [],
+    normals: [],
+    colors: [],
+  }
+}
+
+function pushColoredGeometry(collector, geometry, colorValue, matrix = null) {
+  const color = new Color(colorValue)
+  const workingGeometry = geometry.index ? geometry.toNonIndexed() : geometry.clone()
+  if (matrix) workingGeometry.applyMatrix4(matrix)
+  if (!workingGeometry.attributes.normal) workingGeometry.computeVertexNormals()
+
+  const positions = workingGeometry.attributes.position.array
+  const normals = workingGeometry.attributes.normal.array
+
+  for (let index = 0; index < positions.length; index += 3) {
+    collector.positions.push(positions[index], positions[index + 1], positions[index + 2])
+    collector.normals.push(normals[index], normals[index + 1], normals[index + 2])
+    collector.colors.push(color.r, color.g, color.b)
+  }
+
+  workingGeometry.dispose()
+}
+
+function pushColoredBox(collector, position, rotationY, size, color, depthBoost = 0) {
+  const geometry = new BoxGeometry(size[0], size[1], size[2] + depthBoost)
+  const matrix = new Matrix4().makeRotationY(rotationY)
+  matrix.setPosition(position[0], position[1], position[2])
+  pushColoredGeometry(collector, geometry, color, matrix)
+  geometry.dispose()
+}
+
+function getWallExteriorColor(wall) {
+  return wall.sideA?.type === 'outside'
+    ? wall.sideA.color
+    : wall.sideB?.type === 'outside'
+      ? wall.sideB.color
+      : EXTERIOR_WALL_COLOR
+}
+
+function createPlayerExteriorShellGeometry() {
+  const collector = createColoredGeometryCollector()
+
+  houseLayout.walls.forEach((wall) => {
+    const color = getWallExteriorColor(wall)
+    splitWallIntoSolidRects(wall).forEach((rect) => {
+      const transform = getWallColliderTransform(wall, rect)
+      pushColoredBox(
+        collector,
+        transform.position,
+        transform.rotation[1],
+        [transform.args[0] * 2, transform.args[1] * 2, transform.args[2] * 2],
+        color,
+      )
+    })
+
+    ;(wall.openings ?? []).forEach((opening) => {
+      const wallBottom = wall.bottom ?? wall.bottomY ?? 0
+      const bottom = opening.bottom ?? 0
+      const top = bottom + opening.height
+      const topHeight = wall.height - top
+      const min = opening.center - opening.width * 0.5
+      const max = opening.center + opening.width * 0.5
+      const centerY = wallBottom + bottom + opening.height * 0.5
+      const revealRects = [
+        { center: min, y: centerY, width: 0.05, height: opening.height },
+        { center: max, y: centerY, width: 0.05, height: opening.height },
+      ]
+
+      if (topHeight > 0.001) {
+        revealRects.push({ center: opening.center, y: wallBottom + top, width: opening.width, height: 0.05 })
+      }
+
+      if (bottom > 0.001) {
+        revealRects.push({ center: opening.center, y: wallBottom + bottom, width: opening.width, height: 0.05 })
+      }
+
+      revealRects.forEach((rect) => {
+        const transform = getWallColliderTransform(wall, rect)
+        pushColoredBox(
+          collector,
+          transform.position,
+          transform.rotation[1],
+          [transform.args[0] * 2, transform.args[1] * 2, transform.args[2] * 2],
+          '#d8d0c4',
+          0.03,
+        )
+      })
+    })
+  })
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(collector.positions, 3))
+  geometry.setAttribute('normal', new Float32BufferAttribute(collector.normals, 3))
+  geometry.setAttribute('color', new Float32BufferAttribute(collector.colors, 3))
+  geometry.computeBoundingBox()
+  geometry.computeBoundingSphere()
+  return geometry
+}
+
+function MergedPlayerExteriorShell() {
+  const geometry = useMemo(() => createPlayerExteriorShellGeometry(), [])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  return (
+    <mesh geometry={geometry} castShadow receiveShadow>
+      <meshStandardMaterial vertexColors roughness={0.78} side={DoubleSide} />
+    </mesh>
   )
 }
 
@@ -1572,7 +1694,7 @@ function Ball({ ballRef, skinTexturePath, spawnPosition = [0, 3.2, 0], linearDam
       ccd
     >
       <BallCollider args={[BALL_RADIUS]} />
-      <group name="ball">
+      <group name="ball" userData={{ debugCategory: 'ball' }}>
         {visual && (
           <mesh
             geometry={visual.geometry}
@@ -1684,6 +1806,7 @@ function Dragon({ playerPositionRef }) {
       position={[DRAGON_POSITION.x, DRAGON_POSITION.y, DRAGON_POSITION.z]}
       rotation={[0, Math.PI, 0]}
       scale={2}
+      userData={{ debugCategory: 'npcs' }}
     >
       <primitive object={dragon} />
     </group>
@@ -1809,6 +1932,7 @@ function Goal({
         position={goalPosition}
         rotation={[0, object?.rotationY ?? 0, 0]}
         onPointerDown={handlePointerDown}
+        userData={{ debugCategory: 'goal' }}
       >
         <GoalVisual selected={selected} ballRef={ballRef} goalObject={object} />
       </group>
@@ -7906,6 +8030,7 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
       position={object.position}
       rotation={[0, object.rotationY, 0]}
       onPointerDown={handlePointerDown}
+      userData={{ debugCategory: 'placeables' }}
     >
       <Suspense fallback={null}>
         {isTrainingDummy ? (
@@ -8064,6 +8189,7 @@ function PlacementPreview({ object, preview, groupRef }) {
 function CustomizationLayer({
   mode,
   objects,
+  hideInteriorObjects = false,
   selectedObjectId,
   draggingObjectId,
   placingObjectId,
@@ -8078,7 +8204,10 @@ function CustomizationLayer({
   registerCombatTarget,
   onTrainingDummyDefeated,
 }) {
-  const placedObjects = objects.filter((object) => object.status !== 'stored')
+  const placedObjects = objects.filter((object) => (
+    object.status !== 'stored' &&
+    (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35))
+  ))
   const placingObject = objects.find((object) => object.id === placingObjectId)
   const placeableRefs = useRef(new Map())
   const previewGroupRef = useRef()
@@ -8142,7 +8271,7 @@ function CustomizationLayer({
   }, [getFloorPlacementY, objects])
 
   return (
-    <>
+    <group userData={{ debugCategory: 'placeables' }}>
       <CustomizationCamera active={mode === 'customize'} />
       <EditableFloor
         mode={mode}
@@ -8192,7 +8321,7 @@ function CustomizationLayer({
         />
       ))}
       <PlacementPreview object={placingObject} preview={placementPreview} groupRef={previewGroupRef} />
-    </>
+    </group>
   )
 }
 
@@ -8754,16 +8883,20 @@ function EnvironmentMenu({
   )
 }
 
-function isGoalInsideHouse(goalPosition) {
-  if (!goalPosition) return true
-  const [x, , z] = goalPosition
+function isPositionInsideHouse(position, margin = 0.5) {
+  if (!position) return true
+  const [x, , z] = position
   return houseLayout.rooms.some((room) => {
     const [rx, , rz] = room.position
     return (
-      Math.abs(x - rx) <= room.size[0] * 0.5 + 0.5 &&
-      Math.abs(z - rz) <= room.size[2] * 0.5 + 0.5
+      Math.abs(x - rx) <= room.size[0] * 0.5 + margin &&
+      Math.abs(z - rz) <= room.size[2] * 0.5 + margin
     )
   })
+}
+
+function isGoalInsideHouse(goalPosition) {
+  return isPositionInsideHouse(goalPosition, 0.5)
 }
 
 function BallRespawnGuard({ ballRef, goalObject, onOutOfBounds }) {
@@ -11158,6 +11291,7 @@ function App() {
 
   const isFramedViewport = isAdminMode || isVerticalFrameMode
   const renderOutdoorVisualWorld = currentZone === ZONES.outside
+  const showInteriorHouseDetails = currentZone !== ZONES.outside
   const gameView = (
     <main className={`app app-${viewportOrientation}${isFramedViewport ? ' app-framed' : ''}`}>
       <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
@@ -11205,21 +11339,33 @@ function App() {
               ceilingTexturePath={activeCeilingTexturePath}
               hideCeiling={mode === 'customize'}
               hideRoof={mode === 'customize' || currentZone !== ZONES.outside}
+              exteriorOnly={currentZone === ZONES.outside}
             />
-            <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch && canModifyWorld} onOpen={() => canModifyWorld && setIsLightMenuOpen((v) => !v)} mode={mode} />
-            <Dragon playerPositionRef={playerPositionRef} />
+            {showInteriorHouseDetails && (
+              <group userData={{ debugCategory: 'house-interior' }}>
+                <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch && canModifyWorld} onOpen={() => canModifyWorld && setIsLightMenuOpen((v) => !v)} mode={mode} />
+                <Dragon playerPositionRef={playerPositionRef} />
+                <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
+              </group>
+            )}
             {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
-            <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
-            <OutdoorDoor />
-            <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
-            <EnvironmentStation isNear={isNearEnvironmentStation} />
-            <CustomizationStation isNear={isNearCustomizationStation} />
-            <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
+            <group userData={{ debugCategory: 'interactions' }}>
+              <OutdoorDoor />
+              <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
+              {showInteriorHouseDetails && (
+                <>
+                  <EnvironmentStation isNear={isNearEnvironmentStation} />
+                  <CustomizationStation isNear={isNearCustomizationStation} />
+                </>
+              )}
+              <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
+            </group>
           </group>
           <CustomizationLayer
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             objects={editableObjects}
+            hideInteriorObjects={currentZone === ZONES.outside}
             selectedObjectId={selectedObjectId}
             draggingObjectId={draggingObjectId}
             placingObjectId={placingObjectId}
@@ -12000,7 +12146,11 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
   }, [playerPositionRef, playerVelocityRef])
 
   return (
-    <group ref={(el) => { groupRef.current = el; if (catGroupRef) catGroupRef.current = el }} position={[1, 0, 2]}>
+    <group
+      ref={(el) => { groupRef.current = el; if (catGroupRef) catGroupRef.current = el }}
+      position={[1, 0, 2]}
+      userData={{ debugCategory: 'npcs' }}
+    >
       <primitive object={cat} />
     </group>
   )
