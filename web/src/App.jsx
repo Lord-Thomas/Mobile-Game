@@ -237,7 +237,10 @@ const CHARACTER_BASE_COLORS = {
   hair:          '#d39b3f',
   shirt:         '#b4392e',
   pants:         '#252421',
+  pants_details: '#252421',
+  pants_detail_yellow: '#d39b3f',
   shoes:         '#F0F0F0',
+  socks:         '#F0F0F0',
 }
 const CHARACTER_DEFAULT_APPEARANCE = {
   skinColor:        CHARACTER_BASE_COLORS.skin,
@@ -245,15 +248,23 @@ const CHARACTER_DEFAULT_APPEARANCE = {
   eyeColor:         EYE_COLOR_PALETTE[2],
   shirtColor:       CHARACTER_BASE_COLORS.shirt,
   pantsColor:       CHARACTER_BASE_COLORS.pants,
+  pantsDetailsColor: CHARACTER_BASE_COLORS.pants_detail_yellow,
   shoesColor:       CHARACTER_BASE_COLORS.shoes,
+  socksColor:       CHARACTER_BASE_COLORS.socks,
 }
 
-// Convertit un hex color en triplet [r, g, b] normalisé 0-1 pour les uniforms Three.js
+function srgbChannelToLinear(value) {
+  return value <= 0.04045
+    ? value / 12.92
+    : ((value + 0.055) / 1.055) ** 2.4
+}
+
+// Convertit un hex sRGB en triplet linéaire pour les shaders Three.js.
 function charHexToVec(hex) {
   return [
-    parseInt(hex.slice(1, 3), 16) / 255,
-    parseInt(hex.slice(3, 5), 16) / 255,
-    parseInt(hex.slice(5, 7), 16) / 255,
+    srgbChannelToLinear(parseInt(hex.slice(1, 3), 16) / 255),
+    srgbChannelToLinear(parseInt(hex.slice(3, 5), 16) / 255),
+    srgbChannelToLinear(parseInt(hex.slice(5, 7), 16) / 255),
   ]
 }
 
@@ -263,17 +274,21 @@ const CHARACTER_MATERIAL_COLOR_KEYS = {
   hair:          'hairColor',
   shirt:         'shirtColor',
   pants:         'pantsColor',
+  pants_details: 'pantsDetailsColor',
   shoes:         'shoesColor',
+  socks:         'socksColor',
 }
 
 function getCharacterMaterialKey(materialName = '') {
   const normalized = materialName.toLowerCase().replace(/[^a-z0-9]+/g, '_')
-  if (normalized.includes('detail') || normalized.includes('eye') || normalized.includes('mouth') || normalized.includes('socket')) return null
+  if (normalized.includes('eye') || normalized.includes('mouth')) return null
   if (normalized.includes('skin')) return 'skin'
   if (normalized.includes('hair')) return 'hair'
   if (normalized.includes('shirt')) return 'shirt'
+  if (normalized.includes('pants') && normalized.includes('detail')) return 'pants_details'
   if (normalized.includes('pants')) return 'pants'
   if (normalized.includes('shoe') || normalized.includes('boot')) return 'shoes'
+  if (normalized.includes('sock') || normalized.includes('socket')) return 'socks'
   return null
 }
 
@@ -286,19 +301,41 @@ function normalizeMixamoObjectName(name = '') {
 
 // Déclaration de l'uniform dans le fragment shader (inséré après #include <common>)
 const TINT_RECOLOR_UNIFORM_DECL = `#include <common>
-uniform vec3 uZoneColor;`
+uniform vec3 uZoneColor;
+uniform vec3 uDetailColor;`
 
 // Code GLSL appliqué APRÈS le sampling de texture (remplace #include <map_fragment>)
 // On garde #include <map_fragment> INTACT et on ajoute notre logique après
 function makeTintApplyGlsl(baseR, baseG, baseB) {
   const br = baseR.toFixed(5), bg = baseG.toFixed(5), bb = baseB.toFixed(5)
   return `#include <map_fragment>
+vec3 _raw=diffuseColor.rgb;
 vec3 _bC=vec3(${br},${bg},${bb});
 vec3 _luma=vec3(0.2126,0.7152,0.0722);
 float _baseL=max(dot(_bC,_luma),0.001);
-float _pixelL=dot(diffuseColor.rgb,_luma);
+float _pixelL=dot(_raw,_luma);
 float _shade=clamp(_pixelL/_baseL,0.,2.4);
-diffuseColor.rgb=clamp(uZoneColor*_shade,0.,1.);`
+float _tintAmount=smoothstep(0.015,0.09,length(uZoneColor-_bC));
+vec3 _tinted=clamp(uZoneColor*_shade,0.,1.);
+diffuseColor.rgb=mix(_raw,_tinted,_tintAmount);`
+}
+
+function makePantsDetailsTintApplyGlsl(baseR, baseG, baseB, detailBaseR, detailBaseG, detailBaseB) {
+  const br = baseR.toFixed(5), bg = baseG.toFixed(5), bb = baseB.toFixed(5)
+  const dr = detailBaseR.toFixed(5), dg = detailBaseG.toFixed(5), db = detailBaseB.toFixed(5)
+  return `#include <map_fragment>
+vec3 _luma=vec3(0.2126,0.7152,0.0722);
+vec3 _pantsBase=vec3(${br},${bg},${bb});
+vec3 _detailBase=vec3(${dr},${dg},${db});
+float _pixelL=dot(diffuseColor.rgb,_luma);
+float _pantsShade=clamp(_pixelL/max(dot(_pantsBase,_luma),0.001),0.,2.4);
+float _detailShade=clamp(_pixelL/max(dot(_detailBase,_luma),0.001),0.,2.4);
+float _yellow=max(min(diffuseColor.r,diffuseColor.g)-diffuseColor.b*1.35,0.);
+float _warm=max(diffuseColor.r-diffuseColor.b,0.)+max(diffuseColor.g-diffuseColor.b,0.);
+float _detailMask=smoothstep(0.08,0.28,_yellow+_warm*0.18);
+vec3 _pantsColor=clamp(uZoneColor*_pantsShade,0.,1.);
+vec3 _detailColor=clamp(uDetailColor*_detailShade,0.,1.);
+diffuseColor.rgb=mix(_pantsColor,_detailColor,_detailMask);`
 }
 
 const floorSkins = [
@@ -2570,7 +2607,9 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       mats.forEach((mat) => {
         if (!mat || mat._tintRecolorApplied) return
         const materialKey = mat.userData.characterMaterialKey ?? getCharacterMaterialKey(mat.name)
-        const colorKey = CHARACTER_MATERIAL_COLOR_KEYS[materialKey]
+        const colorKey = materialKey === 'pants_details'
+          ? 'pantsColor'
+          : CHARACTER_MATERIAL_COLOR_KEYS[materialKey]
         if (!colorKey) return
 
         const hex = app[colorKey] ?? CHARACTER_DEFAULT_APPEARANCE[colorKey] ?? '#808080'
@@ -2578,19 +2617,32 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
         if (!zoneColorRefs.current[colorKey]) {
           zoneColorRefs.current[colorKey] = colorUniform
         }
+        if (materialKey === 'pants_details' && !zoneColorRefs.current.pantsDetailsColor) {
+          const detailHex = app.pantsDetailsColor ?? CHARACTER_DEFAULT_APPEARANCE.pantsDetailsColor
+          zoneColorRefs.current.pantsDetailsColor = { value: new Vector3(...charHexToVec(detailHex)) }
+        }
 
         // Couleur de base bakée dans le GLSL (calcule le ratio une seule fois)
-        const baseHex = CHARACTER_BASE_COLORS[materialKey] ?? '#808080'
+        const baseHex = materialKey === 'pants_details'
+          ? CHARACTER_BASE_COLORS.pants
+          : CHARACTER_BASE_COLORS[materialKey] ?? '#808080'
         const [bR, bG, bB] = charHexToVec(baseHex)
+        const [dR, dG, dB] = charHexToVec(CHARACTER_BASE_COLORS.pants_detail_yellow)
 
         mat._tintRecolorApplied = true
         mat.color.set('#FFFFFF') // neutre — le shader applique la couleur via le ratio
         mat.customProgramCacheKey = () => `tint-recolor-${materialKey}-v1`
         mat.onBeforeCompile = (shader) => {
           shader.uniforms.uZoneColor = zoneColorRefs.current[colorKey]
+          shader.uniforms.uDetailColor = zoneColorRefs.current.pantsDetailsColor ?? zoneColorRefs.current[colorKey]
           shader.fragmentShader = shader.fragmentShader
             .replace('#include <common>', TINT_RECOLOR_UNIFORM_DECL)
-            .replace('#include <map_fragment>', makeTintApplyGlsl(bR, bG, bB))
+            .replace(
+              '#include <map_fragment>',
+              materialKey === 'pants_details'
+                ? makePantsDetailsTintApplyGlsl(bR, bG, bB, dR, dG, dB)
+                : makeTintApplyGlsl(bR, bG, bB),
+            )
         }
         mat.needsUpdate = true
       })
@@ -2606,7 +2658,7 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       const hex = app[colorKey] ?? CHARACTER_DEFAULT_APPEARANCE[colorKey] ?? '#808080'
       ref.value.set(...charHexToVec(hex))
     })
-  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.shoesColor])
+  }, [appearance?.skinColor, appearance?.hairColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.pantsDetailsColor, appearance?.shoesColor, appearance?.socksColor])
 
   const animationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
@@ -3384,7 +3436,9 @@ function RemotePlayer({
           nextAppearance.eyeColor !== cur.eyeColor ||
           nextAppearance.shirtColor !== cur.shirtColor ||
           nextAppearance.pantsColor !== cur.pantsColor ||
-          nextAppearance.shoesColor !== cur.shoesColor) {
+          nextAppearance.pantsDetailsColor !== cur.pantsDetailsColor ||
+          nextAppearance.shoesColor !== cur.shoesColor ||
+          nextAppearance.socksColor !== cur.socksColor) {
           displayedAppearanceRef.current = nextAppearance
           setDisplayedAppearance({ ...nextAppearance })
         }
@@ -7876,7 +7930,9 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
     { key: 'hairColor',         label: 'Cheveux',           palette: HAIR_COLOR_PALETTE },
     { key: 'shirtColor',        label: 'Haut',              palette: CLOTHING_COLOR_PALETTE },
     { key: 'pantsColor',        label: 'Bas',               palette: CLOTHING_COLOR_PALETTE },
+    { key: 'pantsDetailsColor', label: 'Détails du bas',    palette: CLOTHING_COLOR_PALETTE },
     { key: 'shoesColor',        label: 'Chaussures',        palette: CLOTHING_COLOR_PALETTE },
+    { key: 'socksColor',        label: 'Chaussettes',       palette: CLOTHING_COLOR_PALETTE },
   ]
 
   return (
