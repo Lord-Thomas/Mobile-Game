@@ -6,7 +6,7 @@ import { getRoadLotTransform } from './roads/roadGeometry'
 import { getLibraryTreeConfig } from './trees/treeLibrary'
 
 export const PLAYER_PLOT_SIZE = 32
-export const OUTDOOR_WORLD_SIZE = 80
+export const OUTDOOR_WORLD_SIZE = 360
 export const OUTDOOR_HALF_SIZE = OUTDOOR_WORLD_SIZE / 2
 export const MAIN_ROAD_Z = 22
 export const ROAD_WIDTH = roadLayout.mainRoad.width

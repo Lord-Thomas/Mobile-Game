@@ -4,10 +4,10 @@ import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
 
-export const TERRAIN_COLLIDER_SEGMENTS = 128
-export const TERRAIN_VISUAL_SEGMENTS = 176
+export const TERRAIN_COLLIDER_SEGMENTS = 192
+export const TERRAIN_VISUAL_SEGMENTS = 256
 export const TERRAIN_COLLIDER_SIZE = OUTDOOR_WORLD_SIZE
-export const TERRAIN_VISUAL_SIZE = 188
+export const TERRAIN_VISUAL_SIZE = 376
 export const TERRAIN_HALF_SIZE = TERRAIN_VISUAL_SIZE * 0.5
 
 const terrainSettings = {
@@ -78,14 +78,14 @@ function layeredWaveNoise(x, z, scale) {
 
 function naturalHeight(x, z) {
   const maxAxis = Math.max(Math.abs(x), Math.abs(z))
-  const playableBlend = smoothstep(15, 30, maxAxis)
+  const playableBlend = smoothstep(45, 120, maxAxis)
   const borderBlend = smoothstep(
     OUTDOOR_WORLD_SIZE * 0.5 * terrainSettings.border.start,
     OUTDOOR_WORLD_SIZE * 0.5 * terrainSettings.border.end,
     maxAxis,
   )
-  const distantBlend = smoothstep(42, 88, maxAxis)
-  const mountainMask = smoothstep(58, 92, maxAxis)
+  const distantBlend = smoothstep(118, 184, maxAxis)
+  const mountainMask = smoothstep(136, 188, maxAxis)
   const ridgeNoise = Math.max(
     0,
     layeredWaveNoise(x - 17.8, z + 31.4, 0.024) * 0.72 +

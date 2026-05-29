@@ -51,7 +51,7 @@ export function OutdoorLighting({ active, showSky, castShadows }) {
   return (
     <>
       <color attach="background" args={['#d7edf6']} />
-      <fog attach="fog" args={['#cfe7f1', 34, 92]} />
+      <fog attach="fog" args={['#cfe7f1', 54, 170]} />
       {showSky && <CloudSky sunDirection={OUTDOOR_SUN_DIRECTION} />}
       <hemisphereLight args={['#f4fbff', '#6f8c54', 1.05]} />
       <OutdoorSun castShadows={castShadows} />

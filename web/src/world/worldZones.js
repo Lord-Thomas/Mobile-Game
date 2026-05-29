@@ -116,7 +116,7 @@ export function getZoneAt(x, z) {
   if (getDistanceToPath(x, z) < 0.8) return WORLD_ZONES.PATH
   if (isInsideAnyPlot(x, z, -0.8)) return WORLD_ZONES.LAWN
   if (isInsideAnyPlot(x, z, 1.8)) return WORLD_ZONES.PLOT_FLAT_AREA
-  if (Math.max(Math.abs(x), Math.abs(z)) > 30) return WORLD_ZONES.FOREST_EDGE
+  if (Math.max(Math.abs(x), Math.abs(z)) > OUTDOOR_HALF_SIZE * 0.72) return WORLD_ZONES.FOREST_EDGE
   return WORLD_ZONES.WILD_GRASS
 }
 

@@ -54,6 +54,14 @@ const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
 const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'settings']
+const PUBLIC_BUILD_FLAGS = {
+  showObjectInventory: false,
+  showWeaponInventory: false,
+  showWeaponShop: false,
+  showCharacterCustomization: false,
+}
+const WORLD_CHAT_Z_INDEX_RANGE = [3, 0]
+const WORLD_NAMEPLATE_Z_INDEX_RANGE = [2, 0]
 const SOLO_NAMEPLATE_STORAGE_KEY = 'lab_show_solo_nameplate_v1'
 const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
@@ -212,7 +220,7 @@ const DOOR_INTERACTION_DISTANCE = 1.25
 const PLAY_AREA_LIMITS = {
   interior: { minX: -ROOM_LIMIT, maxX: ROOM_LIMIT, minZ: -ROOM_LIMIT, maxZ: ROOM_LIMIT },
   secondRoom: { minX: -ROOM_LIMIT, maxX: ROOM_LIMIT, minZ: -ROOM_LIMIT, maxZ: ROOM_LIMIT },
-  outside: { minX: -38, maxX: 38, minZ: -38, maxZ: 38 },
+  outside: { minX: -OUTDOOR_HALF_SIZE + 2, maxX: OUTDOOR_HALF_SIZE - 2, minZ: -OUTDOOR_HALF_SIZE + 2, maxZ: OUTDOOR_HALF_SIZE - 2 },
 }
 
 function getUserDisplayName(user) {
@@ -3715,7 +3723,7 @@ function ChatBubbles({ bubblesRef, version = 0 }) {
   if (!bubbles.length) return null
 
   return (
-    <Html position={[0, 1.08, 0]} distanceFactor={8} zIndexRange={[80, 0]}>
+    <Html position={[0, 1.08, 0]} distanceFactor={8} zIndexRange={WORLD_CHAT_Z_INDEX_RANGE}>
       <div className="chat-bubble-stack" data-version={version}>
         {bubbles.map((bubble) => (
           <div key={bubble.id} className="chat-bubble">
@@ -3759,7 +3767,7 @@ function PlayerNameplateAnchor({ playerPositionRef, label, title }) {
 
   return (
     <group ref={groupRef}>
-      <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={[70, 0]}>
+      <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
         <div className="remote-player-nameplate">
           {label && <div className="remote-player-label">{label}</div>}
           {title && (
@@ -3938,7 +3946,7 @@ function RemotePlayer({
     <group ref={groupRef}>
       <PlayerAvatar motion={displayedMotion} appearance={displayedAppearance} />
       {showOverlays && (
-        <Html position={[0, 1.08, 0]} center distanceFactor={8}>
+        <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
           <div className="remote-player-nameplate">
             <div className="remote-player-label">{label}</div>
             {displayedTitle && (
@@ -4365,8 +4373,6 @@ function SettingsPanel({ settings, onToggle }) {
     ['lowResolution', 'Basse resolution', 'Reduit fortement le nombre de pixels a calculer.'],
     ['shadows', 'Ombres', 'Plus joli, mais couteux sur mobile.'],
     ['grass', 'Herbe', "Desactive les brins d'herbe dehors."],
-    ['trees', 'Arbres', 'Reduit les elements visibles dehors.'],
-    ['sky', 'Ciel anime', 'Desactive les nuages et le ciel detaille.'],
   ]
 
   return (
@@ -8640,7 +8646,7 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   )
 }
 
-function CustomizationChoiceMenu({ open, onChooseRoom, onChooseCharacter, onClose }) {
+function CustomizationChoiceMenu({ open, showCharacterCustomization = true, onChooseRoom, onChooseCharacter, onClose }) {
   if (!open) return null
 
   return (
@@ -8650,9 +8656,11 @@ function CustomizationChoiceMenu({ open, onChooseRoom, onChooseCharacter, onClos
         <button type="button" className="skin-action-btn" onClick={onChooseRoom}>
           Piece
         </button>
-        <button type="button" className="skin-action-btn" onClick={onChooseCharacter}>
-          Personnage
-        </button>
+        {showCharacterCustomization && (
+          <button type="button" className="skin-action-btn" onClick={onChooseCharacter}>
+            Personnage
+          </button>
+        )}
         <button type="button" className="skin-close-btn" onClick={onClose}>
           Fermer
         </button>
@@ -8690,11 +8698,12 @@ function EnvironmentMenu({
   onToggleCat,
   ownedMagicBook,
   onBuyMagicBook,
+  showWeaponShop = true,
 }) {
   if (!open) return null
 
   const isAnimalsTab = activeTab === 'animals'
-  const isWeaponsTab = activeTab === 'weapons'
+  const isWeaponsTab = showWeaponShop && activeTab === 'weapons'
   const isFurnitureTab = activeTab === 'furniture'
   const isFloorTab = activeTab === 'floor'
   const skins = isFloorTab ? floorSkins : wallSkins
@@ -8742,13 +8751,15 @@ function EnvironmentMenu({
           >
             Animaux
           </button>
-          <button
-            type="button"
-            className={`env-tab-btn ${isWeaponsTab ? 'active' : ''}`}
-            onClick={() => onTabChange('weapons')}
-          >
-            Armes
-          </button>
+          {showWeaponShop && (
+            <button
+              type="button"
+              className={`env-tab-btn ${isWeaponsTab ? 'active' : ''}`}
+              onClick={() => onTabChange('weapons')}
+            >
+              Armes
+            </button>
+          )}
         </div>
         {isWeaponsTab ? (
           <>
@@ -10699,6 +10710,7 @@ function App() {
 
   const openCharacterCustomizationFromChoice = () => {
     if (!canModifyWorld) return
+    if (!PUBLIC_BUILD_FLAGS.showCharacterCustomization) return
     setIsCustomizationChoiceOpen(false)
     setIsCharacterMenuOpen(true)
   }
@@ -11314,7 +11326,7 @@ function App() {
       <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
       <Canvas
         dpr={renderSettings.dpr}
-        camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 240 }}
+        camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 420 }}
         shadows={{ enabled: performanceSettings.shadows && (!isDebugMode || debugToggles.shadows), type: PCFShadowMap }}
         gl={{
           antialias: renderSettings.antialias,
@@ -11590,7 +11602,7 @@ function App() {
       {showCaptureUi && <CoinsOverlay coins={coins} />}
       {showCaptureUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
-      {showCaptureUi && mode === 'play' && (
+      {showCaptureUi && PUBLIC_BUILD_FLAGS.showWeaponInventory && mode === 'play' && (
         <button
           className="weapon-inventory-btn"
           type="button"
@@ -11618,7 +11630,7 @@ function App() {
       )}
       {showCaptureUi && (
         <CharacterCustomizationMenu
-          open={isCharacterMenuOpen}
+          open={PUBLIC_BUILD_FLAGS.showCharacterCustomization && isCharacterMenuOpen}
           appearance={characterAppearance}
           onApply={setCharacterAppearance}
           onClose={() => setIsCharacterMenuOpen(false)}
@@ -11627,6 +11639,7 @@ function App() {
       {showCaptureUi && canModifyWorld && (
         <CustomizationChoiceMenu
           open={isCustomizationChoiceOpen}
+          showCharacterCustomization={PUBLIC_BUILD_FLAGS.showCharacterCustomization}
           onChooseRoom={openCustomizationMode}
           onChooseCharacter={openCharacterCustomizationFromChoice}
           onClose={() => setIsCustomizationChoiceOpen(false)}
@@ -11634,7 +11647,7 @@ function App() {
       )}
       {showCaptureUi && (
         <BagPanel
-          open={isWeaponMenuOpen}
+          open={PUBLIC_BUILD_FLAGS.showWeaponInventory && isWeaponMenuOpen}
           ownedItems={BAG_ITEM_DEFS.filter((def) => def.id === 'magic_book' ? ownedMagicBook : false)}
           equippedWeapon={equippedWeapon}
           onEquip={(weapon) => { setEquippedWeapon(weapon) }}
@@ -11777,7 +11790,7 @@ function App() {
             <button type="button" onClick={() => rotateSelectedObject(1)} disabled={!selectedObjectId && !placingObjectId}>
               {'>'}
             </button>
-            {selectedObject?.canStore && !placingObjectId && (
+            {PUBLIC_BUILD_FLAGS.showObjectInventory && selectedObject?.canStore && !placingObjectId && (
               <button type="button" onClick={storeSelectedObject}>
                 Ranger
               </button>
@@ -11804,7 +11817,7 @@ function App() {
           )}
         </div>
       )}
-      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
+      {showCaptureUi && PUBLIC_BUILD_FLAGS.showObjectInventory && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
         <ObjectInventorySheet
           open={isObjectInventoryOpen}
           cards={inventoryCards}
@@ -11856,6 +11869,7 @@ function App() {
         onToggleCat={toggleCat}
         ownedMagicBook={ownedMagicBook}
         onBuyMagicBook={buyMagicBook}
+        showWeaponShop={PUBLIC_BUILD_FLAGS.showWeaponShop}
       />
       <div className={`zone-fade${zoneFadeActive ? ' active' : ''}`} />
     </main>
