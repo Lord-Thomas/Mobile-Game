@@ -636,9 +636,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
 
   const publishGrassDebugStats = () => {
     if (typeof window === 'undefined') return
-    const completedChunks = grassChunkCacheRef.current.size
     const writtenChunks = writtenChunkKeysRefs.current.reduce((sum, set) => sum + set.size, 0)
     const mountedBlades = nextGrassOffsetRefs.current.reduce((sum, count) => sum + count, 0)
+    const completedChunks = grassChunkCacheRef.current.size
     let completedBlades = 0
     grassChunkCacheRef.current.forEach((items) => { completedBlades += items.length })
     const timing = grassBuildTimingRef.current
