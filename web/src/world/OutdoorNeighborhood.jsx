@@ -71,6 +71,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showSky = true,
   castShadows = true,
   showPlayerPlot = false,
+  debugStats = false,
 }) {
   return (
     <group userData={{ debugCategory: 'outdoor' }}>
@@ -83,7 +84,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       ))}
       {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} playerPositionRef={playerPositionRef} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />}
-      {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} />}
+      {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} debugStats={debugStats} />}
     </group>
   )
 })

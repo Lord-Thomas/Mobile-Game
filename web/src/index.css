@@ -111,18 +111,37 @@ canvas {
   position: absolute;
   top: 14px;
   left: 14px;
+  right: 14px;
   z-index: 8;
-  width: 188px;
-  padding: 10px 12px;
   display: grid;
-  gap: 5px;
+  grid-template-columns: repeat(4, minmax(164px, 1fr));
+  align-items: start;
+  gap: 8px;
+  max-height: calc(100vh - 28px);
+  overflow: hidden;
+  color: #f6fbff;
+  font-size: 11px;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.render-stats-panel {
+  min-width: 0;
+  max-height: calc(100vh - 28px);
+  padding: 9px 10px;
+  display: grid;
+  gap: 4px;
+  overflow: auto;
   border: 1px solid rgba(230, 240, 248, 0.22);
   background: rgba(12, 18, 24, 0.76);
-  color: #f6fbff;
-  font-size: 12px;
-  line-height: 1.25;
   pointer-events: auto;
   backdrop-filter: blur(8px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
+}
+
+.render-stats-tall-panel {
+  max-height: calc(100vh - 28px);
 }
 
 .render-stats-controls {
@@ -152,14 +171,20 @@ canvas {
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
 }
 
 .render-stats-row span {
   color: rgba(235, 244, 250, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .render-stats-row strong {
   font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .render-stats-divider {
@@ -173,6 +198,33 @@ canvas {
   color: #ffe56a;
   font-size: 10px;
   font-weight: 900;
+}
+
+@media (max-width: 920px) {
+  .render-stats {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    max-height: calc(100vh - 28px);
+    overflow: auto;
+    pointer-events: auto;
+  }
+
+  .render-stats-panel {
+    max-height: 44vh;
+  }
+}
+
+@media (max-width: 560px) {
+  .render-stats {
+    top: 8px;
+    right: 8px;
+    left: 8px;
+    grid-template-columns: 1fr;
+    max-height: calc(100vh - 16px);
+  }
+
+  .render-stats-panel {
+    max-height: 34vh;
+  }
 }
 
 .fps-overlay {

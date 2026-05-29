@@ -1,19 +1,23 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, MathUtils, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
+import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, Frustum, MathUtils, Matrix4, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
 import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
 
 const dummy = new Object3D()
 const _cameraForward = new Vector3()
+const _grassDebugFrustum = new Frustum()
+const _grassDebugProjectionMatrix = new Matrix4()
+const _grassDebugPoint = new Vector3()
 const grassPlacementSettings = {
   rotationRandomness: Math.PI,
   positionJitter: 0.45,
   minScale: 0.18,
   maxScale: 0.3,
 }
+const GRASS_SCALE_RANGE = grassPlacementSettings.maxScale - grassPlacementSettings.minScale
 const GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const GRASS_GRID_STEP_NEAR = 0.13
@@ -34,7 +38,9 @@ const QUADRANTS = [
   { id: 'sw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
 ]
 const MAX_QUADRANT_INSTANCES = 350_000
-const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 4
+const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 8
+const GRASS_DEBUG_ESTIMATE_INTERVAL_MS = 600
+const GRASS_DEBUG_MAX_SAMPLES = 60_000
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
 const grassBottomColor = new Color('#638b0f')
 const grassMiddleColor = new Color('#6f970e')
@@ -125,6 +131,10 @@ function seededRandom(seed) {
   return MathUtils.euclideanModulo(Math.sin(seed * 12.9898) * 43758.5453, 1)
 }
 
+function grassHash2(x, z) {
+  return MathUtils.euclideanModulo(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453123, 1)
+}
+
 function clamp01(value) {
   return Math.min(1, Math.max(0, value))
 }
@@ -134,9 +144,9 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t)
 }
 
-function getTerrainSlope(x, z) {
+function getTerrainSlope(x, z, baseHeight) {
   const step = 0.25
-  const h = getTerrainHeight(x, z)
+  const h = baseHeight !== undefined ? baseHeight : getTerrainHeight(x, z)
   const dx = (getTerrainHeight(x + step, z) - h) / step
   const dz = (getTerrainHeight(x, z + step) - h) / step
   return Math.sqrt(dx * dx + dz * dz)
@@ -152,14 +162,13 @@ function makeRockInstance(x, z, seed) {
 }
 
 function makeGrassInstance(x, z, seed) {
-  const scaleRange = grassPlacementSettings.maxScale - grassPlacementSettings.minScale
-  const slope = getTerrainSlope(x, z)
-  // Lift blades on slopes so they don't embed into the terrain face
+  const h = getTerrainHeight(x, z)
+  const slope = getTerrainSlope(x, z, h)
   const slopeLift = slope * 0.5
   return {
-    position: [x, getTerrainHeight(x, z) + 0.032 + slopeLift, z],
+    position: [x, h + 0.032 + slopeLift, z],
     rotation: [0, (seededRandom(seed + 18) - 0.5) * grassPlacementSettings.rotationRandomness * 2, 0],
-    scale: grassPlacementSettings.minScale + seededRandom(seed + 9) * scaleRange,
+    scale: grassPlacementSettings.minScale + seededRandom(seed + 9) * GRASS_SCALE_RANGE,
     colorShift: seededRandom(seed + 41),
   }
 }
@@ -414,7 +423,7 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
   }
 }
 
-function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
+function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false }) {
   const rocks = useMemo(() => createRockCover(), [])
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
   const ref = useRef()
@@ -436,6 +445,14 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   const shaderRef = useRef(null)
   const writtenChunkKeysRefs = useRef([new Set(), new Set(), new Set(), new Set()])
   const nextGrassOffsetRefs = useRef([0, 0, 0, 0])
+  const lastGrassDebugEstimateAtRef = useRef(0)
+  const grassVisibilityEstimateRef = useRef(null)
+  const grassBuildTimingRef = useRef({
+    samples: 0,
+    totalMs: 0,
+    maxMs: 0,
+    lastMs: 0,
+  })
 
   const baseTexture = useTexture(GRASS_TEXTURE)
   const grassTexture = useMemo(() => {
@@ -511,13 +528,17 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     const mesh = grassMeshRefs.current[qi]
     if (!mesh) return
     const startIndex = nextGrassOffsetRefs.current[qi]
+    const arr = mesh.instanceMatrix.array
     items.forEach((grass) => {
       if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
-      dummy.position.set(...grass.position)
-      dummy.rotation.set(0, 0, 0)
-      dummy.scale.setScalar(grass.scale)
-      dummy.updateMatrix()
-      dummy.matrix.toArray(mesh.instanceMatrix.array, nextGrassOffsetRefs.current[qi] * 16)
+      const i = nextGrassOffsetRefs.current[qi] * 16
+      const s = grass.scale
+      const p = grass.position
+      // Column-major TRS matrix with identity rotation (billboard handled in vertex shader)
+      arr[i]    = s; arr[i+1]  = 0; arr[i+2]  = 0; arr[i+3]  = 0
+      arr[i+4]  = 0; arr[i+5]  = s; arr[i+6]  = 0; arr[i+7]  = 0
+      arr[i+8]  = 0; arr[i+9]  = 0; arr[i+10] = s; arr[i+11] = 0
+      arr[i+12] = p[0]; arr[i+13] = p[1]; arr[i+14] = p[2]; arr[i+15] = 1
       nextGrassOffsetRefs.current[qi] += 1
     })
     writtenChunkKeysRefs.current[qi].add(key)
@@ -532,6 +553,87 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     if (sphere) mesh.boundingSphere = sphere
   }
 
+  const recordGrassBuildTime = (durationMs) => {
+    if (!Number.isFinite(durationMs)) return
+    const timing = grassBuildTimingRef.current
+    timing.samples += 1
+    timing.totalMs += durationMs
+    timing.lastMs = durationMs
+    timing.maxMs = Math.max(timing.maxMs, durationMs)
+  }
+
+  const estimateGrassVisibility = (camera) => {
+    const mountedBlades = nextGrassOffsetRefs.current.reduce((sum, count) => sum + count, 0)
+    if (!debugStats || !camera || mountedBlades <= 0) return null
+
+    const playerPosition = playerPositionRef?.current
+    if (!playerPosition) return null
+
+    _grassDebugProjectionMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    _grassDebugFrustum.setFromProjectionMatrix(_grassDebugProjectionMatrix)
+
+    const sampleStride = Math.max(1, Math.ceil(mountedBlades / GRASS_DEBUG_MAX_SAMPLES))
+    let visited = 0
+    let sampled = 0
+    let kept = 0
+    let inFrustum = 0
+    let keptInFrustum = 0
+
+    writtenChunkKeysRefs.current.forEach((keys) => {
+      keys.forEach((key) => {
+        const items = grassChunkCacheRef.current.get(key)
+        if (!items) return
+
+        items.forEach((grass) => {
+          visited += 1
+          if (visited % sampleStride !== 0) return
+
+          sampled += 1
+          const [x, y, z] = grass.position
+          const dx = x - playerPosition.x
+          const dz = z - playerPosition.z
+          const distanceSq = dx * dx + dz * dz
+          const fullDensityRadiusSq = GRASS_FULL_DENSITY_RADIUS * GRASS_FULL_DENSITY_RADIUS
+          const thinningRadiusSq = GRASS_THINNING_RADIUS * GRASS_THINNING_RADIUS
+          const thinningT = clamp01(
+            (distanceSq - fullDensityRadiusSq)
+              / Math.max(thinningRadiusSq - fullDensityRadiusSq, 0.0001),
+          )
+          let keepProbability = 1 + (GRASS_MIN_KEEP_PROBABILITY - 1) * thinningT
+          const playerDistance = Math.sqrt(distanceSq)
+          const cameraDistFade = smoothstep(8, 20, playerDistance)
+
+          if (playerDistance > 0.0001) {
+            const toGrassX = dx / playerDistance
+            const toGrassZ = dz / playerDistance
+            const cameraDot = toGrassX * _cameraForward.x + toGrassZ * _cameraForward.z
+            const cameraAngleFactor = smoothstep(-0.8, 0.2, cameraDot)
+            const cameraKeep = 0.3 + (1 - 0.3) * cameraAngleFactor
+            keepProbability *= 1 + (cameraKeep - 1) * cameraDistFade
+          }
+
+          const isKept = grassHash2(x, z) <= keepProbability
+          _grassDebugPoint.set(x, y, z)
+          const isInFrustum = _grassDebugFrustum.containsPoint(_grassDebugPoint)
+
+          if (isKept) kept += 1
+          if (isInFrustum) inFrustum += 1
+          if (isKept && isInFrustum) keptInFrustum += 1
+        })
+      })
+    })
+
+    const scale = sampled > 0 ? mountedBlades / sampled : 0
+    return {
+      sampleStride,
+      sampled,
+      estimatedKeptBlades: Math.round(kept * scale),
+      estimatedFrustumBlades: Math.round(inFrustum * scale),
+      estimatedKeptFrustumBlades: Math.round(keptInFrustum * scale),
+      estimatedHiddenBlades: Math.max(0, mountedBlades - Math.round(kept * scale)),
+    }
+  }
+
   const publishGrassDebugStats = () => {
     if (typeof window === 'undefined') return
     const completedChunks = grassChunkCacheRef.current.size
@@ -539,6 +641,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     const mountedBlades = nextGrassOffsetRefs.current.reduce((sum, count) => sum + count, 0)
     let completedBlades = 0
     grassChunkCacheRef.current.forEach((items) => { completedBlades += items.length })
+    const timing = grassBuildTimingRef.current
     window.__grassDebug = {
       queuedChunks: grassChunkQueueRef.current.length,
       pendingChunks: pendingGrassChunksRef.current.size,
@@ -549,6 +652,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       mountedChunks: writtenChunks,
       mountedBlades,
       completedBlades,
+      chunkBuildLastMs: timing.lastMs,
+      chunkBuildAvgMs: timing.samples > 0 ? timing.totalMs / timing.samples : 0,
+      chunkBuildMaxMs: timing.maxMs,
+      visibilityEstimate: grassVisibilityEstimateRef.current,
     }
   }
 
@@ -572,7 +679,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     while (true) {
       const nextKey = grassChunkQueueRef.current.shift()
       if (!nextKey) break
+      const chunkStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
       const grass = buildGrassChunk(nextKey)
+      if (typeof performance !== 'undefined') recordGrassBuildTime(performance.now() - chunkStartedAt)
       grassChunkCacheRef.current.set(nextKey, grass)
       pendingGrassChunksRef.current.delete(nextKey)
       writeChunkToGPU(nextKey, grass)
@@ -606,7 +715,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
 
     immediateKeys.forEach((key) => {
       if (!grassChunkCacheRef.current.has(key)) {
+        const chunkStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
         const grass = buildGrassChunk(key)
+        if (typeof performance !== 'undefined') recordGrassBuildTime(performance.now() - chunkStartedAt)
         grassChunkCacheRef.current.set(key, grass)
       }
       pendingGrassChunksRef.current.delete(key)
@@ -658,6 +769,35 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, allGrassChunkKeys])
 
+  // Mise à jour incrémentale : ajoute les nouveaux chunks sans effacer le buffer GPU.
+  // Les chunks stale hors rayon de thinning sont masqués automatiquement par le vertex shader.
+  const updateGrassQueueIncremental = (centerChunkX, centerChunkZ) => {
+    const activeKeys = getActiveGrassChunkKeys(allGrassChunkKeys, centerChunkX, centerChunkZ)
+    activeGrassCenterRef.current = getGrassChunkKey(centerChunkX, centerChunkZ)
+    activeGrassTargetKeysRef.current = new Set(activeKeys)
+
+    activeKeys.forEach((key) => {
+      const [kx, kz] = key.split(':').map(Number)
+      const qi = getChunkQuadrantIndex(kx, kz)
+      if (writtenChunkKeysRefs.current[qi].has(key)) return
+      if (pendingGrassChunksRef.current.has(key)) return
+
+      const cached = grassChunkCacheRef.current.get(key)
+      if (cached) {
+        pendingGPUWriteRef.current.push({ key, grass: cached })
+      } else {
+        pendingGrassChunksRef.current.add(key)
+        grassChunkQueueRef.current.push(key)
+      }
+    })
+
+    grassChunkQueueRef.current.sort((a, b) => (
+      getGrassChunkDistance(a, centerChunkX, centerChunkZ) - getGrassChunkDistance(b, centerChunkX, centerChunkZ)
+    ))
+
+    publishGrassDebugStats()
+  }
+
   useFrame(() => {
     if (!active) return
 
@@ -669,7 +809,15 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
       const centerChunkZ = getGrassChunkIndex(playerPosition.z)
       const nextCenterKey = getGrassChunkKey(centerChunkX, centerChunkZ)
       if (activeGrassCenterRef.current !== nextCenterKey) {
-        initGrassQueue(playerPosition)
+        // Grand saut (téléportation) : reset complet. Mouvement normal : update incrémental.
+        const prevKey = activeGrassCenterRef.current
+        const [prevCX, prevCZ] = prevKey ? prevKey.split(':').map(Number) : [centerChunkX, centerChunkZ]
+        const drift = Math.max(Math.abs(centerChunkX - prevCX), Math.abs(centerChunkZ - prevCZ))
+        if (drift > GRASS_ACTIVE_CHUNK_RADIUS) {
+          initGrassQueue(playerPosition)
+        } else {
+          updateGrassQueueIncremental(centerChunkX, centerChunkZ)
+        }
       }
     }
 
@@ -693,6 +841,15 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true }) {
     _cameraForward.y = 0
     if (_cameraForward.lengthSq() > 0.0001) _cameraForward.normalize()
     shader.uniforms.uCameraForward.value.copy(_cameraForward)
+
+    if (debugStats && typeof performance !== 'undefined') {
+      const now = performance.now()
+      if (now - lastGrassDebugEstimateAtRef.current >= GRASS_DEBUG_ESTIMATE_INTERVAL_MS) {
+        lastGrassDebugEstimateAtRef.current = now
+        grassVisibilityEstimateRef.current = estimateGrassVisibility(state.camera)
+        publishGrassDebugStats()
+      }
+    }
   })
 
   // Nettoyage au démontage

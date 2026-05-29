@@ -9286,72 +9286,87 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
     ? [
         ['G queue', stats.grassDebug.queuedChunks.toLocaleString('fr-FR')],
         ['G pending', stats.grassDebug.pendingChunks.toLocaleString('fr-FR')],
+        ['G GPU wait', (stats.grassDebug.pendingGPUWrites ?? 0).toLocaleString('fr-FR')],
         ['G active', stats.grassDebug.activeChunk ?? '-'],
         ['G target', (stats.grassDebug.targetChunks ?? 0).toLocaleString('fr-FR')],
         ['G done', stats.grassDebug.completedChunks.toLocaleString('fr-FR')],
         ['G mounted', stats.grassDebug.mountedChunks.toLocaleString('fr-FR')],
-        ['G visible', (stats.grassDebug.mountedBlades ?? 0).toLocaleString('fr-FR')],
+        ['G mounted blades', (stats.grassDebug.mountedBlades ?? 0).toLocaleString('fr-FR')],
         ['G blades', stats.grassDebug.completedBlades.toLocaleString('fr-FR')],
+        ['G build last', `${(stats.grassDebug.chunkBuildLastMs ?? 0).toFixed(2)} ms`],
+        ['G build avg', `${(stats.grassDebug.chunkBuildAvgMs ?? 0).toFixed(2)} ms`],
+        ['G build max', `${(stats.grassDebug.chunkBuildMaxMs ?? 0).toFixed(2)} ms`],
+        ...(stats.grassDebug.visibilityEstimate
+          ? [
+              ['G est kept', stats.grassDebug.visibilityEstimate.estimatedKeptBlades.toLocaleString('fr-FR')],
+              ['G est hidden', stats.grassDebug.visibilityEstimate.estimatedHiddenBlades.toLocaleString('fr-FR')],
+              ['G est frustum', stats.grassDebug.visibilityEstimate.estimatedFrustumBlades.toLocaleString('fr-FR')],
+              ['G est drawn', stats.grassDebug.visibilityEstimate.estimatedKeptFrustumBlades.toLocaleString('fr-FR')],
+              ['G sample', `${stats.grassDebug.visibilityEstimate.sampled.toLocaleString('fr-FR')} / ${stats.grassDebug.visibilityEstimate.sampleStride}`],
+            ]
+          : []),
       ]
     : []
+  const renderDebugRows = (items, keyPrefix = '') => items.map(([label, value]) => (
+    <div className="render-stats-row" key={`${keyPrefix}${label}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  ))
 
   return (
     <aside className="render-stats" aria-label="Statistiques de rendu">
-      <div className="render-stats-controls">
-        {[
-          ['grass', 'Herbe'],
-          ['trees', 'Arbres'],
-          ['terrain', 'Terrain'],
-          ['sky', 'Ciel'],
-          ['shadows', 'Ombres'],
-          ['house', 'Maison'],
-          ['player', 'Joueur'],
-          ['plot', 'Parcelle'],
-          ['portrait', '9:16'],
-        ].map(([key, label]) => (
-          <button
-            className={toggles[key] ? 'is-active' : ''}
-            key={key}
-            type="button"
-            onClick={() => onToggle(key)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="render-stats-panel render-stats-controls-panel">
+        <div className="render-stats-section-title">Toggles</div>
+        <div className="render-stats-controls">
+          {[
+            ['grass', 'Herbe'],
+            ['trees', 'Arbres'],
+            ['terrain', 'Terrain'],
+            ['sky', 'Ciel'],
+            ['shadows', 'Ombres'],
+            ['house', 'Maison'],
+            ['player', 'Joueur'],
+            ['plot', 'Parcelle'],
+            ['portrait', '9:16'],
+          ].map(([key, label]) => (
+            <button
+              className={toggles[key] ? 'is-active' : ''}
+              key={key}
+              type="button"
+              onClick={() => onToggle(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      {rows.map(([label, value]) => (
-        <div className="render-stats-row" key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
+
+      <div className="render-stats-panel">
+        <div className="render-stats-section-title">Rendu</div>
+        {renderDebugRows(rows, 'render-')}
+      </div>
+
+      {grassRows.length > 0 && (
+        <div className="render-stats-panel render-stats-tall-panel">
+          <div className="render-stats-section-title">Herbe</div>
+          {renderDebugRows(grassRows, 'grass-')}
         </div>
-      ))}
-      <div className="render-stats-divider" />
-      {grassRows.map(([label, value]) => (
-        <div className="render-stats-row" key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
-        </div>
-      ))}
-      {grassRows.length > 0 && <div className="render-stats-divider" />}
+      )}
+
       {drawCallRows.length > 0 && (
-        <div className="render-stats-section-title">Draw calls / categorie</div>
-      )}
-      {drawCallRows.map(([label, value]) => (
-        <div className="render-stats-row" key={`draw-${label}`}>
-          <span>{label}</span>
-          <strong>{value}</strong>
+        <div className="render-stats-panel">
+          <div className="render-stats-section-title">Draw calls / categorie</div>
+          {renderDebugRows(drawCallRows, 'draw-')}
         </div>
-      ))}
-      {drawCallRows.length > 0 && <div className="render-stats-divider" />}
+      )}
+
       {triangleRows.length > 0 && (
-        <div className="render-stats-section-title">Triangles / categorie</div>
-      )}
-      {triangleRows.map(([label, value]) => (
-        <div className="render-stats-row" key={`tri-${label}`}>
-          <span>{label}</span>
-          <strong>{value}</strong>
+        <div className="render-stats-panel">
+          <div className="render-stats-section-title">Triangles / categorie</div>
+          {renderDebugRows(triangleRows, 'tri-')}
         </div>
-      ))}
+      )}
     </aside>
   )
 }
@@ -11395,6 +11410,7 @@ function App() {
             showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
             castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
             showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
+            debugStats={isDebugMode}
           />
         )}
         {hasRemotePlayer && (
