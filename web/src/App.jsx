@@ -55,13 +55,14 @@ const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
 const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'settings']
 const PUBLIC_BUILD_FLAGS = {
-  showObjectInventory: false,
+  showObjectInventory: true,
   showWeaponInventory: false,
   showWeaponShop: false,
   showCharacterCustomization: false,
 }
 const WORLD_CHAT_Z_INDEX_RANGE = [3, 0]
 const WORLD_NAMEPLATE_Z_INDEX_RANGE = [2, 0]
+const FREE_CAMERA_SPEED = 8
 const SOLO_NAMEPLATE_STORAGE_KEY = 'lab_show_solo_nameplate_v1'
 const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
@@ -2168,6 +2169,7 @@ function Player({
   equippedWeapon = null,
   playerBodyYawRef = null,
   appearance = null,
+  freeCameraActive = false,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -2265,6 +2267,20 @@ function Player({
 
     const key = keyboardRef.current
     const touch = touchRef.current
+
+    if (freeCameraActive) {
+      key.forward = false
+      key.back = false
+      key.left = false
+      key.right = false
+      key.actionQueued = false
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
+      setPlayerMotion((current) => (current === 'idle' ? current : 'idle'))
+      return
+    }
 
     if (seatedState?.phase) {
       const seat = seatedState.seat
@@ -9426,6 +9442,180 @@ function AdaptiveCameraFov() {
   return null
 }
 
+function FreeCameraController({ active, touchRef }) {
+  const { camera, gl } = useThree()
+  const keysRef = useRef({
+    forward: false,
+    back: false,
+    left: false,
+    right: false,
+    up: false,
+    down: false,
+  })
+  const forwardRef = useRef(new Vector3())
+  const rightRef = useRef(new Vector3())
+  const focusRef = useRef(new Vector3())
+  const pointerDownRef = useRef(null)
+  const raycasterRef = useRef(new Raycaster())
+  const pointerRef = useRef(new Vector2())
+
+  useEffect(() => {
+    if (!active) {
+      keysRef.current.forward = false
+      keysRef.current.back = false
+      keysRef.current.left = false
+      keysRef.current.right = false
+      keysRef.current.up = false
+      keysRef.current.down = false
+      return undefined
+    }
+
+    const direction = forwardRef.current
+    camera.getWorldDirection(direction)
+    touchRef.current.cameraYaw = Math.atan2(-direction.x, -direction.z)
+    touchRef.current.cameraPitch = MathUtils.clamp(Math.asin(MathUtils.clamp(direction.y, -1, 1)), -0.8, 0.8)
+    focusRef.current.copy(camera.position).addScaledVector(direction, CAMERA_DISTANCE)
+
+    const setKey = (event, pressed) => {
+      if (isTextInputEvent(event)) return
+      const key = getKeyboardKey(event)
+      if (key === 'z' || key === 'w' || key === 'arrowup') keysRef.current.forward = pressed
+      if (key === 's' || key === 'arrowdown') keysRef.current.back = pressed
+      if (key === 'q' || key === 'a' || key === 'arrowleft') keysRef.current.left = pressed
+      if (key === 'd' || key === 'arrowright') keysRef.current.right = pressed
+      if (key === ' ' || key === 'space') {
+        event.preventDefault()
+        keysRef.current.up = pressed
+      }
+      if (key === 'shift') {
+        event.preventDefault()
+        keysRef.current.down = pressed
+      }
+    }
+
+    const onKeyDown = (event) => setKey(event, true)
+    const onKeyUp = (event) => setKey(event, false)
+    const resetKeys = () => {
+      keysRef.current.forward = false
+      keysRef.current.back = false
+      keysRef.current.left = false
+      keysRef.current.right = false
+      keysRef.current.up = false
+      keysRef.current.down = false
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', resetKeys)
+    window.addEventListener('pagehide', resetKeys)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', resetKeys)
+      window.removeEventListener('pagehide', resetKeys)
+      resetKeys()
+    }
+  }, [active, camera, touchRef])
+
+  useEffect(() => {
+    if (!active) return undefined
+
+    const element = gl.domElement
+    const onPointerDown = (event) => {
+      if (event.button !== 0) return
+      pointerDownRef.current = { x: event.clientX, y: event.clientY }
+    }
+    const onPointerUp = (event) => {
+      if (event.button !== 0 || !pointerDownRef.current) return
+      const dx = event.clientX - pointerDownRef.current.x
+      const dy = event.clientY - pointerDownRef.current.y
+      pointerDownRef.current = null
+      if (Math.hypot(dx, dy) > 6) return
+
+      const rect = element.getBoundingClientRect()
+      pointerRef.current.set(
+        ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+        -(((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1),
+      )
+      raycasterRef.current.setFromCamera(pointerRef.current, camera)
+      const ray = raycasterRef.current.ray
+      if (Math.abs(ray.direction.y) < 0.0001) return
+      const t = -ray.origin.y / ray.direction.y
+      if (t <= 0) return
+      focusRef.current.copy(ray.origin).addScaledVector(ray.direction, t)
+    }
+
+    element.addEventListener('pointerdown', onPointerDown)
+    element.addEventListener('pointerup', onPointerUp)
+
+    return () => {
+      element.removeEventListener('pointerdown', onPointerDown)
+      element.removeEventListener('pointerup', onPointerUp)
+      pointerDownRef.current = null
+    }
+  }, [active, camera, gl])
+
+  useFrame((_, delta) => {
+    if (!active) return
+
+    const keys = keysRef.current
+    const touch = touchRef.current
+    const forward = forwardRef.current
+    const right = rightRef.current
+    const focus = focusRef.current
+
+    const cameraYawSpeed = 2.9
+    const cameraPitchSpeed = 2.1
+    if (touch.lookActive) {
+      touch.cameraYaw -= touch.lookX * cameraYawSpeed * delta
+      touch.cameraPitch = MathUtils.clamp(
+        touch.cameraPitch - touch.lookY * cameraPitchSpeed * delta,
+        -0.8,
+        0.8,
+      )
+    } else {
+      touch.lookX = 0
+      touch.lookY = 0
+    }
+
+    const pitch = touch.cameraPitch
+    const yaw = touch.cameraYaw
+    const horizontal = Math.cos(pitch)
+    forward.set(-Math.sin(yaw) * horizontal, 0, -Math.cos(yaw) * horizontal)
+    if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1)
+    forward.normalize()
+    right.set(-forward.z, 0, forward.x)
+
+    const moveForward = (keys.forward ? 1 : 0) - (keys.back ? 1 : 0)
+    const moveRight = (keys.right ? 1 : 0) - (keys.left ? 1 : 0)
+    const moveUp = (keys.up ? 1 : 0) - (keys.down ? 1 : 0)
+
+    const length = Math.hypot(moveForward, moveRight, moveUp)
+    if (length > 0) {
+      const speed = FREE_CAMERA_SPEED * delta / length
+      focus.x += (forward.x * moveForward + right.x * moveRight) * speed
+      focus.y += moveUp * speed
+      focus.z += (forward.z * moveForward + right.z * moveRight) * speed
+    }
+
+    const orbitDistance = MathUtils.clamp(
+      touch.cameraDistance ?? CAMERA_DISTANCE,
+      CAMERA_SETTINGS.interior.minDistance ?? 1.6,
+      CAMERA_SETTINGS.outside.maxDistance ?? 6,
+    )
+    const horizontalDistance = orbitDistance * horizontal
+    camera.position.set(
+      focus.x + Math.sin(yaw) * horizontalDistance,
+      focus.y + Math.sin(pitch) * orbitDistance,
+      focus.z + Math.cos(yaw) * horizontalDistance,
+    )
+    camera.lookAt(focus)
+  })
+
+  return null
+}
+
 function App() {
   const viewportOrientation = useMobileViewportSync()
   const isThumbnailTool = useMemo(() => {
@@ -9501,6 +9691,7 @@ function App() {
   const [renderStats, setRenderStats] = useState(null)
   const [rendererInfo, setRendererInfo] = useState(null)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
+  const [freeCameraActive, setFreeCameraActive] = useState(false)
   const [debugToggles, setDebugToggles] = useState({
     grass: true,
     trees: true,
@@ -9564,6 +9755,31 @@ function App() {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [])
+
+  useEffect(() => {
+    if (!isLocalNetwork) {
+      setFreeCameraActive(false)
+      return undefined
+    }
+
+    const onKeyDown = (event) => {
+      if (isTextInputEvent(event)) return
+      if (getKeyboardKey(event) !== 'l') return
+      if (event.repeat) return
+      event.preventDefault()
+      touchRef.current.moveX = 0
+      touchRef.current.moveY = 0
+      touchRef.current.lookX = 0
+      touchRef.current.lookY = 0
+      touchRef.current.lookActive = false
+      touchRef.current.actionQueued = false
+      touchRef.current.emoteQueued = null
+      setFreeCameraActive((current) => !current)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isLocalNetwork])
 
   const ballRef = useRef()
   const playerPositionRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
@@ -10807,7 +11023,6 @@ function App() {
   }
 
   const startCharge = useCallback(() => {
-    if (currentZone !== ZONES.outside) return
     if (mode !== 'play') return
     if (equippedWeapon !== 'magic_book') return
     if (isChargingRef.current) return
@@ -10821,7 +11036,7 @@ function App() {
     const pos = playerPositionRef.current
     chargePosRef.current = { x: pos.x, z: pos.z }
     chargeYawRef.current = playerBodyYawRef.current + Math.PI // +π car conventions opposées entre body yaw et direction fireball
-  }, [currentZone, mode, equippedWeapon])
+  }, [mode, equippedWeapon])
 
   const launchFromCharge = useCallback(() => {
     isChargingRef.current = false
@@ -11342,6 +11557,7 @@ function App() {
         resize={{ debounce: 80 }}
       >
         <AdaptiveCameraFov />
+        <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
         <MultiplayerBridge
@@ -11542,6 +11758,7 @@ function App() {
               equippedWeapon={equippedWeapon}
               playerBodyYawRef={playerBodyYawRef}
               appearance={characterAppearance}
+              freeCameraActive={isLocalNetwork && freeCameraActive}
             />
           )}
           <OutdoorDoorTrigger
@@ -11594,7 +11811,7 @@ function App() {
       {mode === 'play' && (
         <ControlsOverlay
           touchRef={touchRef}
-          adminCameraControls={isAdminMode || isVerticalFrameMode}
+          adminCameraControls={isAdminMode || isVerticalFrameMode || (isLocalNetwork && freeCameraActive)}
           uiHidden={!showCaptureUi}
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
@@ -11602,6 +11819,9 @@ function App() {
       {showCaptureUi && <CoinsOverlay coins={coins} />}
       {showCaptureUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
+      {showCaptureUi && isLocalNetwork && freeCameraActive && (
+        <div className="free-camera-badge">Camera libre</div>
+      )}
       {showCaptureUi && PUBLIC_BUILD_FLAGS.showWeaponInventory && mode === 'play' && (
         <button
           className="weapon-inventory-btn"
@@ -11618,7 +11838,7 @@ function App() {
           <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
         </div>
       )}
-      {showCaptureUi && equippedWeapon === 'magic_book' && currentZone === ZONES.outside && mode === 'play' && (
+      {showCaptureUi && equippedWeapon === 'magic_book' && mode === 'play' && (
         <button
           className="fireball-btn"
           type="button"
