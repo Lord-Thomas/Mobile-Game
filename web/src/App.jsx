@@ -56,9 +56,9 @@ const CHAT_MAX_VISIBLE_BUBBLES = 4
 const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'settings']
 const PUBLIC_BUILD_FLAGS = {
   showObjectInventory: true,
-  showWeaponInventory: false,
-  showWeaponShop: false,
-  showCharacterCustomization: false,
+  showWeaponInventory: true,
+  showWeaponShop: true,
+  showCharacterCustomization: true,
 }
 const WORLD_CHAT_Z_INDEX_RANGE = [3, 0]
 const WORLD_NAMEPLATE_Z_INDEX_RANGE = [2, 0]
