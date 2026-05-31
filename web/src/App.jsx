@@ -57,8 +57,8 @@ const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'setti
 const PUBLIC_BUILD_FLAGS = {
   showObjectInventory: true,
   showWeaponInventory: true,
-  showWeaponShop: true,
-  showCharacterCustomization: true,
+  showWeaponShop: false,
+  showCharacterCustomization: false,
 }
 const WORLD_CHAT_Z_INDEX_RANGE = [3, 0]
 const WORLD_NAMEPLATE_Z_INDEX_RANGE = [2, 0]
