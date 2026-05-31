@@ -1432,26 +1432,30 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .object-inventory-content {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 50%;
+  right: auto;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  width: min(720px, calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px));
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  max-height: min(48dvh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - 96px));
+  max-height: min(72dvh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 88px));
   padding:
-    12px
-    max(12px, env(safe-area-inset-right))
-    calc(12px + env(safe-area-inset-bottom))
-    max(12px, env(safe-area-inset-left));
-  background: rgba(12, 19, 27, 0.96);
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 20px 20px 0 0;
+    16px
+    16px
+    16px
+    16px;
+  background: linear-gradient(168deg, rgba(18, 26, 38, 0.97) 0%, rgba(10, 15, 22, 0.98) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
   color: #f8fbff;
   pointer-events: auto;
   backdrop-filter: blur(12px);
   overflow: hidden;
-  box-shadow: 0 -16px 42px rgba(0, 0, 0, 0.28);
+  box-shadow:
+    0 22px 60px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .object-inventory-header {
@@ -1465,7 +1469,7 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .object-inventory-header h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 20px;
   line-height: 1;
 }
 
@@ -1486,9 +1490,11 @@ html[data-chat-open='true'] .game-chat-panel {
   display: flex;
   gap: 6px;
   overflow-x: auto;
-  margin-bottom: 8px;
-  padding-bottom: 2px;
+  margin-bottom: 10px;
+  padding: 4px;
   flex: 0 0 auto;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
   scrollbar-width: none;
 }
 
@@ -1497,68 +1503,96 @@ html[data-chat-open='true'] .game-chat-panel {
 }
 
 .object-inventory-tabs button {
-  flex: 0 0 auto;
+  flex: 1 0 auto;
   border: 0;
-  border-radius: 999px;
-  min-height: 32px;
-  padding: 0 10px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #f8fbff;
-  font-size: 11px;
+  border-radius: 9px;
+  min-height: 34px;
+  padding: 0 12px;
+  background: transparent;
+  color: rgba(220, 232, 248, 0.68);
+  font-size: 12px;
   font-weight: 800;
 }
 
 .object-inventory-tabs button.active {
-  background: #f8fbff;
-  color: #101820;
+  background: rgba(108, 177, 255, 0.18);
+  color: #b8deff;
 }
 
 .object-inventory-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-auto-rows: minmax(172px, auto);
+  gap: 10px;
   width: 100%;
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 2px;
+  padding: 2px;
   scrollbar-width: thin;
   scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
+@media (min-width: 520px) {
+  .object-inventory-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 700px) {
+  .object-inventory-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .inventory-card {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 12px;
-  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  min-height: 172px;
   width: 100%;
-  padding: 6px;
-  background: rgba(20, 24, 30, 0.92);
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
   color: #f8fbff;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
   touch-action: manipulation;
+  text-align: center;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.2s,
+              background 0.2s,
+              box-shadow 0.2s;
+}
+
+.inventory-card:not(:disabled):hover {
+  transform: translateY(-3px);
+  border-color: rgba(108, 177, 255, 0.35);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(108, 177, 255, 0.12);
 }
 
 .inventory-card.active {
-  border-color: #f8fbff;
-  box-shadow: 0 0 0 2px rgba(248, 251, 255, 0.22);
+  border-color: rgba(108, 177, 255, 0.75);
+  background: rgba(108, 177, 255, 0.12);
+  box-shadow: 0 0 0 2px rgba(108, 177, 255, 0.22);
 }
 
 .inventory-card.disabled {
   opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .inventory-card-preview {
   position: relative;
-  width: 100%;
+  width: min(118px, 100%);
+  flex: 0 0 auto;
   aspect-ratio: 1 / 1;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -1566,8 +1600,8 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .inventory-thumbnail-img {
   display: block;
-  width: 88%;
-  height: 88%;
+  width: 84%;
+  height: 84%;
   object-fit: contain;
   pointer-events: none;
   user-select: none;
@@ -1636,9 +1670,10 @@ html[data-chat-open='true'] .game-chat-panel {
 }
 
 .inventory-card-name {
-  font-size: 11px;
+  max-width: 100%;
+  font-size: 13px;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.25;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -1741,10 +1776,11 @@ html[data-orientation='landscape'] .object-inventory-content {
   right: max(8px, env(safe-area-inset-right));
   bottom: auto;
   left: auto;
-  width: min(320px, calc(var(--ui-viewport-width) - env(safe-area-inset-left) - env(safe-area-inset-right) - 46%));
+  width: min(460px, calc(var(--ui-viewport-width) - env(safe-area-inset-left) - env(safe-area-inset-right) - 36%));
+  transform: none;
   max-height: calc(var(--ui-viewport-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 12px);
-  padding: 12px;
-  border-radius: 14px;
+  padding: 14px;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.34);
 }
@@ -1771,17 +1807,19 @@ html[data-orientation='landscape'] .object-inventory-tabs button {
 
 html[data-orientation='landscape'] .object-inventory-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-auto-rows: minmax(166px, auto);
+  gap: 10px;
   width: 100%;
 }
 
 html[data-orientation='landscape'] .inventory-card {
-  padding: 8px;
+  min-height: 166px;
+  padding: 9px;
   gap: 6px;
 }
 
 html[data-orientation='landscape'] .inventory-card-preview {
-  width: 100%;
+  width: min(108px, 100%);
 }
 
 html[data-orientation='landscape'] .inventory-card-name {
@@ -4021,11 +4059,12 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   }
 
   html[data-orientation='landscape'] .object-inventory-content {
-    width: min(300px, calc(var(--ui-viewport-width, 100vw) - env(safe-area-inset-left) - env(safe-area-inset-right) - 48%));
+    width: min(460px, calc(var(--ui-viewport-width, 100vw) - env(safe-area-inset-left) - env(safe-area-inset-right) - 36%));
   }
 
   html[data-orientation='landscape'] .object-inventory-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(166px, auto);
   }
 
   html[data-orientation='landscape'] .furniture-shop-grid {
