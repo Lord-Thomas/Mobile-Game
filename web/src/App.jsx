@@ -8866,6 +8866,7 @@ function CustomizationChoiceMenu({ open, showCharacterCustomization = true, onCh
 function EnvironmentMenu({
   open,
   coins,
+  hasUnlimitedCoins = false,
   activeTab,
   onTabChange,
   floorSkins,
@@ -8885,7 +8886,11 @@ function EnvironmentMenu({
   onNext,
   onBuy,
   onSelect,
-  onBuyFurniture,
+  furnitureCart,
+  onAddFurnitureToCart,
+  onRemoveFurnitureFromCart,
+  onClearFurnitureCart,
+  onCheckoutFurnitureCart,
   ownedCat,
   catActive,
   onBuyCat,
@@ -8899,22 +8904,41 @@ function EnvironmentMenu({
   const isAnimalsTab = activeTab === 'animals'
   const isWeaponsTab = showWeaponShop && activeTab === 'weapons'
   const isFurnitureTab = activeTab === 'furniture'
+  const isCartTab = activeTab === 'cart'
   const isFloorTab = activeTab === 'floor'
   const skins = isFloorTab ? floorSkins : wallSkins
   const previewIndex = isFloorTab ? previewFloorIndex : previewWallIndex
   const selectedSkinId = isFloorTab ? selectedFloorSkinId : selectedWallSkinId
   const ownedSkinIds = isFloorTab ? ownedFloorSkinIds : ownedWallSkinIds
   const skin = skins[previewIndex]
-  const isOwned = ownedSkinIds.includes(skin.id)
-  const isSelected = selectedSkinId === skin.id
-  const canBuy = coins >= skin.price
+  const isOwned = skin ? ownedSkinIds.includes(skin.id) : false
+  const isSelected = skin ? selectedSkinId === skin.id : false
+  const canBuy = skin ? coins >= skin.price : false
+  const cartEntries = furnitureCart
+    .map((entry) => {
+      const item = furnitureItems.find((candidate) => candidate.id === entry.objectId)
+      return item ? { ...entry, item, lineTotal: item.price * entry.quantity } : null
+    })
+    .filter(Boolean)
+  const cartItemCount = cartEntries.reduce((total, entry) => total + entry.quantity, 0)
+  const cartTotal = cartEntries.reduce((total, entry) => total + entry.lineTotal, 0)
+  const canCheckoutCart = cartItemCount > 0 && (hasUnlimitedCoins || coins >= cartTotal)
 
   return (
     <div className="skin-menu-overlay environment-shop-overlay">
       <div className="skin-menu environment-shop-menu">
-        <div className="skin-coins">
-          <img src="/ui/coins.png" alt="" aria-hidden="true" />
-          <span>{coins} pieces</span>
+        <button type="button" className="environment-shop-close" onClick={onClose} aria-label="Fermer la boutique">
+          x
+        </button>
+        <div className="environment-shop-header">
+          <div>
+            <span className="environment-shop-kicker">Boutique</span>
+            <div className="skin-title">{isCartTab ? 'Panier' : 'Maison'}</div>
+          </div>
+          <div className="skin-coins">
+            <img src="/ui/coins.png" alt="" aria-hidden="true" />
+            <span>{coins} pieces</span>
+          </div>
         </div>
         <div className="env-tabs">
           <button
@@ -8950,12 +8974,55 @@ function EnvironmentMenu({
               type="button"
               className={`env-tab-btn ${isWeaponsTab ? 'active' : ''}`}
               onClick={() => onTabChange('weapons')}
-            >
-              Armes
-            </button>
-          )}
+          >
+            Armes
+          </button>
+        )}
         </div>
-        {isWeaponsTab ? (
+        {isCartTab ? (
+          <>
+            <div className="shop-cart-list">
+              {cartEntries.length === 0 ? (
+                <div className="shop-cart-empty">Ton panier est vide.</div>
+              ) : (
+                cartEntries.map(({ objectId, quantity, item, lineTotal }) => (
+                  <div className="shop-cart-row" key={objectId}>
+                    <div className="shop-cart-thumb">
+                      <img src={item.thumbnail} alt="" />
+                    </div>
+                    <div className="shop-cart-info">
+                      <span className="shop-cart-name">{item.name}</span>
+                      <span className="shop-cart-meta">{item.price} pieces x {quantity}</span>
+                    </div>
+                    <div className="shop-cart-controls">
+                      <button type="button" onClick={() => onRemoveFurnitureFromCart(objectId)} aria-label={`Retirer ${item.name}`}>
+                        -
+                      </button>
+                      <span>{quantity}</span>
+                      <button type="button" onClick={() => onAddFurnitureToCart(objectId)} aria-label={`Ajouter ${item.name}`}>
+                        +
+                      </button>
+                    </div>
+                    <span className="shop-cart-line-total">{lineTotal}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="shop-cart-summary">
+              <span>Total</span>
+              <strong>{cartTotal} pieces</strong>
+            </div>
+            {cartItemCount > 0 && !canCheckoutCart && (
+              <div className="shop-cart-warning">Pas assez de pieces pour valider ce panier.</div>
+            )}
+            <button type="button" className="skin-action-btn" onClick={onCheckoutFurnitureCart} disabled={!canCheckoutCart}>
+              Valider la commande
+            </button>
+            <button type="button" className="skin-close-btn" onClick={onClearFurnitureCart} disabled={cartItemCount === 0}>
+              Vider le panier
+            </button>
+          </>
+        ) : isWeaponsTab ? (
           <>
             <div className="skin-title">Armes</div>
             <div className="animals-shop-grid">
@@ -9016,22 +9083,27 @@ function EnvironmentMenu({
           </>
         ) : isFurnitureTab ? (
           <>
-            <div className="skin-title">Meubles</div>
+            <div className="shop-section-heading">
+              <span>Meubles</span>
+              <strong>{cartItemCount} article{cartItemCount > 1 ? 's' : ''}</strong>
+            </div>
             <div className="furniture-shop-grid">
               {furnitureItems.map((item) => {
                 const ownedCount = furnitureCounts[item.id] ?? 0
-                const canBuyFurniture = coins >= item.price
+                const cartQuantity = furnitureCart.find((entry) => entry.objectId === item.id)?.quantity ?? 0
+                const canAddFurniture = hasUnlimitedCoins || coins >= cartTotal + item.price
                 return (
                   <button
                     key={item.id}
                     type="button"
                     className="furniture-shop-card"
-                    onClick={() => onBuyFurniture(item.id)}
-                    disabled={!canBuyFurniture}
+                    onClick={() => onAddFurnitureToCart(item.id)}
+                    disabled={!canAddFurniture}
                   >
                     <div className="furniture-shop-preview">
                       <img src={item.thumbnail} alt="" />
                       {ownedCount > 0 && <span className="furniture-owned-badge">x{ownedCount}</span>}
+                      {cartQuantity > 0 && <span className="furniture-cart-badge">+{cartQuantity}</span>}
                     </div>
                     <span className="furniture-shop-name">{item.name}</span>
                     <span className="furniture-shop-price">{item.price} pieces</span>
@@ -9082,7 +9154,11 @@ function EnvironmentMenu({
             {isOwned && isSelected && <div className="skin-equipped">Equipe</div>}
           </>
         )}
-        <button type="button" className="skin-close-btn" onClick={onClose}>Fermer</button>
+        {!isCartTab && (
+          <button type="button" className="skin-action-btn shop-cart-open-btn" onClick={() => onTabChange('cart')}>
+            Aller au panier{cartItemCount > 0 ? ` (${cartItemCount})` : ''}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -10023,6 +10099,7 @@ function App() {
   const [previewWallSkinId, setPreviewWallSkinId] = useState('wall-classic')
   const [applyWallToCeiling, setApplyWallToCeiling] = useState(false)
   const [isEnvironmentMenuOpen, setIsEnvironmentMenuOpen] = useState(false)
+  const [furnitureCart, setFurnitureCart] = useState([])
   const [isNearEnvironmentStation, setIsNearEnvironmentStation] = useState(false)
   const [mode, setMode] = useState('play')
   const [currentZone, setCurrentZone] = useState(ZONES.interior)
@@ -11122,6 +11199,58 @@ function App() {
     setIsEnvironmentMenuOpen(false)
   }
 
+  const addFurnitureToCart = (objectId) => {
+    if (!canModifyWorld) return
+    const item = objectCatalog[objectId]
+    if (!item || !shopObjectIds.includes(objectId)) return
+    setFurnitureCart((current) => {
+      const currentTotal = current.reduce((total, entry) => {
+        const cartItem = objectCatalog[entry.objectId]
+        return total + (cartItem?.price ?? 0) * entry.quantity
+      }, 0)
+      if (!isAdminMode && currentTotal + item.price > coins) return current
+      const existing = current.find((entry) => entry.objectId === objectId)
+      if (existing) {
+        return current.map((entry) => (
+          entry.objectId === objectId
+            ? { ...entry, quantity: entry.quantity + 1 }
+            : entry
+        ))
+      }
+      return [...current, { objectId, quantity: 1 }]
+    })
+  }
+
+  const removeFurnitureFromCart = (objectId) => {
+    setFurnitureCart((current) => current.flatMap((entry) => {
+      if (entry.objectId !== objectId) return [entry]
+      if (entry.quantity <= 1) return []
+      return [{ ...entry, quantity: entry.quantity - 1 }]
+    }))
+  }
+
+  const checkoutFurnitureCart = async () => {
+    if (!canModifyWorld || furnitureCart.length === 0) return
+    const instances = []
+    let total = 0
+    for (const entry of furnitureCart) {
+      const item = objectCatalog[entry.objectId]
+      if (!item || !shopObjectIds.includes(entry.objectId)) return
+      total += item.price * entry.quantity
+      for (let index = 0; index < entry.quantity; index += 1) {
+        const object = createEditableObjectInstance(entry.objectId)
+        if (!object) return
+        instances.push(object)
+      }
+    }
+    if (!isAdminMode && coins < total) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-total)
+    if (!paid) return
+    setEditableObjects((current) => [...current, ...instances])
+    setFurnitureCart([])
+    setEnvironmentTab('furniture')
+  }
+
   const openCustomizationChoice = () => {
     if (!canModifyWorld) return
     setIsSkinMenuOpen(false)
@@ -11196,18 +11325,6 @@ function App() {
     const skin = availableWallSkins[previewWallIndex]
     if (!ownedWallSkins.includes(skin.id)) return
     setSelectedWallSkinId(skin.id)
-  }
-
-  const buyFurnitureObject = async (objectId) => {
-    if (!canModifyWorld) return
-    const item = objectCatalog[objectId]
-    if (!item || !shopObjectIds.includes(objectId)) return
-    if (!isAdminMode && coins < item.price) return
-    const object = createEditableObjectInstance(objectId)
-    if (!object) return
-    const paid = isAdminMode ? true : await applyCoinDelta(-item.price)
-    if (!paid) return
-    setEditableObjects((current) => [...current, object])
   }
 
   const buyCat = async () => {
@@ -12272,6 +12389,7 @@ function App() {
       <EnvironmentMenu
         open={showCaptureUi && isEnvironmentMenuOpen}
         coins={coins}
+        hasUnlimitedCoins={isAdminMode}
         activeTab={environmentTab}
         onTabChange={setEnvironmentTab}
         floorSkins={floorSkins}
@@ -12291,7 +12409,11 @@ function App() {
         onNext={() => goEnvironmentPreview(1)}
         onBuy={buyPreviewEnvironmentSkin}
         onSelect={selectPreviewEnvironmentSkin}
-        onBuyFurniture={buyFurnitureObject}
+        furnitureCart={furnitureCart}
+        onAddFurnitureToCart={addFurnitureToCart}
+        onRemoveFurnitureFromCart={removeFurnitureFromCart}
+        onClearFurnitureCart={() => setFurnitureCart([])}
+        onCheckoutFurnitureCart={checkoutFurnitureCart}
         ownedCat={ownedCat}
         catActive={catActive}
         onBuyCat={buyCat}
