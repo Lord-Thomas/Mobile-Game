@@ -668,8 +668,10 @@ canvas {
 
 .multiplayer-menu {
   width: min(320px, calc(100vw - 28px));
-  max-height: min(520px, calc(100vh - 130px));
+  max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 96px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 18px;
   padding: 12px;
@@ -677,6 +679,8 @@ canvas {
   background: rgba(8, 12, 20, 0.9);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(14px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
 .multiplayer-help,
@@ -1781,14 +1785,26 @@ html[data-chat-open='true'] .game-chat-panel {
   position: absolute;
   inset: 0;
   z-index: 6;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  overflow: hidden;
   background: rgba(7, 10, 15, 0.55);
   backdrop-filter: blur(4px);
 }
 
 .skin-menu {
   width: min(90vw, 360px);
+  max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border-radius: 16px;
   padding: 16px;
   background: rgba(16, 24, 34, 0.95);
@@ -1797,6 +1813,8 @@ html[data-chat-open='true'] .game-chat-panel {
   display: grid;
   gap: 12px;
   justify-items: center;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
 .skin-coins {
@@ -1854,6 +1872,10 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .account-sync-panel {
   width: min(360px, calc(100vw - 28px));
+  max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 88px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   margin-top: 8px;
   padding: 10px;
   border-radius: 14px;
@@ -1862,6 +1884,8 @@ html[data-chat-open='true'] .game-chat-panel {
   backdrop-filter: blur(10px);
   display: grid;
   gap: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
 .main-menu-tabs {
@@ -2240,12 +2264,16 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .furniture-shop-grid {
   width: 100%;
-  max-height: 330px;
+  max-height: min(330px, calc(var(--app-viewport-height, 100dvh) * 0.42));
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
 .furniture-shop-card {
@@ -2354,10 +2382,16 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .animals-shop-grid {
   width: 100%;
+  max-height: min(260px, calc(var(--app-viewport-height, 100dvh) * 0.34));
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
 .animal-shop-card {
@@ -2640,8 +2674,14 @@ html[data-chat-open='true'] .game-chat-panel {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
   z-index: 200;
   background: rgba(0, 0, 0, 0.55);
+  overflow: hidden;
 }
 
 .weapon-inventory-panel {
@@ -2649,9 +2689,13 @@ html[data-chat-open='true'] .game-chat-panel {
   border: 1.5px solid rgba(124, 58, 237, 0.5);
   border-radius: 16px;
   padding: 20px 24px 24px;
-  min-width: 300px;
+  min-width: min(300px, calc(100vw - 24px));
   max-width: 420px;
-  width: 90%;
+  width: min(90vw, 420px);
+  max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 20px rgba(124, 58, 237, 0.3);
 }
 
@@ -2826,16 +2870,26 @@ html[data-chat-open='true'] .game-chat-panel {
   position: absolute;
   inset: 0;
   z-index: 10;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  overflow: hidden;
   background: rgba(7,10,15,0.6);
   backdrop-filter: blur(5px);
 }
 
 .char-menu {
   width: min(92vw, 380px);
-  max-height: 85vh;
+  max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border-radius: 18px;
   padding: 20px 18px;
   background: rgba(14,20,30,0.97);
@@ -2844,6 +2898,8 @@ html[data-chat-open='true'] .game-chat-panel {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
 .char-menu-title {
@@ -2937,3 +2993,110 @@ html[data-chat-open='true'] .game-chat-panel {
   transition: background 0.15s;
 }
 .char-reset-btn:hover { background: rgba(255,180,50,0.12); }
+
+@media (max-height: 520px), (orientation: landscape) and (max-height: 760px) {
+  .skin-menu {
+    width: min(94vw, 420px);
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .skin-title {
+    font-size: 18px;
+  }
+
+  .skin-preview-wrap {
+    width: 88px;
+    height: 88px;
+  }
+
+  .skin-preview-ball {
+    width: 68px;
+    height: 68px;
+  }
+
+  .env-preview-wrap {
+    width: min(148px, 42vw);
+    height: 84px;
+  }
+
+  .env-tabs {
+    gap: 4px;
+  }
+
+  .env-tab-btn {
+    padding: 6px 4px;
+    font-size: 11px;
+  }
+
+  .furniture-shop-grid {
+    max-height: min(160px, calc(var(--app-viewport-height, 100dvh) - 240px));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .furniture-shop-card {
+    min-height: 108px;
+    padding: 6px;
+  }
+
+  .furniture-shop-preview {
+    width: min(72px, 100%);
+  }
+
+  .animals-shop-grid {
+    max-height: min(140px, calc(var(--app-viewport-height, 100dvh) - 220px));
+  }
+
+  .animal-shop-card {
+    min-height: 118px;
+    padding: 6px;
+  }
+
+  .animal-shop-preview {
+    width: min(72px, 100%);
+    font-size: 36px;
+  }
+
+  .skin-nav-btn,
+  .skin-action-btn,
+  .skin-close-btn,
+  .skin-respawn-btn {
+    padding: 8px 12px;
+  }
+
+  .char-menu {
+    width: min(94vw, 420px);
+    padding: 14px 12px;
+    gap: 10px;
+  }
+
+  .char-menu-title {
+    font-size: 1rem;
+  }
+
+  .char-color-swatch {
+    width: 22px;
+    height: 22px;
+  }
+
+  .multiplayer-menu {
+    max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 72px);
+  }
+
+  .account-sync-panel {
+    max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 64px);
+  }
+
+  .main-menu-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .weapon-inventory-panel {
+    padding: 14px 16px 16px;
+  }
+}
+
+html[data-orientation='landscape'] .env-tabs:has(> :nth-child(4)) {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
