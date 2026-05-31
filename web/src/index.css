@@ -876,11 +876,22 @@ canvas {
   }
 }
 
+:root {
+  --bottom-ui-gap: 12px;
+  --bottom-ui-message-height: 34px;
+  --bottom-ui-action-height: 44px;
+  --bottom-ui-safe: env(safe-area-inset-bottom);
+  --bottom-ui-message-offset: calc(24px + var(--bottom-ui-safe));
+  --bottom-ui-action-1: calc(var(--bottom-ui-message-offset) + var(--bottom-ui-message-height) + var(--bottom-ui-gap));
+  --bottom-ui-action-2: calc(var(--bottom-ui-action-1) + var(--bottom-ui-action-height) + var(--bottom-ui-gap));
+  --bottom-ui-action-3: calc(var(--bottom-ui-action-2) + var(--bottom-ui-action-height) + var(--bottom-ui-gap));
+}
+
 .game-chat-toggle,
 .game-chat-panel {
   position: absolute;
-  bottom: calc(24px + env(safe-area-inset-bottom));
-  z-index: 12;
+  bottom: var(--bottom-ui-message-offset);
+  z-index: 4;
   pointer-events: auto;
   box-sizing: border-box;
 }
@@ -918,7 +929,8 @@ canvas {
 }
 
 html[data-chat-open='true'] .game-chat-panel {
-  bottom: calc(var(--chat-keyboard-inset, 0px) + 12px + env(safe-area-inset-bottom));
+  bottom: calc(var(--chat-keyboard-inset, 0px) + var(--bottom-ui-message-offset));
+  z-index: 5;
 }
 
 .game-chat-panel input {
@@ -1228,7 +1240,7 @@ html[data-chat-open='true'] .game-chat-panel {
 .skin-open-btn {
   position: absolute;
   left: 50%;
-  bottom: 88px;
+  bottom: var(--bottom-ui-action-1);
   transform: translateX(-50%);
   z-index: 5;
   border: 0;
@@ -1281,22 +1293,22 @@ html[data-chat-open='true'] .game-chat-panel {
 }
 
 .custom-open-btn {
-  bottom: 154px;
+  bottom: var(--bottom-ui-action-2);
   background: rgba(32, 42, 50, 0.9);
 }
 
 .outdoor-open-btn {
-  bottom: 154px;
+  bottom: var(--bottom-ui-action-2);
   background: rgba(29, 58, 47, 0.92);
 }
 
 .seat-open-btn {
-  bottom: 154px;
+  bottom: var(--bottom-ui-action-2);
   background: rgba(24, 36, 45, 0.92);
 }
 
 .tv-open-btn {
-  bottom: 220px;
+  bottom: var(--bottom-ui-action-3);
   background: rgba(11, 20, 30, 0.92);
 }
 
@@ -2446,7 +2458,7 @@ html[data-chat-open='true'] .game-chat-panel {
 .light-panel {
   position: absolute;
   left: 50%;
-  bottom: 88px;
+  bottom: var(--bottom-ui-action-1);
   transform: translateX(-50%);
   z-index: 5;
   display: flex;
@@ -2563,7 +2575,7 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .fireball-btn {
   position: fixed;
-  bottom: 90px;
+  bottom: var(--bottom-ui-action-1);
   left: 50%;
   transform: translateX(-50%);
   width: 66px;
@@ -2590,7 +2602,7 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .charge-bar-wrap {
   position: fixed;
-  bottom: 180px;
+  bottom: var(--bottom-ui-action-3);
   left: 50%;
   transform: translateX(-50%);
   width: 220px;
@@ -2792,7 +2804,7 @@ html[data-chat-open='true'] .game-chat-panel {
 /* ── Character Customization ─────────────────────────── */
 .char-customization-btn {
   position: absolute;
-  bottom: 88px;
+  bottom: var(--bottom-ui-action-1);
   right: 16px;
   z-index: 7;
   width: 50px;

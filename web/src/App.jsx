@@ -10949,6 +10949,7 @@ function App() {
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
   const showCaptureUi = !(isAdminMode || isVerticalFrameMode) || !captureUiHidden
+  const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
   const furnitureCounts = editableObjects.reduce((counts, object) => {
     if (shopObjectIds.includes(object.objectId)) {
@@ -12008,18 +12009,6 @@ function App() {
           onTogglePerformanceSetting={togglePerformanceSetting}
         />
       )}
-      {showCaptureUi && isMultiplayerSession && (
-        <GameChatPanel
-          open={isGameChatOpen}
-          value={chatInput}
-          disabled={sessionConnectionState !== 'connected'}
-          onOpen={() => setIsGameChatOpen(true)}
-          onClose={() => setIsGameChatOpen(false)}
-          onChange={setChatInput}
-          onFocus={pausePlayerControlsForChat}
-          onSubmit={submitChatMessage}
-        />
-      )}
       {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
         <button className="skin-open-btn outdoor-open-btn" type="button" onClick={requestOutdoorTransition}>
           {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
@@ -12069,6 +12058,18 @@ function App() {
         <button className="skin-open-btn seat-open-btn" type="button" onClick={requestStandUp}>
           Se relever
         </button>
+      )}
+      {showCaptureUi && isMultiplayerSession && !blocksBottomGameChat && (
+        <GameChatPanel
+          open={isGameChatOpen}
+          value={chatInput}
+          disabled={sessionConnectionState !== 'connected'}
+          onOpen={() => setIsGameChatOpen(true)}
+          onClose={() => setIsGameChatOpen(false)}
+          onChange={setChatInput}
+          onFocus={pausePlayerControlsForChat}
+          onSubmit={submitChatMessage}
+        />
       )}
       {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
         <div className="customize-ui">
