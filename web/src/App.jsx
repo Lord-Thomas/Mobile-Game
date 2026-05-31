@@ -956,6 +956,90 @@ function getNearestPunchTarget({ targets, playerX, playerZ, yaw }) {
   return nearest
 }
 
+function useCombatActionsAvailability(actionsRef) {
+  const [actions, setActions] = useState({ canKick: false, canPunch: false })
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const next = actionsRef.current ?? { canKick: false, canPunch: false }
+      setActions((current) => (
+        current.canKick === next.canKick && current.canPunch === next.canPunch
+          ? current
+          : { canKick: next.canKick, canPunch: next.canPunch }
+      ))
+    }, 50)
+    return () => window.clearInterval(interval)
+  }, [actionsRef])
+
+  return actions
+}
+
+function CombatActionDock({
+  touchRef,
+  canKick,
+  canPunch,
+  showSpell,
+  onSpellPress,
+}) {
+  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0)
+  if (count === 0) return null
+
+  const queuePunch = () => {
+    touchRef.current.punchQueued = true
+  }
+
+  const queueKick = () => {
+    touchRef.current.kickQueued = true
+  }
+
+  return (
+    <div className={`combat-action-dock combat-action-dock--count-${count}`}>
+      {canPunch && (
+        <button
+          className="combat-action-btn combat-action-btn--punch"
+          type="button"
+          aria-label="Taper"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            queuePunch()
+          }}
+        >
+          <span className="combat-action-icon" aria-hidden="true">👊</span>
+          <span className="combat-action-label">Taper</span>
+        </button>
+      )}
+      {canKick && (
+        <button
+          className="combat-action-btn combat-action-btn--kick"
+          type="button"
+          aria-label="Tirer"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            queueKick()
+          }}
+        >
+          <span className="combat-action-icon" aria-hidden="true">⚽</span>
+          <span className="combat-action-label">Tirer</span>
+        </button>
+      )}
+      {showSpell && (
+        <button
+          className="combat-action-btn combat-action-btn--spell"
+          type="button"
+          aria-label="Lancer un sort"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            onSpellPress?.()
+          }}
+        >
+          <span className="combat-action-icon" aria-hidden="true">🔥</span>
+          <span className="combat-action-label">Sort</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
 function useKeyboardInput() {
   const keysRef = useRef({
     forward: false,
@@ -963,6 +1047,8 @@ function useKeyboardInput() {
     left: false,
     right: false,
     actionQueued: false,
+    punchQueued: false,
+    kickQueued: false,
   })
 
   useEffect(() => {
@@ -972,6 +1058,8 @@ function useKeyboardInput() {
       keysRef.current.left = false
       keysRef.current.right = false
       keysRef.current.actionQueued = false
+      keysRef.current.punchQueued = false
+      keysRef.current.kickQueued = false
     }
 
     const resetKeysWhenInactive = () => {
@@ -2173,6 +2261,7 @@ function Player({
   onCombatHit = null,
   equippedWeapon = null,
   playerBodyYawRef = null,
+  playerCombatActionsRef = null,
   appearance = null,
   freeCameraActive = false,
 }) {
@@ -2538,11 +2627,39 @@ function Player({
     nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
     nextZ = MathUtils.clamp(nextZ, limits.minZ, limits.maxZ)
 
+    const playerYaw = visualRef.current.rotation.y
+    const punchTarget = getNearestPunchTarget({
+      targets: combatTargetsRef?.current,
+      playerX: nextX,
+      playerZ: nextZ,
+      yaw: playerYaw,
+    })
+    let kickInArc = false
+    const ball = ballRef.current
+    if (ball) {
+      const ballPos = ball.translation()
+      kickInArc = getKickContact({
+        playerX: nextX,
+        playerZ: nextZ,
+        yaw: playerYaw,
+        ballX: ballPos.x,
+        ballZ: ballPos.z,
+      }).isInKickArc
+    }
+
+    if (playerCombatActionsRef) {
+      const inPlay = mode === 'play'
+      playerCombatActionsRef.current.canPunch = inPlay && Boolean(punchTarget && onGroundRef.current)
+      playerCombatActionsRef.current.canKick = inPlay && Boolean(kickInArc && onGroundRef.current)
+    }
+
     const wantsEmote = touch.emoteQueued
     const isAttackLocked =
       state.clock.elapsedTime < punchUntilRef.current ||
       state.clock.elapsedTime < kickUntilRef.current
-    const wantsAction = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
+    const wantsPunch = !isEmoting && !isAttackLocked && (touch.punchQueued || key.punchQueued)
+    const wantsKick = !isEmoting && !isAttackLocked && (touch.kickQueued || key.kickQueued)
+    const wantsGenericAction = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
     if (wantsEmote === 'wave' && onGroundRef.current) {
       waveUntilRef.current = state.clock.elapsedTime + PLAYER_WAVE_DURATION
       danceUntilRef.current = 0
@@ -2585,14 +2702,25 @@ function Player({
       planarVelocityRef.current.z = 0
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
-    } else if (wantsAction) {
-      const punchTarget = getNearestPunchTarget({
-        targets: combatTargetsRef?.current,
-        playerX: nextX,
-        playerZ: nextZ,
-        yaw: visualRef.current.rotation.y,
-      })
-
+    } else if (wantsPunch && punchTarget && onGroundRef.current) {
+      const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
+      punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
+      pendingPunchRef.current = {
+        targetId: punchTarget.target.id,
+        contactAt,
+        expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
+        fired: false,
+      }
+    } else if (wantsKick && kickInArc && onGroundRef.current) {
+      const contactAt = state.clock.elapsedTime + PLAYER_KICK_CONTACT_DELAY
+      kickUntilRef.current = state.clock.elapsedTime + PLAYER_KICK_DURATION
+      pendingKickRef.current = {
+        contactAt,
+        expiresAt: contactAt + PLAYER_KICK_CONTACT_WINDOW,
+        fired: false,
+        running: speed > 2.45,
+      }
+    } else if (wantsGenericAction) {
       if (punchTarget && onGroundRef.current) {
         const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
         punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
@@ -2602,14 +2730,12 @@ function Player({
           expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
           fired: false,
         }
-      } else {
-      const ball = ballRef.current
-      if (ball) {
+      } else if (ball) {
         const ballPos = ball.translation()
         const kickContact = getKickContact({
           playerX: nextX,
           playerZ: nextZ,
-          yaw: visualRef.current.rotation.y,
+          yaw: playerYaw,
           ballX: ballPos.x,
           ballZ: ballPos.z,
         })
@@ -2637,11 +2763,14 @@ function Player({
         jumpLandUntilRef.current = 0
         landingPreparedRef.current = false
       }
-      }
     }
 
     key.actionQueued = false
     touch.actionQueued = false
+    touch.punchQueued = false
+    touch.kickQueued = false
+    key.punchQueued = false
+    key.kickQueued = false
     touch.emoteQueued = null
 
     if (!onGroundRef.current) {
@@ -3983,7 +4112,7 @@ function RemotePlayer({
   )
 }
 
-function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false, onTap }) {
+function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false, showJumpAction = true, onTap }) {
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookPointersRef = useRef(new Map())
@@ -4282,8 +4411,8 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
         </div>
       )}
 
-      {!uiHidden && (
-        <button className="action-btn" type="button" onPointerDown={triggerAction} aria-label="Action">
+      {!uiHidden && showJumpAction && (
+        <button className="action-btn" type="button" onPointerDown={triggerAction} aria-label="Sauter">
           <span className="action-symbol">{'\u2423'}</span>
         </button>
       )}
@@ -9796,8 +9925,12 @@ function App() {
     lookY: 0,
     lookActive: false,
     actionQueued: false,
+    punchQueued: false,
+    kickQueued: false,
     emoteQueued: null,
   })
+  const playerCombatActionsRef = useRef({ canKick: false, canPunch: false })
+  const { canKick, canPunch } = useCombatActionsAvailability(playerCombatActionsRef)
 
   useEffect(() => {
     const resetTouchControls = () => {
@@ -9807,6 +9940,8 @@ function App() {
       touchRef.current.lookY = 0
       touchRef.current.lookActive = false
       touchRef.current.actionQueued = false
+      touchRef.current.punchQueued = false
+      touchRef.current.kickQueued = false
       touchRef.current.emoteQueued = null
     }
 
@@ -9842,6 +9977,8 @@ function App() {
       touchRef.current.lookY = 0
       touchRef.current.lookActive = false
       touchRef.current.actionQueued = false
+      touchRef.current.punchQueued = false
+      touchRef.current.kickQueued = false
       touchRef.current.emoteQueued = null
       setFreeCameraActive((current) => !current)
     }
@@ -11557,6 +11694,8 @@ function App() {
     touchRef.current.lookY = 0
     touchRef.current.lookActive = false
     touchRef.current.actionQueued = false
+    touchRef.current.punchQueued = false
+    touchRef.current.kickQueued = false
     touchRef.current.emoteQueued = null
   }
 
@@ -11829,6 +11968,7 @@ function App() {
               playerBodyYawRef={playerBodyYawRef}
               appearance={characterAppearance}
               freeCameraActive={isLocalNetwork && freeCameraActive}
+              playerCombatActionsRef={playerCombatActionsRef}
             />
           )}
           <OutdoorDoorTrigger
@@ -11908,15 +12048,14 @@ function App() {
           <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
         </div>
       )}
-      {showCaptureUi && equippedWeapon === 'magic_book' && mode === 'play' && (
-        <button
-          className="fireball-btn"
-          type="button"
-          onPointerDown={startCharge}
-          aria-label="Lancer boule de feu"
-        >
-          🔥
-        </button>
+      {showCaptureUi && mode === 'play' && (
+        <CombatActionDock
+          touchRef={touchRef}
+          canKick={canKick}
+          canPunch={canPunch}
+          showSpell={equippedWeapon === 'magic_book'}
+          onSpellPress={startCharge}
+        />
       )}
       {showCaptureUi && (
         <CharacterCustomizationMenu
