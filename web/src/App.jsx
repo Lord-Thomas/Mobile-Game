@@ -208,6 +208,11 @@ const OUTDOOR_DOOR_POSITION = {
   y: 1.1,
   z: outsideDoorOpening.centerZ,
 }
+const OUTDOOR_EXIT_POSITION = {
+  x: MAIN_ROOM_BOUNDS.minX + 1.2,
+  y: 0.35,
+  z: outsideDoorOpening.centerZ,
+}
 const OUTDOOR_ENTRY_POSITION = {
   x: MAIN_ROOM_BOUNDS.minX - 2.2,
   y: 0.35,
@@ -4829,6 +4834,17 @@ function GameChatPanel({
   onFocus,
   onSubmit,
 }) {
+  const inputRef = useRef(null)
+  const autoFocusChat = !isLikelyMobileDevice()
+
+  useLayoutEffect(() => {
+    if (!open || !autoFocusChat) return undefined
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [autoFocusChat, open])
+
   if (!open) {
     return (
       <button className="game-chat-toggle" type="button" onClick={onOpen}>
@@ -4843,14 +4859,21 @@ function GameChatPanel({
         ×
       </button>
       <input
+        ref={inputRef}
         type="text"
         value={value}
         maxLength={CHAT_MAX_LENGTH}
         placeholder="Message..."
         aria-label="Message de chat"
-        autoFocus
+        enterKeyHint="send"
+        autoComplete="off"
         onChange={(event) => onChange(event.target.value)}
-        onFocus={onFocus}
+        onFocus={(event) => {
+          onFocus?.()
+          if (isLikelyMobileDevice()) {
+            event.currentTarget.focus({ preventScroll: true })
+          }
+        }}
         onKeyDown={(event) => {
           event.stopPropagation()
           if (event.key === 'Escape') onClose()
@@ -5020,11 +5043,14 @@ function MultiplayerBridge({
 }
 
 // Halo d'interaction : anneau au sol qui s'agrandit et pulse quand on approche
-function InteractionHalo({ isNear, color = '#ffffff', pulseColor, position }) {
+function InteractionHalo({ isNear, color = '#ffffff', pulseColor, position, size = 1 }) {
   const outerRef = useRef()
   const innerRef = useRef()
   const scaleRef = useRef(0.35)
   const pulseRef = useRef(0)
+  const innerRadius = 0.28 * size
+  const outerInnerRadius = 0.28 * size
+  const outerOuterRadius = 0.42 * size
 
   useFrame((_, delta) => {
     const target = isNear ? 1 : 0.35
@@ -5051,12 +5077,12 @@ function InteractionHalo({ isNear, color = '#ffffff', pulseColor, position }) {
     <group position={position} rotation={[-Math.PI / 2, 0, 0]}>
       {/* Anneau principal */}
       <mesh ref={outerRef}>
-        <ringGeometry args={[0.28, 0.42, 48]} />
+        <ringGeometry args={[outerInnerRadius, outerOuterRadius, 48]} />
         <meshBasicMaterial color={color} transparent opacity={0.75} depthWrite={false} />
       </mesh>
       {/* Disque intérieur pulsé */}
       <mesh ref={innerRef}>
-        <circleGeometry args={[0.28, 48]} />
+        <circleGeometry args={[innerRadius, 48]} />
         <meshBasicMaterial color={pc} transparent opacity={0} depthWrite={false} />
       </mesh>
     </group>
@@ -5121,12 +5147,35 @@ function OutdoorDoor() {
   )
 }
 
+function OutdoorDoorStation({ isNear, currentZone }) {
+  const isOutside = currentZone === ZONES.outside
+
+  return (
+    <>
+      <InteractionHalo
+        isNear={!isOutside && isNear}
+        color="#c9b08a"
+        pulseColor="#ffe8c8"
+        position={[OUTDOOR_EXIT_POSITION.x, 0.02, OUTDOOR_EXIT_POSITION.z]}
+        size={0.62}
+      />
+      <InteractionHalo
+        isNear={isOutside && isNear}
+        color="#c9b08a"
+        pulseColor="#ffe8c8"
+        position={[OUTDOOR_ENTRY_POSITION.x, 0.02, OUTDOOR_ENTRY_POSITION.z]}
+        size={0.62}
+      />
+    </>
+  )
+}
+
 function OutdoorDoorTrigger({ playerPositionRef, currentZone, onNearChange }) {
   const wasNearRef = useRef(false)
 
   useFrame(() => {
     const p = playerPositionRef.current
-    const target = currentZone === ZONES.outside ? OUTDOOR_ENTRY_POSITION : OUTDOOR_DOOR_POSITION
+    const target = currentZone === ZONES.outside ? OUTDOOR_ENTRY_POSITION : OUTDOOR_EXIT_POSITION
     const near = Math.hypot(p.x - target.x, p.z - target.z) < DOOR_INTERACTION_DISTANCE
     if (near !== wasNearRef.current) {
       wasNearRef.current = near
@@ -8960,24 +9009,32 @@ function getEvenPixelSize(value) {
   return rounded % 2 === 0 ? rounded : rounded - 1
 }
 
-function getActiveViewportSize() {
+function getActiveViewportSize(freezeForKeyboard = false) {
   if (typeof window === 'undefined') {
-    return { width: 1, height: 1 }
+    return { width: 1, height: 1, keyboardInset: 0 }
   }
 
   const visualViewport = window.visualViewport
-  return {
-    width: Math.max(1, Math.round(visualViewport?.width ?? window.innerWidth ?? 1)),
-    height: Math.max(1, Math.round(visualViewport?.height ?? window.innerHeight ?? 1)),
-  }
+  const layoutWidth = window.innerWidth ?? 1
+  const layoutHeight = window.innerHeight ?? 1
+  const visualWidth = visualViewport?.width ?? layoutWidth
+  const visualHeight = visualViewport?.height ?? layoutHeight
+  const visualOffsetTop = visualViewport?.offsetTop ?? 0
+  const width = Math.max(1, Math.round(visualWidth))
+  const height = Math.max(1, Math.round(freezeForKeyboard ? layoutHeight : visualHeight))
+  const keyboardInset = freezeForKeyboard
+    ? Math.max(0, Math.round(layoutHeight - visualOffsetTop - visualHeight))
+    : 0
+
+  return { width, height, keyboardInset }
 }
 
-function getViewportOrientation() {
-  const { width, height } = getActiveViewportSize()
+function getViewportOrientation(freezeForKeyboard = false) {
+  const { width, height } = getActiveViewportSize(freezeForKeyboard)
   return width > height ? 'landscape' : 'portrait'
 }
 
-function useMobileViewportSync() {
+function useMobileViewportSync(freezeForKeyboard = false) {
   const [orientation, setOrientation] = useState(() => getViewportOrientation())
 
   useLayoutEffect(() => {
@@ -8986,12 +9043,21 @@ function useMobileViewportSync() {
     const updateViewport = () => {
       if (frame) cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
-        const { width, height } = getActiveViewportSize()
+        const { width, height, keyboardInset } = getActiveViewportSize(freezeForKeyboard)
         const nextOrientation = width > height ? 'landscape' : 'portrait'
 
         document.documentElement.style.setProperty('--app-viewport-width', `${width}px`)
         document.documentElement.style.setProperty('--app-viewport-height', `${height}px`)
+        document.documentElement.style.setProperty('--chat-keyboard-inset', `${keyboardInset}px`)
         document.documentElement.dataset.orientation = nextOrientation
+        if (freezeForKeyboard) {
+          document.documentElement.dataset.chatOpen = 'true'
+          if (window.scrollY > 0 || (window.visualViewport?.offsetTop ?? 0) > 0) {
+            window.scrollTo(0, 0)
+          }
+        } else {
+          delete document.documentElement.dataset.chatOpen
+        }
         setOrientation((current) => (current === nextOrientation ? current : nextOrientation))
       })
     }
@@ -9012,9 +9078,11 @@ function useMobileViewportSync() {
       window.screen?.orientation?.removeEventListener?.('change', updateViewport)
       document.documentElement.style.removeProperty('--app-viewport-width')
       document.documentElement.style.removeProperty('--app-viewport-height')
+      document.documentElement.style.removeProperty('--chat-keyboard-inset')
       delete document.documentElement.dataset.orientation
+      delete document.documentElement.dataset.chatOpen
     }
-  }, [])
+  }, [freezeForKeyboard])
 
   return orientation
 }
@@ -9617,7 +9685,8 @@ function FreeCameraController({ active, touchRef }) {
 }
 
 function App() {
-  const viewportOrientation = useMobileViewportSync()
+  const [isGameChatOpen, setIsGameChatOpen] = useState(false)
+  const viewportOrientation = useMobileViewportSync(isGameChatOpen)
   const isThumbnailTool = useMemo(() => {
     try {
       const params = new URLSearchParams(window.location.search)
@@ -9915,7 +9984,6 @@ function App() {
   const [sessionTransport, setSessionTransport] = useState('none')
   const [multiplayerMessage, setMultiplayerMessage] = useState('')
   const [chatInput, setChatInput] = useState('')
-  const [isGameChatOpen, setIsGameChatOpen] = useState(false)
   const isGuestVisit = multiplayerRole === 'guest'
   const isHostVisit = multiplayerRole === 'host'
   const isMultiplayerSession = multiplayerRole !== 'solo'
@@ -11597,6 +11665,7 @@ function App() {
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
             <group userData={{ debugCategory: 'interactions' }}>
               <OutdoorDoor />
+              <OutdoorDoorStation isNear={isNearOutdoorDoor} currentZone={currentZone} />
               <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
               {showInteriorHouseDetails && (
                 <>

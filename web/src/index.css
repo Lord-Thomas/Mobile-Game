@@ -917,6 +917,10 @@ canvas {
   backdrop-filter: blur(14px);
 }
 
+html[data-chat-open='true'] .game-chat-panel {
+  bottom: calc(var(--chat-keyboard-inset, 0px) + 12px + env(safe-area-inset-bottom));
+}
+
 .game-chat-panel input {
   min-width: 0;
   flex: 1;
