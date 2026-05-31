@@ -748,6 +748,47 @@ function getInventoryCards(objects) {
   return Object.values(grouped)
 }
 
+function normalizeSocialFriend(friend) {
+  if (!friend?.userId) return null
+  return {
+    userId: friend.userId,
+    displayName: friend.displayName || 'Joueur',
+    addedAt: friend.addedAt || new Date().toISOString(),
+    lastSeenAt: friend.lastSeenAt || null,
+  }
+}
+
+function mergeSocialFriends(left = [], right = []) {
+  const byUserId = new Map()
+  ;[...left, ...right].forEach((friend) => {
+    const normalized = normalizeSocialFriend(friend)
+    if (!normalized) return
+    const existing = byUserId.get(normalized.userId)
+    byUserId.set(normalized.userId, {
+      ...existing,
+      ...normalized,
+      displayName: normalized.displayName || existing?.displayName || 'Joueur',
+      lastSeenAt: normalized.lastSeenAt || existing?.lastSeenAt || null,
+    })
+  })
+  return Array.from(byUserId.values())
+}
+
+function formatRelativeLastSeen(value) {
+  if (!value) return 'Derniere connexion inconnue'
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return 'Derniere connexion inconnue'
+  const elapsedSeconds = Math.max(1, Math.floor((Date.now() - timestamp) / 1000))
+
+  if (elapsedSeconds < 60) return 'Derniere connexion a l instant'
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
+  if (elapsedMinutes < 60) return `Derniere connexion il y a ${elapsedMinutes} minute${elapsedMinutes > 1 ? 's' : ''}`
+  const elapsedHours = Math.floor(elapsedMinutes / 60)
+  if (elapsedHours < 24) return `Derniere connexion il y a ${elapsedHours} heure${elapsedHours > 1 ? 's' : ''}`
+  const elapsedDays = Math.floor(elapsedHours / 24)
+  return `Derniere connexion il y a ${elapsedDays} jour${elapsedDays > 1 ? 's' : ''}`
+}
+
 function getEmoteAngle(index, count) {
   if (count <= 1) return -Math.PI / 2
   const t = index / (count - 1)
@@ -4612,6 +4653,7 @@ function GameMenuPanel({
         displayName: online?.displayName || friend.displayName,
         status: online?.status || 'offline',
         online: Boolean(online),
+        lastSeenAt: online?.onlineAt || friend.lastSeenAt || friend.addedAt || null,
       }
     })
     .sort((a, b) => Number(b.online) - Number(a.online) || a.displayName.localeCompare(b.displayName))
@@ -4798,7 +4840,9 @@ function GameMenuPanel({
                 {friendsWithStatus.map((friend) => (
                   <button key={friend.userId} type="button" className="multiplayer-player" onClick={() => friend.online && onSelectPlayer(friend)}>
                     <span>{friend.displayName}</span>
-                    <small>{friend.online ? 'En ligne' : 'Hors ligne'}</small>
+                    <small className={friend.online ? 'friend-status online' : 'friend-status offline'}>
+                      {friend.online ? 'En ligne' : `Hors ligne - ${formatRelativeLastSeen(friend.lastSeenAt)}`}
+                    </small>
                   </button>
                 ))}
               </div>
@@ -10174,6 +10218,7 @@ function App() {
   const lastRemoteWorldSeqRef = useRef(-1)
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false)
   const [onlinePlayers, setOnlinePlayers] = useState([])
+  const onlinePlayersRef = useRef([])
   const [incomingVisitRequest, setIncomingVisitRequest] = useState(null)
   const [outgoingVisitRequest, setOutgoingVisitRequest] = useState(null)
   const outgoingVisitRequestIdRef = useRef(null)
@@ -10261,7 +10306,7 @@ function App() {
 
     try {
       const raw = localStorage.getItem(`lab_friends_v1:${authUser.id}`)
-      setFriends(raw ? JSON.parse(raw) : [])
+      setFriends(raw ? mergeSocialFriends(JSON.parse(raw)) : [])
     } catch {
       setFriends([])
     }
@@ -10271,6 +10316,24 @@ function App() {
     if (!authUser?.id) return
     localStorage.setItem(`lab_friends_v1:${authUser.id}`, JSON.stringify(friends))
   }, [authUser?.id, friends])
+
+  useEffect(() => {
+    onlinePlayersRef.current = onlinePlayers
+    if (!onlinePlayers.length) return
+    setFriends((current) => {
+      let changed = false
+      const next = current.map((friend) => {
+        const online = onlinePlayers.find((player) => player.userId === friend.userId)
+        if (!online) return friend
+        const lastSeenAt = online.onlineAt || new Date().toISOString()
+        const displayName = online.displayName || friend.displayName
+        if (friend.lastSeenAt === lastSeenAt && friend.displayName === displayName) return friend
+        changed = true
+        return { ...friend, displayName, lastSeenAt }
+      })
+      return changed ? next : current
+    })
+  }, [onlinePlayers])
 
   useEffect(() => {
     try {
@@ -10365,6 +10428,7 @@ function App() {
     equippedWeapon,
     equippedTitleId,
     characterAppearance,
+    friends,
   })
 
   const resetGuestProgress = () => {
@@ -10496,6 +10560,9 @@ function App() {
     const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
     setEquippedWeapon(hasMagicBook && savedEquipped === 'magic_book' ? 'magic_book' : null)
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
+    if (includeIdentity && Array.isArray(parsed.friends)) {
+      setFriends((current) => mergeSocialFriends(current, parsed.friends))
+    }
   }
 
   const refreshPlayerTitles = async () => {
@@ -10585,7 +10652,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -10603,14 +10670,12 @@ function App() {
     if (!friend?.userId) return
     setFriends((current) => {
       if (current.some((item) => item.userId === friend.userId)) return current
-      return [
-        ...current,
-        {
-          userId: friend.userId,
-          displayName: friend.displayName || 'Joueur',
-          addedAt: new Date().toISOString(),
-        },
-      ]
+      return mergeSocialFriends(current, [{
+        userId: friend.userId,
+        displayName: friend.displayName || 'Joueur',
+        addedAt: new Date().toISOString(),
+        lastSeenAt: friend.lastSeenAt || null,
+      }])
     })
   }, [])
 
@@ -10685,9 +10750,11 @@ function App() {
           setMultiplayerMessage('Demande d ami refusee.')
           return
         }
+        const onlineFriend = onlinePlayersRef.current.find((player) => player.userId === response.fromUserId)
         addFriend({
           userId: response.fromUserId,
-          displayName: response.fromDisplayName,
+          displayName: onlineFriend?.displayName || response.fromDisplayName,
+          lastSeenAt: onlineFriend?.onlineAt || null,
         })
         setMultiplayerMessage(`${response.fromDisplayName} est maintenant dans ta liste d'amis.`)
       },
@@ -10929,7 +10996,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -11729,9 +11796,11 @@ function App() {
 
   const acceptFriendRequest = async (request) => {
     if (!authUser || !request?.fromUserId) return
+    const onlineFriend = onlinePlayers.find((player) => player.userId === request.fromUserId)
     addFriend({
       userId: request.fromUserId,
-      displayName: request.fromDisplayName,
+      displayName: onlineFriend?.displayName || request.fromDisplayName,
+      lastSeenAt: onlineFriend?.onlineAt || null,
     })
     setIncomingFriendRequests((current) => current.filter((item) => item.id !== request.id))
     setMultiplayerMessage(`${request.fromDisplayName} est maintenant dans ta liste d'amis.`)

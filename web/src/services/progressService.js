@@ -23,10 +23,34 @@ function mergeEditableObjects(existingObjects = [], currentObjects = []) {
   return Array.from(byId.values())
 }
 
+function normalizeFriends(friends = []) {
+  if (!Array.isArray(friends)) return []
+  const byUserId = new Map()
+
+  friends.forEach((friend) => {
+    if (!friend?.userId) return
+    const existing = byUserId.get(friend.userId)
+    byUserId.set(friend.userId, {
+      ...existing,
+      userId: friend.userId,
+      displayName: friend.displayName || existing?.displayName || 'Joueur',
+      addedAt: friend.addedAt || existing?.addedAt || new Date().toISOString(),
+      lastSeenAt: friend.lastSeenAt || existing?.lastSeenAt || null,
+    })
+  })
+
+  return Array.from(byUserId.values())
+}
+
+function mergeFriends(existingFriends = [], currentFriends = []) {
+  return normalizeFriends([...existingFriends, ...currentFriends])
+}
+
 function mergeProgressRow(existingRow, progress) {
   if (!existingRow) return progress
   const existing = fromProgressRow(existingRow)
   const ownedWeapons = mergeUnique(existing.ownedWeapons, progress.ownedWeapons)
+  const friends = mergeFriends(existing.friends, progress.friends)
   const ownedMagicBook = Boolean(existing.ownedMagicBook || progress.ownedMagicBook || ownedWeapons.includes('magic_book'))
   const equippedWeapon = ownedWeapons.includes(progress.equippedWeapon) || (progress.equippedWeapon === 'magic_book' && ownedMagicBook)
     ? progress.equippedWeapon
@@ -48,6 +72,7 @@ function mergeProgressRow(existingRow, progress) {
       ? existing.selectedWallSkinId
       : progress.selectedWallSkinId,
     ownedWeapons,
+    friends,
     ownedCat: Boolean(existing.ownedCat || progress.ownedCat),
     ownedMagicBook,
     equippedWeapon,
@@ -152,6 +177,7 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
+      friends: normalizeFriends(progress.friends),
     },
     updated_at: new Date().toISOString(),
   }
@@ -182,6 +208,7 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
+      friends: normalizeFriends(progress.friends),
     },
   }
 }
@@ -215,6 +242,7 @@ export function fromProgressRow(row) {
     equippedTitleId: row.equipped_title_id ?? null,
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],
     characterAppearance: row.world_settings?.characterAppearance ?? null,
+    friends: normalizeFriends(row.world_settings?.friends),
   }
 }
 

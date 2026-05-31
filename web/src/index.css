@@ -753,6 +753,34 @@ canvas {
   font-size: 11px;
 }
 
+.friend-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.friend-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #8fa0b3;
+  flex: 0 0 auto;
+}
+
+.friend-status.online {
+  color: #8df2a9;
+}
+
+.friend-status.online::before {
+  background: #66ff9a;
+  box-shadow: 0 0 0 3px rgba(102, 255, 154, 0.14);
+}
+
+.friend-status.offline {
+  color: #aebdcb;
+}
+
 .multiplayer-session-card {
   display: grid;
   gap: 8px;
