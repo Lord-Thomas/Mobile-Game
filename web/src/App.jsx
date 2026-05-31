@@ -8781,8 +8781,8 @@ function EnvironmentMenu({
   const canBuy = coins >= skin.price
 
   return (
-    <div className="skin-menu-overlay">
-      <div className="skin-menu">
+    <div className="skin-menu-overlay environment-shop-overlay">
+      <div className="skin-menu environment-shop-menu">
         <div className="skin-coins">
           <img src="/ui/coins.png" alt="" aria-hidden="true" />
           <span>{coins} pieces</span>
@@ -12020,7 +12020,7 @@ function App() {
         </button>
       )}
       {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
-        <button className="skin-open-btn skin-open-btn-right" type="button" onClick={openEnvironmentMenu}>
+        <button className="skin-open-btn environment-open-btn" type="button" onClick={openEnvironmentMenu}>
           Boutique
         </button>
       )}

@@ -891,6 +891,18 @@ canvas {
   --bottom-ui-action-3: calc(var(--bottom-ui-action-2) + var(--bottom-ui-action-height) + var(--bottom-ui-gap));
 }
 
+html[data-orientation='landscape'] {
+  --bottom-ui-gap: 6px;
+  --bottom-ui-message-height: 28px;
+  --bottom-ui-action-height: 34px;
+  --bottom-ui-message-offset: calc(8px + env(safe-area-inset-bottom));
+  --bottom-ui-action-1: calc(var(--bottom-ui-message-offset) + var(--bottom-ui-message-height) + var(--bottom-ui-gap));
+  --bottom-ui-action-2: calc(var(--bottom-ui-action-1) + var(--bottom-ui-action-height) + var(--bottom-ui-gap));
+  --bottom-ui-action-3: calc(var(--bottom-ui-action-2) + var(--bottom-ui-action-height) + var(--bottom-ui-gap));
+  --ui-viewport-width: var(--app-viewport-width, 100vw);
+  --ui-viewport-height: var(--app-viewport-height, 100dvh);
+}
+
 .game-chat-toggle,
 .game-chat-panel {
   position: absolute;
@@ -1318,7 +1330,7 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .customize-ui {
   position: absolute;
-  inset: auto 14px 16px 14px;
+  inset: auto max(14px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
   z-index: 7;
   display: flex;
   align-items: center;
@@ -1392,27 +1404,26 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .object-inventory-sheet {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 8;
   pointer-events: none;
 }
 
 .object-inventory-handle {
   position: absolute;
-  right: 14px;
-  bottom: 82px;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: var(--bottom-ui-action-1);
   border: 0;
   border-radius: 14px;
-  height: 48px;
-  padding: 0 16px;
-  background: rgba(14, 23, 34, 0.9);
+  height: 44px;
+  padding: 0 14px;
+  background: rgba(14, 23, 34, 0.92);
   color: #f8fbff;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 900;
   pointer-events: auto;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 
 .object-inventory-sheet.open .object-inventory-handle {
@@ -1420,8 +1431,19 @@ html[data-chat-open='true'] .game-chat-panel {
 }
 
 .object-inventory-content {
-  height: min(55vh, 430px);
-  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  max-height: min(48dvh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - 96px));
+  padding:
+    12px
+    max(12px, env(safe-area-inset-right))
+    calc(12px + env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
   background: rgba(12, 19, 27, 0.96);
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 20px 20px 0 0;
@@ -1429,6 +1451,7 @@ html[data-chat-open='true'] .game-chat-panel {
   pointer-events: auto;
   backdrop-filter: blur(12px);
   overflow: hidden;
+  box-shadow: 0 -16px 42px rgba(0, 0, 0, 0.28);
 }
 
 .object-inventory-header {
@@ -1436,23 +1459,24 @@ html[data-chat-open='true'] .game-chat-panel {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
 }
 
 .object-inventory-header h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
 }
 
 .object-inventory-header button {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border: 0;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   color: #f8fbff;
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1;
   display: grid;
   place-items: center;
@@ -1460,21 +1484,27 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .object-inventory-tabs {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   padding-bottom: 2px;
+  flex: 0 0 auto;
+  scrollbar-width: none;
+}
+
+.object-inventory-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .object-inventory-tabs button {
   flex: 0 0 auto;
   border: 0;
   border-radius: 999px;
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 10px;
   background: rgba(255, 255, 255, 0.08);
   color: #f8fbff;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -1486,23 +1516,31 @@ html[data-chat-open='true'] .game-chat-panel {
 .object-inventory-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  max-height: calc(min(55vh, 430px) - 112px);
+  gap: 8px;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding-bottom: 4px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
 .inventory-card {
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 14px;
-  min-height: 142px;
-  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  min-height: 0;
+  width: 100%;
+  padding: 6px;
   background: rgba(20, 24, 30, 0.92);
   color: #f8fbff;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: stretch;
+  gap: 4px;
   touch-action: manipulation;
 }
 
@@ -1517,15 +1555,13 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .inventory-card-preview {
   position: relative;
-  justify-self: center;
-  width: min(108px, 100%);
+  width: 100%;
   aspect-ratio: 1 / 1;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
   display: grid;
   place-items: center;
   overflow: hidden;
-  align-self: center;
 }
 
 .inventory-thumbnail-img {
@@ -1600,9 +1636,9 @@ html[data-chat-open='true'] .game-chat-panel {
 }
 
 .inventory-card-name {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.15;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -1613,6 +1649,189 @@ html[data-chat-open='true'] .game-chat-panel {
   .object-inventory-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+html[data-orientation='landscape'] .account-sync {
+  left: max(10px, env(safe-area-inset-left));
+  top: max(8px, env(safe-area-inset-top));
+}
+
+html[data-orientation='landscape'] .multiplayer-panel {
+  top: max(8px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+}
+
+html[data-orientation='landscape'] .score-wrap {
+  top: max(8px, env(safe-area-inset-top));
+}
+
+html[data-orientation='landscape'] .joystick-wrap {
+  left: max(10px, env(safe-area-inset-left));
+  bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+html[data-orientation='landscape'] .joystick-zone {
+  width: 104px;
+  height: 104px;
+}
+
+html[data-orientation='landscape'] .joystick-thumb {
+  width: 42px;
+  height: 42px;
+}
+
+html[data-orientation='landscape'] .action-btn {
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  width: 92px;
+  height: 48px;
+}
+
+html[data-orientation='landscape'] .skin-open-btn {
+  padding: 8px 12px;
+  font-size: 12px;
+  border-radius: 12px;
+}
+
+html[data-orientation='landscape'] .skin-open-btn-right {
+  right: max(10px, env(safe-area-inset-right));
+}
+
+html[data-orientation='landscape'] .customize-ui {
+  left: max(10px, env(safe-area-inset-left));
+  right: auto;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  width: auto;
+  max-width: min(420px, calc(var(--ui-viewport-width) - env(safe-area-inset-left) - env(safe-area-inset-right) - 36% - 20px));
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+html[data-orientation='landscape'] .customize-rotation,
+html[data-orientation='landscape'] .customize-placement-actions {
+  flex-wrap: wrap;
+}
+
+html[data-orientation='landscape'] .customize-rotation button,
+html[data-orientation='landscape'] .customize-done,
+html[data-orientation='landscape'] .customize-cancel {
+  height: 40px;
+  min-width: 44px;
+  padding: 0 12px;
+  font-size: 15px;
+  border-radius: 12px;
+}
+
+html[data-orientation='landscape'] .customize-done {
+  min-width: 84px;
+}
+
+html[data-orientation='landscape'] .object-inventory-handle {
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  bottom: auto;
+  height: 38px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+html[data-orientation='landscape'] .object-inventory-content {
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  bottom: auto;
+  left: auto;
+  width: min(320px, calc(var(--ui-viewport-width) - env(safe-area-inset-left) - env(safe-area-inset-right) - 46%));
+  max-height: calc(var(--ui-viewport-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 12px);
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.34);
+}
+
+html[data-orientation='landscape'] .object-inventory-header {
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+html[data-orientation='landscape'] .object-inventory-header h2 {
+  font-size: 15px;
+}
+
+html[data-orientation='landscape'] .object-inventory-tabs {
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+html[data-orientation='landscape'] .object-inventory-tabs button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+html[data-orientation='landscape'] .object-inventory-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+html[data-orientation='landscape'] .inventory-card {
+  padding: 8px;
+  gap: 6px;
+}
+
+html[data-orientation='landscape'] .inventory-card-preview {
+  width: 100%;
+}
+
+html[data-orientation='landscape'] .inventory-card-name {
+  font-size: 11px;
+}
+
+html[data-orientation='landscape'] .inventory-card-quantity {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+html[data-orientation='landscape'] .skin-menu {
+  width: min(380px, calc(var(--ui-viewport-width) - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px));
+  max-height: calc(var(--ui-viewport-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
+}
+
+html[data-orientation='landscape'] .environment-shop-menu {
+  width: min(400px, calc(var(--ui-viewport-width) - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px));
+  max-height: calc(var(--ui-viewport-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - var(--bottom-ui-message-offset) - 12px);
+}
+
+html[data-orientation='landscape'] .char-menu {
+  width: min(380px, calc(var(--ui-viewport-width) - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px));
+  max-height: calc(var(--ui-viewport-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
+  padding: 14px 12px;
+}
+
+html[data-orientation='landscape'] .account-sync-panel,
+html[data-orientation='landscape'] .multiplayer-menu {
+  max-height: calc(var(--ui-viewport-height) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 56px);
+}
+
+html[data-orientation='landscape'] .weapon-inventory-btn {
+  bottom: calc(var(--bottom-ui-action-2) + 4px);
+  right: max(10px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  font-size: 1.15rem;
+}
+
+html[data-orientation='landscape'] .fireball-btn {
+  width: 54px;
+  height: 54px;
+  font-size: 1.45rem;
+}
+
+html[data-orientation='landscape'] .charge-bar-wrap {
+  width: min(200px, calc(var(--ui-viewport-width) * 0.34));
 }
 
 .thumbnail-tool {
@@ -1815,6 +2034,28 @@ html[data-chat-open='true'] .game-chat-panel {
   justify-items: center;
   scrollbar-width: thin;
   scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
+}
+
+.environment-shop-overlay {
+  align-items: flex-end;
+  justify-content: center;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(var(--bottom-ui-message-offset), calc(8px + env(safe-area-inset-bottom)))
+    max(12px, env(safe-area-inset-left));
+}
+
+.environment-shop-menu {
+  width: min(360px, 100%);
+  max-height: min(62dvh, calc(var(--app-viewport-height, 100dvh) - var(--bottom-ui-message-offset) - env(safe-area-inset-top) - 32px));
+  margin: 0;
+  border-radius: 18px 18px 14px 14px;
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.32);
+}
+
+.environment-open-btn {
+  background: rgba(26, 48, 38, 0.92);
 }
 
 .skin-coins {
@@ -2564,23 +2805,11 @@ html[data-chat-open='true'] .game-chat-panel {
   }
 
   .customize-ui {
-    inset: auto 12px 14px 12px;
-  }
-
-  .customize-rotation button,
-  .customize-done,
-  .customize-cancel {
-    height: 48px;
-    min-width: 52px;
+    inset: auto max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
 
   .object-inventory-handle {
-    right: 12px;
-    bottom: 76px;
-  }
-
-  .object-inventory-content {
-    padding-inline: 12px;
+    right: max(12px, env(safe-area-inset-right));
   }
 }
 
@@ -3094,6 +3323,22 @@ html[data-chat-open='true'] .game-chat-panel {
 
   .weapon-inventory-panel {
     padding: 14px 16px 16px;
+  }
+
+  html[data-orientation='landscape'] .object-inventory-content {
+    width: min(300px, calc(var(--ui-viewport-width, 100vw) - env(safe-area-inset-left) - env(safe-area-inset-right) - 48%));
+  }
+
+  html[data-orientation='landscape'] .object-inventory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  html[data-orientation='landscape'] .furniture-shop-grid {
+    max-height: min(140px, calc(var(--ui-viewport-height, 100dvh) - 210px));
+  }
+
+  html[data-orientation='landscape'] .animals-shop-grid {
+    max-height: min(120px, calc(var(--ui-viewport-height, 100dvh) - 200px));
   }
 }
 
