@@ -3306,6 +3306,10 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   pointer-events: auto;
 }
 
+.app--bottom-interaction-prompt .combat-action-dock {
+  bottom: calc(var(--bottom-ui-action-3) + var(--bottom-ui-action-height) + var(--bottom-ui-gap));
+}
+
 .combat-action-btn {
   flex: 0 1 auto;
   min-width: 0;
@@ -3405,6 +3409,10 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   box-shadow: 0 0 10px rgba(255, 80, 0, 0.5);
   overflow: hidden;
   z-index: 100;
+}
+
+.app--bottom-interaction-prompt .charge-bar-wrap {
+  bottom: calc(var(--bottom-ui-action-3) + var(--bottom-ui-action-height) + var(--bottom-ui-action-height) + var(--bottom-ui-gap) + var(--bottom-ui-gap));
 }
 .charge-bar-fill {
   height: 100%;

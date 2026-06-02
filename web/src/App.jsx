@@ -57,7 +57,7 @@ const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'setti
 const PUBLIC_BUILD_FLAGS = {
   showObjectInventory: true,
   showWeaponInventory: true,
-  showWeaponShop: false,
+  showWeaponShop: true,
   showCharacterCustomization: false,
 }
 const WORLD_CHAT_Z_INDEX_RANGE = [3, 0]
@@ -11930,8 +11930,17 @@ function App() {
   const isFramedViewport = isAdminMode || isVerticalFrameMode
   const renderOutdoorVisualWorld = currentZone === ZONES.outside
   const showInteriorHouseDetails = currentZone !== ZONES.outside
+  const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
+    isNearOutdoorDoor ||
+    (canModifyWorld && isNearSkinStation) ||
+    (canModifyWorld && currentZone !== ZONES.outside && isNearEnvironmentStation) ||
+    (canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation) ||
+    Boolean(nearbyTv) ||
+    Boolean(nearbySeat) ||
+    seatedState?.phase === 'sitting'
+  )
   const gameView = (
-    <main className={`app app-${viewportOrientation}${isFramedViewport ? ' app-framed' : ''}`}>
+    <main className={`app app-${viewportOrientation}${isFramedViewport ? ' app-framed' : ''}${hasBottomInteractionPrompt ? ' app--bottom-interaction-prompt' : ''}`}>
       <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
       <Canvas
         dpr={renderSettings.dpr}
