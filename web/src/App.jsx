@@ -5556,10 +5556,15 @@ const CUSTOMIZE_ZOOM_MAX = 150
 const CUSTOMIZE_ZOOM_DEFAULT = 58
 
 function CustomizationCamera({ active }) {
-  const { gl } = useThree()
+  const { camera, gl } = useThree()
   const camRef = useRef()
   const zoomRef = useRef(CUSTOMIZE_ZOOM_DEFAULT)
   const pinchDistRef = useRef(null)
+
+  useEffect(() => {
+    if (!camRef.current) return
+    gl.compile(camRef.current, camera)
+  }, [camera, gl])
 
   useEffect(() => {
     if (active) zoomRef.current = CUSTOMIZE_ZOOM_DEFAULT
@@ -5624,12 +5629,10 @@ function CustomizationCamera({ active }) {
     }
   })
 
-  if (!active) return null
-
   return (
     <OrthographicCamera
       ref={camRef}
-      makeDefault
+      makeDefault={active}
       position={[0, 18, 0]}
       rotation={[-Math.PI / 2, 0, 0]}
       zoom={CUSTOMIZE_ZOOM_DEFAULT}
@@ -8339,6 +8342,30 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
 
 const CUSTOMIZE_PAN_BOUNDS = { minX: -6, maxX: 6, minZ: -6, maxZ: 12 }
 
+function CustomizationWarmup() {
+  const groupRef = useRef(null)
+  const { camera, gl } = useThree()
+
+  useEffect(() => {
+    if (!groupRef.current) return
+    gl.compile(groupRef.current, camera)
+  }, [camera, gl])
+
+  return (
+    <group ref={groupRef} position={[0, -500, 0]} scale={0.0001} frustumCulled={false}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false}>
+        <planeGeometry args={[PLAYER_PLOT_SIZE + 4, PLAYER_PLOT_SIZE + 4]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <gridHelper args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']} frustumCulled={false} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false}>
+        <ringGeometry args={[1.08, 1.16, 40]} />
+        <meshBasicMaterial color="#66ff9a" transparent opacity={0} />
+      </mesh>
+    </group>
+  )
+}
+
 function RoomBorder({ width, depth, posX = 0, posZ = 0 }) {
   const positions = useMemo(() => new Float32Array([
     -width / 2, 0, -depth / 2,
@@ -8552,6 +8579,7 @@ function CustomizationLayer({
 
   return (
     <group userData={{ debugCategory: 'placeables' }}>
+      <CustomizationWarmup />
       <CustomizationCamera active={mode === 'customize'} />
       <EditableFloor
         mode={mode}
@@ -11964,7 +11992,7 @@ function App() {
   }
 
   const isFramedViewport = isAdminMode || isVerticalFrameMode
-  const renderOutdoorVisualWorld = currentZone === ZONES.outside
+  const renderOutdoorVisualWorld = currentZone === ZONES.outside || mode === 'customize'
   const showInteriorHouseDetails = currentZone !== ZONES.outside
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
     isNearOutdoorDoor ||
@@ -12069,12 +12097,12 @@ function App() {
         )}
         {renderOutdoorVisualWorld && (
           <OutdoorNeighborhood
-            lightingActive
+            lightingActive={currentZone === ZONES.outside}
             playerPositionRef={playerPositionRef}
             ballRef={ballRef}
             showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
             showTrees={performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
-            showTerrain={!isDebugMode || debugToggles.terrain}
+            showTerrain
             showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
             castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
             showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
