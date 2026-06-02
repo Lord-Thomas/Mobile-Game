@@ -3838,6 +3838,56 @@ function FireballImpact({ impact }) {
   )
 }
 
+function FireballWarmup() {
+  const groupRef = useRef(null)
+  const { camera, gl } = useThree()
+  const uniforms = useMemo(() => ({
+    uTime: { value: 0 },
+    uOpacity: { value: 0 },
+    uRadius: { value: 0.18 },
+    uDistortion: { value: 0.075 },
+  }), [])
+
+  useEffect(() => {
+    if (!groupRef.current) return
+    gl.compile(groupRef.current, camera)
+  }, [camera, gl])
+
+  return (
+    <group ref={groupRef} position={[0, -500, 0]} scale={0.0001} frustumCulled={false}>
+      <mesh frustumCulled={false}>
+        <primitive object={FIREBALL_GEO_CORE} attach="geometry" />
+        <primitive object={FIREBALL_MAT_CORE} attach="material" />
+      </mesh>
+      <mesh frustumCulled={false}>
+        <primitive object={FIREBALL_GEO_GLOW} attach="geometry" />
+        <primitive object={FIREBALL_MAT_GLOW} attach="material" />
+      </mesh>
+      <mesh frustumCulled={false}>
+        <primitive object={FIREBALL_GEO_SHELL} attach="geometry" />
+        <shaderMaterial
+          uniforms={uniforms}
+          vertexShader={fireballFlameVertexShader}
+          fragmentShader={fireballFlameFragmentShader}
+          transparent
+          depthWrite={false}
+          blending={AdditiveBlending}
+          side={DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh frustumCulled={false}>
+        <primitive object={FIREBALL_GEO_IMPACT_SPHERE} attach="geometry" />
+        <meshBasicMaterial color="#fff1a6" transparent opacity={0} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
+      </mesh>
+      <mesh frustumCulled={false}>
+        <primitive object={FIREBALL_GEO_IMPACT_RING} attach="geometry" />
+        <meshBasicMaterial color="#ff6a00" transparent opacity={0} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
+      </mesh>
+    </group>
+  )
+}
+
 function FireballManager({ projectilesRef, combatTargetsRef }) {
   const [, setRenderTick] = useState(0)
   const impactsRef = useRef([])
@@ -3884,21 +3934,7 @@ function FireballManager({ projectilesRef, combatTargetsRef }) {
 
   return (
     <>
-      {/* Shader warmup: renders at scale 0.0001 far below the map so Three.js
-          compiles the GLSL program on scene load, not on first cast. */}
-      <mesh scale={0.0001} position={[0, -500, 0]}>
-        <primitive object={FIREBALL_GEO_SHELL} attach="geometry" />
-        <shaderMaterial
-          vertexShader={fireballFlameVertexShader}
-          fragmentShader={fireballFlameFragmentShader}
-          uniforms={{ uTime: { value: 0 }, uOpacity: { value: 0 }, uRadius: { value: 0.18 }, uDistortion: { value: 0.075 } }}
-          transparent
-          depthWrite={false}
-          blending={AdditiveBlending}
-          side={DoubleSide}
-          toneMapped={false}
-        />
-      </mesh>
+      <FireballWarmup />
       {projs.map((p) => (
         <FireballProjectile key={p.id} projectile={p} />
       ))}
