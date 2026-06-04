@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -3140,10 +3140,17 @@ function CharacterAuraGlow({ visible }) {
     `,
     transparent: true,
     depthWrite: false,
-    depthTest: false,
+    depthTest: true,
     blending: AdditiveBlending,
     side: DoubleSide,
     toneMapped: false,
+    stencilWrite: true,
+    stencilWriteMask: 0x00,
+    stencilRef: 1,
+    stencilFunc: NotEqualStencilFunc,
+    stencilFail: KeepStencilOp,
+    stencilZFail: KeepStencilOp,
+    stencilZPass: KeepStencilOp,
   }), [])
   const particlesMaterial = useMemo(() => new ShaderMaterial({
     uniforms: {
@@ -3189,9 +3196,16 @@ function CharacterAuraGlow({ visible }) {
     `,
     transparent: true,
     depthWrite: false,
-    depthTest: true,
+    depthTest: false,
     blending: AdditiveBlending,
     toneMapped: false,
+    stencilWrite: true,
+    stencilWriteMask: 0x00,
+    stencilRef: 1,
+    stencilFunc: NotEqualStencilFunc,
+    stencilFail: KeepStencilOp,
+    stencilZFail: KeepStencilOp,
+    stencilZPass: KeepStencilOp,
   }), [])
   const particleGeometry = useMemo(() => {
     const count = 96
@@ -3354,6 +3368,12 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
 
         mat._tintRecolorApplied = true
         mat.color.set('#FFFFFF') // neutre — le shader applique la couleur via le ratio
+        mat.stencilWrite = true
+        mat.stencilRef = 1
+        mat.stencilFunc = AlwaysStencilFunc
+        mat.stencilFail = KeepStencilOp
+        mat.stencilZFail = KeepStencilOp
+        mat.stencilZPass = ReplaceStencilOp
         mat.customProgramCacheKey = () => `tint-recolor-${materialKey}-v3`
         mat.onBeforeCompile = (shader) => {
           shader.uniforms.uZoneColor = zoneColorRefs.current[colorKey]
@@ -12231,7 +12251,7 @@ function App() {
         gl={{
           antialias: renderSettings.antialias,
           powerPreference: 'high-performance',
-          stencil: false,
+          stencil: true,
           depth: true,
         }}
         onCreated={({ gl }) => {
