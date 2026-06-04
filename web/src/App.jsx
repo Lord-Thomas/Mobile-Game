@@ -12193,8 +12193,8 @@ function App() {
   }
 
   const isFramedViewport = isAdminMode || isVerticalFrameMode
-  const renderOutdoorVisualWorld = currentZone === ZONES.outside
-  const showInteriorHouseDetails = currentZone !== ZONES.outside
+  const isOutsideZone = currentZone === ZONES.outside
+  const showInteriorHouseDetails = !isOutsideZone
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
     isNearOutdoorDoor ||
     (canModifyWorld && isNearSkinStation) ||
@@ -12297,24 +12297,23 @@ function App() {
           />
         </PlayerHouse>
         )}
-        {renderOutdoorVisualWorld && (
-          <group>
-            <OutdoorNeighborhood
-              lightingActive={currentZone === ZONES.outside}
-              playerPositionRef={playerPositionRef}
-              ballRef={ballRef}
-              showGrass={currentZone === ZONES.outside && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
-              showTrees={currentZone === ZONES.outside && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
-              showTerrain
-              showRoad={currentZone === ZONES.outside}
-              showNeighborHouses={currentZone === ZONES.outside}
-              showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
-              castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
-              showPlayerPlot={isDebugMode && debugToggles.plot}
-              debugStats={isDebugMode}
-            />
-          </group>
-        )}
+        <group>
+          <OutdoorNeighborhood
+            profile={isOutsideZone ? 'full' : 'interior'}
+            lightingActive={isOutsideZone}
+            playerPositionRef={playerPositionRef}
+            ballRef={ballRef}
+            showGrass={isOutsideZone && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+            showTrees={isOutsideZone && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
+            showTerrain
+            showRoad
+            showNeighborHouses={isOutsideZone}
+            showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
+            castShadows={isOutsideZone && performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
+            showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
+            debugStats={isDebugMode}
+          />
+        </group>
         {hasRemotePlayer && (
           <RemotePlayer
             stateRef={remotePlayerStateRef}

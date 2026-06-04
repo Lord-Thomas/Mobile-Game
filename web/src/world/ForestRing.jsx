@@ -5,7 +5,7 @@ import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const dummy = new Object3D()
 
-function InstancedTrees() {
+function InstancedTrees({ castShadows = true }) {
   const trunkRef = useRef()
   const foliageARef = useRef()
   const foliageBRef = useRef()
@@ -48,15 +48,15 @@ function InstancedTrees() {
 
   return (
     <group>
-      <instancedMesh ref={trunkRef} args={[undefined, undefined, FOREST_TREES.length]} castShadow receiveShadow>
+      <instancedMesh ref={trunkRef} args={[undefined, undefined, FOREST_TREES.length]} castShadow={castShadows} receiveShadow={castShadows}>
         <cylinderGeometry args={[0.16, 0.22, 1.45, 8]} />
         <meshStandardMaterial roughness={0.86} vertexColors />
       </instancedMesh>
-      <instancedMesh ref={foliageARef} args={[undefined, undefined, FOREST_TREES.length]} castShadow>
+      <instancedMesh ref={foliageARef} args={[undefined, undefined, FOREST_TREES.length]} castShadow={castShadows}>
         <coneGeometry args={[0.92, 1.8, 9]} />
         <meshStandardMaterial roughness={0.8} vertexColors />
       </instancedMesh>
-      <instancedMesh ref={foliageBRef} args={[undefined, undefined, FOREST_TREES.length]} castShadow>
+      <instancedMesh ref={foliageBRef} args={[undefined, undefined, FOREST_TREES.length]} castShadow={castShadows}>
         <coneGeometry args={[0.68, 1.35, 9]} />
         <meshStandardMaterial roughness={0.8} vertexColors />
       </instancedMesh>
@@ -64,10 +64,10 @@ function InstancedTrees() {
   )
 }
 
-function ForestRing() {
+function ForestRing({ castShadows = true }) {
   return (
     <group>
-      <InstancedTrees />
+      <InstancedTrees castShadows={castShadows} />
       <mesh position={[0, 0.05, -39]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[70, 3]} />
         <meshStandardMaterial color="#5e8e67" roughness={0.9} />

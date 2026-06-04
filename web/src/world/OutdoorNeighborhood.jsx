@@ -1,6 +1,9 @@
 import React from 'react'
 import { Environment } from '@react-three/drei'
 import { useEffect, useRef } from 'react'
+import { BackSide } from 'three'
+import DistantScenery from './DistantScenery'
+import ForestRing from './ForestRing'
 import OutdoorGround from './OutdoorGround'
 import PlayerPlot from './PlayerPlot'
 import Road from './Road'
@@ -45,7 +48,17 @@ function OutdoorSun({ castShadows }) {
   )
 }
 
-export function OutdoorLighting({ active, showSky, castShadows }) {
+function StaticSkyDome() {
+  return (
+    <mesh scale={150} renderOrder={-100} frustumCulled={false}>
+      <sphereGeometry args={[1, 16, 8]} />
+      <meshBasicMaterial color="#a8d7f2" side={BackSide} depthWrite={false} depthTest={false} fog={false} toneMapped />
+    </mesh>
+  )
+}
+
+export function OutdoorLighting({ active, showSky, castShadows, lightweight = false }) {
+  if (lightweight) return showSky ? <StaticSkyDome /> : null
   if (!active) return null
 
   return (
@@ -61,6 +74,7 @@ export function OutdoorLighting({ active, showSky, castShadows }) {
 }
 
 const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
+  profile = 'full',
   lightingActive = true,
   playerPositionRef,
   ballRef,
@@ -75,15 +89,19 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showPlayerPlot = false,
   debugStats = false,
 }) {
+  const isLightweight = profile === 'interior'
+
   return (
     <group userData={{ debugCategory: 'outdoor' }}>
-      <OutdoorLighting active={lightingActive} showSky={showSky} castShadows={castShadows} />
-      {showTerrain && <OutdoorGround />}
+      <OutdoorLighting active={lightingActive} showSky={showSky} castShadows={castShadows} lightweight={isLightweight} />
+      {isLightweight && <DistantScenery />}
+      {showTerrain && <OutdoorGround detail={isLightweight ? 'light' : 'full'} />}
       {showPlayerPlot && <PlayerPlot />}
-      {showRoad && <Road />}
+      {showRoad && <Road lightweight={isLightweight} />}
       {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />
       ))}
+      {isLightweight && <ForestRing castShadows={false} />}
       {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} playerPositionRef={playerPositionRef} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} />}
       {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} debugStats={debugStats} />}

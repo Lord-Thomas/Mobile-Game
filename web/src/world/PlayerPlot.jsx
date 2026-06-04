@@ -48,7 +48,7 @@ function PlayerPlot() {
     <group userData={{ debugCategory: 'plot' }}>
       <mesh position={[0, 0.046, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[perimeterLength, perimeterLength]} />
-        <meshStandardMaterial color="#ffffff" transparent opacity={0.16} roughness={0.9} depthWrite={false} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.16} depthWrite={false} />
       </mesh>
       {[0, 1, 2, 3].map((side) => (
         <instancedMesh
@@ -58,7 +58,7 @@ function PlayerPlot() {
           renderOrder={10}
         >
           <planeGeometry args={[dashLength, 0.12]} />
-          <meshStandardMaterial color="#ffffff" transparent opacity={0.92} roughness={0.9} depthWrite={false} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
         </instancedMesh>
       ))}
     </group>

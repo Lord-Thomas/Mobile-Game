@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
 
 const MOUNTAIN_RADIUS = 76
@@ -82,6 +82,11 @@ function createMountainRingGeometry() {
 function DistantScenery() {
   const mountains = useMemo(() => createMountainRingGeometry(), [])
   const outerHills = useMemo(() => createOuterHillsGeometry(), [])
+
+  useEffect(() => () => {
+    mountains.dispose()
+    outerHills.dispose()
+  }, [mountains, outerHills])
 
   return (
     <group>
