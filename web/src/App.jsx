@@ -3079,7 +3079,8 @@ function CharacterAuraGlow({ visible }) {
   const hazeMaterial = useMemo(() => new ShaderMaterial({
     uniforms: {
       glowColor: { value: new Color('#77d9ff') },
-      opacity: { value: 0.28 },
+      opacity: { value: 0.24 },
+      uTime: { value: 0 },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -3094,15 +3095,47 @@ function CharacterAuraGlow({ visible }) {
     fragmentShader: `
       uniform vec3 glowColor;
       uniform float opacity;
+      uniform float uTime;
       varying vec2 vUv;
       varying float vFacing;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+          u.y
+        );
+      }
+
+      float fbm(vec2 p) {
+        float value = 0.0;
+        float amplitude = 0.5;
+        for (int i = 0; i < 4; i++) {
+          value += noise(p) * amplitude;
+          p *= 2.03;
+          amplitude *= 0.5;
+        }
+        return value;
+      }
+
       void main() {
         vec2 centered = vUv - vec2(0.5);
         centered.y *= 0.58;
         float radial = length(centered);
         float alpha = (1.0 - smoothstep(0.08, 0.52, radial)) * opacity;
         alpha *= smoothstep(0.02, 0.2, vUv.y) * (1.0 - smoothstep(0.82, 1.0, vUv.y));
-        gl_FragColor = vec4(glowColor, alpha * vFacing);
+        float organic = fbm(vUv * vec2(4.0, 6.5) + vec2(uTime * 0.08, -uTime * 0.16));
+        float streaks = smoothstep(0.28, 0.86, organic);
+        alpha *= mix(0.58, 1.24, streaks);
+        alpha *= 1.0 - smoothstep(0.42, 0.56, radial) * 0.42;
+        gl_FragColor = vec4(glowColor * 0.82, alpha * vFacing);
       }
     `,
     transparent: true,
@@ -3116,8 +3149,8 @@ function CharacterAuraGlow({ visible }) {
     uniforms: {
       uTime: { value: 0 },
       uColor: { value: new Color('#b8f1ff') },
-      uOpacity: { value: 0.72 },
-      uSize: { value: 18 },
+      uOpacity: { value: 0.82 },
+      uSize: { value: 19.5 },
     },
     vertexShader: `
       uniform float uTime;
@@ -3188,7 +3221,9 @@ function CharacterAuraGlow({ visible }) {
   }, [])
 
   useFrame((state) => {
-    particlesMaterial.uniforms.uTime.value = state.clock.elapsedTime
+    const t = state.clock.elapsedTime
+    hazeMaterial.uniforms.uTime.value = t
+    particlesMaterial.uniforms.uTime.value = t
   })
 
   useEffect(() => () => {
@@ -3202,7 +3237,7 @@ function CharacterAuraGlow({ visible }) {
   return (
     <group>
       {[0, Math.PI / 3, -Math.PI / 3].map((rotationY) => (
-        <mesh key={rotationY} position={[0, 0.28, 0]} rotation={[0, rotationY, 0]} scale={[1.05, 1.72, 1]} renderOrder={-2}>
+        <mesh key={rotationY} position={[0, 0.28, 0]} rotation={[0, rotationY, 0]} scale={[1.28, 1.92, 1]} renderOrder={-2}>
           <planeGeometry args={[1, 1, 1, 1]} />
           <primitive object={hazeMaterial} attach="material" />
         </mesh>
