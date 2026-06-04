@@ -1998,12 +1998,10 @@ function GoalVisual({ selected = false, ballRef = null, goalObject = null }) {
       </mesh>
 
       {ballRef && goalObject && <GoalNet ballRef={ballRef} goalObject={goalObject} />}
-      {selected && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, -0.45]}>
-          <ringGeometry args={[1.82, 1.9, 42]} />
-          <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
-        </mesh>
-      )}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, -0.45]}>
+        <ringGeometry args={[1.82, 1.9, 42]} />
+        <meshBasicMaterial color="#ffd447" transparent opacity={selected ? 0.95 : 0} />
+      </mesh>
     </>
   )
 }
@@ -3069,9 +3067,7 @@ function Player({
       </RigidBody>
       <group ref={visualRef} position={PLAYER_SPAWNS.interior} visible={isPlayerVisible}>
         <PlayerAvatar motion={playerMotion} handBoneRef={handBoneRef} equippedWeapon={equippedWeapon} appearance={appearance} />
-        {equippedWeapon === 'magic_book' && (
-          <FloatingMagicBook handBoneRef={handBoneRef} playerGroupRef={visualRef} />
-        )}
+        <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
       </group>
     </>
   )
@@ -3239,7 +3235,9 @@ function CharacterAuraGlow({ visible }) {
   useFrame((state) => {
     const t = state.clock.elapsedTime
     hazeMaterial.uniforms.uTime.value = t
+    hazeMaterial.uniforms.opacity.value = visible ? 0.44 : 0
     particlesMaterial.uniforms.uTime.value = t
+    particlesMaterial.uniforms.uOpacity.value = visible ? 0.92 : 0
   })
 
   useEffect(() => () => {
@@ -3247,8 +3245,6 @@ function CharacterAuraGlow({ visible }) {
     particlesMaterial.dispose()
     particleGeometry.dispose()
   }, [hazeMaterial, particlesMaterial, particleGeometry])
-
-  if (!visible) return null
 
   return (
     <group>
@@ -3633,7 +3629,7 @@ function MagicBookMesh() {
   return <primitive object={bookScene} scale={0.35} />
 }
 
-function FloatingMagicBook({ handBoneRef, playerGroupRef }) {
+function FloatingMagicBook({ active, handBoneRef, playerGroupRef }) {
   const groupRef = useRef(null)
   const worldPos = useRef(new Vector3())
   const localTarget = useRef(new Vector3(0.4, 0.9, 0))
@@ -3641,6 +3637,10 @@ function FloatingMagicBook({ handBoneRef, playerGroupRef }) {
   useFrame((state, delta) => {
     const g = groupRef.current
     if (!g) return
+    if (!active) {
+      g.position.set(0, -500, 0)
+      return
+    }
 
     const hand = handBoneRef?.current
     const playerGroup = playerGroupRef?.current
@@ -3670,7 +3670,7 @@ function FloatingMagicBook({ handBoneRef, playerGroupRef }) {
       <Suspense fallback={null}>
         <MagicBookMesh />
       </Suspense>
-      <pointLight color="#ff5a00" intensity={1.35} distance={2.7} />
+      <pointLight color="#ff5a00" intensity={active ? 1.35 : 0} distance={2.7} />
     </group>
   )
 }
@@ -3902,6 +3902,14 @@ const fireballFlameFragmentShader = `
   }
 `
 
+// IMPORTANT PERF NOTE:
+// The first-cast freeze was caused by spell meshes/materials being "preloaded"
+// but hidden with visible={false} or mounted only when the spell started.
+// Three.js skips invisible objects during shader/program compilation, so the
+// first real cast paid the WebGL getProgramParameter/getProgramInfoLog cost on
+// the main thread. For runtime effects that must be warm, keep them mounted and
+// renderable off-camera, then disable them with opacity/intensity/position.
+// Do not replace this with conditional mount/unmount or visible={false}.
 function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = false, active = true }) {
   const meshRef = useRef(null)
   const materialRef = useRef(null)
@@ -7059,7 +7067,9 @@ function SmallMushroomEnemy({
     recoil.z = MathUtils.clamp(recoil.z + velocity.z * delta, -0.28, 0.28)
     recoil.y = MathUtils.clamp(recoil.y + velocity.y * delta, 0, 0.18)
 
-    if (groupRef.current) {
+    if (groupRef.current && !active) {
+      groupRef.current.position.set(0, -500, 0)
+    } else if (groupRef.current) {
       groupRef.current.position.set(
         enemyPosition.x + recoil.x,
         enemyPosition.y + recoil.y,
@@ -7273,10 +7283,8 @@ function SmallMushroomEnemy({
 
   const hpRatio = MathUtils.clamp(hp / cfg.maxHp, 0, 1)
 
-  if (!active) return null
-
   return (
-    <group ref={groupRef} position={spawnPosition} rotation={[0, cfg.spawnYaw, 0]}>
+    <group ref={groupRef} position={active ? spawnPosition : [0, -500, 0]} rotation={[0, cfg.spawnYaw, 0]}>
       {!defeated && (
         <>
           <group scale={model.scale} renderOrder={isEvading ? 1 : 0}>
@@ -8631,11 +8639,10 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.035, 0]}
-        visible={selected}
         userData={{ ignorePlacementSupport: true, placedObjectId: object.id }}
       >
         <ringGeometry args={[selectionRing[0], selectionRing[1], 36]} />
-        <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
+        <meshBasicMaterial color="#ffd447" transparent opacity={selected ? 0.95 : 0} />
       </mesh>
     </group>
   )
