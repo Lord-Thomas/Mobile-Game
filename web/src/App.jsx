@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
+import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -1197,23 +1197,21 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
 
   return (
     <group userData={{ debugCategory: exteriorOnly ? 'house-exterior' : 'house-shell' }}>
-      {exteriorOnly ? (
+      <group visible={exteriorOnly}>
         <MergedPlayerExteriorShell />
-      ) : (
-        <>
-          <HouseWalls wallTexture={wallColorMap} />
-          <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
-            <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
-            <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
-          </mesh>
-          <mesh position={[secondRoom.position[0], secondRoom.size[1] - 0.02, secondRoom.position[2]]} visible={!hideCeiling}>
-            <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
-            <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
-          </mesh>
-        </>
-      )}
-      {!hideRoof && (
-        <>
+      </group>
+      <group visible={!exteriorOnly}>
+        <HouseWalls wallTexture={wallColorMap} />
+        <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
+          <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
+          <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
+        </mesh>
+        <mesh position={[secondRoom.position[0], secondRoom.size[1] - 0.02, secondRoom.position[2]]} visible={!hideCeiling}>
+          <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
+          <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
+        </mesh>
+      </group>
+      <group visible={!hideRoof}>
           <GableRoof
             width={MAIN_ROOM.width}
             depth={MAIN_ROOM.depth}
@@ -1243,10 +1241,9 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
               gableTexture={exteriorWallTexture}
             />
           </group>
-        </>
-      )}
+      </group>
 
-      {!exteriorOnly && (
+      <group visible={!exteriorOnly}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
           <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
           <meshStandardMaterial
@@ -1256,7 +1253,7 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
             color="#b8ad9b"
           />
         </mesh>
-      )}
+      </group>
 
       <gridHelper
         args={[10, 20, '#c3ccd6', '#d8e0e8']}
@@ -3916,13 +3913,13 @@ function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = f
   }), [opacity, radius, wake])
 
   useFrame((state) => {
-    if (!active) return
-
     const t = state.clock.elapsedTime + phase
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value = t
-      materialRef.current.uniforms.uOpacity.value = opacity
+      materialRef.current.uniforms.uOpacity.value = active ? opacity : 0
     }
+    if (!active) return
+
     if (meshRef.current) {
       meshRef.current.rotation.x += wake ? 0.025 : 0.035
       meshRef.current.rotation.y += wake ? -0.042 : 0.058
@@ -3935,7 +3932,7 @@ function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = f
   })
 
   return (
-    <mesh ref={meshRef} visible={active}>
+    <mesh ref={meshRef}>
       <primitive object={FIREBALL_GEO_SHELL} attach="geometry" />
       <shaderMaterial
         ref={materialRef}
@@ -3958,7 +3955,10 @@ function FireballProjectileSlot({ projectile }) {
   const active = Boolean(projectile)
 
   useFrame((state) => {
-    if (!projectile) return
+    if (!projectile) {
+      if (groupRef.current) groupRef.current.position.set(0, -500, 0)
+      return
+    }
 
     const t = state.clock.elapsedTime + (projectile.phase ?? 0)
     if (groupRef.current) {
@@ -3972,7 +3972,7 @@ function FireballProjectileSlot({ projectile }) {
   })
 
   return (
-    <group ref={groupRef} position={[0, -500, 0]} visible={active}>
+    <group ref={groupRef} position={[0, -500, 0]}>
       <mesh ref={coreRef}>
         <primitive object={FIREBALL_GEO_CORE} attach="geometry" />
         <primitive object={FIREBALL_MAT_CORE} attach="material" />
@@ -3982,7 +3982,7 @@ function FireballProjectileSlot({ projectile }) {
         <primitive object={FIREBALL_MAT_GLOW} attach="material" />
       </mesh>
       <FireballFlameShell radius={0.18} opacity={0.62} phase={projectile?.phase ?? 0} active={active} />
-      <pointLight color="#ff7a00" intensity={1.2} distance={2.6} />
+      <pointLight color="#ff7a00" intensity={active ? 1.2 : 0} distance={2.6} />
     </group>
   )
 }
@@ -3994,6 +3994,10 @@ function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, c
   const phase = useMemo(() => Math.random() * Math.PI * 2, [])
 
   useEffect(() => {
+    if (!active && groupRef.current) {
+      groupRef.current.position.set(0, -500, 0)
+      groupRef.current.scale.setScalar(1)
+    }
     if (active) {
       launchedRef.current = false
       frameRef.current = 0
@@ -4039,13 +4043,13 @@ function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, c
   })
 
   return (
-    <group ref={groupRef} position={[0, -500, 0]} visible={active}>
+    <group ref={groupRef} position={[0, -500, 0]}>
       <mesh>
         <primitive object={FIREBALL_GEO_CHARGE_CORE} attach="geometry" />
         <primitive object={FIREBALL_MAT_CORE} attach="material" />
       </mesh>
       <FireballFlameShell radius={0.18} opacity={0.75} phase={phase} active={active} />
-      <pointLight color="#ff7a00" intensity={1.0} distance={2.5} />
+      <pointLight color="#ff7a00" intensity={active ? 1.0 : 0} distance={2.5} />
     </group>
   )
 }
@@ -4055,7 +4059,7 @@ function FireballImpactSlot({ impact }) {
   const age = active ? MathUtils.clamp((Date.now() - impact.createdAt) / 520, 0, 1) : 1
   const flashScale = 0.5 + age * 1.05
   return (
-    <group position={active ? [impact.x, impact.y, impact.z] : [0, -500, 0]} visible={active}>
+    <group position={active ? [impact.x, impact.y, impact.z] : [0, -500, 0]}>
       <mesh scale={flashScale}>
         <primitive object={FIREBALL_GEO_IMPACT_SPHERE} attach="geometry" />
         <meshBasicMaterial color="#fff1a6" transparent opacity={(1 - age) * 0.44} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
@@ -4120,6 +4124,72 @@ function FireballWarmup() {
         <primitive object={FIREBALL_GEO_IMPACT_RING} attach="geometry" />
         <meshBasicMaterial color="#ff6a00" transparent opacity={0} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
       </mesh>
+    </group>
+  )
+}
+
+function RuntimeWarmupRig() {
+  const exteriorWallTexture = useTexture(EXTERIOR_WALL_TEXTURE)
+
+  return (
+    <group position={[0, -500, 0]} scale={0.001} frustumCulled={false} userData={{ debugCategory: 'warmup' }}>
+      <Suspense fallback={null}>
+        <MagicBookMesh />
+      </Suspense>
+      <MergedPlayerExteriorShell />
+      <GableRoof
+        width={MAIN_ROOM.width}
+        depth={MAIN_ROOM.depth}
+        wallTopY={MAIN_ROOM.height}
+        gableBaseY={MAIN_ROOM.height}
+        pitch={32}
+        overhang={0.42}
+        thickness={0.14}
+        wallThickness={houseLayout.wallThickness}
+        color="#8b4c3f"
+        gableColor={EXTERIOR_WALL_COLOR}
+        gableTexture={exteriorWallTexture}
+      />
+      <group position={secondRoom.position}>
+        <LeanToRoof
+          width={secondRoom.size[0]}
+          depth={secondRoom.size[2]}
+          wallTopY={secondRoom.size[1]}
+          attachSide="south"
+          rise={MAIN_ROOM.height - secondRoom.size[1]}
+          overhang={0.34}
+          overhangAttached={0}
+          thickness={0.12}
+          wallThickness={houseLayout.wallThickness}
+          color="#8b4c3f"
+          gableColor={EXTERIOR_WALL_COLOR}
+          gableTexture={exteriorWallTexture}
+        />
+      </group>
+      <gridHelper
+        args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
+        position={[0, 0.032, 0]}
+      />
+      <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} />
+      <RoomBorder
+        width={secondRoom.size[0]}
+        depth={secondRoom.size[2]}
+        posX={secondRoom.position[0]}
+        posZ={secondRoom.position[2]}
+      />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.028, 0]} frustumCulled={false}>
+        <planeGeometry args={[PLAYER_PLOT_SIZE + 4, PLAYER_PLOT_SIZE + 4]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]} frustumCulled={false}>
+        <ringGeometry args={[0.62, 0.68, 36]} />
+        <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.045, 0]} frustumCulled={false}>
+        <ringGeometry args={[1.08, 1.16, 40]} />
+        <meshBasicMaterial color="#66ff9a" transparent opacity={0.92} />
+      </mesh>
+      <pointLight color="#ff5a00" intensity={1.35} distance={2.7} />
     </group>
   )
 }
@@ -9754,10 +9824,12 @@ function RenderQualityGovernor({ onScaleChange }) {
 
 function ShaderWarmupGate({ onComplete }) {
   const { gl, scene, camera } = useThree()
+  const { active: assetsLoading } = useProgress()
   const completedRef = useRef(false)
 
   useEffect(() => {
     if (completedRef.current) return undefined
+    if (assetsLoading) return undefined
 
     let cancelled = false
     let frameId = 0
@@ -9794,7 +9866,7 @@ function ShaderWarmupGate({ onComplete }) {
       cancelled = true
       if (frameId) window.cancelAnimationFrame(frameId)
     }
-  }, [camera, gl, onComplete, scene])
+  }, [assetsLoading, camera, gl, onComplete, scene])
 
   return null
 }
@@ -12301,6 +12373,7 @@ function App() {
         resize={{ debounce: 80 }}
       >
         <ShaderWarmupGate onComplete={completeShaderWarmup} />
+        <RuntimeWarmupRig />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
