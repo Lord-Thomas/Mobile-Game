@@ -13,6 +13,7 @@ import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generate
 import { TITLES, getTitleDefinition, getTitleRarity } from './gameProgress/titles'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
+import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
@@ -1543,17 +1544,50 @@ function HouseOpeningReveals({ walls }) {
   )
 }
 
+function SceneAtmosphere({ currentZone, mode, roomLightOn = true }) {
+  const isOutside = currentZone === ZONES.outside
+  const backgroundColor = isOutside
+    ? '#ecfdff'
+    : roomLightOn ? '#eef3f8' : '#04060a'
+  const fogColor = isOutside
+    ? '#fbffff'
+    : roomLightOn ? '#eef3f8' : '#04060a'
+  const fogNear = isOutside ? 180 : mode === 'customize' ? 42 : 10
+  const fogFar = isOutside ? 520 : mode === 'customize' ? 110 : 24
+
+  return (
+    <>
+      <color attach="background" args={[backgroundColor]} />
+      <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
+    </>
+  )
+}
+
+function CameraRenderLayers() {
+  const { camera } = useThree()
+
+  useEffect(() => {
+    camera.layers.enable(OUTDOOR_LIGHT_LAYER)
+  }, [camera])
+
+  return null
+}
+
 function InteriorLighting({ active, roomLightOn = true, lightColor = '#ffffff' }) {
   const activeIntensity = active ? 1 : 0
+  const ambientIntensity = roomLightOn ? 0.68 : 0
+  const hemisphereIntensity = roomLightOn ? 0.95 : 0
+  const environmentIntensity = roomLightOn ? 0.16 : 0
 
   return (
     <>
       {/* Keep the same light set mounted across indoor/outdoor transitions.
           Changing light/fog/environment topology can force first-use shader variants. */}
-      <ambientLight intensity={(roomLightOn ? 0.65 : 0.45) * activeIntensity} color={roomLightOn ? lightColor : '#6878a0'} />
-      <hemisphereLight args={[roomLightOn ? lightColor : '#3a4a6a', '#10131a', (roomLightOn ? 0.9 : 0.5) * activeIntensity]} />
+      <ambientLight intensity={ambientIntensity * activeIntensity} color={roomLightOn ? lightColor : '#182238'} />
+      <hemisphereLight args={[roomLightOn ? lightColor : '#141d30', '#020308', hemisphereIntensity * activeIntensity]} />
       <directionalLight position={[4, 7, 5]} intensity={(roomLightOn ? 1.4 : 0) * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
       <directionalLight position={[-3, 5, -4]} intensity={(roomLightOn ? 0.6 : 0) * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
+      <Environment preset="city" environmentIntensity={environmentIntensity * activeIntensity} />
     </>
   )
 }
@@ -3065,7 +3099,7 @@ function Player({
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
       <group ref={visualRef} position={PLAYER_SPAWNS.interior} visible={isPlayerVisible}>
-        <PlayerAvatar motion={playerMotion} handBoneRef={handBoneRef} equippedWeapon={equippedWeapon} appearance={appearance} />
+        <PlayerAvatar motion={playerMotion} handBoneRef={handBoneRef} equippedWeapon={equippedWeapon} appearance={appearance} currentZone={currentZone} />
         <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
       </group>
     </>
@@ -3258,7 +3292,7 @@ function CharacterAuraGlow({ visible }) {
   )
 }
 
-function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
+function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance, currentZone }) {
   const { gl } = useThree()
   const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
   const faceDetailsMask = useTexture(PLAYER_FACE_DETAILS_MASK_URL)
@@ -3288,7 +3322,7 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       }
       if (object instanceof Mesh) {
         object.castShadow = true
-        object.receiveShadow = true
+        object.receiveShadow = false
         object.frustumCulled = false
         object.material = Array.isArray(object.material)
           ? object.material.map((mat) => mat?.clone?.() ?? mat)
@@ -3308,6 +3342,13 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
     })
     return next
   }, [modelScene, gl])
+
+  useLayoutEffect(() => {
+    const lightingLayer = currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0
+    avatar.traverse((object) => {
+      object.layers.set(lightingLayer)
+    })
+  }, [avatar, currentZone])
 
   useEffect(() => {
     if (!faceDetailsMask) return
@@ -12409,17 +12450,19 @@ function App() {
         onCreated={({ gl }) => {
           gl.outputColorSpace = SRGBColorSpace
           gl.toneMapping = ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.04
+          gl.toneMappingExposure = 1.25
           gl.debug.checkShaderErrors = new URLSearchParams(window.location.search).get('shaderDebug') === '1'
         }}
         resize={{ debounce: 80 }}
       >
         <ShaderWarmupGate onComplete={completeShaderWarmup} />
         <RuntimeWarmupRig />
+        <CameraRenderLayers />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
+        <SceneAtmosphere currentZone={currentZone} mode={mode} roomLightOn={roomLightOn} />
         <MultiplayerBridge
           channelRef={multiplayerChannelRef}
           role={multiplayerRole}
@@ -12487,6 +12530,7 @@ function App() {
         <group>
           <OutdoorNeighborhood
             lightingActive
+            viewerOutside={isOutsideZone}
             playerPositionRef={playerPositionRef}
             ballRef={ballRef}
             showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}

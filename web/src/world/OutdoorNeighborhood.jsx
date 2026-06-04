@@ -1,6 +1,5 @@
 import React from 'react'
-import { Environment } from '@react-three/drei'
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import OutdoorGround from './OutdoorGround'
 import PlayerPlot from './PlayerPlot'
 import Road from './Road'
@@ -9,8 +8,9 @@ import CloudSky from './CloudSky'
 import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import { AUTHORED_TREES, DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
+import { OUTDOOR_LIGHT_LAYER } from './lightingLayers'
 
-const OUTDOOR_SUN_DIRECTION = [0.62, 0.74, 0.2]
+const OUTDOOR_SUN_DIRECTION = [0.42, 0.9, 0.18]
 
 function OutdoorSun({ castShadows, intensity }) {
   const lightRef = useRef()
@@ -18,6 +18,7 @@ function OutdoorSun({ castShadows, intensity }) {
 
   useEffect(() => {
     if (!lightRef.current || !targetRef.current) return
+    lightRef.current.layers.set(OUTDOOR_LIGHT_LAYER)
     lightRef.current.target = targetRef.current
     lightRef.current.target.updateMatrixWorld()
   }, [])
@@ -29,7 +30,7 @@ function OutdoorSun({ castShadows, intensity }) {
         ref={lightRef}
         position={OUTDOOR_SUN_DIRECTION.map((value) => value * 32)}
         intensity={intensity}
-        color="#fff1d2"
+        color="#fffaf0"
         castShadow={castShadows}
         shadow-mapSize={[512, 512]}
         shadow-camera-left={-28}
@@ -45,18 +46,20 @@ function OutdoorSun({ castShadows, intensity }) {
   )
 }
 
-export function OutdoorLighting({ active, showSky, castShadows }) {
-  const sunIntensity = active ? 1.55 : 0
-  const hemiIntensity = active ? 1.05 : 0
+export function OutdoorLighting({ active, showSky, castShadows, viewerOutside = true }) {
+  const hemiRef = useRef()
+  const sunIntensity = active ? (viewerOutside ? 4.25 : 3.9) : 0
+  const hemiIntensity = active ? (viewerOutside ? 2.65 : 2.25) : 0
+
+  useEffect(() => {
+    hemiRef.current?.layers.set(OUTDOOR_LIGHT_LAYER)
+  }, [])
 
   return (
     <>
-      {active && <color attach="background" args={['#d7edf6']} />}
-      {active && <fog attach="fog" args={['#cfe7f1', 54, 170]} />}
       {showSky && active && <CloudSky sunDirection={OUTDOOR_SUN_DIRECTION} />}
-      <hemisphereLight args={['#f4fbff', '#6f8c54', hemiIntensity]} />
+      <hemisphereLight ref={hemiRef} args={['#ffffff', '#a8d87b', hemiIntensity]} />
       <OutdoorSun castShadows={castShadows && active} intensity={sunIntensity} />
-      {active && <Environment preset="park" />}
     </>
   )
 }
@@ -73,12 +76,21 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showNeighborHouses = true,
   showSky = true,
   castShadows = true,
+  viewerOutside = true,
   showPlayerPlot = false,
   debugStats = false,
 }) {
+  const groupRef = useRef()
+
+  useLayoutEffect(() => {
+    groupRef.current?.traverse((object) => {
+      object.layers.set(OUTDOOR_LIGHT_LAYER)
+    })
+  })
+
   return (
-    <group userData={{ debugCategory: 'outdoor' }}>
-      <OutdoorLighting active={lightingActive} showSky={showSky} castShadows={castShadows} />
+    <group ref={groupRef} userData={{ debugCategory: 'outdoor' }}>
+      <OutdoorLighting active={lightingActive} showSky={showSky} castShadows={castShadows} viewerOutside={viewerOutside} />
       {showTerrain && <OutdoorGround />}
       {showPlayerPlot && <PlayerPlot />}
       {showRoad && <Road />}
