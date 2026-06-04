@@ -101,6 +101,63 @@ canvas {
   background: #000;
 }
 
+.game-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(180deg, rgba(229, 236, 243, 0.86), rgba(213, 226, 235, 0.92));
+  color: #18212a;
+  pointer-events: auto;
+}
+
+.game-loading-panel {
+  width: min(360px, 100%);
+  display: grid;
+  gap: 10px;
+  text-align: center;
+}
+
+.game-loading-title {
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.game-loading-text {
+  color: rgba(24, 33, 42, 0.72);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.game-loading-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(24, 33, 42, 0.14);
+}
+
+.game-loading-bar span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: #4f8fb8;
+  animation: game-loading-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes game-loading-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
 .hud {
   position: absolute;
   inset: 0;

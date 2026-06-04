@@ -169,6 +169,8 @@ const FIREBALL_LIFETIME_MS = 2500
 const FIREBALL_COOLDOWN_MS = 800
 const FIREBALL_COLLISION_RADIUS = 0.9
 const MAX_ACTIVE_FIREBALLS = 5
+const FIREBALL_PROJECTILE_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
+const FIREBALL_IMPACT_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
 const CHARGE_TIME_MS = 1200
 const MIN_CHARGE_RATIO = 0.2
 const PLAYER_MAX_HP = 100
@@ -1859,7 +1861,7 @@ const DRAGON_WAKE_DISTANCE = 5
 const DRAGON_WAKE_DELAY = 2
 const DRAGON_SLEEP_DELAY = 4
 
-function Dragon({ playerPositionRef }) {
+function Dragon({ playerPositionRef, visible = true }) {
   const { scene, animations } = useGLTF('/models/dragon.glb')
   const dragon = useMemo(() => clone(scene), [scene])
   const { actions, mixer } = useAnimations(animations, dragon)
@@ -1916,6 +1918,8 @@ function Dragon({ playerPositionRef }) {
   }, [actions, mixer])
 
   useFrame((_, delta) => {
+    if (!visible) return
+
     const playerPosition = playerPositionRef.current
     const distanceToPlayer = Math.hypot(
       playerPosition.x - DRAGON_POSITION.x,
@@ -1951,6 +1955,7 @@ function Dragon({ playerPositionRef }) {
       position={[DRAGON_POSITION.x, DRAGON_POSITION.y, DRAGON_POSITION.z]}
       rotation={[0, Math.PI, 0]}
       scale={2}
+      visible={visible}
       userData={{ debugCategory: 'npcs' }}
     >
       <primitive object={dragon} />
@@ -3900,7 +3905,7 @@ const fireballFlameFragmentShader = `
   }
 `
 
-function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = false }) {
+function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = false, active = true }) {
   const meshRef = useRef(null)
   const materialRef = useRef(null)
   const uniforms = useMemo(() => ({
@@ -3911,6 +3916,8 @@ function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = f
   }), [opacity, radius, wake])
 
   useFrame((state) => {
+    if (!active) return
+
     const t = state.clock.elapsedTime + phase
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value = t
@@ -3928,7 +3935,7 @@ function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = f
   })
 
   return (
-    <mesh ref={meshRef}>
+    <mesh ref={meshRef} visible={active}>
       <primitive object={FIREBALL_GEO_SHELL} attach="geometry" />
       <shaderMaterial
         ref={materialRef}
@@ -3945,13 +3952,19 @@ function FireballFlameShell({ radius = 0.34, opacity = 0.85, phase = 0, wake = f
   )
 }
 
-function FireballProjectile({ projectile }) {
+function FireballProjectileSlot({ projectile }) {
   const groupRef = useRef(null)
   const coreRef = useRef(null)
+  const active = Boolean(projectile)
 
   useFrame((state) => {
+    if (!projectile) return
+
     const t = state.clock.elapsedTime + (projectile.phase ?? 0)
-    if (groupRef.current) groupRef.current.rotation.z = 0
+    if (groupRef.current) {
+      groupRef.current.position.set(projectile.x, projectile.y, projectile.z)
+      groupRef.current.rotation.z = 0
+    }
     if (coreRef.current) {
       const pulse = 1 + Math.sin(t * 24) * 0.07
       coreRef.current.scale.setScalar(pulse)
@@ -3959,7 +3972,7 @@ function FireballProjectile({ projectile }) {
   })
 
   return (
-    <group ref={groupRef} position={[projectile.x, projectile.y, projectile.z]}>
+    <group ref={groupRef} position={[0, -500, 0]} visible={active}>
       <mesh ref={coreRef}>
         <primitive object={FIREBALL_GEO_CORE} attach="geometry" />
         <primitive object={FIREBALL_MAT_CORE} attach="material" />
@@ -3968,21 +3981,28 @@ function FireballProjectile({ projectile }) {
         <primitive object={FIREBALL_GEO_GLOW} attach="geometry" />
         <primitive object={FIREBALL_MAT_GLOW} attach="material" />
       </mesh>
-      <FireballFlameShell radius={0.18} opacity={0.62} phase={projectile.phase ?? 0} />
+      <FireballFlameShell radius={0.18} opacity={0.62} phase={projectile?.phase ?? 0} active={active} />
       <pointLight color="#ff7a00" intensity={1.2} distance={2.6} />
     </group>
   )
 }
 
-function ChargingFireball({ playerPositionRef, touchRef, chargeYawRef, chargeAimYawRef, chargeProgressRef, chargeStartTimeRef, chargePosRef, setChargeProgress, onCancel, onLaunch }) {
+function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, chargeAimYawRef, chargeProgressRef, chargeStartTimeRef, chargePosRef, setChargeProgress, onCancel, onLaunch }) {
   const groupRef = useRef(null)
   const frameRef = useRef(0)
   const launchedRef = useRef(false)
   const phase = useMemo(() => Math.random() * Math.PI * 2, [])
 
+  useEffect(() => {
+    if (active) {
+      launchedRef.current = false
+      frameRef.current = 0
+    }
+  }, [active])
+
   useFrame(() => {
     const g = groupRef.current
-    if (!g || launchedRef.current) return
+    if (!g || !active || launchedRef.current) return
     const elapsed = Date.now() - chargeStartTimeRef.current
     const progress = Math.min(elapsed / CHARGE_TIME_MS, 1.0)
     chargeProgressRef.current = progress
@@ -4019,22 +4039,23 @@ function ChargingFireball({ playerPositionRef, touchRef, chargeYawRef, chargeAim
   })
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} position={[0, -500, 0]} visible={active}>
       <mesh>
         <primitive object={FIREBALL_GEO_CHARGE_CORE} attach="geometry" />
         <primitive object={FIREBALL_MAT_CORE} attach="material" />
       </mesh>
-      <FireballFlameShell radius={0.18} opacity={0.75} phase={phase} />
+      <FireballFlameShell radius={0.18} opacity={0.75} phase={phase} active={active} />
       <pointLight color="#ff7a00" intensity={1.0} distance={2.5} />
     </group>
   )
 }
 
-function FireballImpact({ impact }) {
-  const age = MathUtils.clamp((Date.now() - impact.createdAt) / 520, 0, 1)
+function FireballImpactSlot({ impact }) {
+  const active = Boolean(impact)
+  const age = active ? MathUtils.clamp((Date.now() - impact.createdAt) / 520, 0, 1) : 1
   const flashScale = 0.5 + age * 1.05
   return (
-    <group position={[impact.x, impact.y, impact.z]}>
+    <group position={active ? [impact.x, impact.y, impact.z] : [0, -500, 0]} visible={active}>
       <mesh scale={flashScale}>
         <primitive object={FIREBALL_GEO_IMPACT_SPHERE} attach="geometry" />
         <meshBasicMaterial color="#fff1a6" transparent opacity={(1 - age) * 0.44} depthWrite={false} toneMapped={false} blending={AdditiveBlending} />
@@ -4045,7 +4066,7 @@ function FireballImpact({ impact }) {
       </mesh>
       <pointLight color="#ff7a00" intensity={(1 - age) * 0.85} distance={1.8} />
       <Html position={[0, 0.5 + age * 1.2, 0]} center occlude={false}>
-        <div style={{ color: '#ff3300', fontWeight: 'bold', fontSize: '22px', opacity: 1 - age, textShadow: '0 0 6px #000, 0 0 3px #000', pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap' }}>
+        <div style={{ color: '#ff3300', fontWeight: 'bold', fontSize: '22px', opacity: active ? 1 - age : 0, textShadow: '0 0 6px #000, 0 0 3px #000', pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap' }}>
           -{FIREBALL_DAMAGE}
         </div>
       </Html>
@@ -4150,11 +4171,11 @@ function FireballManager({ projectilesRef, combatTargetsRef }) {
   return (
     <>
       <FireballWarmup />
-      {projs.map((p) => (
-        <FireballProjectile key={p.id} projectile={p} />
+      {FIREBALL_PROJECTILE_POOL.map((slot) => (
+        <FireballProjectileSlot key={`fireball_slot_${slot}`} projectile={projs[slot] ?? null} />
       ))}
-      {impacts.map((impact) => (
-        <FireballImpact key={impact.id} impact={impact} />
+      {FIREBALL_IMPACT_POOL.map((slot) => (
+        <FireballImpactSlot key={`fireball_impact_slot_${slot}`} impact={impacts[slot] ?? null} />
       ))}
     </>
   )
@@ -8519,40 +8540,40 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
 
   return (
     <group
-      ref={groupRef}
       position={object.position}
       rotation={[0, object.rotationY, 0]}
       onPointerDown={handlePointerDown}
       userData={{ debugCategory: 'placeables' }}
     >
-      <Suspense fallback={null}>
-        {isTrainingDummy ? (
-          <TrainingDummyModel
-            object={object}
-            registerCombatTarget={registerCombatTarget}
-            onDefeated={onTrainingDummyDefeated}
-          />
-        ) : (
-          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
-        )}
-      </Suspense>
-      {selected && (
-        <mesh
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0.035, 0]}
-          userData={{ ignorePlacementSupport: true, placedObjectId: object.id }}
-        >
-          <ringGeometry args={[selectionRing[0], selectionRing[1], 36]} />
-          <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
-        </mesh>
-      )}
+      <group ref={groupRef}>
+        <Suspense fallback={null}>
+          {isTrainingDummy ? (
+            <TrainingDummyModel
+              object={object}
+              registerCombatTarget={registerCombatTarget}
+              onDefeated={onTrainingDummyDefeated}
+            />
+          ) : (
+            <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
+          )}
+        </Suspense>
+      </group>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.035, 0]}
+        visible={selected}
+        userData={{ ignorePlacementSupport: true, placedObjectId: object.id }}
+      >
+        <ringGeometry args={[selectionRing[0], selectionRing[1], 36]} />
+        <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
+      </mesh>
     </group>
   )
 }
 
 const CUSTOMIZE_PAN_BOUNDS = { minX: -6, maxX: 6, minZ: -6, maxZ: 12 }
 
-function RoomBorder({ width, depth, posX = 0, posZ = 0 }) {
+function RoomBorder({ width, depth, posX = 0, posZ = 0, visible = true }) {
   const positions = useMemo(() => new Float32Array([
     -width / 2, 0, -depth / 2,
      width / 2, 0, -depth / 2,
@@ -8561,7 +8582,7 @@ function RoomBorder({ width, depth, posX = 0, posZ = 0 }) {
   ]), [width, depth])
 
   return (
-    <lineLoop position={[posX, 0.07, posZ]}>
+    <lineLoop position={[posX, 0.07, posZ]} visible={visible}>
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" array={positions} count={4} itemSize={3} />
       </bufferGeometry>
@@ -8584,15 +8605,14 @@ function EditableFloor({
 }) {
   const { camera } = useThree()
   const lastClientRef = useRef(null)
+  const isActive = mode === 'customize'
 
   useEffect(() => {
-    if (mode !== 'customize') {
+    if (!isActive) {
       camera.position.x = 0
       camera.position.z = 0
     }
-  }, [mode, camera])
-
-  if (mode !== 'customize') return null
+  }, [isActive, camera])
 
   const getSnappedPlacement = (point, objectId) => {
     const { hx, hz } = getFootprint(objectId)
@@ -8607,7 +8627,9 @@ function EditableFloor({
     <mesh
       rotation={[-Math.PI / 2, 0, 0]}
       position={[0, 0.028, 0]}
+      visible={isActive}
       onPointerDown={(event) => {
+        if (!isActive) return
         if (isPanning) {
           if (event.pointerType === 'touch' && lastClientRef.current) {
             // Second finger landed — cancel pan to let pinch zoom take over
@@ -8618,6 +8640,7 @@ function EditableFloor({
         }
       }}
       onPointerMove={(event) => {
+        if (!isActive) return
         if (isPanning) {
           if (lastClientRef.current) {
             const dx = event.clientX - lastClientRef.current.x
@@ -8635,17 +8658,20 @@ function EditableFloor({
         onDrag(objectId, getSnappedPlacement(event.point, objectId))
       }}
       onClick={(event) => {
+        if (!isActive) return
         if (!placingObjectId || placementLocked) return
         event.stopPropagation()
         onDrag(placingObjectId, getSnappedPlacement(event.point, placingObjectId))
         onLockPlacement()
       }}
       onPointerUp={(event) => {
+        if (!isActive) return
         lastClientRef.current = null
         event.stopPropagation()
         onStopDragging()
       }}
       onPointerMissed={() => {
+        if (!isActive) return
         lastClientRef.current = null
         onStopDragging()
         onClearSelection()
@@ -8789,17 +8815,14 @@ function CustomizationLayer({
         position={[0, 0.032, 0]}
         visible={mode === 'customize'}
       />
-      {mode === 'customize' && (
-        <>
-          <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} />
-          <RoomBorder
-            width={secondRoom.size[0]}
-            depth={secondRoom.size[2]}
-            posX={secondRoom.position[0]}
-            posZ={secondRoom.position[2]}
-          />
-        </>
-      )}
+      <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} visible={mode === 'customize'} />
+      <RoomBorder
+        width={secondRoom.size[0]}
+        depth={secondRoom.size[2]}
+        posX={secondRoom.position[0]}
+        posZ={secondRoom.position[2]}
+        visible={mode === 'customize'}
+      />
       {placedObjects.map((object) => (
         <EditableObject
           key={object.id}
@@ -9729,6 +9752,53 @@ function RenderQualityGovernor({ onScaleChange }) {
   return null
 }
 
+function ShaderWarmupGate({ onComplete }) {
+  const { gl, scene, camera } = useThree()
+  const completedRef = useRef(false)
+
+  useEffect(() => {
+    if (completedRef.current) return undefined
+
+    let cancelled = false
+    let frameId = 0
+
+    const waitFrame = () => new Promise((resolve) => {
+      frameId = window.requestAnimationFrame(resolve)
+    })
+
+    const runWarmup = async () => {
+      // Let the loading overlay and the initial scene commit before WebGL shader work starts.
+      await waitFrame()
+      await waitFrame()
+      if (cancelled) return
+
+      try {
+        if (typeof gl.compileAsync === 'function') {
+          await gl.compileAsync(scene, camera)
+        } else {
+          gl.compile(scene, camera)
+        }
+      } catch (error) {
+        console.warn('Shader warmup failed', error)
+      }
+
+      if (!cancelled) {
+        completedRef.current = true
+        onComplete()
+      }
+    }
+
+    runWarmup()
+
+    return () => {
+      cancelled = true
+      if (frameId) window.cancelAnimationFrame(frameId)
+    }
+  }, [camera, gl, onComplete, scene])
+
+  return null
+}
+
 function getDebugCategory(object) {
   let current = object
   while (current) {
@@ -10415,6 +10485,7 @@ function App() {
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
   const [spawnRequest, setSpawnRequest] = useState(null)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
+  const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
   const [editableObjects, setEditableObjects] = useState(defaultEditableObjects)
   const [selectedObjectId, setSelectedObjectId] = useState(null)
   const [draggingObjectId, setDraggingObjectId] = useState(null)
@@ -11494,7 +11565,7 @@ function App() {
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
-  const showCaptureUi = !(isAdminMode || isVerticalFrameMode) || !captureUiHidden
+  const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
   const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
   const furnitureCounts = editableObjects.reduce((counts, object) => {
@@ -12150,6 +12221,10 @@ function App() {
     touchRef.current.emoteQueued = null
   }
 
+  const completeShaderWarmup = useCallback(() => {
+    setShaderWarmupComplete(true)
+  }, [])
+
   const requestAccountSubmit = async (event) => {
     event.preventDefault()
     const email = authEmail.trim()
@@ -12225,6 +12300,7 @@ function App() {
         }}
         resize={{ debounce: 80 }}
       >
+        <ShaderWarmupGate onComplete={completeShaderWarmup} />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
@@ -12255,25 +12331,21 @@ function App() {
               hideRoof={mode === 'customize' || currentZone !== ZONES.outside}
               exteriorOnly={currentZone === ZONES.outside}
             />
-            {showInteriorHouseDetails && (
-              <group userData={{ debugCategory: 'house-interior' }}>
+            <group visible={showInteriorHouseDetails} userData={{ debugCategory: 'house-interior' }}>
                 <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch && canModifyWorld} onOpen={() => canModifyWorld && setIsLightMenuOpen((v) => !v)} mode={mode} />
-                <Dragon playerPositionRef={playerPositionRef} />
+                <Dragon playerPositionRef={playerPositionRef} visible={showInteriorHouseDetails} />
                 <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
-              </group>
-            )}
+            </group>
             {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
             <group userData={{ debugCategory: 'interactions' }}>
               <OutdoorDoor />
               <OutdoorDoorStation isNear={isNearOutdoorDoor} currentZone={currentZone} />
               <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
-              {showInteriorHouseDetails && (
-                <>
-                  <EnvironmentStation isNear={isNearEnvironmentStation} />
-                  <CustomizationStation isNear={isNearCustomizationStation} />
-                </>
-              )}
+              <group visible={showInteriorHouseDetails}>
+                <EnvironmentStation isNear={isNearEnvironmentStation} />
+                <CustomizationStation isNear={isNearCustomizationStation} />
+              </group>
               <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
             </group>
           </group>
@@ -12299,17 +12371,16 @@ function App() {
         )}
         <group>
           <OutdoorNeighborhood
-            profile={isOutsideZone ? 'full' : 'interior'}
-            lightingActive={isOutsideZone}
+            lightingActive
             playerPositionRef={playerPositionRef}
             ballRef={ballRef}
-            showGrass={isOutsideZone && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
-            showTrees={isOutsideZone && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
+            showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+            showTrees={performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
             showTerrain
             showRoad
-            showNeighborHouses={isOutsideZone}
+            showNeighborHouses
             showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
-            castShadows={isOutsideZone && performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
+            castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
             showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
             debugStats={isDebugMode}
           />
@@ -12390,21 +12461,19 @@ function App() {
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
           />
-          {isCharging && equippedWeapon === 'magic_book' && (
-            <ChargingFireball
-              playerPositionRef={playerPositionRef}
-              touchRef={touchRef}
-              touchRef={touchRef}
-              chargeYawRef={chargeYawRef}
-              chargeAimYawRef={chargeAimYawRef}
-              chargeProgressRef={chargeProgressRef}
-              chargeStartTimeRef={chargeStartTimeRef}
-              chargePosRef={chargePosRef}
-              setChargeProgress={setChargeProgress}
-              onCancel={cancelCharge}
-              onLaunch={launchFromCharge}
-            />
-          )}
+          <ChargingFireball
+            active={isCharging && equippedWeapon === 'magic_book'}
+            playerPositionRef={playerPositionRef}
+            touchRef={touchRef}
+            chargeYawRef={chargeYawRef}
+            chargeAimYawRef={chargeAimYawRef}
+            chargeProgressRef={chargeProgressRef}
+            chargeStartTimeRef={chargeStartTimeRef}
+            chargePosRef={chargePosRef}
+            setChargeProgress={setChargeProgress}
+            onCancel={cancelCharge}
+            onLaunch={launchFromCharge}
+          />
           {(!isDebugMode || debugToggles.player) && (
             <Player
               touchRef={touchRef}
@@ -12472,6 +12541,17 @@ function App() {
         </Physics>
       </Canvas>
       </div>
+      {!shaderWarmupComplete && (
+        <div className="game-loading-overlay" role="status" aria-live="polite">
+          <div className="game-loading-panel">
+            <div className="game-loading-title">Chargement du monde</div>
+            <div className="game-loading-text">Preparation du rendu...</div>
+            <div className="game-loading-bar" aria-hidden="true">
+              <span />
+            </div>
+          </div>
+        </div>
+      )}
       {isDebugMode && (
         <RenderStatsOverlay
           stats={renderStats}
