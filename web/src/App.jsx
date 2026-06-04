@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -1543,18 +1543,17 @@ function HouseOpeningReveals({ walls }) {
   )
 }
 
-function InteriorLighting({ active, hideCeiling, roomLightOn = true, lightColor = '#ffffff' }) {
-  if (!active) return null
+function InteriorLighting({ active, roomLightOn = true, lightColor = '#ffffff' }) {
+  const activeIntensity = active ? 1 : 0
 
   return (
     <>
-      <color attach="background" args={[roomLightOn ? '#eef3f8' : '#04060a']} />
-      {!hideCeiling && <fog attach="fog" args={[roomLightOn ? '#eef3f8' : '#04060a', 10, 24]} />}
-      <ambientLight intensity={roomLightOn ? 0.65 : 0.45} color={roomLightOn ? lightColor : '#6878a0'} />
-      <hemisphereLight args={[roomLightOn ? lightColor : '#3a4a6a', '#10131a', roomLightOn ? 0.9 : 0.5]} />
-      <directionalLight position={[4, 7, 5]} intensity={roomLightOn ? 1.4 : 0} color={roomLightOn ? lightColor : '#ffffff'} />
-      <directionalLight position={[-3, 5, -4]} intensity={roomLightOn ? 0.6 : 0} color={roomLightOn ? lightColor : '#ffffff'} />
-      {roomLightOn && <Environment preset="city" environmentIntensity={0.15} />}
+      {/* Keep the same light set mounted across indoor/outdoor transitions.
+          Changing light/fog/environment topology can force first-use shader variants. */}
+      <ambientLight intensity={(roomLightOn ? 0.65 : 0.45) * activeIntensity} color={roomLightOn ? lightColor : '#6878a0'} />
+      <hemisphereLight args={[roomLightOn ? lightColor : '#3a4a6a', '#10131a', (roomLightOn ? 0.9 : 0.5) * activeIntensity]} />
+      <directionalLight position={[4, 7, 5]} intensity={(roomLightOn ? 1.4 : 0) * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
+      <directionalLight position={[-3, 5, -4]} intensity={(roomLightOn ? 0.6 : 0) * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
     </>
   )
 }
@@ -8704,7 +8703,6 @@ function EditableFloor({
     <mesh
       rotation={[-Math.PI / 2, 0, 0]}
       position={[0, 0.028, 0]}
-      visible={isActive}
       onPointerDown={(event) => {
         if (!isActive) return
         if (isPanning) {
@@ -8887,19 +8885,19 @@ function CustomizationLayer({
         onClearSelection={() => onSelect(null)}
         onLockPlacement={onLockPlacement}
       />
-      <gridHelper
-        args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
-        position={[0, 0.032, 0]}
-        visible={mode === 'customize'}
-      />
-      <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} visible={mode === 'customize'} />
-      <RoomBorder
-        width={secondRoom.size[0]}
-        depth={secondRoom.size[2]}
-        posX={secondRoom.position[0]}
-        posZ={secondRoom.position[2]}
-        visible={mode === 'customize'}
-      />
+      <group position={mode === 'customize' ? [0, 0, 0] : [0, -500, 0]}>
+        <gridHelper
+          args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
+          position={[0, 0.032, 0]}
+        />
+        <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} />
+        <RoomBorder
+          width={secondRoom.size[0]}
+          depth={secondRoom.size[2]}
+          posX={secondRoom.position[0]}
+          posZ={secondRoom.position[2]}
+        />
+      </group>
       {placedObjects.map((object) => (
         <EditableObject
           key={object.id}
@@ -9851,14 +9849,51 @@ function ShaderWarmupGate({ onComplete }) {
       await waitFrame()
       if (cancelled) return
 
-      try {
+      const aspect = Math.max(0.1, gl.domElement.clientWidth / Math.max(gl.domElement.clientHeight, 1))
+      const customizeCamera = new ThreeOrthographicCamera(-12 * aspect, 12 * aspect, 12, -12, 0.1, 120)
+      customizeCamera.position.set(0, 18, 0)
+      customizeCamera.lookAt(0, 0, 0)
+      customizeCamera.updateProjectionMatrix()
+      customizeCamera.updateMatrixWorld(true)
+
+      const outsideSpawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
+      const outsideCamera = new PerspectiveCamera(BASE_CAMERA_VERTICAL_FOV, aspect, 0.1, 420)
+      outsideCamera.position.set(outsideSpawn[0], outsideSpawn[1] + 2.4, outsideSpawn[2] + 6)
+      outsideCamera.lookAt(outsideSpawn[0], outsideSpawn[1] + 1.1, outsideSpawn[2])
+      outsideCamera.updateProjectionMatrix()
+      outsideCamera.updateMatrixWorld(true)
+
+      const changedCulling = []
+      scene.traverse((object) => {
+        if (!(object.isMesh || object.isLine || object.isPoints || object.isSprite)) return
+        changedCulling.push([object, object.frustumCulled])
+        object.frustumCulled = false
+      })
+
+      const compileAndRender = async (warmupCamera) => {
         if (typeof gl.compileAsync === 'function') {
-          await gl.compileAsync(scene, camera)
+          await gl.compileAsync(scene, warmupCamera)
         } else {
-          gl.compile(scene, camera)
+          gl.compile(scene, warmupCamera)
+        }
+        gl.render(scene, warmupCamera)
+      }
+
+      try {
+        // Compile from the runtime camera, the first customization camera, and
+        // the first outdoor camera. The first-click freezes happened because
+        // camera/frustum-specific visibility could leave shaders cold until
+        // those modes were used for real.
+        for (const warmupCamera of [camera, customizeCamera, outsideCamera]) {
+          if (cancelled) break
+          await compileAndRender(warmupCamera)
         }
       } catch (error) {
         console.warn('Shader warmup failed', error)
+      } finally {
+        changedCulling.forEach(([object, frustumCulled]) => {
+          object.frustumCulled = frustumCulled
+        })
       }
 
       if (!cancelled) {
