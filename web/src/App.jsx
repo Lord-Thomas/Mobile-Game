@@ -3079,7 +3079,7 @@ function CharacterAuraGlow({ visible }) {
   const hazeMaterial = useMemo(() => new ShaderMaterial({
     uniforms: {
       glowColor: { value: new Color('#77d9ff') },
-      opacity: { value: 0.34 },
+      opacity: { value: 0.44 },
       uTime: { value: 0 },
     },
     vertexShader: `
@@ -3133,9 +3133,9 @@ function CharacterAuraGlow({ visible }) {
         alpha *= smoothstep(0.02, 0.2, vUv.y) * (1.0 - smoothstep(0.82, 1.0, vUv.y));
         float organic = fbm(vUv * vec2(4.0, 6.5) + vec2(uTime * 0.08, -uTime * 0.16));
         float streaks = smoothstep(0.28, 0.86, organic);
-        alpha *= mix(0.62, 1.42, streaks);
+        alpha *= mix(0.7, 1.55, streaks);
         alpha *= 1.0 - smoothstep(0.42, 0.56, radial) * 0.42;
-        gl_FragColor = vec4(glowColor * 0.56, alpha * vFacing);
+        gl_FragColor = vec4(glowColor * 0.76, alpha * vFacing);
       }
     `,
     transparent: true,
@@ -3156,8 +3156,8 @@ function CharacterAuraGlow({ visible }) {
     uniforms: {
       uTime: { value: 0 },
       uColor: { value: new Color('#b8f1ff') },
-      uOpacity: { value: 0.82 },
-      uSize: { value: 19.5 },
+      uOpacity: { value: 0.92 },
+      uSize: { value: 20.5 },
     },
     vertexShader: `
       uniform float uTime;
