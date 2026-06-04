@@ -1758,7 +1758,7 @@ function GlassContainmentRoom({ roomLightOn = true, lightColor = '#ffffff' }) {
         <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
       </mesh>
 
-      {roomLightOn && <pointLight position={[0, roomHeight - 0.6, 0.05]} intensity={1.45} color={lightColor} />}
+
     </group>
   )
 }
@@ -12221,7 +12221,7 @@ function App() {
           gl.outputColorSpace = SRGBColorSpace
           gl.toneMapping = ACESFilmicToneMapping
           gl.toneMappingExposure = 1.04
-          gl.debug.checkShaderErrors = false
+          gl.debug.checkShaderErrors = new URLSearchParams(window.location.search).get('shaderDebug') === '1'
         }}
         resize={{ debounce: 80 }}
       >

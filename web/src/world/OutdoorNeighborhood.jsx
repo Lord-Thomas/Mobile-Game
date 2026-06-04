@@ -15,7 +15,7 @@ import { AUTHORED_TREES, DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
 
 const OUTDOOR_SUN_DIRECTION = [0.62, 0.74, 0.2]
 
-function OutdoorSun({ castShadows }) {
+function OutdoorSun({ castShadows, intensity }) {
   const lightRef = useRef()
   const targetRef = useRef()
 
@@ -31,7 +31,7 @@ function OutdoorSun({ castShadows }) {
       <directionalLight
         ref={lightRef}
         position={OUTDOOR_SUN_DIRECTION.map((value) => value * 32)}
-        intensity={1.55}
+        intensity={intensity}
         color="#fff1d2"
         castShadow={castShadows}
         shadow-mapSize={[512, 512]}
@@ -58,17 +58,18 @@ function StaticSkyDome() {
 }
 
 export function OutdoorLighting({ active, showSky, castShadows, lightweight = false }) {
-  if (lightweight) return showSky ? <StaticSkyDome /> : null
-  if (!active) return null
+  const sunIntensity = active ? 1.55 : 0
+  const hemiIntensity = active ? 1.05 : 0
 
   return (
     <>
-      <color attach="background" args={['#d7edf6']} />
-      <fog attach="fog" args={['#cfe7f1', 54, 170]} />
-      {showSky && <CloudSky sunDirection={OUTDOOR_SUN_DIRECTION} />}
-      <hemisphereLight args={['#f4fbff', '#6f8c54', 1.05]} />
-      <OutdoorSun castShadows={castShadows} />
-      <Environment preset="park" />
+      {active && <color attach="background" args={['#d7edf6']} />}
+      {active && <fog attach="fog" args={['#cfe7f1', 54, 170]} />}
+      {showSky && active && <CloudSky sunDirection={OUTDOOR_SUN_DIRECTION} />}
+      {showSky && !active && lightweight && <StaticSkyDome />}
+      <hemisphereLight args={['#f4fbff', '#6f8c54', hemiIntensity]} />
+      <OutdoorSun castShadows={castShadows && active} intensity={sunIntensity} />
+      {active && <Environment preset="park" />}
     </>
   )
 }
