@@ -3083,8 +3083,11 @@ function CharacterAuraGlow({ visible }) {
     },
     vertexShader: `
       varying vec2 vUv;
+      varying float vFacing;
       void main() {
         vUv = uv;
+        vec3 viewNormal = normalize(normalMatrix * normal);
+        vFacing = smoothstep(0.10, 0.42, abs(viewNormal.z));
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
@@ -3092,13 +3095,14 @@ function CharacterAuraGlow({ visible }) {
       uniform vec3 glowColor;
       uniform float opacity;
       varying vec2 vUv;
+      varying float vFacing;
       void main() {
         vec2 centered = vUv - vec2(0.5);
         centered.y *= 0.58;
         float radial = length(centered);
         float alpha = (1.0 - smoothstep(0.08, 0.52, radial)) * opacity;
         alpha *= smoothstep(0.02, 0.2, vUv.y) * (1.0 - smoothstep(0.82, 1.0, vUv.y));
-        gl_FragColor = vec4(glowColor, alpha);
+        gl_FragColor = vec4(glowColor, alpha * vFacing);
       }
     `,
     transparent: true,
