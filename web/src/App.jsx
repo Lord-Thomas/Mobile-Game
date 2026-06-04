@@ -3130,7 +3130,7 @@ function CharacterAuraGlow({ visible }) {
         centered.y *= 0.58;
         float radial = length(centered);
         float alpha = (1.0 - smoothstep(0.08, 0.52, radial)) * opacity;
-        alpha *= smoothstep(0.02, 0.2, vUv.y) * (1.0 - smoothstep(0.82, 1.0, vUv.y));
+        alpha *= smoothstep(0.16, 0.34, vUv.y) * (1.0 - smoothstep(0.82, 1.0, vUv.y));
         float organic = fbm(vUv * vec2(4.0, 6.5) + vec2(uTime * 0.08, -uTime * 0.16));
         float streaks = smoothstep(0.28, 0.86, organic);
         alpha *= mix(0.7, 1.55, streaks);
