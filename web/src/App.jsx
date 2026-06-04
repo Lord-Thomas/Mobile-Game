@@ -3189,7 +3189,7 @@ function CharacterAuraGlow({ visible }) {
     `,
     transparent: true,
     depthWrite: false,
-    depthTest: false,
+    depthTest: true,
     blending: AdditiveBlending,
     toneMapped: false,
   }), [])
