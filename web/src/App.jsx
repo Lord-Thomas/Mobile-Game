@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, RingGeometry, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, PCFShadowMap, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -58,7 +58,7 @@ const PUBLIC_BUILD_FLAGS = {
   showObjectInventory: true,
   showWeaponInventory: true,
   showWeaponShop: true,
-  showCharacterCustomization: false,
+  showCharacterCustomization: true,
 }
 const WORLD_CHAT_Z_INDEX_RANGE = [3, 0]
 const WORLD_NAMEPLATE_Z_INDEX_RANGE = [2, 0]
@@ -348,6 +348,8 @@ const CHARACTER_DEFAULT_APPEARANCE = {
   pantsDetailsColor: CHARACTER_BASE_COLORS.pants_detail_yellow,
   shoesColor:       CHARACTER_BASE_COLORS.shoes,
   socksColor:       CHARACTER_BASE_COLORS.socks,
+  goldCoat: false,
+  auraEquipped: false,
 }
 
 function srgbChannelToLinear(value) {
@@ -3073,6 +3075,139 @@ function Player({
   )
 }
 
+function CharacterAuraGlow({ visible }) {
+  const hazeMaterial = useMemo(() => new ShaderMaterial({
+    uniforms: {
+      glowColor: { value: new Color('#77d9ff') },
+      opacity: { value: 0.28 },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 glowColor;
+      uniform float opacity;
+      varying vec2 vUv;
+      void main() {
+        vec2 centered = vUv - vec2(0.5);
+        centered.y *= 0.58;
+        float radial = length(centered);
+        float alpha = (1.0 - smoothstep(0.08, 0.52, radial)) * opacity;
+        alpha *= smoothstep(0.02, 0.2, vUv.y) * (1.0 - smoothstep(0.82, 1.0, vUv.y));
+        gl_FragColor = vec4(glowColor, alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: AdditiveBlending,
+    side: DoubleSide,
+    toneMapped: false,
+  }), [])
+  const particlesMaterial = useMemo(() => new ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new Color('#b8f1ff') },
+      uOpacity: { value: 0.72 },
+      uSize: { value: 18 },
+    },
+    vertexShader: `
+      uniform float uTime;
+      uniform float uSize;
+      attribute float aPhase;
+      attribute float aSpeed;
+      attribute float aSize;
+      varying float vAlpha;
+
+      void main() {
+        vec3 p = position;
+        float angle = atan(p.z, p.x) + uTime * aSpeed + aPhase * 0.18;
+        float radius = length(p.xz) + sin(uTime * 1.2 + aPhase) * 0.025;
+        p.x = cos(angle) * radius;
+        p.z = sin(angle) * radius;
+        p.y += sin(uTime * aSpeed * 1.7 + aPhase) * 0.08;
+
+        vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        gl_PointSize = uSize * aSize * (1.0 / max(-mvPosition.z, 0.2));
+
+        float verticalFade = smoothstep(-0.72, -0.12, p.y) * (1.0 - smoothstep(0.72, 1.08, p.y));
+        vAlpha = verticalFade * (0.5 + 0.5 * sin(uTime * 2.2 + aPhase));
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying float vAlpha;
+
+      void main() {
+        float d = distance(gl_PointCoord, vec2(0.5));
+        float strength = pow(max(1.0 - d * 2.0, 0.0), 2.8);
+        gl_FragColor = vec4(uColor, strength * vAlpha * uOpacity);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: AdditiveBlending,
+    toneMapped: false,
+  }), [])
+  const particleGeometry = useMemo(() => {
+    const count = 96
+    const positions = []
+    const phases = []
+    const speeds = []
+    const sizes = []
+
+    for (let index = 0; index < count; index += 1) {
+      const t = index / count
+      const angle = t * Math.PI * 2 * 3.7
+      const band = (index % 3) / 2
+      const radius = 0.34 + Math.sin(index * 12.9898) * 0.08 + band * 0.08
+      const y = -0.46 + ((index * 0.61803398875) % 1) * 1.34
+      positions.push(Math.cos(angle) * radius, y, Math.sin(angle) * radius)
+      phases.push(index * 1.71)
+      speeds.push(0.12 + ((index * 7) % 11) * 0.012)
+      sizes.push(0.42 + ((index * 13) % 9) * 0.08)
+    }
+
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+    geometry.setAttribute('aPhase', new Float32BufferAttribute(phases, 1))
+    geometry.setAttribute('aSpeed', new Float32BufferAttribute(speeds, 1))
+    geometry.setAttribute('aSize', new Float32BufferAttribute(sizes, 1))
+    return geometry
+  }, [])
+
+  useFrame((state) => {
+    particlesMaterial.uniforms.uTime.value = state.clock.elapsedTime
+  })
+
+  useEffect(() => () => {
+    hazeMaterial.dispose()
+    particlesMaterial.dispose()
+    particleGeometry.dispose()
+  }, [hazeMaterial, particlesMaterial, particleGeometry])
+
+  if (!visible) return null
+
+  return (
+    <group>
+      {[0, Math.PI / 3, -Math.PI / 3].map((rotationY) => (
+        <mesh key={rotationY} position={[0, 0.28, 0]} rotation={[0, rotationY, 0]} scale={[1.05, 1.72, 1]} renderOrder={-2}>
+          <planeGeometry args={[1, 1, 1, 1]} />
+          <primitive object={hazeMaterial} attach="material" />
+        </mesh>
+      ))}
+      <points geometry={particleGeometry} material={particlesMaterial} position={[0, 0.16, 0]} renderOrder={-1} />
+    </group>
+  )
+}
+
 function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   const { gl } = useThree()
   const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
@@ -3134,7 +3269,6 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
 
   // Uniforms de couleur par zone matériau — stables entre les deux effects
   const zoneColorRefs = useRef({})
-
   // Effect 1 : injecter le shader de recoloration une fois par matériau (au chargement du modèle)
   useEffect(() => {
     const app = appearance ?? CHARACTER_DEFAULT_APPEARANCE
@@ -3217,7 +3351,26 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
       const hex = app[colorKey] ?? CHARACTER_DEFAULT_APPEARANCE[colorKey] ?? '#808080'
       ref.value.set(...charHexToVec(hex))
     })
-  }, [appearance?.skinColor, appearance?.hairColor, appearance?.eyeColor, appearance?.eyebrowsColor, appearance?.shirtColor, appearance?.pantsColor, appearance?.pantsDetailsColor, appearance?.shoesColor, appearance?.socksColor])
+    avatar.traverse((obj) => {
+      if (!(obj instanceof Mesh)) return
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+      mats.forEach((mat) => {
+        if (!mat) return
+        const materialKey = mat.userData.characterMaterialKey ?? getCharacterMaterialKey(mat.name)
+        const colorKey = materialKey === 'pants_details'
+          ? 'pantsDetailsColor'
+          : CHARACTER_MATERIAL_COLOR_KEYS[materialKey]
+        if (!colorKey) return
+        const hasGoldCoat = Boolean(app.goldCoat)
+        if ('metalness' in mat) mat.metalness = hasGoldCoat ? 0.08 : 0.05
+        if ('roughness' in mat) mat.roughness = hasGoldCoat ? 0.07 : 0.62
+        if ('emissive' in mat) mat.emissive.set('#000000')
+        if ('emissiveIntensity' in mat) mat.emissiveIntensity = 0
+        if ('envMapIntensity' in mat) mat.envMapIntensity = hasGoldCoat ? 2 : 1
+        mat.needsUpdate = true
+      })
+    })
+  }, [avatar, appearance])
 
   const animationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
@@ -3391,13 +3544,16 @@ function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance }) {
   })
 
   return (
-    <primitive
-      object={avatar}
-      position={[0, -PLAYER_HEIGHT + PLAYER_MODEL_VERTICAL_OFFSET, 0]}
-      rotation={[0, 0, 0]}
-      scale={PLAYER_MODEL_SCALE}
-      visible={avatarReady}
-    />
+    <group>
+      <CharacterAuraGlow visible={avatarReady && appearance?.auraEquipped} />
+      <primitive
+        object={avatar}
+        position={[0, -PLAYER_HEIGHT + PLAYER_MODEL_VERTICAL_OFFSET, 0]}
+        rotation={[0, 0, 0]}
+        scale={PLAYER_MODEL_SCALE}
+        visible={avatarReady}
+      />
+    </group>
   )
 }
 
@@ -8895,7 +9051,7 @@ function SkinMenu({
 function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   const [local, setLocal] = useState(appearance)
 
-  useEffect(() => { setLocal(appearance) }, [appearance])
+  useEffect(() => { setLocal({ ...CHARACTER_DEFAULT_APPEARANCE, ...appearance }) }, [appearance])
 
   if (!open) return null
 
@@ -8915,6 +9071,22 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
     <div className="char-menu-overlay">
       <div className="char-menu">
         <div className="char-menu-title">Personnage</div>
+        <button
+          type="button"
+          className={`char-gold-coat-btn char-gold-coat-global${local.goldCoat ? ' selected' : ''}`}
+          onClick={() => setLocal((prev) => ({ ...prev, goldCoat: !prev.goldCoat }))}
+          aria-pressed={Boolean(local.goldCoat)}
+        >
+          Vernis brillant
+        </button>
+        <button
+          type="button"
+          className={`char-aura-btn${local.auraEquipped ? ' selected' : ''}`}
+          onClick={() => setLocal((prev) => ({ ...prev, auraEquipped: !prev.auraEquipped }))}
+          aria-pressed={Boolean(local.auraEquipped)}
+        >
+          Aura brillante
+        </button>
         {sections.map(({ key, label, palette }) => (
           <div key={key} className="char-menu-section">
             <div className="char-menu-label">{label}</div>
@@ -11992,7 +12164,14 @@ function App() {
   }
 
   const isFramedViewport = isAdminMode || isVerticalFrameMode
-  const renderOutdoorVisualWorld = currentZone === ZONES.outside || mode === 'customize'
+  const prepareIndoorCustomizationTerrain = currentZone !== ZONES.outside && canModifyWorld && (
+    isNearCustomizationStation ||
+    isCustomizationChoiceOpen ||
+    mode === 'customize'
+  )
+  const renderOutdoorVisualWorld = currentZone === ZONES.outside || prepareIndoorCustomizationTerrain
+  const displayIndoorCustomizationTerrain = currentZone !== ZONES.outside && mode === 'customize'
+  const prewarmIndoorCustomizationTerrain = prepareIndoorCustomizationTerrain && !displayIndoorCustomizationTerrain
   const showInteriorHouseDetails = currentZone !== ZONES.outside
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
     isNearOutdoorDoor ||
@@ -12096,18 +12275,25 @@ function App() {
         </PlayerHouse>
         )}
         {renderOutdoorVisualWorld && (
-          <OutdoorNeighborhood
-            lightingActive={currentZone === ZONES.outside}
-            playerPositionRef={playerPositionRef}
-            ballRef={ballRef}
-            showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
-            showTrees={performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
-            showTerrain
-            showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
-            castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
-            showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
-            debugStats={isDebugMode}
-          />
+          <group
+            position={prewarmIndoorCustomizationTerrain ? [0, -500, 0] : [0, 0, 0]}
+            scale={prewarmIndoorCustomizationTerrain ? 0.0001 : 1}
+          >
+            <OutdoorNeighborhood
+              lightingActive={currentZone === ZONES.outside}
+              playerPositionRef={playerPositionRef}
+              ballRef={ballRef}
+              showGrass={currentZone === ZONES.outside && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+              showTrees={currentZone === ZONES.outside && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
+              showTerrain
+              showRoad={currentZone === ZONES.outside}
+              showNeighborHouses={currentZone === ZONES.outside}
+              showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
+              castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
+              showPlayerPlot={(isDebugMode && debugToggles.plot) || mode === 'customize'}
+              debugStats={isDebugMode}
+            />
+          </group>
         )}
         {hasRemotePlayer && (
           <RemotePlayer
@@ -12905,6 +13091,10 @@ useFBX.preload('/models/player/Sitting Idle.fbx')
 useFBX.preload('/models/player/Stand Up.fbx')
 useFBX.preload('/models/placeables/modular-sofa/modular-sofa.fbx')
 useTexture.preload('/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG')
+useTexture.preload('/textures/outdoor/grass-patchy-basecolor-512.jpg')
+useTexture.preload('/textures/outdoor/dirt-ground-basecolor-512.jpg')
+useTexture.preload('/textures/outdoor/grass-patchy-normal.png')
+useTexture.preload('/textures/outdoor/dirt-ground-normal.jpg')
 Object.values(objectCatalog).forEach((item) => {
   if (item.modelUrl) useGLTF.preload(item.modelUrl)
   if (item.thumbnailModelUrl?.endsWith('.fbx')) useFBX.preload(item.thumbnailModelUrl)
