@@ -3282,6 +3282,33 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   color: #9aa8b8;
 }
 
+.light-panel-intensity {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  color: #e8edf5;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.light-panel-intensity span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.light-panel-intensity strong {
+  color: #ffe56a;
+  font-size: 12px;
+}
+
+.light-panel-intensity input {
+  width: 100%;
+  margin: 0;
+  accent-color: #ffe56a;
+  cursor: pointer;
+}
+
 @media (max-width: 520px) {
   .joystick-zone {
     width: 126px;

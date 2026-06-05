@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Environment, Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
+import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -1544,16 +1544,12 @@ function HouseOpeningReveals({ walls }) {
   )
 }
 
-function SceneAtmosphere({ currentZone, mode, roomLightOn = true }) {
+function SceneAtmosphere({ currentZone, mode }) {
   const isOutside = currentZone === ZONES.outside
-  const backgroundColor = isOutside
-    ? '#ecfdff'
-    : roomLightOn ? '#eef3f8' : '#04060a'
-  const fogColor = isOutside
-    ? '#fbffff'
-    : roomLightOn ? '#eef3f8' : '#04060a'
-  const fogNear = isOutside ? 180 : mode === 'customize' ? 42 : 10
-  const fogFar = isOutside ? 520 : mode === 'customize' ? 110 : 24
+  const backgroundColor = '#ecfdff'
+  const fogColor = '#fbffff'
+  const fogNear = isOutside ? 180 : mode === 'customize' ? 130 : 120
+  const fogFar = isOutside ? 520 : mode === 'customize' ? 360 : 340
 
   return (
     <>
@@ -1563,21 +1559,47 @@ function SceneAtmosphere({ currentZone, mode, roomLightOn = true }) {
   )
 }
 
-function CameraRenderLayers() {
-  const { camera } = useThree()
+function LayeredSceneRenderer({ currentZone }) {
+  const { gl, scene, camera } = useThree()
 
-  useEffect(() => {
-    camera.layers.enable(OUTDOOR_LIGHT_LAYER)
-  }, [camera])
+  useFrame(() => {
+    const previousAutoClear = gl.autoClear
+    const previousLayerMask = camera.layers.mask
+    const previousBackground = scene.background
+
+    if (currentZone === ZONES.outside) {
+      camera.layers.enable(OUTDOOR_LIGHT_LAYER)
+      gl.autoClear = previousAutoClear
+      gl.render(scene, camera)
+      camera.layers.mask = previousLayerMask
+      return
+    }
+
+    // Inside the house, render the outdoor world and the indoor house in
+    // separate passes. A single camera seeing both layers would let the
+    // outdoor sun be collected as a global light and brighten the interior.
+    gl.autoClear = true
+    camera.layers.set(OUTDOOR_LIGHT_LAYER)
+    gl.render(scene, camera)
+
+    gl.autoClear = false
+    scene.background = null
+    camera.layers.set(0)
+    gl.render(scene, camera)
+
+    scene.background = previousBackground
+    camera.layers.mask = previousLayerMask
+    gl.autoClear = previousAutoClear
+  }, 1)
 
   return null
 }
 
-function InteriorLighting({ active, roomLightOn = true, lightColor = '#ffffff' }) {
+function InteriorLighting({ active, roomLightOn = true, lightColor = '#ffffff', lightIntensity = 2 }) {
   const activeIntensity = active ? 1 : 0
-  const ambientIntensity = roomLightOn ? 0.68 : 0
-  const hemisphereIntensity = roomLightOn ? 0.95 : 0
-  const environmentIntensity = roomLightOn ? 0.16 : 0
+  const roomIntensity = roomLightOn ? lightIntensity : 0.1
+  const ambientIntensity = 0.36 * roomIntensity
+  const hemisphereIntensity = 0.56 * roomIntensity
 
   return (
     <>
@@ -1585,9 +1607,8 @@ function InteriorLighting({ active, roomLightOn = true, lightColor = '#ffffff' }
           Changing light/fog/environment topology can force first-use shader variants. */}
       <ambientLight intensity={ambientIntensity * activeIntensity} color={roomLightOn ? lightColor : '#182238'} />
       <hemisphereLight args={[roomLightOn ? lightColor : '#141d30', '#020308', hemisphereIntensity * activeIntensity]} />
-      <directionalLight position={[4, 7, 5]} intensity={(roomLightOn ? 1.4 : 0) * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
-      <directionalLight position={[-3, 5, -4]} intensity={(roomLightOn ? 0.6 : 0) * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
-      <Environment preset="city" environmentIntensity={environmentIntensity * activeIntensity} />
+      <directionalLight position={[4, 7, 5]} intensity={1.16 * roomIntensity * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
+      <directionalLight position={[-3, 5, -4]} intensity={0.32 * roomIntensity * activeIntensity} color={roomLightOn ? lightColor : '#ffffff'} />
     </>
   )
 }
@@ -1759,7 +1780,7 @@ function GlassContainmentRoom({ roomLightOn = true, lightColor = '#ffffff' }) {
       <mesh position={[0, roomHeight * 0.5, -halfDepth + 0.02]}>
         <boxGeometry args={[roomWidth, roomHeight, 0.06]} />
         <meshPhysicalMaterial
-          color="#bfefff"
+          color={roomLightOn ? '#bfefff' : '#05080d'}
           transparent
           opacity={1}
           roughness={0.05}
@@ -1767,27 +1788,27 @@ function GlassContainmentRoom({ roomLightOn = true, lightColor = '#ffffff' }) {
           transmission={1}
           thickness={0.2}
           ior={1.5}
-          reflectivity={0.8}
-          envMapIntensity={1.35}
+          reflectivity={roomLightOn ? 0.32 : 0}
+          envMapIntensity={roomLightOn ? 0.18 : 0}
           side={BackSide}
         />
       </mesh>
 
       <mesh position={[0, roomHeight + 0.03, -halfDepth + 0.055]}>
         <boxGeometry args={[roomWidth + 0.12, 0.06, 0.06]} />
-        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+        <meshStandardMaterial color={roomLightOn ? '#9da8b3' : '#05070b'} metalness={0.18} roughness={0.58} />
       </mesh>
       <mesh position={[0, -0.03, -halfDepth + 0.055]}>
         <boxGeometry args={[roomWidth + 0.12, 0.06, 0.06]} />
-        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+        <meshStandardMaterial color={roomLightOn ? '#9da8b3' : '#05070b'} metalness={0.18} roughness={0.58} />
       </mesh>
       <mesh position={[-halfWidth - 0.03, roomHeight * 0.5, -halfDepth + 0.055]}>
         <boxGeometry args={[0.06, roomHeight + 0.12, 0.06]} />
-        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+        <meshStandardMaterial color={roomLightOn ? '#9da8b3' : '#05070b'} metalness={0.18} roughness={0.58} />
       </mesh>
       <mesh position={[halfWidth + 0.03, roomHeight * 0.5, -halfDepth + 0.055]}>
         <boxGeometry args={[0.06, roomHeight + 0.12, 0.06]} />
-        <meshStandardMaterial color="#9da8b3" metalness={0.45} roughness={0.35} />
+        <meshStandardMaterial color={roomLightOn ? '#9da8b3' : '#05070b'} metalness={0.18} roughness={0.58} />
       </mesh>
 
 
@@ -9912,12 +9933,17 @@ function ShaderWarmupGate({ onComplete }) {
       })
 
       const compileAndRender = async (warmupCamera) => {
-        if (typeof gl.compileAsync === 'function') {
-          await gl.compileAsync(scene, warmupCamera)
-        } else {
-          gl.compile(scene, warmupCamera)
+        const originalLayerMask = warmupCamera.layers.mask
+        for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
+          warmupCamera.layers.set(layer)
+          if (typeof gl.compileAsync === 'function') {
+            await gl.compileAsync(scene, warmupCamera)
+          } else {
+            gl.compile(scene, warmupCamera)
+          }
+          gl.render(scene, warmupCamera)
         }
-        gl.render(scene, warmupCamera)
+        warmupCamera.layers.mask = originalLayerMask
       }
 
       try {
@@ -10622,6 +10648,7 @@ function App() {
   const [isNearSkinStation, setIsNearSkinStation] = useState(false)
   const [roomLightOn, setRoomLightOn] = useState(true)
   const [lightColor, setLightColor] = useState('#ffffff')
+  const [lightIntensity, setLightIntensity] = useState(2)
   const [isNearLightSwitch, setIsNearLightSwitch] = useState(false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
@@ -10872,7 +10899,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -10906,6 +10933,7 @@ function App() {
     selectedSkinId,
     roomLightOn,
     lightColor,
+    lightIntensity,
     ownedFloorSkins,
     ownedWallSkins,
     selectedFloorSkinId,
@@ -10929,6 +10957,7 @@ function App() {
     setPreviewSkinId('classic')
     setRoomLightOn(true)
     setLightColor('#ffffff')
+    setLightIntensity(2)
     setOwnedFloorSkins(['floor-classic'])
     setOwnedWallSkins(['wall-classic'])
     setSelectedFloorSkinId('floor-classic')
@@ -10973,6 +11002,9 @@ function App() {
     }
     if (typeof parsed.roomLightOn === 'boolean') setRoomLightOn(parsed.roomLightOn)
     if (typeof parsed.lightColor === 'string') setLightColor(parsed.lightColor)
+    if (typeof parsed.lightIntensity === 'number') {
+      setLightIntensity(MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
+    }
     if (parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
       setCharacterAppearance({ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
     }
@@ -11143,7 +11175,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -11487,7 +11519,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -12450,19 +12482,19 @@ function App() {
         onCreated={({ gl }) => {
           gl.outputColorSpace = SRGBColorSpace
           gl.toneMapping = ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.25
+          gl.toneMappingExposure = 1.1
           gl.debug.checkShaderErrors = new URLSearchParams(window.location.search).get('shaderDebug') === '1'
         }}
         resize={{ debounce: 80 }}
       >
         <ShaderWarmupGate onComplete={completeShaderWarmup} />
         <RuntimeWarmupRig />
-        <CameraRenderLayers />
+        <LayeredSceneRenderer currentZone={currentZone} />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
-        <SceneAtmosphere currentZone={currentZone} mode={mode} roomLightOn={roomLightOn} />
+        <SceneAtmosphere currentZone={currentZone} mode={mode} />
         <MultiplayerBridge
           channelRef={multiplayerChannelRef}
           role={multiplayerRole}
@@ -12477,7 +12509,13 @@ function App() {
           equippedTitleId={equippedTitleId}
           characterAppearance={characterAppearance}
         />
-        <InteriorLighting active={currentZone !== ZONES.outside} hideCeiling={mode === 'customize'} roomLightOn={roomLightOn} lightColor={lightColor} />
+        <InteriorLighting
+          active={currentZone !== ZONES.outside}
+          hideCeiling={mode === 'customize'}
+          roomLightOn={roomLightOn}
+          lightColor={lightColor}
+          lightIntensity={lightIntensity}
+        />
         {(!isDebugMode || debugToggles.house) && (
         <PlayerHouse exteriorVisible>
           <group>
@@ -12490,7 +12528,12 @@ function App() {
               exteriorOnly={currentZone === ZONES.outside}
             />
             <group visible={showInteriorHouseDetails} userData={{ debugCategory: 'house-interior' }}>
-                <LightSwitch isOn={roomLightOn} isNear={isNearLightSwitch && canModifyWorld} onOpen={() => canModifyWorld && setIsLightMenuOpen((v) => !v)} mode={mode} />
+                <LightSwitch
+                  isOn={roomLightOn}
+                  isNear={isNearLightSwitch && canModifyWorld}
+                  onOpen={() => canModifyWorld && setIsLightMenuOpen(true)}
+                  mode={mode}
+                />
                 <Dragon playerPositionRef={playerPositionRef} visible={showInteriorHouseDetails} />
                 <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
             </group>
@@ -12880,7 +12923,26 @@ function App() {
           >
             {roomLightOn ? 'Lumière ON' : 'Lumière OFF'}
           </button>
-          {roomLightOn && <LightColorWheel onChange={setLightColor} />}
+          {roomLightOn && (
+            <>
+              <label className="light-panel-intensity">
+                <span>
+                  Intensité
+                  <strong>{Math.round(lightIntensity * 50)} %</strong>
+                </span>
+                <input
+                  type="range"
+                  min="5"
+                  max="150"
+                  step="5"
+                  value={Math.round(lightIntensity * 50)}
+                  onChange={(event) => setLightIntensity(Number(event.target.value) / 50)}
+                  aria-label="Intensité de la lumière"
+                />
+              </label>
+              <LightColorWheel onChange={setLightColor} />
+            </>
+          )}
           <button className="light-panel-close" type="button" onClick={() => setIsLightMenuOpen(false)}>
             Fermer
           </button>
