@@ -20,10 +20,7 @@ const grassPlacementSettings = {
 const GRASS_SCALE_RANGE = grassPlacementSettings.maxScale - grassPlacementSettings.minScale
 const GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
-const GRASS_GRID_STEP_NEAR = 0.13
-const GRASS_GRID_STEP_FAR = 0.38
-const GRASS_NEAR_DIST = 20
-const GRASS_FAR_DIST = 44
+const GRASS_GRID_STEP = 0.15
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 2.5
@@ -39,6 +36,7 @@ const QUADRANTS = [
 ]
 const MAX_QUADRANT_INSTANCES = 350_000
 const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 8
+const GRASS_BUFFER_COMPACTION_RATIO = 1.75
 const GRASS_DEBUG_ESTIMATE_INTERVAL_MS = 600
 const GRASS_DEBUG_MAX_SAMPLES = 60_000
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
@@ -50,6 +48,8 @@ const GRASS_VERTICAL_SEGMENTS = 1
 const GRASS_FULL_DENSITY_RADIUS = 10
 const GRASS_THINNING_RADIUS = 52
 const GRASS_MIN_KEEP_PROBABILITY = 0.035
+const GRASS_CULL_FADE_START = 44
+const GRASS_CULL_RADIUS = 52
 const GRASS_FAR_WIDTH_SCALE = 1.65
 const GRASS_FAR_HEIGHT_SCALE = 1.08
 const grassWindSettings = {
@@ -175,7 +175,7 @@ function makeGrassInstance(x, z, seed) {
   }
 }
 
-function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP_NEAR) {
+function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP) {
   for (let zi = minZ; zi <= maxZ; zi += step) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
@@ -223,14 +223,6 @@ function getChunkQuadrantIndex(chunkX, chunkZ) {
   return (centerX >= 0 ? 0 : 1) + (centerZ >= 0 ? 0 : 2)
 }
 
-function getGrassChunkStep(chunkX, chunkZ) {
-  const centerX = (chunkX + 0.5) * GRASS_CHUNK_SIZE
-  const centerZ = (chunkZ + 0.5) * GRASS_CHUNK_SIZE
-  const dist = Math.max(Math.abs(centerX), Math.abs(centerZ))
-  const t = Math.min(1, Math.max(0, (dist - GRASS_NEAR_DIST) / (GRASS_FAR_DIST - GRASS_NEAR_DIST)))
-  return GRASS_GRID_STEP_NEAR + (GRASS_GRID_STEP_FAR - GRASS_GRID_STEP_NEAR) * t * t
-}
-
 function getAllGrassChunkKeys() {
   const keys = []
   const minChunkX = getGrassChunkIndex(GRASS_AREA_MIN)
@@ -264,7 +256,7 @@ function buildGrassChunk(key) {
   const [chunkX, chunkZ] = key.split(':').map(Number)
   const bounds = getGrassChunkBounds(chunkX, chunkZ)
   const grass = []
-  const step = getGrassChunkStep(chunkX, chunkZ)
+  const step = GRASS_GRID_STEP
   for (let xi = bounds.minX; xi <= bounds.maxX; xi += step) {
     pushGrassRow(grass, xi, bounds.minZ, bounds.maxZ, step)
   }
@@ -305,13 +297,14 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
     shader.uniforms.uFullDensityRadius = { value: GRASS_FULL_DENSITY_RADIUS }
     shader.uniforms.uThinningRadius = { value: GRASS_THINNING_RADIUS }
     shader.uniforms.uMinKeepProbability = { value: GRASS_MIN_KEEP_PROBABILITY }
+    shader.uniforms.uCullFadeStart = { value: GRASS_CULL_FADE_START }
+    shader.uniforms.uCullRadius = { value: GRASS_CULL_RADIUS }
     shader.uniforms.uFarWidthScale = { value: GRASS_FAR_WIDTH_SCALE }
     shader.uniforms.uFarHeightScale = { value: GRASS_FAR_HEIGHT_SCALE }
     shader.uniforms.uWindDirection = {
       value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
     }
     shader.uniforms.uCameraForward = { value: new Vector3(0, 0, -1) }
-    shader.uniforms.uCameraAngleMinDensity = { value: 0.3 }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -328,6 +321,8 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
       uniform float uFullDensityRadius;
       uniform float uThinningRadius;
       uniform float uMinKeepProbability;
+      uniform float uCullFadeStart;
+      uniform float uCullRadius;
       uniform float uFarWidthScale;
       uniform float uFarHeightScale;
       uniform vec3 uPlayerPosition;
@@ -335,7 +330,6 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
       uniform float uBallInteractionRadius;
       uniform vec3 uWindDirection;
       uniform vec3 uCameraForward;
-      uniform float uCameraAngleMinDensity;
 
       float grassHash(vec2 value) {
         return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
@@ -393,20 +387,13 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
         1.0
       );
       float keepProbability = mix(1.0, uMinKeepProbability, thinningT);
+      keepProbability *= 1.0 - smoothstep(uCullFadeStart, uCullRadius, playerDistance);
 
       // Distant blades represent small clusters: fewer instances, slightly wider cards.
       // The curve stays gradual so there is no visible LOD transition.
       float clusterT = thinningT * thinningT;
       transformed.x *= mix(1.0, uFarWidthScale, clusterT);
       transformed.y *= mix(1.0, uFarHeightScale, clusterT);
-
-      // Camera-angle density: blades behind the camera are progressively thinned.
-      // Only kicks in for distant grass (smooth fade 8→20 units), so nearby grass is unaffected.
-      float cameraDistFade = smoothstep(8.0, 20.0, playerDistance);
-      vec2 toGrassNorm = fromPlayer / max(playerDistance, 0.0001);
-      float cameraDot = dot(toGrassNorm, uCameraForward.xz);
-      float cameraAngleFactor = smoothstep(-0.8, 0.2, cameraDot);
-      keepProbability *= mix(1.0, mix(uCameraAngleMinDensity, 1.0, cameraAngleFactor), cameraDistFade);
 
       float keep = step(grassHash(grassOrigin.xz), keepProbability);
       transformed.y -= (1.0 - keep) * 1000.0;
@@ -613,17 +600,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
           )
           let keepProbability = 1 + (GRASS_MIN_KEEP_PROBABILITY - 1) * thinningT
           const playerDistance = Math.sqrt(distanceSq)
-          const cameraDistFade = smoothstep(8, 20, playerDistance)
-
-          if (playerDistance > 0.0001) {
-            const toGrassX = dx / playerDistance
-            const toGrassZ = dz / playerDistance
-            const cameraDot = toGrassX * _cameraForward.x + toGrassZ * _cameraForward.z
-            const cameraAngleFactor = smoothstep(-0.8, 0.2, cameraDot)
-            const cameraKeep = 0.3 + (1 - 0.3) * cameraAngleFactor
-            keepProbability *= 1 + (cameraKeep - 1) * cameraDistFade
-          }
-
+          keepProbability *= 1 - smoothstep(GRASS_CULL_FADE_START, GRASS_CULL_RADIUS, playerDistance)
           const isKept = grassHash2(x, z) <= keepProbability
           _grassDebugPoint.set(x, y, z)
           const isInFrustum = _grassDebugFrustum.containsPoint(_grassDebugPoint)
@@ -785,8 +762,15 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   // Les chunks stale hors rayon de thinning sont masqués automatiquement par le vertex shader.
   const updateGrassQueueIncremental = (centerChunkX, centerChunkZ) => {
     const activeKeys = getActiveGrassChunkKeys(allGrassChunkKeys, centerChunkX, centerChunkZ)
+    const activeKeySet = new Set(activeKeys)
     activeGrassCenterRef.current = getGrassChunkKey(centerChunkX, centerChunkZ)
-    activeGrassTargetKeysRef.current = new Set(activeKeys)
+    activeGrassTargetKeysRef.current = activeKeySet
+
+    grassChunkQueueRef.current = grassChunkQueueRef.current.filter((key) => activeKeySet.has(key))
+    pendingGPUWriteRef.current = pendingGPUWriteRef.current.filter(({ key }) => activeKeySet.has(key))
+    pendingGrassChunksRef.current.forEach((key) => {
+      if (!activeKeySet.has(key)) pendingGrassChunksRef.current.delete(key)
+    })
 
     activeKeys.forEach((key) => {
       const [kx, kz] = key.split(':').map(Number)
@@ -825,7 +809,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
         const prevKey = activeGrassCenterRef.current
         const [prevCX, prevCZ] = prevKey ? prevKey.split(':').map(Number) : [centerChunkX, centerChunkZ]
         const drift = Math.max(Math.abs(centerChunkX - prevCX), Math.abs(centerChunkZ - prevCZ))
-        if (drift > GRASS_ACTIVE_CHUNK_RADIUS) {
+        const mountedChunks = writtenChunkKeysRefs.current.reduce((sum, set) => sum + set.size, 0)
+        const targetChunkCount = activeGrassTargetKeysRef.current.size || 1
+        const shouldCompact = mountedChunks > targetChunkCount * GRASS_BUFFER_COMPACTION_RATIO
+        if (drift > GRASS_ACTIVE_CHUNK_RADIUS || shouldCompact) {
           initGrassQueue(playerPosition)
         } else {
           updateGrassQueueIncremental(centerChunkX, centerChunkZ)
