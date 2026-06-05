@@ -4160,6 +4160,7 @@ function FireballWarmup() {
   useEffect(() => {
     if (!groupRef.current) return
     gl.compile(groupRef.current, camera)
+    groupRef.current.visible = false
   }, [camera, gl])
 
   return (
@@ -8700,10 +8701,11 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.035, 0]}
+        visible={selected}
         userData={{ ignorePlacementSupport: true, placedObjectId: object.id }}
       >
         <ringGeometry args={[selectionRing[0], selectionRing[1], 36]} />
-        <meshBasicMaterial color="#ffd447" transparent opacity={selected ? 0.95 : 0} />
+        <meshBasicMaterial color="#ffd447" transparent opacity={0.95} />
       </mesh>
     </group>
   )
@@ -8765,6 +8767,7 @@ function EditableFloor({
     <mesh
       rotation={[-Math.PI / 2, 0, 0]}
       position={[0, 0.028, 0]}
+      visible={isActive}
       onPointerDown={(event) => {
         if (!isActive) return
         if (isPanning) {
@@ -8947,7 +8950,7 @@ function CustomizationLayer({
         onClearSelection={() => onSelect(null)}
         onLockPlacement={onLockPlacement}
       />
-      <group position={mode === 'customize' ? [0, 0, 0] : [0, -500, 0]}>
+      <group visible={mode === 'customize'}>
         <gridHelper
           args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
           position={[0, 0.032, 0]}
@@ -10065,6 +10068,11 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
   const framesRef = useRef(0)
   const maxFrameTimeRef = useRef(0)
   const drawingBufferRef = useRef(new Vector2())
+  const categoryElapsedRef = useRef(1)
+  const categoryStatsRef = useRef({
+    trianglesByCategory: {},
+    drawCallsByCategory: {},
+  })
 
   useEffect(() => {
     onRendererInfo(getRendererInfo(gl))
@@ -10083,20 +10091,26 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
     gl.getDrawingBufferSize(drawingBufferRef.current)
     const fps = framesRef.current / elapsedRef.current
     const averageFrameTimeMs = (elapsedRef.current / framesRef.current) * 1000
-    const trianglesByCategory = {}
-    const drawCallsByCategory = {}
+    categoryElapsedRef.current += elapsedRef.current
+    if (categoryElapsedRef.current >= 1) {
+      const trianglesByCategory = {}
+      const drawCallsByCategory = {}
 
-    scene.traverse((object) => {
-      const category = getDebugCategory(object)
-      const drawCalls = getObjectDrawCallCount(object)
-      if (drawCalls > 0) {
-        drawCallsByCategory[category] = (drawCallsByCategory[category] ?? 0) + drawCalls
-      }
+      scene.traverse((object) => {
+        const category = getDebugCategory(object)
+        const drawCalls = getObjectDrawCallCount(object)
+        if (drawCalls > 0) {
+          drawCallsByCategory[category] = (drawCallsByCategory[category] ?? 0) + drawCalls
+        }
 
-      const triangles = getObjectTriangleCount(object)
-      if (triangles <= 0) return
-      trianglesByCategory[category] = (trianglesByCategory[category] ?? 0) + triangles
-    })
+        const triangles = getObjectTriangleCount(object)
+        if (triangles <= 0) return
+        trianglesByCategory[category] = (trianglesByCategory[category] ?? 0) + triangles
+      })
+
+      categoryStatsRef.current = { trianglesByCategory, drawCallsByCategory }
+      categoryElapsedRef.current = 0
+    }
 
     onStatsChange({
       fps,
@@ -10109,8 +10123,8 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
       dpr: gl.getPixelRatio(),
       drawingBufferWidth: drawingBufferRef.current.x,
       drawingBufferHeight: drawingBufferRef.current.y,
-      drawCallsByCategory,
-      trianglesByCategory,
+      drawCallsByCategory: categoryStatsRef.current.drawCallsByCategory,
+      trianglesByCategory: categoryStatsRef.current.trianglesByCategory,
       grassDebug: typeof window !== 'undefined' ? window.__grassDebug ?? null : null,
     })
 
