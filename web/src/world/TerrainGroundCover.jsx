@@ -453,9 +453,13 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
         uTime - spawnTime - revealDelay
       );
       reveal = mix(reveal, 1.0, uGlobalLayer);
-      transformed.x *= mix(0.72, 1.0, reveal);
-      transformed.z *= mix(0.72, 1.0, reveal);
-      transformed.y *= reveal;
+      float revealGrowth = smoothstep(0.0, 1.0, reveal);
+      transformed.x *= mix(0.78, 1.0, revealGrowth);
+      transformed.z *= mix(0.78, 1.0, revealGrowth);
+      // Keep a valid card below the ground at the beginning. Collapsing it to
+      // zero height creates degenerate triangles that can flicker against the terrain.
+      transformed.y *= mix(0.35, 1.0, revealGrowth);
+      transformed.y -= (1.0 - revealGrowth) * 0.58;
       transformed.y -= (1.0 - keep) * 1000.0;
 
       float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
