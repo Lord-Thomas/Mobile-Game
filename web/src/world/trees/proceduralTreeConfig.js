@@ -351,15 +351,16 @@ export function createSimplifiedTreeConfig(config) {
     branch: {
       ...normalized.branch,
       levels: Math.max(2, values.levels - 1),
-      trunkChildren: Math.max(2, Math.round(values.trunkChildren * 0.65)),
-      branchChildren: Math.max(2, Math.round(values.branchChildren * 0.45)),
+      trunkChildren: Math.max(3, Math.round(values.trunkChildren * 0.8)),
+      branchChildren: Math.max(3, Math.round(values.branchChildren * 0.68)),
     },
     leaves: {
       ...normalized.leaves,
-      size: normalized.leaves.size * 1.18,
-      count: Math.max(12, Math.round(values.leafCount * 0.42)),
-      normalMode: 'upward',
-      normalStrength: 1,
+      size: normalized.leaves.size * 1.32,
+      count: Math.max(20, Math.round(values.leafCount * 0.68)),
+      start: Math.max(0.28, values.leafStart - 0.08),
+      normalMode: 'canopy',
+      normalStrength: 0.9,
     },
   }
 }
