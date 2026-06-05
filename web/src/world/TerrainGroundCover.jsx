@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, Frustum, MathUtils, Matrix4, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
+import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, Frustum, InstancedBufferAttribute, MathUtils, Matrix4, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
 import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
@@ -357,6 +357,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
       uniform float uBallInteractionRadius;
       uniform vec3 uWindDirection;
       uniform vec3 uCameraForward;
+      attribute float instanceSpawnTime;
 
       float grassHash(vec2 value) {
         return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
@@ -444,8 +445,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
       float keep = step(grassHash(grassOrigin.xz), keepProbability);
 
       // Newly streamed local chunks grow in progressively instead of appearing at once.
-      // The spawn timestamp is stored in the unused bottom row of instanceMatrix.
-      float spawnTime = instanceMatrix[0].w;
+      float spawnTime = instanceSpawnTime;
       float revealDelay = grassHash(grassOrigin.xz + vec2(4.1, 9.7)) * ${GRASS_CHUNK_REVEAL_STAGGER.toFixed(2)};
       float reveal = smoothstep(
         0.0,
@@ -537,6 +537,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   const grassGeometryData = useMemo(() => {
     const geometries = QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
       const geo = grassBaseGeometry.clone()
+      geo.setAttribute('instanceSpawnTime', new InstancedBufferAttribute(
+        new Float32Array(MAX_QUADRANT_INSTANCES),
+        1,
+      ))
       const cx = (minX + maxX) / 2
       const cz = (minZ + maxZ) / 2
       const radius = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 6
@@ -621,6 +625,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     if (!mesh) return
     const startIndex = nextGrassOffsetRefs.current[qi]
     const arr = mesh.instanceMatrix.array
+    const spawnTimes = mesh.geometry.getAttribute('instanceSpawnTime')
     const spawnTime = reveal ? grassElapsedTimeRef.current : -1000
     items.forEach((grass) => {
       if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
@@ -628,10 +633,11 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
       const s = grass.scale
       const p = grass.position
       // Column-major TRS matrix with identity rotation (billboard handled in vertex shader)
-      arr[i]    = s; arr[i+1]  = 0; arr[i+2]  = 0; arr[i+3]  = spawnTime
+      arr[i]    = s; arr[i+1]  = 0; arr[i+2]  = 0; arr[i+3]  = 0
       arr[i+4]  = 0; arr[i+5]  = s; arr[i+6]  = 0; arr[i+7]  = 0
       arr[i+8]  = 0; arr[i+9]  = 0; arr[i+10] = s; arr[i+11] = 0
       arr[i+12] = p[0]; arr[i+13] = p[1]; arr[i+14] = p[2]; arr[i+15] = 1
+      spawnTimes.array[nextGrassOffsetRefs.current[qi]] = spawnTime
       nextGrassOffsetRefs.current[qi] += 1
     })
     writtenChunkKeysRefs.current[qi].add(key)
@@ -639,6 +645,8 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     mesh.count = endIndex
     if (endIndex > startIndex) {
       mesh.instanceMatrix.addUpdateRange({ start: startIndex * 16, count: (endIndex - startIndex) * 16 })
+      spawnTimes.addUpdateRange({ start: startIndex, count: endIndex - startIndex })
+      spawnTimes.needsUpdate = true
     }
     mesh.instanceMatrix.needsUpdate = true
     // Restore the full-quadrant bounding sphere so frustum culling is never based on a subset
