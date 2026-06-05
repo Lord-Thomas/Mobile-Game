@@ -23,9 +23,8 @@ const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const GRASS_GRID_STEP = 0.15
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_CHUNK_SIZE = 6
-const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 2.5
+const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 1
 const GRASS_ACTIVE_CHUNK_RADIUS = 9
-const GRASS_IMMEDIATE_BOOTSTRAP_RADIUS = 2
 // Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
 // frustum-culls entire quadrants when they fall outside the camera view.
 const QUADRANTS = [
@@ -35,7 +34,7 @@ const QUADRANTS = [
   { id: 'sw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
 ]
 const MAX_QUADRANT_INSTANCES = 350_000
-const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 8
+const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 2
 const GRASS_BUFFER_COMPACTION_RATIO = 1.75
 const GRASS_DEBUG_ESTIMATE_INTERVAL_MS = 600
 const GRASS_DEBUG_MAX_SAMPLES = 60_000
@@ -153,14 +152,6 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t)
 }
 
-function getTerrainSlope(x, z, baseHeight) {
-  const step = 0.25
-  const h = baseHeight !== undefined ? baseHeight : getTerrainHeight(x, z)
-  const dx = (getTerrainHeight(x + step, z) - h) / step
-  const dz = (getTerrainHeight(x, z + step) - h) / step
-  return Math.sqrt(dx * dx + dz * dz)
-}
-
 function makeRockInstance(x, z, seed) {
   return {
     position: [x, getTerrainHeight(x, z) + 0.03, z],
@@ -172,10 +163,8 @@ function makeRockInstance(x, z, seed) {
 
 function makeGrassInstance(x, z, seed) {
   const h = getTerrainHeight(x, z)
-  const slope = getTerrainSlope(x, z, h)
-  const slopeLift = slope * 0.5
   return {
-    position: [x, h + 0.032 + slopeLift, z],
+    position: [x, h + 0.04, z],
     rotation: [0, (seededRandom(seed + 18) - 0.5) * grassPlacementSettings.rotationRandomness * 2, 0],
     scale: grassPlacementSettings.minScale + seededRandom(seed + 9) * GRASS_SCALE_RANGE,
     colorShift: seededRandom(seed + 41),
@@ -259,17 +248,6 @@ function getActiveGrassChunkKeys(allKeys, centerChunkX, centerChunkZ) {
     .sort((a, b) => getGrassChunkDistance(a, centerChunkX, centerChunkZ) - getGrassChunkDistance(b, centerChunkX, centerChunkZ))
 }
 
-function buildGrassChunk(key) {
-  const [chunkX, chunkZ] = key.split(':').map(Number)
-  const bounds = getGrassChunkBounds(chunkX, chunkZ)
-  const grass = []
-  const step = GRASS_GRID_STEP
-  for (let xi = bounds.minX; xi <= bounds.maxX; xi += step) {
-    pushGrassRow(grass, xi, bounds.minZ, bounds.maxZ, step)
-  }
-  return grass
-}
-
 function createRockCover() {
   const rocks = []
 
@@ -297,6 +275,32 @@ function buildGlobalGrassChunk(key) {
     pushGrassRow(grass, x, bounds.minZ, bounds.maxZ, GLOBAL_GRASS_GRID_STEP)
   }
   return grass
+}
+
+function createGrassChunkBuildJob(key) {
+  const [chunkX, chunkZ] = key.split(':').map(Number)
+  const bounds = getGrassChunkBounds(chunkX, chunkZ)
+  return {
+    key,
+    bounds,
+    nextX: bounds.minX,
+    grass: [],
+    buildTimeMs: 0,
+  }
+}
+
+function continueGrassChunkBuild(job, deadline) {
+  const sliceStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
+  while (job.nextX <= job.bounds.maxX) {
+    pushGrassRow(job.grass, job.nextX, job.bounds.minZ, job.bounds.maxZ, GRASS_GRID_STEP)
+    job.nextX += GRASS_GRID_STEP
+    if (typeof performance !== 'undefined' && performance.now() >= deadline) {
+      job.buildTimeMs += performance.now() - sliceStartedAt
+      return false
+    }
+  }
+  if (typeof performance !== 'undefined') job.buildTimeMs += performance.now() - sliceStartedAt
+  return true
 }
 
 function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
@@ -463,6 +467,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   const grassChunkCacheRef = useRef(new Map())
   const pendingGrassChunksRef = useRef(new Set())
   const grassChunkQueueRef = useRef([])
+  const activeGrassBuildJobRef = useRef(null)
   // Chunks built but not yet written to GPU — writes happen only in useFrame where
   // mesh refs are guaranteed populated (not in useLayoutEffect where they may be null).
   const pendingGPUWriteRef = useRef([])
@@ -761,9 +766,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
 
   // Appelé depuis useFrame uniquement — les mesh refs sont garantis populés ici.
   // Phase 1 : vider la file d'attente GPU (chunks construits depuis useLayoutEffect ou frame précédente).
-  // Phase 2 : construire de nouveaux chunks depuis la queue (budget 14 ms).
+  // Phase 2 : construire de nouveaux chunks depuis la queue avec un budget strict.
   const processGrassChunkBatch = () => {
-    // Phase 1 — écriture GPU des chunks déjà construits (bootstrap ou frame précédente)
+    // Phase 1 — écriture GPU des chunks déjà construits.
     let writes = 0
     while (
       pendingGPUWriteRef.current.length > 0
@@ -776,16 +781,22 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
 
     // Phase 2 — construction de nouveaux chunks (budget temps)
     const startedAt = typeof performance !== 'undefined' ? performance.now() : 0
-    while (true) {
-      const nextKey = grassChunkQueueRef.current.shift()
-      if (!nextKey) break
-      const chunkStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
-      const grass = buildGrassChunk(nextKey)
-      if (typeof performance !== 'undefined') recordGrassBuildTime(performance.now() - chunkStartedAt)
-      grassChunkCacheRef.current.set(nextKey, grass)
-      pendingGrassChunksRef.current.delete(nextKey)
-      writeChunkToGPU(nextKey, grass)
-      if (typeof performance !== 'undefined' && performance.now() - startedAt >= GRASS_CHUNK_BUILD_TIME_BUDGET_MS) break
+    const deadline = startedAt + GRASS_CHUNK_BUILD_TIME_BUDGET_MS
+    while (typeof performance === 'undefined' || performance.now() < deadline) {
+      if (!activeGrassBuildJobRef.current) {
+        const nextKey = grassChunkQueueRef.current.shift()
+        if (!nextKey) break
+        activeGrassBuildJobRef.current = createGrassChunkBuildJob(nextKey)
+      }
+
+      const job = activeGrassBuildJobRef.current
+      if (!continueGrassChunkBuild(job, deadline)) break
+
+      grassChunkCacheRef.current.set(job.key, job.grass)
+      pendingGrassChunksRef.current.delete(job.key)
+      pendingGPUWriteRef.current.push({ key: job.key, grass: job.grass })
+      recordGrassBuildTime(job.buildTimeMs)
+      activeGrassBuildJobRef.current = null
     }
 
     publishGrassDebugStats()
@@ -793,52 +804,27 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
 
   // Initialise la queue quand active passe à true (ou que les clés changent).
   // NE PAS écrire sur le GPU ici — les mesh refs ne sont pas garantis prêts avant le premier useFrame.
-  // Les chunks bootstrap sont mis dans pendingGPUWriteRef pour être écrits lors du prochain useFrame.
+  // Les chunks en cache sont écrits au prochain useFrame, les autres sont construits progressivement.
   const initGrassQueue = (playerPosition) => {
     const centerChunkX = playerPosition ? getGrassChunkIndex(playerPosition.x) : 0
     const centerChunkZ = playerPosition ? getGrassChunkIndex(playerPosition.z) : 0
     const activeKeys = getActiveGrassChunkKeys(allGrassChunkKeys, centerChunkX, centerChunkZ)
-    const immediateKeySet = new Set(
-      activeKeys.filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= GRASS_IMMEDIATE_BOOTSTRAP_RADIUS),
-    )
     activeGrassCenterRef.current = getGrassChunkKey(centerChunkX, centerChunkZ)
     activeGrassTargetKeysRef.current = new Set(activeKeys)
     grassChunkQueueRef.current = []
+    activeGrassBuildJobRef.current = null
     pendingGPUWriteRef.current = []
     pendingGrassChunksRef.current.clear()
     resetGrassGpuBuffers()
 
-    // Bootstrap : construire synchrone les chunks proches (ils seront écrits au prochain useFrame)
-    const immediateKeys = activeKeys
-      .filter((key) => immediateKeySet.has(key))
-      .sort((a, b) => getGrassChunkDistance(a, centerChunkX, centerChunkZ) - getGrassChunkDistance(b, centerChunkX, centerChunkZ))
-
-    immediateKeys.forEach((key) => {
-      if (!grassChunkCacheRef.current.has(key)) {
-        const chunkStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
-        const grass = buildGrassChunk(key)
-        if (typeof performance !== 'undefined') recordGrassBuildTime(performance.now() - chunkStartedAt)
-        grassChunkCacheRef.current.set(key, grass)
+    activeKeys.forEach((key) => {
+      const cached = grassChunkCacheRef.current.get(key)
+      if (cached) {
+        pendingGPUWriteRef.current.push({ key, grass: cached })
+      } else {
+        pendingGrassChunksRef.current.add(key)
+        grassChunkQueueRef.current.push(key)
       }
-      pendingGrassChunksRef.current.delete(key)
-      grassChunkQueueRef.current = grassChunkQueueRef.current.filter((k) => k !== key)
-      // Planifier l'écriture GPU (sera faite dans useFrame, pas ici)
-      const cached = grassChunkCacheRef.current.get(key)
-      if (cached) pendingGPUWriteRef.current.push({ key, grass: cached })
-    })
-
-    // Mettre aussi en file d'écriture tout chunk déjà en cache (visites précédentes)
-    activeKeys.forEach((key) => {
-      if (immediateKeySet.has(key)) return
-      const cached = grassChunkCacheRef.current.get(key)
-      if (cached) pendingGPUWriteRef.current.push({ key, grass: cached })
-    })
-
-    // Queue le reste pour construction progressive
-    activeKeys.forEach((key) => {
-      if (grassChunkCacheRef.current.has(key) || pendingGrassChunksRef.current.has(key)) return
-      pendingGrassChunksRef.current.add(key)
-      grassChunkQueueRef.current.push(key)
     })
 
     grassChunkQueueRef.current.sort((a, b) => (
@@ -858,6 +844,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
 
     // Retour à l'intérieur : vider la queue et les writes en attente
     grassChunkQueueRef.current = []
+    activeGrassBuildJobRef.current = null
     pendingGPUWriteRef.current = []
     pendingGrassChunksRef.current.clear()
     activeGrassTargetKeysRef.current.clear()
@@ -879,6 +866,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
 
     grassChunkQueueRef.current = grassChunkQueueRef.current.filter((key) => activeKeySet.has(key))
     pendingGPUWriteRef.current = pendingGPUWriteRef.current.filter(({ key }) => activeKeySet.has(key))
+    if (activeGrassBuildJobRef.current && !activeKeySet.has(activeGrassBuildJobRef.current.key)) {
+      activeGrassBuildJobRef.current = null
+    }
     pendingGrassChunksRef.current.forEach((key) => {
       if (!activeKeySet.has(key)) pendingGrassChunksRef.current.delete(key)
     })
@@ -944,7 +934,11 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     }
 
     // Écriture GPU + construction progressive — s'exécute chaque frame tant qu'il y a du travail
-    if (pendingGPUWriteRef.current.length > 0 || grassChunkQueueRef.current.length > 0) {
+    if (
+      pendingGPUWriteRef.current.length > 0
+      || grassChunkQueueRef.current.length > 0
+      || activeGrassBuildJobRef.current
+    ) {
       processGrassChunkBatch()
     }
   })
@@ -987,6 +981,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   // Nettoyage au démontage
   useEffect(() => () => {
     grassChunkQueueRef.current = []
+    activeGrassBuildJobRef.current = null
     pendingGPUWriteRef.current = []
     pendingGrassChunksRef.current.clear()
   }, [])
