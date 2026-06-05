@@ -21,9 +21,9 @@ const GRASS_SCALE_RANGE = grassPlacementSettings.maxScale - grassPlacementSettin
 const GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const GRASS_GRID_STEP_NEAR = 0.13
-const GRASS_GRID_STEP_FAR = 0.28
-const GRASS_NEAR_DIST = 24
-const GRASS_FAR_DIST = 48
+const GRASS_GRID_STEP_FAR = 0.38
+const GRASS_NEAR_DIST = 20
+const GRASS_FAR_DIST = 44
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 2.5
@@ -49,7 +49,9 @@ const GRASS_CARD_HEIGHT = 0.78
 const GRASS_VERTICAL_SEGMENTS = 1
 const GRASS_FULL_DENSITY_RADIUS = 10
 const GRASS_THINNING_RADIUS = 52
-const GRASS_MIN_KEEP_PROBABILITY = 0.05
+const GRASS_MIN_KEEP_PROBABILITY = 0.035
+const GRASS_FAR_WIDTH_SCALE = 1.65
+const GRASS_FAR_HEIGHT_SCALE = 1.08
 const grassWindSettings = {
   strength: 0.13,
   speed: 1.05,
@@ -303,6 +305,8 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
     shader.uniforms.uFullDensityRadius = { value: GRASS_FULL_DENSITY_RADIUS }
     shader.uniforms.uThinningRadius = { value: GRASS_THINNING_RADIUS }
     shader.uniforms.uMinKeepProbability = { value: GRASS_MIN_KEEP_PROBABILITY }
+    shader.uniforms.uFarWidthScale = { value: GRASS_FAR_WIDTH_SCALE }
+    shader.uniforms.uFarHeightScale = { value: GRASS_FAR_HEIGHT_SCALE }
     shader.uniforms.uWindDirection = {
       value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
     }
@@ -324,6 +328,8 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
       uniform float uFullDensityRadius;
       uniform float uThinningRadius;
       uniform float uMinKeepProbability;
+      uniform float uFarWidthScale;
+      uniform float uFarHeightScale;
       uniform vec3 uPlayerPosition;
       uniform vec3 uBallPosition;
       uniform float uBallInteractionRadius;
@@ -387,6 +393,12 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
         1.0
       );
       float keepProbability = mix(1.0, uMinKeepProbability, thinningT);
+
+      // Distant blades represent small clusters: fewer instances, slightly wider cards.
+      // The curve stays gradual so there is no visible LOD transition.
+      float clusterT = thinningT * thinningT;
+      transformed.x *= mix(1.0, uFarWidthScale, clusterT);
+      transformed.y *= mix(1.0, uFarHeightScale, clusterT);
 
       // Camera-angle density: blades behind the camera are progressively thinned.
       // Only kicks in for distant grass (smooth fade 8→20 units), so nearby grass is unaffected.

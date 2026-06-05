@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { InstancedBufferAttribute, MathUtils, Matrix4, Object3D, Vector3 } from 'three'
 import { getTerrainHeight } from '../terrain/terrainGeometry'
@@ -17,9 +17,12 @@ const TREE_OCCLUSION_FADE_IN_SPEED = 16
 const TREE_OCCLUSION_FADE_OUT_SPEED = 14
 const TREE_CAMERA_CLEAR_RADIUS = 1.2
 const TREE_CAMERA_MIN_VISIBILITY = 0.20
-const TREE_LOD_NEAR_DISTANCE = 30
-const TREE_LOD_FAR_DISTANCE = 36
 const TREE_LOD_UPDATE_INTERVAL = 0.32
+const TREE_LOD_THRESHOLDS = [
+  { enter: 32, exit: 28 },
+  { enter: 52, exit: 46 },
+  { enter: 74, exit: 66 },
+]
 
 function disposeTree(tree) {
   tree.traverse((object) => {
@@ -117,15 +120,25 @@ function makeOcclusionMaterial(material) {
   return next
 }
 
-function InstancedTreePart({ part, placements, onOpacityAttribute, partIndex }) {
+function InstancedTreePart({
+  part,
+  capacity,
+  lodLevel,
+  lodPlacementsRef,
+  lodVersionRef,
+  onOpacityAttribute,
+  partIndex,
+}) {
   const ref = useRef(null)
+  const appliedVersionRef = useRef(-1)
   const material = useMemo(() => makeOcclusionMaterial(part.material), [part.material])
   const opacityAttribute = useMemo(
-    () => new InstancedBufferAttribute(new Float32Array(placements.length).fill(1), 1),
-    [placements.length],
+    () => new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1),
+    [capacity],
   )
 
-  useLayoutEffect(() => {
+  const updateInstances = useCallback(() => {
+    const placements = lodPlacementsRef.current[lodLevel]
     placements.forEach((tree, index) => {
       const { position, rotationY, scale, snapToGround } = tree.config
       const terrainY = snapToGround ? getTerrainHeight(position.x, position.z) : 0
@@ -136,9 +149,19 @@ function InstancedTreePart({ part, placements, onOpacityAttribute, partIndex }) 
       localMatrix.multiplyMatrices(dummy.matrix, part.matrix)
       ref.current.setMatrixAt(index, localMatrix)
     })
+    ref.current.count = placements.length
     ref.current.geometry.setAttribute('instanceOcclusionOpacity', opacityAttribute)
     ref.current.instanceMatrix.needsUpdate = true
-  }, [opacityAttribute, part.matrix, placements])
+    appliedVersionRef.current = lodVersionRef.current
+  }, [lodLevel, lodPlacementsRef, lodVersionRef, opacityAttribute, part.matrix])
+
+  useLayoutEffect(() => {
+    updateInstances()
+  }, [updateInstances])
+
+  useFrame(() => {
+    if (appliedVersionRef.current !== lodVersionRef.current) updateInstances()
+  })
 
   useLayoutEffect(() => {
     onOpacityAttribute(partIndex, opacityAttribute)
@@ -150,19 +173,27 @@ function InstancedTreePart({ part, placements, onOpacityAttribute, partIndex }) 
   return (
     <instancedMesh
       ref={ref}
-      args={[part.geometry, material, placements.length]}
+      args={[part.geometry, material, capacity]}
       castShadow={part.castShadow}
       receiveShadow={part.receiveShadow}
-      frustumCulled
+      frustumCulled={false}
     />
   )
 }
 
-function InstancedTreeVariant({ variantId, placements, animated, playerPositionRef, simplified = false }) {
+function InstancedTreeVariant({
+  variantId,
+  capacity,
+  animated,
+  playerPositionRef,
+  lodLevel,
+  lodPlacementsRef,
+  lodVersionRef,
+}) {
   const variant = GAME_TREE_LIBRARY[variantId] ?? GAME_TREE_LIBRARY.ashMedium
   const treeConfig = useMemo(
-    () => simplified ? createSimplifiedTreeConfig(variant.config) : variant.config,
-    [simplified, variant],
+    () => lodLevel > 0 ? createSimplifiedTreeConfig(variant.config, lodLevel) : variant.config,
+    [lodLevel, variant],
   )
   const tree = useMemo(() => createProceduralTree(treeConfig, animated), [treeConfig, animated])
   const parts = useMemo(() => collectRenderableParts(tree), [tree])
@@ -170,20 +201,21 @@ function InstancedTreeVariant({ variantId, placements, animated, playerPositionR
   const registerOpacityAttribute = useCallback((index, attribute) => {
     opacityAttributesRef.current[index] = attribute
   }, [])
-  const currentOpacitiesRef = useRef(new Float32Array(placements.length).fill(1))
-  const targetOpacitiesRef = useRef(new Float32Array(placements.length).fill(1))
+  const currentOpacitiesRef = useRef(new Float32Array(capacity).fill(1))
+  const targetOpacitiesRef = useRef(new Float32Array(capacity).fill(1))
+  const opacityVersionRef = useRef(-1)
 
   useEffect(() => () => disposeTree(tree), [tree])
 
-  useEffect(() => {
-    currentOpacitiesRef.current = new Float32Array(placements.length).fill(1)
-    targetOpacitiesRef.current = new Float32Array(placements.length).fill(1)
-  }, [placements.length])
-
   useFrame(({ camera }, delta) => {
+    const placements = lodPlacementsRef.current[lodLevel]
     if (!playerPositionRef?.current || placements.length === 0) return
 
     const targets = targetOpacitiesRef.current
+    if (opacityVersionRef.current !== lodVersionRef.current) {
+      currentOpacitiesRef.current.fill(1)
+      opacityVersionRef.current = lodVersionRef.current
+    }
     targets.fill(1)
 
     playerTarget.set(
@@ -257,22 +289,41 @@ function InstancedTreeVariant({ variantId, placements, animated, playerPositionR
 
   return parts.map((part, index) => (
     <InstancedTreePart
-      key={`${variantId}-${simplified ? 'far' : 'near'}-${index}`}
+      key={`${variantId}-lod-${lodLevel}-${index}`}
       part={part}
-      placements={placements}
+      capacity={capacity}
+      lodLevel={lodLevel}
+      lodPlacementsRef={lodPlacementsRef}
+      lodVersionRef={lodVersionRef}
       onOpacityAttribute={registerOpacityAttribute}
       partIndex={index}
     />
   ))
 }
 
+function getNextTreeLod(distance, previousLevel) {
+  if (previousLevel === 0) return distance > TREE_LOD_THRESHOLDS[0].enter ? 1 : 0
+  if (previousLevel === 1) {
+    if (distance < TREE_LOD_THRESHOLDS[0].exit) return 0
+    return distance > TREE_LOD_THRESHOLDS[1].enter ? 2 : 1
+  }
+  if (previousLevel === 2) {
+    if (distance < TREE_LOD_THRESHOLDS[1].exit) return 1
+    return distance > TREE_LOD_THRESHOLDS[2].enter ? 3 : 2
+  }
+  return distance < TREE_LOD_THRESHOLDS[2].exit ? 2 : 3
+}
+
 function TreeLodVariant({ variantId, placements, animated, playerPositionRef, forceSimplified }) {
-  const [lodPlacements, setLodPlacements] = useState(() => (
-    forceSimplified
-      ? { near: [], far: placements }
-      : { near: placements, far: [] }
-  ))
-  const farTreeIdsRef = useRef(new Set(forceSimplified ? placements.map((tree) => tree.id) : []))
+  const forcedLevel = forceSimplified ? 3 : 0
+  const lodPlacementsRef = useRef(null)
+  if (lodPlacementsRef.current === null) {
+    const levels = [[], [], [], []]
+    levels[forcedLevel] = placements
+    lodPlacementsRef.current = levels
+  }
+  const lodVersionRef = useRef(0)
+  const treeLevelsRef = useRef(new Map(placements.map((tree) => [tree.id, forcedLevel])))
   const updateElapsedRef = useRef(0)
 
   useFrame(({ camera }, delta) => {
@@ -282,56 +333,44 @@ function TreeLodVariant({ variantId, placements, animated, playerPositionRef, fo
     if (updateElapsedRef.current < TREE_LOD_UPDATE_INTERVAL) return
     updateElapsedRef.current = 0
 
-    const previousFarIds = farTreeIdsRef.current
-    const nextFarIds = new Set()
-    const near = []
-    const far = []
+    const previousLevels = treeLevelsRef.current
+    const nextLevels = new Map()
+    const levels = [[], [], [], []]
+    let classificationChanged = false
 
     placements.forEach((tree) => {
       const distance = Math.hypot(
         tree.config.position.x - camera.position.x,
         tree.config.position.z - camera.position.z,
       )
-      const wasFar = previousFarIds.has(tree.id)
-      const isFar = wasFar
-        ? distance >= TREE_LOD_NEAR_DISTANCE
-        : distance > TREE_LOD_FAR_DISTANCE
-
-      if (isFar) {
-        nextFarIds.add(tree.id)
-        far.push(tree)
-      } else {
-        near.push(tree)
-      }
+      const previousLevel = previousLevels.get(tree.id) ?? 0
+      const nextLevel = getNextTreeLod(distance, previousLevel)
+      nextLevels.set(tree.id, nextLevel)
+      levels[nextLevel].push(tree)
+      if (nextLevel !== previousLevel) classificationChanged = true
     })
 
-    const classificationChanged =
-      nextFarIds.size !== previousFarIds.size ||
-      [...nextFarIds].some((id) => !previousFarIds.has(id))
     if (!classificationChanged) return
 
-    farTreeIdsRef.current = nextFarIds
-    setLodPlacements({ near, far })
+    treeLevelsRef.current = nextLevels
+    lodPlacementsRef.current = levels
+    lodVersionRef.current += 1
   })
 
   return (
     <>
-      {lodPlacements.near.length > 0 && (
+      {[0, 1, 2, 3].map((lodLevel) => (
         <InstancedTreeVariant
+          key={`${variantId}-lod-${lodLevel}`}
           variantId={variantId}
-          placements={lodPlacements.near}
-          animated={animated}
-          playerPositionRef={playerPositionRef}
+          capacity={placements.length}
+          animated={lodLevel === 0 && animated}
+          playerPositionRef={lodLevel === 0 ? playerPositionRef : null}
+          lodLevel={lodLevel}
+          lodPlacementsRef={lodPlacementsRef}
+          lodVersionRef={lodVersionRef}
         />
-      )}
-      {lodPlacements.far.length > 0 && (
-        <InstancedTreeVariant
-          variantId={variantId}
-          placements={lodPlacements.far}
-          animated={false}
-          simplified
-        />
-      )}
+      ))}
     </>
   )
 }

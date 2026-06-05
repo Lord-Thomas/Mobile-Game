@@ -1,5 +1,5 @@
 import { Tree } from '@dgreenheck/ez-tree'
-import { BufferAttribute, Box3, Color, Float32BufferAttribute, FrontSide, MeshBasicMaterial, Vector3 } from 'three'
+import { BufferAttribute, Box3, Color, DoubleSide, Float32BufferAttribute, FrontSide, MathUtils, MeshBasicMaterial, Vector3 } from 'three'
 
 // Shared uniform objects — all animated leaf shaders reference these same objects.
 // Updating .value once per frame updates every tree variant simultaneously.
@@ -50,6 +50,7 @@ export const DEFAULT_TREE_CONFIG = {
     start: null,
     sizeVariance: null,
     alphaTest: null,
+    billboard: 'double',
     normalMode: 'canopy',
     normalStrength: 0.78,
     colorMode: 'gameGrass',
@@ -109,6 +110,9 @@ export function normalizeTreeConfig(config = {}) {
       start: finiteOrNull(leaves.start),
       sizeVariance: finiteOrNull(leaves.sizeVariance),
       alphaTest: finiteOrNull(leaves.alphaTest),
+      billboard: ['single', 'double'].includes(leaves.billboard)
+        ? leaves.billboard
+        : DEFAULT_TREE_CONFIG.leaves.billboard,
       normalMode: ['generated', 'upward', 'canopy'].includes(leaves.normalMode)
         ? leaves.normalMode
         : DEFAULT_TREE_CONFIG.leaves.normalMode,
@@ -151,6 +155,7 @@ function applyTreeOptionOverrides(options, config) {
   if (leaves.start !== null) options.leaves.start = leaves.start
   if (leaves.sizeVariance !== null) options.leaves.sizeVariance = leaves.sizeVariance
   if (leaves.alphaTest !== null) options.leaves.alphaTest = leaves.alphaTest
+  options.leaves.billboard = leaves.billboard
 }
 
 function stylizeLeafNormals(tree, config) {
@@ -252,7 +257,7 @@ function stylizeLeafColors(tree, config, animated = false) {
     name: 'stylized-leaves',
     map: alphaTexture,
     alphaTest: material.alphaTest ?? 0.5,
-    side: FrontSide,
+    side: config.leaves.billboard === 'single' ? DoubleSide : FrontSide,
     transparent: false,
     depthWrite: true,
     color: '#ffffff',
@@ -342,23 +347,25 @@ export function createProceduralTree(config, animated = true) {
   return tree
 }
 
-export function createSimplifiedTreeConfig(config) {
+const TREE_LEAF_LOD_LEVELS = [
+  { countScale: 0.52, sizeScale: 1.12, billboard: 'double' },
+  { countScale: 0.42, sizeScale: 1.18, billboard: 'single' },
+  { countScale: 0.25, sizeScale: 1.32, billboard: 'single' },
+]
+
+export function createSimplifiedTreeConfig(config, lodLevel = 1) {
   const normalized = normalizeTreeConfig(config)
   const values = getTreeEditorValues(normalized)
+  const lod = TREE_LEAF_LOD_LEVELS[MathUtils.clamp(Math.round(lodLevel) - 1, 0, TREE_LEAF_LOD_LEVELS.length - 1)]
 
   return {
     ...normalized,
-    branch: {
-      ...normalized.branch,
-      levels: Math.max(2, values.levels - 1),
-      trunkChildren: Math.max(3, Math.round(values.trunkChildren * 0.8)),
-      branchChildren: Math.max(3, Math.round(values.branchChildren * 0.68)),
-    },
     leaves: {
       ...normalized.leaves,
-      size: normalized.leaves.size * 1.32,
-      count: Math.max(20, Math.round(values.leafCount * 0.68)),
-      start: Math.max(0.28, values.leafStart - 0.08),
+      size: normalized.leaves.size * lod.sizeScale,
+      count: Math.max(8, Math.round(values.leafCount * lod.countScale)),
+      start: values.leafStart,
+      billboard: lod.billboard,
       normalMode: 'canopy',
       normalStrength: 0.9,
     },
