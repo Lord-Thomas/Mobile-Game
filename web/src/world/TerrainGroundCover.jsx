@@ -49,8 +49,12 @@ const GRASS_THINNING_RADIUS = 150
 const GRASS_MIN_KEEP_PROBABILITY = 0.015
 const GRASS_CULL_FADE_START = 150
 const GRASS_CULL_RADIUS = TERRAIN_HALF_SIZE * 1.42
-const GRASS_LOCAL_FADE_START = 24
-const GRASS_LOCAL_FADE_END = 52
+const GRASS_LOCAL_FADE_START = 16
+const GRASS_LOCAL_FADE_END = 48
+const GRASS_GLOBAL_FADE_START = 12
+const GRASS_GLOBAL_FADE_END = 52
+const GRASS_CHUNK_REVEAL_DURATION = 0.9
+const GRASS_CHUNK_REVEAL_STAGGER = 0.35
 const GRASS_FAR_WIDTH_SCALE = 1.65
 const GRASS_FAR_HEIGHT_SCALE = 1.08
 const GLOBAL_GRASS_GRID_STEP = 0.9
@@ -421,7 +425,13 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
         ${GRASS_LOCAL_FADE_END.toFixed(1)} + transitionOffset,
         playerDistance
       );
-      keepProbability *= horizonFade * mix(localFade, 1.0, uGlobalLayer);
+      float globalFade = smoothstep(
+        ${GRASS_GLOBAL_FADE_START.toFixed(1)} + transitionOffset,
+        ${GRASS_GLOBAL_FADE_END.toFixed(1)} + transitionOffset,
+        playerDistance
+      );
+      float layerFade = mix(localFade, globalFade, uGlobalLayer);
+      keepProbability *= horizonFade * layerFade;
 
       // Distant blades represent small clusters: fewer instances, slightly wider cards.
       // The curve stays gradual so there is no visible LOD transition.
@@ -432,7 +442,22 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
       transformed.y *= mix(1.0, heightScale, clusterT);
 
       float keep = step(grassHash(grassOrigin.xz), keepProbability);
+
+      // Newly streamed local chunks grow in progressively instead of appearing at once.
+      // The spawn timestamp is stored in the unused bottom row of instanceMatrix.
+      float spawnTime = instanceMatrix[0].w;
+      float revealDelay = grassHash(grassOrigin.xz + vec2(4.1, 9.7)) * ${GRASS_CHUNK_REVEAL_STAGGER.toFixed(2)};
+      float reveal = smoothstep(
+        0.0,
+        ${GRASS_CHUNK_REVEAL_DURATION.toFixed(2)},
+        uTime - spawnTime - revealDelay
+      );
+      reveal = mix(reveal, 1.0, uGlobalLayer);
+      transformed.x *= mix(0.72, 1.0, reveal);
+      transformed.z *= mix(0.72, 1.0, reveal);
+      transformed.y *= reveal;
       transformed.y -= (1.0 - keep) * 1000.0;
+
       float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
 
       if (playerDistance > 0.0001) {
@@ -484,6 +509,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   // and may auto-recompute it from newly added instances only → wrong frustum culling.
   const shaderRef = useRef(null)
   const globalShaderRef = useRef(null)
+  const grassElapsedTimeRef = useRef(0)
   const writtenChunkKeysRefs = useRef([new Set(), new Set(), new Set(), new Set()])
   const nextGrassOffsetRefs = useRef([0, 0, 0, 0])
   const lastGrassDebugEstimateAtRef = useRef(0)
@@ -587,7 +613,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   // Uses addUpdateRange so Three.js only uploads the new portion to the GPU (not the full 22 MB buffer).
   // After the partial upload we restore mesh.boundingSphere to the full quadrant sphere because
   // Three.js r175+ may recompute it from the new instances only, causing incorrect frustum culling.
-  const writeChunkToGPU = (key, items) => {
+  const writeChunkToGPU = (key, items, reveal = true) => {
     const [cx, cz] = key.split(':').map(Number)
     const qi = getChunkQuadrantIndex(cx, cz)
     if (writtenChunkKeysRefs.current[qi].has(key)) return
@@ -595,13 +621,14 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     if (!mesh) return
     const startIndex = nextGrassOffsetRefs.current[qi]
     const arr = mesh.instanceMatrix.array
+    const spawnTime = reveal ? grassElapsedTimeRef.current : -1000
     items.forEach((grass) => {
       if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
       const i = nextGrassOffsetRefs.current[qi] * 16
       const s = grass.scale
       const p = grass.position
       // Column-major TRS matrix with identity rotation (billboard handled in vertex shader)
-      arr[i]    = s; arr[i+1]  = 0; arr[i+2]  = 0; arr[i+3]  = 0
+      arr[i]    = s; arr[i+1]  = 0; arr[i+2]  = 0; arr[i+3]  = spawnTime
       arr[i+4]  = 0; arr[i+5]  = s; arr[i+6]  = 0; arr[i+7]  = 0
       arr[i+8]  = 0; arr[i+9]  = 0; arr[i+10] = s; arr[i+11] = 0
       arr[i+12] = p[0]; arr[i+13] = p[1]; arr[i+14] = p[2]; arr[i+15] = 1
@@ -774,8 +801,8 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
       pendingGPUWriteRef.current.length > 0
       && writes < GRASS_GPU_CHUNK_WRITES_PER_FRAME
     ) {
-      const { key, grass } = pendingGPUWriteRef.current.shift()
-      writeChunkToGPU(key, grass)
+      const { key, grass, reveal = true } = pendingGPUWriteRef.current.shift()
+      writeChunkToGPU(key, grass, reveal)
       writes += 1
     }
 
@@ -809,6 +836,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     const centerChunkX = playerPosition ? getGrassChunkIndex(playerPosition.x) : 0
     const centerChunkZ = playerPosition ? getGrassChunkIndex(playerPosition.z) : 0
     const activeKeys = getActiveGrassChunkKeys(allGrassChunkKeys, centerChunkX, centerChunkZ)
+    const previouslyMountedKeys = new Set(
+      writtenChunkKeysRefs.current.flatMap((keys) => [...keys]),
+    )
     activeGrassCenterRef.current = getGrassChunkKey(centerChunkX, centerChunkZ)
     activeGrassTargetKeysRef.current = new Set(activeKeys)
     grassChunkQueueRef.current = []
@@ -820,7 +850,11 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     activeKeys.forEach((key) => {
       const cached = grassChunkCacheRef.current.get(key)
       if (cached) {
-        pendingGPUWriteRef.current.push({ key, grass: cached })
+        pendingGPUWriteRef.current.push({
+          key,
+          grass: cached,
+          reveal: !previouslyMountedKeys.has(key),
+        })
       } else {
         pendingGrassChunksRef.current.add(key)
         grassChunkQueueRef.current.push(key)
@@ -895,8 +929,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     publishGrassDebugStats()
   }
 
-  useFrame(() => {
+  useFrame((state) => {
     if (!active) return
+    grassElapsedTimeRef.current = state.clock.elapsedTime
 
     const playerPosition = playerPositionRef?.current
 
