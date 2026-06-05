@@ -24,7 +24,7 @@ const GRASS_GRID_STEP = 0.15
 const GRASS_DENSITY_MULTIPLIER = 9.5
 const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 2.5
-const GRASS_ACTIVE_CHUNK_RADIUS = 6
+const GRASS_ACTIVE_CHUNK_RADIUS = 9
 const GRASS_IMMEDIATE_BOOTSTRAP_RADIUS = 2
 // Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
 // frustum-culls entire quadrants when they fall outside the camera view.
@@ -46,12 +46,19 @@ const grassTopColor = new Color('#8aac22')
 const GRASS_CARD_HEIGHT = 0.78
 const GRASS_VERTICAL_SEGMENTS = 1
 const GRASS_FULL_DENSITY_RADIUS = 10
-const GRASS_THINNING_RADIUS = 52
-const GRASS_MIN_KEEP_PROBABILITY = 0.035
-const GRASS_CULL_FADE_START = 44
-const GRASS_CULL_RADIUS = 52
+const GRASS_THINNING_RADIUS = 54
+const GRASS_MIN_KEEP_PROBABILITY = 0.025
+const GRASS_CULL_FADE_START = 28
+const GRASS_CULL_RADIUS = 50
 const GRASS_FAR_WIDTH_SCALE = 1.65
 const GRASS_FAR_HEIGHT_SCALE = 1.08
+const DISTANT_GRASS_GRID_STEP = 1
+const DISTANT_GRASS_FADE_START = 22
+const DISTANT_GRASS_FULL_VISIBILITY = 66
+const DISTANT_GRASS_MIN_KEEP_PROBABILITY = 0.28
+const DISTANT_GRASS_MAX_DISTANCE = TERRAIN_HALF_SIZE * 1.45
+const DISTANT_GRASS_WIDTH_SCALE = 2.6
+const DISTANT_GRASS_HEIGHT_SCALE = 1.2
 const grassWindSettings = {
   strength: 0.13,
   speed: 1.05,
@@ -126,6 +133,53 @@ function createGrassCardGeometry() {
   geometry.setIndex(indices)
   geometry.computeVertexNormals()
   softenGrassNormals(geometry, 0.65)
+  return geometry
+}
+
+function createDistantGrassClumpGeometry() {
+  const width = 1.08
+  const height = GRASS_CARD_HEIGHT
+  const positions = []
+  const uvs = []
+  const colors = []
+  const indices = []
+
+  const addCard = (axis) => {
+    const offset = positions.length / 3
+    const cardPositions = axis === 'x'
+      ? [
+          [-width * 0.5, 0, 0],
+          [width * 0.5, 0, 0],
+          [-width * 0.5, height, 0],
+          [width * 0.5, height, 0],
+        ]
+      : [
+          [0, 0, -width * 0.42],
+          [0, 0, width * 0.42],
+          [0, height * 0.88, -width * 0.42],
+          [0, height * 0.88, width * 0.42],
+        ]
+
+    cardPositions.forEach(([x, y, z], index) => {
+      positions.push(x, y, z)
+      uvs.push(index % 2, index < 2 ? 0 : 1)
+      const verticalT = index < 2 ? 0 : 1
+      const color = grassBottomColor.clone().lerp(grassTopColor, verticalT)
+      colors.push(color.r, color.g, color.b)
+    })
+    indices.push(offset, offset + 1, offset + 2, offset + 1, offset + 3, offset + 2)
+  }
+
+  addCard('x')
+  addCard('z')
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  softenGrassNormals(geometry, 0.72)
   return geometry
 }
 
@@ -282,6 +336,100 @@ function createRockCover() {
   return rocks
 }
 
+function createDistantGrassCover() {
+  const quadrants = [[], [], [], []]
+
+  for (let x = GRASS_AREA_MIN; x <= GRASS_AREA_MAX; x += DISTANT_GRASS_GRID_STEP) {
+    for (let z = GRASS_AREA_MIN; z <= GRASS_AREA_MAX; z += DISTANT_GRASS_GRID_STEP) {
+      const seed = (x + 211) * 157 + (z + 193) * 113
+      const px = x + (seededRandom(seed) - 0.5) * DISTANT_GRASS_GRID_STEP * 0.72
+      const pz = z + (seededRandom(seed + 5) - 0.5) * DISTANT_GRASS_GRID_STEP * 0.72
+      const gameplayDensity = Math.max(
+        getZoneDensity('tall_grass', px, pz),
+        getZoneDensity('lawn_blade', px, pz) * 0.9,
+      )
+      const density = Math.min(1, Math.max(gameplayDensity, getVisualGrassDensity(px, pz)) * 3.8)
+      if (seededRandom(seed + 19) >= density) continue
+
+      const quadrantIndex = (px >= 0 ? 0 : 1) + (pz >= 0 ? 0 : 2)
+      quadrants[quadrantIndex].push({
+        position: [px, getTerrainHeight(px, pz) + 0.045, pz],
+        scale: 0.34 + seededRandom(seed + 9) * 0.18,
+      })
+    }
+  }
+
+  return quadrants
+}
+
+function buildDistantGrassHandleBeforeCompile(onShaderReady) {
+  return (shader) => {
+    shader.uniforms.uPlayerPosition = { value: new Vector3(9999, 0, 9999) }
+    shader.uniforms.uCameraForward = { value: new Vector3(0, 0, -1) }
+    shader.uniforms.uFadeStart = { value: DISTANT_GRASS_FADE_START }
+    shader.uniforms.uFullVisibility = { value: DISTANT_GRASS_FULL_VISIBILITY }
+    shader.uniforms.uMaxDistance = { value: DISTANT_GRASS_MAX_DISTANCE }
+    shader.uniforms.uMinKeepProbability = { value: DISTANT_GRASS_MIN_KEEP_PROBABILITY }
+    shader.uniforms.uWidthScale = { value: DISTANT_GRASS_WIDTH_SCALE }
+    shader.uniforms.uHeightScale = { value: DISTANT_GRASS_HEIGHT_SCALE }
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `
+      #include <common>
+      uniform vec3 uPlayerPosition;
+      uniform vec3 uCameraForward;
+      uniform float uFadeStart;
+      uniform float uFullVisibility;
+      uniform float uMaxDistance;
+      uniform float uMinKeepProbability;
+      uniform float uWidthScale;
+      uniform float uHeightScale;
+
+      float distantGrassHash(vec2 value) {
+        return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+      `,
+    )
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `
+      #include <begin_vertex>
+      vec2 camRight = vec2(-uCameraForward.z, uCameraForward.x);
+      vec2 camForward = normalize(uCameraForward.xz);
+      float localX = transformed.x;
+      float localZ = transformed.z;
+      transformed.x = localX * camRight.x + localZ * camForward.x;
+      transformed.z = localX * camRight.y + localZ * camForward.y;
+
+      #ifdef USE_INSTANCING
+        vec3 grassOrigin = vec3(instanceMatrix[3].x, instanceMatrix[3].y, instanceMatrix[3].z);
+      #else
+        vec3 grassOrigin = vec3(0.0);
+      #endif
+
+      float distanceToPlayer = length(grassOrigin.xz - uPlayerPosition.xz);
+      float transitionOffset = (distantGrassHash(grassOrigin.xz + vec2(7.3, 2.1)) - 0.5) * 18.0;
+      float fadeIn = smoothstep(
+        uFadeStart + transitionOffset,
+        uFullVisibility + transitionOffset,
+        distanceToPlayer
+      );
+      float distanceT = smoothstep(uFullVisibility, uMaxDistance, distanceToPlayer);
+      float keepProbability = mix(1.0, uMinKeepProbability, distanceT) * fadeIn;
+      float keep = step(distantGrassHash(grassOrigin.xz), keepProbability);
+
+      transformed.x *= mix(1.0, uWidthScale, 0.35 + distanceT * 0.65);
+      transformed.y *= mix(1.0, uHeightScale, distanceT);
+      transformed.y -= (1.0 - keep) * 1000.0;
+      `,
+    )
+
+    onShaderReady(shader)
+  }
+}
+
 function buildGrassHandleBeforeCompile(onShaderReady) {
   return (shader) => {
     shader.uniforms.uTime = { value: 0 }
@@ -387,7 +535,12 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
         1.0
       );
       float keepProbability = mix(1.0, uMinKeepProbability, thinningT);
-      keepProbability *= 1.0 - smoothstep(uCullFadeStart, uCullRadius, playerDistance);
+      float transitionOffset = (grassHash(grassOrigin.xz + vec2(7.3, 2.1)) - 0.5) * 8.0;
+      keepProbability *= 1.0 - smoothstep(
+        uCullFadeStart + transitionOffset,
+        uCullRadius + transitionOffset,
+        playerDistance
+      );
 
       // Distant blades represent small clusters: fewer instances, slightly wider cards.
       // The curve stays gradual so there is no visible LOD transition.
@@ -424,6 +577,7 @@ function buildGrassHandleBeforeCompile(onShaderReady) {
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false }) {
   const rocks = useMemo(() => createRockCover(), [])
+  const distantGrass = useMemo(() => createDistantGrassCover(), [])
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
   const ref = useRef()
   const activeGrassCenterRef = useRef(null)
@@ -438,10 +592,12 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   // 4 quadrant instancedMeshes — each has a correct bounding box so Three.js can
   // frustum-cull entire quadrants that fall outside the camera view (4 draw calls).
   const grassMeshRefs = useRef([null, null, null, null])
+  const distantGrassMeshRefs = useRef([null, null, null, null])
   // Quadrant bounding spheres stored so we can re-apply them after each GPU write.
   // Three.js r175+ uses mesh.boundingSphere in priority over geometry.boundingSphere,
   // and may auto-recompute it from newly added instances only → wrong frustum culling.
   const shaderRef = useRef(null)
+  const distantShaderRef = useRef(null)
   const writtenChunkKeysRefs = useRef([new Set(), new Set(), new Set(), new Set()])
   const nextGrassOffsetRefs = useRef([0, 0, 0, 0])
   const lastGrassDebugEstimateAtRef = useRef(0)
@@ -463,6 +619,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   useEffect(() => () => grassTexture.dispose(), [grassTexture])
 
   const grassBaseGeometry = useMemo(() => createGrassCardGeometry(), [])
+  const distantGrassBaseGeometry = useMemo(() => createDistantGrassClumpGeometry(), [])
 
   // One geometry clone per quadrant — each carries its own bounding sphere so
   // Three.js frustum-culls correctly (the blade geometry alone is too small to cull by).
@@ -481,6 +638,17 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   }, [grassBaseGeometry])
   const grassGeometries = grassGeometryData.geometries
   const grassQuadrantSpheres = grassGeometryData.spheres
+  const distantGrassGeometries = useMemo(() => (
+    QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
+      const geo = distantGrassBaseGeometry.clone()
+      const cx = (minX + maxX) / 2
+      const cz = (minZ + maxZ) / 2
+      const radius = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 8
+      geo.boundingBox = new Box3(new Vector3(minX, -2, minZ), new Vector3(maxX, 6, maxZ))
+      geo.boundingSphere = new Sphere(new Vector3(cx, 1.5, cz), radius)
+      return geo
+    })
+  ), [distantGrassBaseGeometry])
 
   // One shared material for all 4 quadrants — single shader compilation, single uniform set.
   const grassMaterial = useMemo(() => {
@@ -501,10 +669,45 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   }, [grassTexture])
   useEffect(() => () => grassMaterial.dispose(), [grassMaterial])
 
+  const distantGrassMaterial = useMemo(() => {
+    const mat = new MeshBasicMaterial({
+      map: grassTexture,
+      alphaTest: 0.45,
+      side: FrontSide,
+      transparent: false,
+      depthWrite: true,
+      color: 0xffffff,
+      vertexColors: true,
+    })
+    // eslint-disable-next-line react-hooks/refs
+    mat.onBeforeCompile = buildDistantGrassHandleBeforeCompile((shader) => {
+      distantShaderRef.current = shader
+    })
+    return mat
+  }, [grassTexture])
+  useEffect(() => () => distantGrassMaterial.dispose(), [distantGrassMaterial])
+
   // Initialize mesh counts to 0 on mount to avoid showing uninitialized instances
   useLayoutEffect(() => {
     grassMeshRefs.current.forEach((mesh) => { if (mesh) mesh.count = 0 })
   }, [])
+
+  useLayoutEffect(() => {
+    distantGrass.forEach((instances, quadrantIndex) => {
+      const mesh = distantGrassMeshRefs.current[quadrantIndex]
+      if (!mesh) return
+
+      instances.forEach((grass, index) => {
+        dummy.position.set(...grass.position)
+        dummy.rotation.set(0, 0, 0)
+        dummy.scale.setScalar(grass.scale)
+        dummy.updateMatrix()
+        mesh.setMatrixAt(index, dummy.matrix)
+      })
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.boundingSphere = grassQuadrantSpheres[quadrantIndex]
+    })
+  }, [distantGrass, grassQuadrantSpheres])
 
   const resetGrassGpuBuffers = () => {
     grassMeshRefs.current.forEach((mesh) => {
@@ -600,7 +803,12 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
           )
           let keepProbability = 1 + (GRASS_MIN_KEEP_PROBABILITY - 1) * thinningT
           const playerDistance = Math.sqrt(distanceSq)
-          keepProbability *= 1 - smoothstep(GRASS_CULL_FADE_START, GRASS_CULL_RADIUS, playerDistance)
+          const transitionOffset = (grassHash2(x + 7.3, z + 2.1) - 0.5) * 8
+          keepProbability *= 1 - smoothstep(
+            GRASS_CULL_FADE_START + transitionOffset,
+            GRASS_CULL_RADIUS + transitionOffset,
+            playerDistance,
+          )
           const isKept = grassHash2(x, z) <= keepProbability
           _grassDebugPoint.set(x, y, z)
           const isInFrustum = _grassDebugFrustum.containsPoint(_grassDebugPoint)
@@ -829,17 +1037,25 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   // Single useFrame for all grass uniforms (replaces one-per-chunk pattern)
   useFrame((state) => {
     const shader = shaderRef.current
-    if (!shader) return
-    shader.uniforms.uTime.value = state.clock.elapsedTime
     const pp = playerPositionRef?.current
-    if (pp) shader.uniforms.uPlayerPosition.value.set(pp.x, pp.y, pp.z)
-    const bp = ballRef?.current?.translation?.()
-    if (bp) shader.uniforms.uBallPosition.value.set(bp.x, bp.y, bp.z)
-    else shader.uniforms.uBallPosition.value.set(9999, 0, 9999)
     _cameraForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion)
     _cameraForward.y = 0
     if (_cameraForward.lengthSq() > 0.0001) _cameraForward.normalize()
-    shader.uniforms.uCameraForward.value.copy(_cameraForward)
+
+    if (shader) {
+      shader.uniforms.uTime.value = state.clock.elapsedTime
+      if (pp) shader.uniforms.uPlayerPosition.value.set(pp.x, pp.y, pp.z)
+      const bp = ballRef?.current?.translation?.()
+      if (bp) shader.uniforms.uBallPosition.value.set(bp.x, bp.y, bp.z)
+      else shader.uniforms.uBallPosition.value.set(9999, 0, 9999)
+      shader.uniforms.uCameraForward.value.copy(_cameraForward)
+    }
+
+    const distantShader = distantShaderRef.current
+    if (distantShader) {
+      if (pp) distantShader.uniforms.uPlayerPosition.value.set(pp.x, pp.y, pp.z)
+      distantShader.uniforms.uCameraForward.value.copy(_cameraForward)
+    }
 
     if (debugStats && typeof performance !== 'undefined') {
       const now = performance.now()
@@ -878,6 +1094,15 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
           args={[grassGeometries[qi], grassMaterial, MAX_QUADRANT_INSTANCES]}
           frustumCulled
           userData={{ debugCategory: 'grass-mesh' }}
+        />
+      ))}
+      {QUADRANTS.map((quadrant, qi) => (
+        <instancedMesh
+          key={`distant-${quadrant.id}`}
+          ref={(el) => { distantGrassMeshRefs.current[qi] = el }}
+          args={[distantGrassGeometries[qi], distantGrassMaterial, distantGrass[qi].length]}
+          frustumCulled
+          userData={{ debugCategory: 'distant-grass-mesh' }}
         />
       ))}
       <instancedMesh

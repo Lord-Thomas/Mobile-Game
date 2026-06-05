@@ -154,13 +154,13 @@ function NaturalTerrainMaterial() {
       vec4 naturalGrassColor = naturalTextureNoTile(uGrassMap, naturalUv * 0.155);
       vec4 naturalDirtColor = naturalTextureNoTile(uDirtMap, naturalUv * 0.18);
 
-      // Grade grass toward blade palette: vivid warm greens (linear: ~#9fd442 mid, #d8f050 highlight)
+      // Keep the terrain close to the blade palette so sparse distant grass blends into it.
       float grassLum = dot(naturalGrassColor.rgb, vec3(0.299, 0.587, 0.114));
-      vec3 grassTarget = vec3(0.34, 0.66, 0.06);
+      vec3 grassTarget = vec3(0.20, 0.43, 0.035);
       vec3 grassGraded = mix(
         naturalGrassColor.rgb,
-        grassTarget * clamp(grassLum * 3.5 + 0.12, 0.0, 0.95),
-        0.60
+        grassTarget * clamp(grassLum * 2.8 + 0.10, 0.0, 0.84),
+        0.74
       );
 
       // Grade dirt toward warm amber-ochre: harmonious earth tones under green (linear: ~#b87a30)
