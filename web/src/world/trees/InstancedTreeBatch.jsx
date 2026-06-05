@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { InstancedBufferAttribute, MathUtils, Matrix4, Object3D, Vector3 } from 'three'
 import { getTerrainHeight } from '../terrain/terrainGeometry'
-import { createProceduralTree, treeLeafWindUniforms } from './proceduralTreeConfig'
+import { createProceduralTree, createSimplifiedTreeConfig, treeLeafWindUniforms } from './proceduralTreeConfig'
 import { GAME_TREE_LIBRARY } from './treeLibrary'
 
 const dummy = new Object3D()
@@ -17,6 +17,9 @@ const TREE_OCCLUSION_FADE_IN_SPEED = 16
 const TREE_OCCLUSION_FADE_OUT_SPEED = 14
 const TREE_CAMERA_CLEAR_RADIUS = 1.2
 const TREE_CAMERA_MIN_VISIBILITY = 0.20
+const TREE_LOD_NEAR_DISTANCE = 30
+const TREE_LOD_FAR_DISTANCE = 36
+const TREE_LOD_UPDATE_INTERVAL = 0.32
 
 function disposeTree(tree) {
   tree.traverse((object) => {
@@ -114,7 +117,7 @@ function makeOcclusionMaterial(material) {
   return next
 }
 
-function InstancedTreePart({ part, placements, meshRefs, opacityAttributesRef, partIndex }) {
+function InstancedTreePart({ part, placements, onOpacityAttribute, partIndex }) {
   const ref = useRef(null)
   const material = useMemo(() => makeOcclusionMaterial(part.material), [part.material])
   const opacityAttribute = useMemo(
@@ -138,13 +141,9 @@ function InstancedTreePart({ part, placements, meshRefs, opacityAttributesRef, p
   }, [opacityAttribute, part.matrix, placements])
 
   useLayoutEffect(() => {
-    meshRefs.current[partIndex] = ref.current
-    opacityAttributesRef.current[partIndex] = opacityAttribute
-    return () => {
-      meshRefs.current[partIndex] = null
-      opacityAttributesRef.current[partIndex] = null
-    }
-  }, [meshRefs, opacityAttribute, opacityAttributesRef, partIndex])
+    onOpacityAttribute(partIndex, opacityAttribute)
+    return () => onOpacityAttribute(partIndex, null)
+  }, [onOpacityAttribute, opacityAttribute, partIndex])
 
   useEffect(() => () => material.dispose(), [material])
 
@@ -159,12 +158,18 @@ function InstancedTreePart({ part, placements, meshRefs, opacityAttributesRef, p
   )
 }
 
-function InstancedTreeVariant({ variantId, placements, animated, playerPositionRef }) {
+function InstancedTreeVariant({ variantId, placements, animated, playerPositionRef, simplified = false }) {
   const variant = GAME_TREE_LIBRARY[variantId] ?? GAME_TREE_LIBRARY.ashMedium
-  const tree = useMemo(() => createProceduralTree(variant.config, animated), [variant, animated])
+  const treeConfig = useMemo(
+    () => simplified ? createSimplifiedTreeConfig(variant.config) : variant.config,
+    [simplified, variant],
+  )
+  const tree = useMemo(() => createProceduralTree(treeConfig, animated), [treeConfig, animated])
   const parts = useMemo(() => collectRenderableParts(tree), [tree])
-  const meshRefs = useRef([])
   const opacityAttributesRef = useRef([])
+  const registerOpacityAttribute = useCallback((index, attribute) => {
+    opacityAttributesRef.current[index] = attribute
+  }, [])
   const currentOpacitiesRef = useRef(new Float32Array(placements.length).fill(1))
   const targetOpacitiesRef = useRef(new Float32Array(placements.length).fill(1))
 
@@ -252,17 +257,86 @@ function InstancedTreeVariant({ variantId, placements, animated, playerPositionR
 
   return parts.map((part, index) => (
     <InstancedTreePart
-      key={`${variantId}-${index}`}
+      key={`${variantId}-${simplified ? 'far' : 'near'}-${index}`}
       part={part}
       placements={placements}
-      meshRefs={meshRefs}
-      opacityAttributesRef={opacityAttributesRef}
+      onOpacityAttribute={registerOpacityAttribute}
       partIndex={index}
     />
   ))
 }
 
-function InstancedTreeBatch({ trees, animated = true, playerPositionRef = null }) {
+function TreeLodVariant({ variantId, placements, animated, playerPositionRef, forceSimplified }) {
+  const [lodPlacements, setLodPlacements] = useState(() => (
+    forceSimplified
+      ? { near: [], far: placements }
+      : { near: placements, far: [] }
+  ))
+  const farTreeIdsRef = useRef(new Set(forceSimplified ? placements.map((tree) => tree.id) : []))
+  const updateElapsedRef = useRef(0)
+
+  useFrame(({ camera }, delta) => {
+    if (forceSimplified || placements.length === 0) return
+
+    updateElapsedRef.current += delta
+    if (updateElapsedRef.current < TREE_LOD_UPDATE_INTERVAL) return
+    updateElapsedRef.current = 0
+
+    const previousFarIds = farTreeIdsRef.current
+    const nextFarIds = new Set()
+    const near = []
+    const far = []
+
+    placements.forEach((tree) => {
+      const distance = Math.hypot(
+        tree.config.position.x - camera.position.x,
+        tree.config.position.z - camera.position.z,
+      )
+      const wasFar = previousFarIds.has(tree.id)
+      const isFar = wasFar
+        ? distance >= TREE_LOD_NEAR_DISTANCE
+        : distance > TREE_LOD_FAR_DISTANCE
+
+      if (isFar) {
+        nextFarIds.add(tree.id)
+        far.push(tree)
+      } else {
+        near.push(tree)
+      }
+    })
+
+    const classificationChanged =
+      nextFarIds.size !== previousFarIds.size ||
+      [...nextFarIds].some((id) => !previousFarIds.has(id))
+    if (!classificationChanged) return
+
+    farTreeIdsRef.current = nextFarIds
+    setLodPlacements({ near, far })
+  })
+
+  return (
+    <>
+      {lodPlacements.near.length > 0 && (
+        <InstancedTreeVariant
+          variantId={variantId}
+          placements={lodPlacements.near}
+          animated={animated}
+          playerPositionRef={playerPositionRef}
+        />
+      )}
+      {lodPlacements.far.length > 0 && (
+        <InstancedTreeVariant
+          variantId={variantId}
+          placements={lodPlacements.far}
+          animated={false}
+          simplified
+        />
+      )}
+    </>
+  )
+}
+
+function InstancedTreeBatch({ trees, animated = true, playerPositionRef = null, forceSimplified = false }) {
   const groups = useMemo(() => {
     const next = new Map()
     trees.forEach((tree) => {
@@ -281,12 +355,13 @@ function InstancedTreeBatch({ trees, animated = true, playerPositionRef = null }
   return (
     <group userData={{ debugCategory: 'trees' }}>
       {groups.map(([variantId, placements]) => (
-        <InstancedTreeVariant
+        <TreeLodVariant
           key={variantId}
           variantId={variantId}
           placements={placements}
           animated={animated}
           playerPositionRef={playerPositionRef}
+          forceSimplified={forceSimplified}
         />
       ))}
     </group>

@@ -342,6 +342,28 @@ export function createProceduralTree(config, animated = true) {
   return tree
 }
 
+export function createSimplifiedTreeConfig(config) {
+  const normalized = normalizeTreeConfig(config)
+  const values = getTreeEditorValues(normalized)
+
+  return {
+    ...normalized,
+    branch: {
+      ...normalized.branch,
+      levels: Math.max(2, values.levels - 1),
+      trunkChildren: Math.max(2, Math.round(values.trunkChildren * 0.65)),
+      branchChildren: Math.max(2, Math.round(values.branchChildren * 0.45)),
+    },
+    leaves: {
+      ...normalized.leaves,
+      size: normalized.leaves.size * 1.18,
+      count: Math.max(12, Math.round(values.leafCount * 0.42)),
+      normalMode: 'upward',
+      normalStrength: 1,
+    },
+  }
+}
+
 export function getTreeEditorValues(config) {
   const normalized = normalizeTreeConfig(config)
   const options = getPresetOptions(normalized.preset)
