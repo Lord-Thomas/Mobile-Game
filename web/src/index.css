@@ -3834,7 +3834,34 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   color: #9ca3af;
   font-size: 0.73rem;
   text-align: center;
-  margin: -8px 0 12px;
+  margin: 10px 0 12px;
+}
+
+.bag-character-customization-btn {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid rgba(167, 139, 250, 0.55);
+  border-radius: 9px;
+  background: rgba(124, 58, 237, 0.16);
+  color: #e9e2ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+}
+
+.bag-character-customization-btn:hover {
+  background: rgba(124, 58, 237, 0.28);
+  border-color: rgba(196, 181, 253, 0.8);
+}
+
+.bag-character-customization-btn:active {
+  transform: scale(0.98);
 }
 
 .bag-grid {

@@ -3,6 +3,7 @@ import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, 
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
@@ -1765,7 +1766,7 @@ function LightColorWheel({ onChange }) {
   )
 }
 
-function GlassContainmentRoom({ roomLightOn = true, lightColor = '#ffffff' }) {
+function GlassContainmentRoom({ roomLightOn = true, lightColor = '#ffffff', lightweight = false }) {
   const [roomWidth, roomHeight, roomDepth] = secondRoom.size
   const halfWidth = roomWidth * 0.5
   const halfDepth = roomDepth * 0.5
@@ -1779,19 +1780,31 @@ function GlassContainmentRoom({ roomLightOn = true, lightColor = '#ffffff' }) {
 
       <mesh position={[0, roomHeight * 0.5, -halfDepth + 0.02]}>
         <boxGeometry args={[roomWidth, roomHeight, 0.06]} />
-        <meshPhysicalMaterial
-          color={roomLightOn ? '#bfefff' : '#05080d'}
-          transparent
-          opacity={1}
-          roughness={0.05}
-          metalness={0}
-          transmission={1}
-          thickness={0.2}
-          ior={1.5}
-          reflectivity={roomLightOn ? 0.32 : 0}
-          envMapIntensity={roomLightOn ? 0.18 : 0}
-          side={BackSide}
-        />
+        {lightweight ? (
+          <meshStandardMaterial
+            color={roomLightOn ? '#9ed8e8' : '#05080d'}
+            transparent
+            opacity={roomLightOn ? 0.24 : 0.48}
+            roughness={0.18}
+            metalness={0.04}
+            depthWrite={false}
+            side={BackSide}
+          />
+        ) : (
+          <meshPhysicalMaterial
+            color={roomLightOn ? '#bfefff' : '#05080d'}
+            transparent
+            opacity={1}
+            roughness={0.05}
+            metalness={0}
+            transmission={1}
+            thickness={0.2}
+            ior={1.5}
+            reflectivity={roomLightOn ? 0.32 : 0}
+            envMapIntensity={roomLightOn ? 0.18 : 0}
+            side={BackSide}
+          />
+        )}
       </mesh>
 
       <mesh position={[0, roomHeight + 0.03, -halfDepth + 0.055]}>
@@ -4879,7 +4892,7 @@ const BAG_ITEM_DEFS = [
 
 const BAG_GRID_SIZE = 12
 
-function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose }) {
+function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, onClose }) {
   const lastTapRef = useRef({})
 
   function handleSlotInteraction(itemId) {
@@ -4904,6 +4917,16 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose }) {
           <span>🎒 Sac</span>
           <button type="button" className="weapon-inventory-close" onClick={onClose}>✕</button>
         </div>
+        {onCustomizeCharacter && (
+          <button
+            type="button"
+            className="bag-character-customization-btn"
+            onClick={onCustomizeCharacter}
+          >
+            <span aria-hidden="true">{'\u{1F464}'}</span>
+            Personnaliser le personnage
+          </button>
+        )}
         <p className="bag-hint">Double-cliquer pour équiper</p>
         <div className="bag-grid">
           {slots.map((item, i) => {
@@ -6055,6 +6078,62 @@ function SofaModel() {
   )
 }
 
+function getMergeCompatibilityKey(mesh) {
+  if (!mesh.geometry || !mesh.material || Array.isArray(mesh.material)) return null
+  if (mesh.isSkinnedMesh || mesh.morphTargetInfluences) return null
+
+  const attributeSignature = Object.entries(mesh.geometry.attributes)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, attribute]) => (
+      `${name}:${attribute.array.constructor.name}:${attribute.itemSize}:${attribute.normalized ? 1 : 0}`
+    ))
+    .join('|')
+
+  return [
+    mesh.material.uuid,
+    mesh.geometry.index ? 'indexed' : 'plain',
+    attributeSignature,
+  ].join(':')
+}
+
+function mergeStaticModelMeshes(root) {
+  root.updateWorldMatrix(true, true)
+  const rootInverse = root.matrixWorld.clone().invert()
+  const batches = new Map()
+
+  root.traverse((child) => {
+    if (!(child instanceof Mesh) || !child.visible) return
+    const key = getMergeCompatibilityKey(child)
+    if (!key) return
+    const batch = batches.get(key) ?? []
+    batch.push(child)
+    batches.set(key, batch)
+  })
+
+  batches.forEach((meshes) => {
+    if (meshes.length < 2) return
+
+    const geometries = meshes.map((mesh) => {
+      const geometry = mesh.geometry.clone()
+      const relativeMatrix = rootInverse.clone().multiply(mesh.matrixWorld)
+      geometry.applyMatrix4(relativeMatrix)
+      return geometry
+    })
+    const mergedGeometry = mergeGeometries(geometries, false)
+    geometries.forEach((geometry) => geometry.dispose())
+    if (!mergedGeometry) return
+
+    const mergedMesh = new Mesh(mergedGeometry, meshes[0].material)
+    mergedMesh.name = `Merged_${meshes[0].material.name || meshes[0].material.uuid}`
+    mergedMesh.castShadow = meshes.some((mesh) => mesh.castShadow)
+    mergedMesh.receiveShadow = meshes.some((mesh) => mesh.receiveShadow)
+    meshes.forEach((mesh) => mesh.removeFromParent())
+    root.add(mergedMesh)
+  })
+
+  return root
+}
+
 function GlbPlaceableModel({ objectId }) {
   const catalogItem = objectCatalog[objectId]
   const gltf = useGLTF(catalogItem.modelUrl)
@@ -6067,6 +6146,7 @@ function GlbPlaceableModel({ objectId }) {
         child.receiveShadow = true
       }
     })
+    mergeStaticModelMeshes(object)
 
     object.updateWorldMatrix(true, true)
     const box = new Box3().setFromObject(object)
@@ -9312,7 +9392,7 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   )
 }
 
-function CustomizationChoiceMenu({ open, showCharacterCustomization = true, onChooseRoom, onChooseCharacter, onClose }) {
+function CustomizationChoiceMenu({ open, onChooseRoom, onClose }) {
   if (!open) return null
 
   return (
@@ -9322,11 +9402,6 @@ function CustomizationChoiceMenu({ open, showCharacterCustomization = true, onCh
         <button type="button" className="skin-action-btn" onClick={onChooseRoom}>
           Piece
         </button>
-        {showCharacterCustomization && (
-          <button type="button" className="skin-action-btn" onClick={onChooseCharacter}>
-            Personnage
-          </button>
-        )}
         <button type="button" className="skin-close-btn" onClick={onClose}>
           Fermer
         </button>
@@ -11863,10 +11938,10 @@ function App() {
     setIsCustomizationChoiceOpen(true)
   }
 
-  const openCharacterCustomizationFromChoice = () => {
+  const openCharacterCustomizationFromBag = () => {
     if (!canModifyWorld) return
     if (!PUBLIC_BUILD_FLAGS.showCharacterCustomization) return
-    setIsCustomizationChoiceOpen(false)
+    setIsWeaponMenuOpen(false)
     setIsCharacterMenuOpen(true)
   }
 
@@ -12488,7 +12563,7 @@ function App() {
         camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 420 }}
         shadows={{ enabled: performanceSettings.shadows && (!isDebugMode || debugToggles.shadows), type: PCFShadowMap }}
         gl={{
-          antialias: renderSettings.antialias,
+          antialias: renderSettings.antialias && !performanceSettings.lowResolution,
           powerPreference: 'high-performance',
           stencil: true,
           depth: true,
@@ -12549,7 +12624,11 @@ function App() {
                   mode={mode}
                 />
                 <Dragon playerPositionRef={playerPositionRef} visible={showInteriorHouseDetails} />
-                <GlassContainmentRoom roomLightOn={roomLightOn} lightColor={lightColor} />
+                <GlassContainmentRoom
+                  roomLightOn={roomLightOn}
+                  lightColor={lightColor}
+                  lightweight={performanceSettings.lowResolution}
+                />
             </group>
             {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
@@ -12828,9 +12907,7 @@ function App() {
       {showCaptureUi && canModifyWorld && (
         <CustomizationChoiceMenu
           open={isCustomizationChoiceOpen}
-          showCharacterCustomization={PUBLIC_BUILD_FLAGS.showCharacterCustomization}
           onChooseRoom={openCustomizationMode}
-          onChooseCharacter={openCharacterCustomizationFromChoice}
           onClose={() => setIsCustomizationChoiceOpen(false)}
         />
       )}
@@ -12840,6 +12917,11 @@ function App() {
           ownedItems={BAG_ITEM_DEFS.filter((def) => def.id === 'magic_book' ? ownedMagicBook : false)}
           equippedWeapon={equippedWeapon}
           onEquip={(weapon) => { setEquippedWeapon(weapon) }}
+          onCustomizeCharacter={
+            canModifyWorld && PUBLIC_BUILD_FLAGS.showCharacterCustomization
+              ? openCharacterCustomizationFromBag
+              : undefined
+          }
           onClose={() => setIsWeaponMenuOpen(false)}
         />
       )}
