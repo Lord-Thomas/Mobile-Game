@@ -1925,7 +1925,8 @@ const DRAGON_WAKE_DISTANCE = 5
 const DRAGON_WAKE_DELAY = 2
 const DRAGON_SLEEP_DELAY = 4
 
-const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI
+const DRAGON_RIDE_MODEL_YAW_OFFSET = 0
+const DRAGON_RIDE_SEAT_OFFSET_Y = -1.2
 const DRAGON_RIDE_GROUND_SPEED = 6
 const DRAGON_RIDE_FLY_SPEED = 9
 const DRAGON_RIDE_TURN_SPEED = 2.2
@@ -1939,7 +1940,7 @@ const dragonRideSeatWorldPos = new Vector3()
 function MountedDragon({ positionRef, yawRef, riderAnchorRef }) {
   const { scene, animations } = useGLTF('/models/dragon.glb')
   const dragon = useMemo(() => clone(scene), [scene])
-  const { actions } = useAnimations(animations, dragon)
+  const { actions, mixer } = useAnimations(animations, dragon)
   const groupRef = useRef()
   const seatBoneRef = useRef(null)
 
@@ -1952,8 +1953,23 @@ function MountedDragon({ positionRef, yawRef, riderAnchorRef }) {
     })
     seatBoneRef.current = dragon.getObjectByName(DRAGON_RIDE_SEAT_BONE_NAME) ?? null
     const flyTransition = actions?.Dragon_Ancient_Idle_FlyTransition
-    if (flyTransition) flyTransition.reset().setLoop(LoopRepeat, Infinity).setEffectiveWeight(1).play()
+    if (flyTransition) {
+      flyTransition.reset().setLoop(LoopOnce, 1).setEffectiveWeight(1).play()
+      flyTransition.clampWhenFinished = true
+    }
   }, [dragon, actions])
+
+  useEffect(() => {
+    const onFinished = (event) => {
+      if (event.action !== actions?.Dragon_Ancient_Idle_FlyTransition) return
+      const idle = actions?.Dragon_Ancient_Patrol_Idle
+      if (!idle) return
+      event.action.fadeOut(0.4)
+      idle.reset().setLoop(LoopRepeat, Infinity).setEffectiveWeight(1).fadeIn(0.4).play()
+    }
+    mixer.addEventListener('finished', onFinished)
+    return () => mixer.removeEventListener('finished', onFinished)
+  }, [actions, mixer])
 
   useFrame(() => {
     if (!groupRef.current) return
@@ -1966,7 +1982,7 @@ function MountedDragon({ positionRef, yawRef, riderAnchorRef }) {
       if (seatBoneRef.current) {
         seatBoneRef.current.getWorldPosition(dragonRideSeatWorldPos)
         riderAnchorRef.current.x = dragonRideSeatWorldPos.x
-        riderAnchorRef.current.y = dragonRideSeatWorldPos.y
+        riderAnchorRef.current.y = dragonRideSeatWorldPos.y + DRAGON_RIDE_SEAT_OFFSET_Y
         riderAnchorRef.current.z = dragonRideSeatWorldPos.z
         riderAnchorRef.current.valid = true
       } else {
