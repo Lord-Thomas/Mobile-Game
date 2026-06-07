@@ -1932,12 +1932,16 @@ const DRAGON_RIDE_TURN_SPEED = 2.2
 const DRAGON_RIDE_CLIMB_SPEED = 4.5
 const DRAGON_RIDE_MAX_ALTITUDE = 16
 const DRAGON_RIDE_RIDER_HEIGHT = 2.6
+const DRAGON_RIDE_SEAT_BONE_NAME = 'NPC Hub01_023'
 
-function MountedDragon({ positionRef, yawRef }) {
+const dragonRideSeatWorldPos = new Vector3()
+
+function MountedDragon({ positionRef, yawRef, riderAnchorRef }) {
   const { scene, animations } = useGLTF('/models/dragon.glb')
   const dragon = useMemo(() => clone(scene), [scene])
   const { actions } = useAnimations(animations, dragon)
   const groupRef = useRef()
+  const seatBoneRef = useRef(null)
 
   useEffect(() => {
     dragon.traverse((object) => {
@@ -1946,8 +1950,9 @@ function MountedDragon({ positionRef, yawRef }) {
         object.receiveShadow = true
       }
     })
-    const idle = actions?.Dragon_Ancient_Patrol_Idle
-    if (idle) idle.reset().setLoop(LoopRepeat, Infinity).setEffectiveWeight(1).play()
+    seatBoneRef.current = dragon.getObjectByName(DRAGON_RIDE_SEAT_BONE_NAME) ?? null
+    const flyTransition = actions?.Dragon_Ancient_Idle_FlyTransition
+    if (flyTransition) flyTransition.reset().setLoop(LoopRepeat, Infinity).setEffectiveWeight(1).play()
   }, [dragon, actions])
 
   useFrame(() => {
@@ -1955,6 +1960,19 @@ function MountedDragon({ positionRef, yawRef }) {
     const pos = positionRef.current
     groupRef.current.position.set(pos.x, pos.y, pos.z)
     groupRef.current.rotation.y = yawRef.current + DRAGON_RIDE_MODEL_YAW_OFFSET
+    groupRef.current.updateWorldMatrix(true, true)
+
+    if (riderAnchorRef) {
+      if (seatBoneRef.current) {
+        seatBoneRef.current.getWorldPosition(dragonRideSeatWorldPos)
+        riderAnchorRef.current.x = dragonRideSeatWorldPos.x
+        riderAnchorRef.current.y = dragonRideSeatWorldPos.y
+        riderAnchorRef.current.z = dragonRideSeatWorldPos.z
+        riderAnchorRef.current.valid = true
+      } else {
+        riderAnchorRef.current.valid = false
+      }
+    }
   })
 
   return (
@@ -2586,9 +2604,19 @@ function Player({
       dragonRide.positionRef.current.z = nextZ
       dragonRide.yawRef.current = yaw
 
-      const riderX = nextX
-      const riderY = nextY + DRAGON_RIDE_RIDER_HEIGHT
-      const riderZ = nextZ
+      const anchor = dragonRide.riderAnchorRef?.current
+      let riderX
+      let riderY
+      let riderZ
+      if (anchor?.valid) {
+        riderX = anchor.x
+        riderY = anchor.y
+        riderZ = anchor.z
+      } else {
+        riderX = nextX
+        riderY = nextY + DRAGON_RIDE_RIDER_HEIGHT
+        riderZ = nextZ
+      }
 
       key.actionQueued = false
       touch.actionQueued = false
@@ -10891,6 +10919,7 @@ function App() {
   const catTapCallbackRef = useRef(null)
   const dragonRidePositionRef = useRef({ x: 0, y: 0, z: 0 })
   const dragonRideYawRef = useRef(0)
+  const dragonRiderAnchorRef = useRef({ x: 0, y: 0, z: 0, valid: false })
   const [dragonMounted, setDragonMounted] = useState(false)
   const [cameraOnCat, setCameraOnCat] = useState(false)
   const scoreCooldownRef = useRef(false)
@@ -12274,6 +12303,7 @@ function App() {
     const groundY = currentZone === ZONES.outside ? getTerrainHeight(spawnX, spawnZ) : 0
     dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
     dragonRideYawRef.current = yaw
+    dragonRiderAnchorRef.current.valid = false
     setDragonMounted(true)
   }
 
@@ -12829,7 +12859,13 @@ function App() {
                 />
             </group>
             {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
-            {dragonMounted && <MountedDragon positionRef={dragonRidePositionRef} yawRef={dragonRideYawRef} />}
+            {dragonMounted && (
+              <MountedDragon
+                positionRef={dragonRidePositionRef}
+                yawRef={dragonRideYawRef}
+                riderAnchorRef={dragonRiderAnchorRef}
+              />
+            )}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
             <group userData={{ debugCategory: 'interactions' }}>
               <OutdoorDoor />
@@ -12996,7 +13032,12 @@ function App() {
               appearance={characterAppearance}
               freeCameraActive={isLocalNetwork && freeCameraActive}
               playerCombatActionsRef={playerCombatActionsRef}
-              dragonRide={{ active: dragonMounted, positionRef: dragonRidePositionRef, yawRef: dragonRideYawRef }}
+              dragonRide={{
+                active: dragonMounted,
+                positionRef: dragonRidePositionRef,
+                yawRef: dragonRideYawRef,
+                riderAnchorRef: dragonRiderAnchorRef,
+              }}
             />
           )}
           <OutdoorDoorTrigger
