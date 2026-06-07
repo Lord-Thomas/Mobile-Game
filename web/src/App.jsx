@@ -1925,6 +1925,45 @@ const DRAGON_WAKE_DISTANCE = 5
 const DRAGON_WAKE_DELAY = 2
 const DRAGON_SLEEP_DELAY = 4
 
+const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI
+const DRAGON_RIDE_GROUND_SPEED = 6
+const DRAGON_RIDE_FLY_SPEED = 9
+const DRAGON_RIDE_TURN_SPEED = 2.2
+const DRAGON_RIDE_CLIMB_SPEED = 4.5
+const DRAGON_RIDE_MAX_ALTITUDE = 16
+const DRAGON_RIDE_RIDER_HEIGHT = 2.6
+
+function MountedDragon({ positionRef, yawRef }) {
+  const { scene, animations } = useGLTF('/models/dragon.glb')
+  const dragon = useMemo(() => clone(scene), [scene])
+  const { actions } = useAnimations(animations, dragon)
+  const groupRef = useRef()
+
+  useEffect(() => {
+    dragon.traverse((object) => {
+      if (object instanceof Mesh) {
+        object.castShadow = true
+        object.receiveShadow = true
+      }
+    })
+    const idle = actions?.Dragon_Ancient_Patrol_Idle
+    if (idle) idle.reset().setLoop(LoopRepeat, Infinity).setEffectiveWeight(1).play()
+  }, [dragon, actions])
+
+  useFrame(() => {
+    if (!groupRef.current) return
+    const pos = positionRef.current
+    groupRef.current.position.set(pos.x, pos.y, pos.z)
+    groupRef.current.rotation.y = yawRef.current + DRAGON_RIDE_MODEL_YAW_OFFSET
+  })
+
+  return (
+    <group ref={groupRef} scale={2} userData={{ debugCategory: 'npcs' }}>
+      <primitive object={dragon} />
+    </group>
+  )
+}
+
 function Dragon({ playerPositionRef, visible = true }) {
   const { scene, animations } = useGLTF('/models/dragon.glb')
   const dragon = useMemo(() => clone(scene), [scene])
@@ -2374,6 +2413,7 @@ function Player({
   playerCombatActionsRef = null,
   appearance = null,
   freeCameraActive = false,
+  dragonRide = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -2400,8 +2440,35 @@ function Player({
   const [isPlayerVisible, setIsPlayerVisible] = useState(true)
   const [playerMotion, setPlayerMotion] = useState('idle')
   const keyboardRef = useKeyboardInput()
+  const dragonFlightInputRef = useRef({ up: false, down: false })
   const { camera } = useThree()
   const { world, rapier } = useRapier()
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (isTextInputEvent(event)) return
+      const key = getKeyboardKey(event)
+      if (key === ' ' || key === 'space') dragonFlightInputRef.current.up = true
+      if (key === 'shift') dragonFlightInputRef.current.down = true
+    }
+    const onKeyUp = (event) => {
+      const key = getKeyboardKey(event)
+      if (key === ' ' || key === 'space') dragonFlightInputRef.current.up = false
+      if (key === 'shift') dragonFlightInputRef.current.down = false
+    }
+    const resetFlightInput = () => {
+      dragonFlightInputRef.current.up = false
+      dragonFlightInputRef.current.down = false
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', resetFlightInput)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', resetFlightInput)
+    }
+  }, [])
 
   useEffect(() => {
     if (!spawnRequest) return
@@ -2483,6 +2550,98 @@ function Player({
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
       setPlayerMotion((current) => (current === 'idle' ? current : 'idle'))
+      return
+    }
+
+    if (dragonRide?.active && dragonRide.positionRef && dragonRide.yawRef) {
+      const flight = dragonFlightInputRef.current
+      const pos = dragonRide.positionRef.current
+      let yaw = dragonRide.yawRef.current
+
+      if (key.left) yaw += DRAGON_RIDE_TURN_SPEED * delta
+      if (key.right) yaw -= DRAGON_RIDE_TURN_SPEED * delta
+
+      const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
+      const altitude = pos.y - groundY
+      let nextAltitude = altitude
+      if (flight.up) {
+        nextAltitude = Math.min(DRAGON_RIDE_MAX_ALTITUDE, altitude + DRAGON_RIDE_CLIMB_SPEED * delta)
+      } else if (flight.down) {
+        nextAltitude = Math.max(0, altitude - DRAGON_RIDE_CLIMB_SPEED * delta)
+      }
+
+      const speed = altitude > 0.05 ? DRAGON_RIDE_FLY_SPEED : DRAGON_RIDE_GROUND_SPEED
+      const forwardInput = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
+      const dirX = Math.sin(yaw)
+      const dirZ = Math.cos(yaw)
+
+      const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
+      let nextX = MathUtils.clamp(pos.x + dirX * forwardInput * speed * delta, limits.minX, limits.maxX)
+      let nextZ = MathUtils.clamp(pos.z + dirZ * forwardInput * speed * delta, limits.minZ, limits.maxZ)
+      const nextGroundY = currentZone === ZONES.outside ? getTerrainHeight(nextX, nextZ) : 0
+      const nextY = nextGroundY + nextAltitude
+
+      dragonRide.positionRef.current.x = nextX
+      dragonRide.positionRef.current.y = nextY
+      dragonRide.positionRef.current.z = nextZ
+      dragonRide.yawRef.current = yaw
+
+      const riderX = nextX
+      const riderY = nextY + DRAGON_RIDE_RIDER_HEIGHT
+      const riderZ = nextZ
+
+      key.actionQueued = false
+      touch.actionQueued = false
+      planarVelocityRef.current.x = 0
+      planarVelocityRef.current.z = 0
+      filteredInputRef.current.x = 0
+      filteredInputRef.current.y = 0
+      velocityYRef.current = 0
+      onGroundRef.current = true
+
+      playerPosRef.current.x = riderX
+      playerPosRef.current.y = riderY
+      playerPosRef.current.z = riderZ
+      playerPositionRef.current.x = riderX
+      playerPositionRef.current.y = riderY
+      playerPositionRef.current.z = riderZ
+      playerBodyRef.current.setNextKinematicTranslation({ x: riderX, y: riderY, z: riderZ })
+      visualRef.current.position.set(riderX, riderY, riderZ)
+      visualRef.current.rotation.y = yaw
+      if (playerBodyYawRef) playerBodyYawRef.current = yaw
+
+      setPlayerMotion((current) => (current === 'sittingIdle' ? current : 'sittingIdle'))
+      if (localPlayerStateRef) {
+        localPlayerStateRef.current = {
+          position: [riderX, riderY, riderZ],
+          rotationY: yaw,
+          motion: 'sittingIdle',
+          zone: currentZone,
+        }
+      }
+
+      if (!touch.lookActive) {
+        touch.lookX = 0
+        touch.lookY = 0
+      }
+      touch.cameraYaw -= touch.lookX * 2.9 * delta
+      touch.cameraPitch = MathUtils.clamp(touch.cameraPitch + touch.lookY * 2.1 * delta, -0.8, 0.5)
+      const pitch = touch.cameraPitch
+      const cameraDistance = touch.cameraDistance ?? 5
+      const horizontalDistance = cameraDistance * Math.cos(pitch)
+      const camTargetX = riderX + Math.sin(touch.cameraYaw) * horizontalDistance
+      const camTargetY = riderY + 1.6 + Math.sin(pitch) * cameraDistance
+      const camTargetZ = riderZ + Math.cos(touch.cameraYaw) * horizontalDistance
+
+      cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, riderX, 12, delta)
+      cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, riderY + 0.6, 12, delta)
+      cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, riderZ, 12, delta)
+
+      const clampedCamera = clampCameraInPlayableVolume(camTargetX, camTargetY, camTargetZ, currentZone)
+      camera.position.x = MathUtils.damp(camera.position.x, clampedCamera.x, 7, delta)
+      camera.position.y = MathUtils.damp(camera.position.y, clampedCamera.y, 7, delta)
+      camera.position.z = MathUtils.damp(camera.position.z, clampedCamera.z, 7, delta)
+      camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
       return
     }
 
@@ -4892,7 +5051,7 @@ const BAG_ITEM_DEFS = [
 
 const BAG_GRID_SIZE = 12
 
-function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, onClose }) {
+function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, dragonMounted, onToggleDragonMount, onClose }) {
   const lastTapRef = useRef({})
 
   function handleSlotInteraction(itemId) {
@@ -4925,6 +5084,16 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
           >
             <span aria-hidden="true">{'\u{1F464}'}</span>
             Personnaliser le personnage
+          </button>
+        )}
+        {onToggleDragonMount && (
+          <button
+            type="button"
+            className="bag-character-customization-btn"
+            onClick={onToggleDragonMount}
+          >
+            <span aria-hidden="true">🐉</span>
+            {dragonMounted ? 'Désinvoquer le dragon' : 'Invoquer le dragon'}
           </button>
         )}
         <p className="bag-hint">Double-cliquer pour équiper</p>
@@ -10720,6 +10889,9 @@ function App() {
   const catPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const catGroupRef = useRef(null)
   const catTapCallbackRef = useRef(null)
+  const dragonRidePositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const dragonRideYawRef = useRef(0)
+  const [dragonMounted, setDragonMounted] = useState(false)
   const [cameraOnCat, setCameraOnCat] = useState(false)
   const scoreCooldownRef = useRef(false)
   const respawnTimerRef = useRef(null)
@@ -12079,6 +12251,32 @@ function App() {
     setCatActive((v) => !v)
   }
 
+  const toggleDragonMount = () => {
+    if (mode !== 'play') return
+    if (dragonMounted) {
+      const pos = dragonRidePositionRef.current
+      const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
+      if (pos.y - groundY > 0.15) return
+      setDragonMounted(false)
+      setSpawnRequest({
+        zone: currentZone,
+        position: [pos.x, groundY + PLAYER_HEIGHT, pos.z],
+        token: Date.now(),
+      })
+      return
+    }
+
+    const yaw = playerBodyYawRef.current
+    const px = playerPositionRef.current.x
+    const pz = playerPositionRef.current.z
+    const spawnX = px + Math.sin(yaw) * 3
+    const spawnZ = pz + Math.cos(yaw) * 3
+    const groundY = currentZone === ZONES.outside ? getTerrainHeight(spawnX, spawnZ) : 0
+    dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
+    dragonRideYawRef.current = yaw
+    setDragonMounted(true)
+  }
+
   const toggleCameraOnCat = useCallback(() => setCameraOnCat(v => !v), [])
 
   const requestSit = () => {
@@ -12631,6 +12829,7 @@ function App() {
                 />
             </group>
             {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
+            {dragonMounted && <MountedDragon positionRef={dragonRidePositionRef} yawRef={dragonRideYawRef} />}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
             <group userData={{ debugCategory: 'interactions' }}>
               <OutdoorDoor />
@@ -12797,6 +12996,7 @@ function App() {
               appearance={characterAppearance}
               freeCameraActive={isLocalNetwork && freeCameraActive}
               playerCombatActionsRef={playerCombatActionsRef}
+              dragonRide={{ active: dragonMounted, positionRef: dragonRidePositionRef, yawRef: dragonRideYawRef }}
             />
           )}
           <OutdoorDoorTrigger
@@ -12922,6 +13122,8 @@ function App() {
               ? openCharacterCustomizationFromBag
               : undefined
           }
+          dragonMounted={dragonMounted}
+          onToggleDragonMount={mode === 'play' ? toggleDragonMount : undefined}
           onClose={() => setIsWeaponMenuOpen(false)}
         />
       )}
