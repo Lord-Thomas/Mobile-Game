@@ -1946,8 +1946,9 @@ const DRAGON_RIDE_MAX_BODY_WIDTH = 1.35
 const DRAGON_RIDE_HAND_FORWARD_OFFSET = 0.62
 const DRAGON_RIDE_HAND_RAY_HEIGHT = 0.9
 const DRAGON_RIDE_HAND_SURFACE_OFFSET = 0.035
-const DRAGON_RIDE_SEAT_SURFACE_OFFSET = 0.08
-const DRAGON_RIDE_MAX_RIDER_LIFT = 0.5
+const DRAGON_RIDE_SEAT_SURFACE_OFFSET = 0.035
+const DRAGON_RIDE_MIN_RIDER_LIFT = 0.02
+const DRAGON_RIDE_MAX_RIDER_LIFT = 0.34
 
 function aimBoneAtWorldPoint(bone, childBone, target, scratch) {
   if (!bone?.parent || !childBone || !target) return false
@@ -2032,6 +2033,21 @@ function solveMountedArmIk(upperArm, foreArm, hand, target, scratch) {
 
   aimBoneAtWorldPoint(upperArm, foreArm, scratch.elbowTarget, scratch)
   aimBoneAtWorldPoint(foreArm, hand, target, scratch)
+}
+
+function getMountedRiderWorldPosition(
+  riderSocket,
+  riderLift,
+  target,
+  socketQuaternion,
+  localLiftOffset,
+) {
+  riderSocket.getWorldPosition(target)
+  riderSocket.getWorldQuaternion(socketQuaternion)
+  localLiftOffset
+    .set(-riderLift, 0, 0)
+    .applyQuaternion(socketQuaternion)
+  return target.add(localLiftOffset)
 }
 
 function MountedDragon({
@@ -2216,20 +2232,14 @@ function MountedDragon({
       widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
       const leftHits = widthRaycaster.intersectObject(dragon, true)
 
-      widthRayOrigin
-        .copy(handRayCenter)
-        .addScaledVector(handRayRight, gripHalfWidth)
-      widthRaycaster.set(widthRayOrigin, widthRayDirection.set(0, -1, 0))
-      widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
-      const rightHits = widthRaycaster.intersectObject(dragon, true)
-
-      if (leftHits.length > 0 && rightHits.length > 0) {
+      if (leftHits.length > 0) {
         mountProfileRef.current.leftHandLocalTarget
           .copy(leftHits[0].point)
           .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_SURFACE_OFFSET)
         saddleSocket.worldToLocal(mountProfileRef.current.leftHandLocalTarget)
         mountProfileRef.current.rightHandLocalTarget
-          .copy(rightHits[0].point)
+          .copy(leftHits[0].point)
+          .addScaledVector(handRayRight, gripHalfWidth * 2)
           .addScaledVector(widthRayDirection, DRAGON_RIDE_HAND_SURFACE_OFFSET)
         saddleSocket.worldToLocal(mountProfileRef.current.rightHandLocalTarget)
         mountProfileRef.current.handTargetsMeasured = true
@@ -2237,18 +2247,32 @@ function MountedDragon({
     }
 
     if (mountProfileRef && !mountProfileRef.current.seatHeightMeasured) {
-      widthRayOrigin
-        .copy(boneWorldPosition)
-        .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_RAY_HEIGHT)
-      widthRaycaster.set(widthRayOrigin, widthRayDirection.set(0, -1, 0))
-      widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
-      const seatHits = widthRaycaster.intersectObject(dragon, true)
-      if (seatHits.length > 0) {
+      handRayRight.set(Math.cos(yawRef.current), 0, -Math.sin(yawRef.current))
+      const seatHalfWidth = MathUtils.clamp(
+        mountProfileRef.current.width * 0.28,
+        0.12,
+        0.3,
+      )
+      let measuredSeatY = Infinity
+      let seatSamples = 0
+      for (const side of [-1, -0.55, 0.55, 1]) {
+        widthRayOrigin
+          .copy(boneWorldPosition)
+          .addScaledVector(handRayRight, seatHalfWidth * side)
+          .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_RAY_HEIGHT)
+        widthRaycaster.set(widthRayOrigin, widthRayDirection.set(0, -1, 0))
+        widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
+        const seatHits = widthRaycaster.intersectObject(dragon, true)
+        if (seatHits.length === 0) continue
+        measuredSeatY = Math.min(measuredSeatY, seatHits[0].point.y)
+        seatSamples += 1
+      }
+      if (seatSamples >= 2) {
         mountProfileRef.current.riderLift = MathUtils.clamp(
-          seatHits[0].point.y -
+          measuredSeatY -
             boneWorldPosition.y +
             DRAGON_RIDE_SEAT_SURFACE_OFFSET,
-          DRAGON_RIDE_RIDER_LIFT,
+          DRAGON_RIDE_MIN_RIDER_LIFT,
           DRAGON_RIDE_MAX_RIDER_LIFT,
         )
         mountProfileRef.current.seatHeightMeasured = true
@@ -2739,6 +2763,8 @@ function Player({
   const dragonCameraRideOffsetRef = useRef({ x: 0, y: 0, z: 0 })
   const dragonCameraDistanceRef = useRef({ value: 5, ready: false })
   const dragonCameraSocketPosition = useMemo(() => new Vector3(), [])
+  const mountedRiderSocketQuaternion = useMemo(() => new Quaternion(), [])
+  const mountedRiderLiftOffset = useMemo(() => new Vector3(), [])
   const kickUntilRef = useRef(0)
   const pendingKickRef = useRef(null)
   const handBoneRef = useRef(null)
@@ -2916,11 +2942,21 @@ function Player({
 
       const riderTransform = dragonRide.riderTransformRef?.current
       const riderLift = dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT
-      const riderX = riderTransform?.ready ? riderTransform.position.x : nextX
-      const riderY = riderTransform?.ready
-        ? riderTransform.position.y + riderLift
-        : nextY + DRAGON_RIDE_RIDER_HEIGHT + riderLift
-      const riderZ = riderTransform?.ready ? riderTransform.position.z : nextZ
+      let riderX = nextX
+      let riderY = nextY + DRAGON_RIDE_RIDER_HEIGHT + riderLift
+      let riderZ = nextZ
+      if (riderTransform?.ready && dragonRide.riderSocketRef?.current) {
+        getMountedRiderWorldPosition(
+          dragonRide.riderSocketRef.current,
+          riderLift,
+          mountedPlayerLocalPosition,
+          mountedRiderSocketQuaternion,
+          mountedRiderLiftOffset,
+        )
+        riderX = mountedPlayerLocalPosition.x
+        riderY = mountedPlayerLocalPosition.y
+        riderZ = mountedPlayerLocalPosition.z
+      }
 
       key.actionQueued = false
       touch.actionQueued = false
@@ -3606,8 +3642,13 @@ function Player({
     const playerParent = playerGroup?.parent
     if (!dragonRide?.active || !riderSocket || !playerGroup || !playerParent) return
 
-    riderSocket.getWorldPosition(mountedPlayerLocalPosition)
-    mountedPlayerLocalPosition.y += dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT
+    getMountedRiderWorldPosition(
+      riderSocket,
+      dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT,
+      mountedPlayerLocalPosition,
+      mountedRiderSocketQuaternion,
+      mountedRiderLiftOffset,
+    )
     playerBodyRef.current?.setNextKinematicTranslation({
       x: mountedPlayerLocalPosition.x,
       y: mountedPlayerLocalPosition.y,
@@ -3622,8 +3663,13 @@ function Player({
     const riderSocket = dragonRide?.riderSocketRef?.current
     if (!dragonRide?.active || !riderSocket) return
 
-    riderSocket.getWorldPosition(dragonCameraSocketPosition)
-    dragonCameraSocketPosition.y += dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT
+    getMountedRiderWorldPosition(
+      riderSocket,
+      dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT,
+      dragonCameraSocketPosition,
+      mountedRiderSocketQuaternion,
+      mountedRiderLiftOffset,
+    )
     const dragonPosition = dragonRide.positionRef.current
     const rideOffset = dragonCameraRideOffsetRef.current
     const cameraFocus = dragonCameraFocusRef.current
