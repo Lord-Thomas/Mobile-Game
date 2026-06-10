@@ -1926,14 +1926,17 @@ const DRAGON_WAKE_DELAY = 2
 const DRAGON_SLEEP_DELAY = 4
 
 const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI / 2
-const DRAGON_RIDE_GROUND_SPEED = 6
-const DRAGON_RIDE_FLY_SPEED = 9
+const PLAYER_MAX_RUN_SPEED = 3.4
+const DRAGON_RIDE_SPEED = PLAYER_MAX_RUN_SPEED * 2
+const DRAGON_RIDE_GROUND_SPEED = DRAGON_RIDE_SPEED
+const DRAGON_RIDE_FLY_SPEED = DRAGON_RIDE_SPEED
 const DRAGON_RIDE_TURN_SPEED = 2.2
 const DRAGON_RIDE_CLIMB_SPEED = 4.5
 const DRAGON_RIDE_MAX_ALTITUDE = 16
 const DRAGON_RIDE_RIDER_HEIGHT = 1.0
 const DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING = 9
 const DRAGON_RIDE_CAMERA_VERTICAL_DAMPING = 5
+const DRAGON_RIDE_CAMERA_ZOOM_DAMPING = 10
 const DRAGON_RIDE_SPINE_BONE_NAME = 'NPC_Spine2_021'
 // This rig's local -X points above the back.
 const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
@@ -2489,6 +2492,8 @@ function Player({
   const cameraLookRef = useRef({ x: 0, y: PLAYER_HEIGHT + 0.55, z: 2.2 })
   const dragonCameraFocusRef = useRef({ x: 0, y: 0, z: 0, ready: false })
   const dragonCameraRideOffsetRef = useRef({ x: 0, y: 0, z: 0 })
+  const dragonCameraDistanceRef = useRef({ value: 5, ready: false })
+  const dragonCameraSocketPosition = useMemo(() => new Vector3(), [])
   const kickUntilRef = useRef(0)
   const pendingKickRef = useRef(null)
   const handBoneRef = useRef(null)
@@ -2668,39 +2673,6 @@ function Player({
       const riderX = riderTransform?.ready ? riderTransform.position.x : nextX
       const riderY = riderTransform?.ready ? riderTransform.position.y : nextY + DRAGON_RIDE_RIDER_HEIGHT
       const riderZ = riderTransform?.ready ? riderTransform.position.z : nextZ
-      const dragonCameraFocus = dragonCameraFocusRef.current
-      const dragonCameraRideOffset = dragonCameraRideOffsetRef.current
-      const targetRideOffsetX = riderX - nextX
-      const targetRideOffsetY = riderY - nextY
-      const targetRideOffsetZ = riderZ - nextZ
-      if (!dragonCameraFocus.ready) {
-        dragonCameraRideOffset.x = targetRideOffsetX
-        dragonCameraRideOffset.y = targetRideOffsetY
-        dragonCameraRideOffset.z = targetRideOffsetZ
-        dragonCameraFocus.ready = true
-      } else {
-        dragonCameraRideOffset.x = MathUtils.damp(
-          dragonCameraRideOffset.x,
-          targetRideOffsetX,
-          DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING,
-          delta,
-        )
-        dragonCameraRideOffset.y = MathUtils.damp(
-          dragonCameraRideOffset.y,
-          targetRideOffsetY,
-          DRAGON_RIDE_CAMERA_VERTICAL_DAMPING,
-          delta,
-        )
-        dragonCameraRideOffset.z = MathUtils.damp(
-          dragonCameraRideOffset.z,
-          targetRideOffsetZ,
-          DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING,
-          delta,
-        )
-      }
-      dragonCameraFocus.x = nextX + dragonCameraRideOffset.x
-      dragonCameraFocus.y = nextY + dragonCameraRideOffset.y
-      dragonCameraFocus.z = nextZ + dragonCameraRideOffset.z
 
       key.actionQueued = false
       touch.actionQueued = false
@@ -2736,26 +2708,11 @@ function Player({
       }
       touch.cameraYaw -= touch.lookX * 2.9 * delta
       touch.cameraPitch = MathUtils.clamp(touch.cameraPitch + touch.lookY * 2.1 * delta, -0.8, 0.5)
-      const pitch = touch.cameraPitch
-      const cameraDistance = touch.cameraDistance ?? 5
-      const horizontalDistance = cameraDistance * Math.cos(pitch)
-      const camTargetX = dragonCameraFocus.x + Math.sin(touch.cameraYaw) * horizontalDistance
-      const camTargetY = dragonCameraFocus.y + 1.6 + Math.sin(pitch) * cameraDistance
-      const camTargetZ = dragonCameraFocus.z + Math.cos(touch.cameraYaw) * horizontalDistance
-
-      cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, dragonCameraFocus.x, 12, delta)
-      cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, dragonCameraFocus.y + 0.6, 9, delta)
-      cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, dragonCameraFocus.z, 12, delta)
-
-      const clampedCamera = clampCameraInPlayableVolume(camTargetX, camTargetY, camTargetZ, currentZone)
-      camera.position.x = MathUtils.damp(camera.position.x, clampedCamera.x, 7, delta)
-      camera.position.y = MathUtils.damp(camera.position.y, clampedCamera.y, 7, delta)
-      camera.position.z = MathUtils.damp(camera.position.z, clampedCamera.z, 7, delta)
-      camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
       return
     }
 
     dragonCameraFocusRef.current.ready = false
+    dragonCameraDistanceRef.current.ready = false
 
     if (seatedState?.phase) {
       const seat = seatedState.seat
@@ -2978,7 +2935,9 @@ function Player({
     }
 
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
-    const speed = isMoving ? MathUtils.lerp(1.65, 3.4, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) : 0
+    const speed = isMoving
+      ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95))
+      : 0
     const targetVelX = worldX * speed
     const targetVelZ = worldZ * speed
     const planarDamping = 14
@@ -3409,6 +3368,64 @@ function Player({
     playerGroup.position.copy(mountedPlayerLocalPosition)
     playerGroup.rotation.set(0, dragonRide.yawRef.current, 0)
   }, 0.5)
+
+  useFrame((_, delta) => {
+    const riderSocket = dragonRide?.riderSocketRef?.current
+    if (!dragonRide?.active || !riderSocket) return
+
+    riderSocket.getWorldPosition(dragonCameraSocketPosition)
+    const dragonPosition = dragonRide.positionRef.current
+    const rideOffset = dragonCameraRideOffsetRef.current
+    const cameraFocus = dragonCameraFocusRef.current
+    const targetOffsetX = dragonCameraSocketPosition.x - dragonPosition.x
+    const targetOffsetY = dragonCameraSocketPosition.y - dragonPosition.y
+    const targetOffsetZ = dragonCameraSocketPosition.z - dragonPosition.z
+
+    if (!cameraFocus.ready) {
+      rideOffset.x = targetOffsetX
+      rideOffset.y = targetOffsetY
+      rideOffset.z = targetOffsetZ
+      cameraFocus.ready = true
+    } else {
+      rideOffset.x = MathUtils.damp(rideOffset.x, targetOffsetX, DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING, delta)
+      rideOffset.y = MathUtils.damp(rideOffset.y, targetOffsetY, DRAGON_RIDE_CAMERA_VERTICAL_DAMPING, delta)
+      rideOffset.z = MathUtils.damp(rideOffset.z, targetOffsetZ, DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING, delta)
+    }
+
+    cameraFocus.x = dragonPosition.x + rideOffset.x
+    cameraFocus.y = dragonPosition.y + rideOffset.y
+    cameraFocus.z = dragonPosition.z + rideOffset.z
+
+    const touch = touchRef.current
+    const pitch = touch.cameraPitch
+    const targetCameraDistance = touch.cameraDistance ?? 5
+    const cameraDistanceState = dragonCameraDistanceRef.current
+    if (!cameraDistanceState.ready) {
+      cameraDistanceState.value = targetCameraDistance
+      cameraDistanceState.ready = true
+    } else {
+      cameraDistanceState.value = MathUtils.damp(
+        cameraDistanceState.value,
+        targetCameraDistance,
+        DRAGON_RIDE_CAMERA_ZOOM_DAMPING,
+        delta,
+      )
+    }
+    const cameraDistance = cameraDistanceState.value
+    const horizontalDistance = cameraDistance * Math.cos(pitch)
+    const cameraTarget = clampCameraInPlayableVolume(
+      cameraFocus.x + Math.sin(touch.cameraYaw) * horizontalDistance,
+      cameraFocus.y + 1.6 + Math.sin(pitch) * cameraDistance,
+      cameraFocus.z + Math.cos(touch.cameraYaw) * horizontalDistance,
+      currentZone,
+    )
+
+    camera.position.set(cameraTarget.x, cameraTarget.y, cameraTarget.z)
+    cameraLookRef.current.x = cameraFocus.x
+    cameraLookRef.current.y = cameraFocus.y + 0.6
+    cameraLookRef.current.z = cameraFocus.z
+    camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
+  }, 0.75)
 
   return (
     <>
