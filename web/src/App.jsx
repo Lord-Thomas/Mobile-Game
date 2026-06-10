@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -1932,16 +1932,29 @@ const DRAGON_RIDE_TURN_SPEED = 2.2
 const DRAGON_RIDE_CLIMB_SPEED = 4.5
 const DRAGON_RIDE_MAX_ALTITUDE = 16
 const DRAGON_RIDE_RIDER_HEIGHT = 1.0
+const DRAGON_RIDE_SPINE_BONE_NAME = 'NPC Spine2_021'
+// This rig's local -X points above the back.
+const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
 
-function MountedDragon({ positionRef, yawRef, animStateRef }) {
+function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, riderSocketRef }) {
   const { scene, animations } = useGLTF('/models/dragon.glb')
   const dragon = useMemo(() => clone(scene), [scene])
-  const { actions } = useAnimations(animations, dragon)
+  const { actions, mixer } = useAnimations(animations, dragon)
   const groupRef = useRef()
   const currentActionRef = useRef(null)
+  const [poseReady, setPoseReady] = useState(false)
+  const riderBoneRef = useRef(null)
+  const saddleSocket = useMemo(() => {
+    const socket = new Object3D()
+    socket.name = 'DragonRideSocket'
+    socket.position.copy(DRAGON_RIDE_SADDLE_LOCAL_POSITION)
+    return socket
+  }, [])
+  const boneWorldPosition = useMemo(() => new Vector3(), [])
+  const boneWorldQuaternion = useMemo(() => new Quaternion(), [])
 
-  const playAction = useCallback((name, { loop = true, pingpong = false, timeScale = 1, fade = 0.5 } = {}) => {
-    const action = actions[name]
+  const playAction = useCallback((name, { fallback = null, loop = true, pingpong = false, timeScale = 1, fade = 0.5 } = {}) => {
+    const action = actions[name] ?? (fallback ? actions[fallback] : null)
     if (!action || currentActionRef.current === action) return action
     const prev = currentActionRef.current
     if (prev) prev.fadeOut(fade)
@@ -1949,24 +1962,39 @@ function MountedDragon({ positionRef, yawRef, animStateRef }) {
     const loopMode = !loop ? LoopOnce : pingpong ? LoopPingPong : LoopRepeat
     const loopCount = loop ? Infinity : 1
     action.setLoop(loopMode, loopCount)
+    action.enabled = true
+    action.paused = false
     action.setEffectiveWeight(1)
     action.setEffectiveTimeScale(timeScale)
-    action.fadeIn(fade)
+    if (fade > 0) action.fadeIn(fade)
     action.play()
     action.clampWhenFinished = !loop
     currentActionRef.current = action
     return action
   }, [actions])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     dragon.traverse((object) => {
       if (object instanceof Mesh) {
         object.castShadow = true
         object.receiveShadow = true
       }
     })
-    playAction('Dragon_Fly_Idle', { fade: 0 })
-  }, [dragon, playAction])
+    riderBoneRef.current = dragon.getObjectByName(DRAGON_RIDE_SPINE_BONE_NAME) ?? null
+    riderBoneRef.current?.add(saddleSocket)
+    if (riderSocketRef) riderSocketRef.current = saddleSocket
+    if (riderTransformRef) riderTransformRef.current.ready = false
+    playAction('Dragon_Fly_Idle', { fallback: 'Dragon_Fly', fade: 0 })
+    mixer.update(1 / 60)
+    dragon.updateMatrixWorld(true)
+    setPoseReady(true)
+    return () => {
+      saddleSocket.removeFromParent()
+      if (riderSocketRef?.current === saddleSocket) riderSocketRef.current = null
+      riderBoneRef.current = null
+      if (riderTransformRef) riderTransformRef.current.ready = false
+    }
+  }, [dragon, mixer, playAction, riderTransformRef, riderSocketRef, saddleSocket])
 
   useFrame(() => {
     if (!groupRef.current) return
@@ -1976,13 +2004,25 @@ function MountedDragon({ positionRef, yawRef, animStateRef }) {
 
     const state = animStateRef?.current
     if (state) {
-      if (state.airborne && state.moving) playAction('Dragon_Fly', { pingpong: true, timeScale: 2 })
-      else playAction('Dragon_Fly_Idle')
+      if (state.airborne && state.moving) playAction('Dragon_Fly')
+      else playAction('Dragon_Fly_Idle', { fallback: 'Dragon_Fly' })
     }
-  })
+
+    if (!riderTransformRef) return
+
+    if (!riderBoneRef.current || saddleSocket.parent !== riderBoneRef.current) return
+    saddleSocket.updateWorldMatrix(true, false)
+    saddleSocket.getWorldPosition(boneWorldPosition)
+    saddleSocket.getWorldQuaternion(boneWorldQuaternion)
+
+    const riderTransform = riderTransformRef.current
+    riderTransform.position.copy(boneWorldPosition)
+    riderTransform.quaternion.copy(boneWorldQuaternion)
+    riderTransform.ready = true
+  }, 0.1)
 
   return (
-    <group ref={groupRef} scale={2} userData={{ debugCategory: 'npcs' }}>
+    <group ref={groupRef} scale={2} visible={poseReady} userData={{ debugCategory: 'npcs' }}>
       <primitive object={dragon} />
     </group>
   )
@@ -2448,6 +2488,7 @@ function Player({
   const kickUntilRef = useRef(0)
   const pendingKickRef = useRef(null)
   const handBoneRef = useRef(null)
+  const mountedPlayerLocalPosition = useMemo(() => new Vector3(), [])
   const punchUntilRef = useRef(0)
   const pendingPunchRef = useRef(null)
   const jumpStartUntilRef = useRef(0)
@@ -2467,6 +2508,10 @@ function Player({
   const dragonFlightInputRef = useRef({ up: false, down: false })
   const { camera } = useThree()
   const { world, rapier } = useRapier()
+
+  useLayoutEffect(() => {
+    visualRef.current?.position.set(...PLAYER_SPAWNS.interior)
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -2615,9 +2660,10 @@ function Player({
       }
       dragonRide.yawRef.current = yaw
 
-      const riderX = nextX
-      const riderY = nextY + DRAGON_RIDE_RIDER_HEIGHT
-      const riderZ = nextZ
+      const riderTransform = dragonRide.riderTransformRef?.current
+      const riderX = riderTransform?.ready ? riderTransform.position.x : nextX
+      const riderY = riderTransform?.ready ? riderTransform.position.y : nextY + DRAGON_RIDE_RIDER_HEIGHT
+      const riderZ = riderTransform?.ready ? riderTransform.position.z : nextZ
 
       key.actionQueued = false
       touch.actionQueued = false
@@ -2635,8 +2681,6 @@ function Player({
       playerPositionRef.current.y = riderY
       playerPositionRef.current.z = riderZ
       playerBodyRef.current.setNextKinematicTranslation({ x: riderX, y: riderY, z: riderZ })
-      visualRef.current.position.set(riderX, riderY, riderZ)
-      visualRef.current.rotation.y = yaw
       if (playerBodyYawRef) playerBodyYawRef.current = yaw
 
       setPlayerMotion((current) => (current === 'sittingIdle' ? current : 'sittingIdle'))
@@ -3310,6 +3354,23 @@ function Player({
     camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
   })
 
+  useFrame(() => {
+    const playerGroup = visualRef.current
+    const riderSocket = dragonRide?.riderSocketRef?.current
+    const playerParent = playerGroup?.parent
+    if (!dragonRide?.active || !riderSocket || !playerGroup || !playerParent) return
+
+    riderSocket.getWorldPosition(mountedPlayerLocalPosition)
+    playerBodyRef.current?.setNextKinematicTranslation({
+      x: mountedPlayerLocalPosition.x,
+      y: mountedPlayerLocalPosition.y,
+      z: mountedPlayerLocalPosition.z,
+    })
+    playerParent.worldToLocal(mountedPlayerLocalPosition)
+    playerGroup.position.copy(mountedPlayerLocalPosition)
+    playerGroup.rotation.set(0, dragonRide.yawRef.current, 0)
+  }, 0.5)
+
   return (
     <>
       <RigidBody
@@ -3320,8 +3381,14 @@ function Player({
       >
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
-      <group ref={visualRef} position={PLAYER_SPAWNS.interior} visible={isPlayerVisible}>
-        <PlayerAvatar motion={playerMotion} handBoneRef={handBoneRef} equippedWeapon={equippedWeapon} appearance={appearance} currentZone={currentZone} />
+      <group ref={visualRef} visible={isPlayerVisible}>
+        <PlayerAvatar
+          motion={playerMotion}
+          handBoneRef={handBoneRef}
+          equippedWeapon={equippedWeapon}
+          appearance={appearance}
+          currentZone={currentZone}
+        />
         <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
       </group>
     </>
@@ -3514,7 +3581,13 @@ function CharacterAuraGlow({ visible }) {
   )
 }
 
-function PlayerAvatar({ motion, handBoneRef, equippedWeapon, appearance, currentZone }) {
+function PlayerAvatar({
+  motion,
+  handBoneRef,
+  equippedWeapon,
+  appearance,
+  currentZone,
+}) {
   const { gl } = useThree()
   const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
   const faceDetailsMask = useTexture(PLAYER_FACE_DETAILS_MASK_URL)
@@ -10921,6 +10994,12 @@ function App() {
   const dragonRidePositionRef = useRef({ x: 0, y: 0, z: 0 })
   const dragonRideYawRef = useRef(0)
   const dragonRideAnimStateRef = useRef({ airborne: false, moving: false })
+  const dragonRideSocketRef = useRef(null)
+  const dragonRideRiderTransformRef = useRef({
+    position: new Vector3(),
+    quaternion: new Quaternion(),
+    ready: false,
+  })
   const [dragonMounted, setDragonMounted] = useState(false)
   const [cameraOnCat, setCameraOnCat] = useState(false)
   const scoreCooldownRef = useRef(false)
@@ -12305,6 +12384,7 @@ function App() {
     dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
     dragonRideYawRef.current = yaw
     dragonRideAnimStateRef.current = { airborne: false, moving: false }
+    dragonRideRiderTransformRef.current.ready = false
     setDragonMounted(true)
   }
 
@@ -12865,6 +12945,8 @@ function App() {
                 positionRef={dragonRidePositionRef}
                 yawRef={dragonRideYawRef}
                 animStateRef={dragonRideAnimStateRef}
+                riderTransformRef={dragonRideRiderTransformRef}
+                riderSocketRef={dragonRideSocketRef}
               />
             )}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
@@ -13038,6 +13120,8 @@ function App() {
                 positionRef: dragonRidePositionRef,
                 yawRef: dragonRideYawRef,
                 animStateRef: dragonRideAnimStateRef,
+                riderTransformRef: dragonRideRiderTransformRef,
+                riderSocketRef: dragonRideSocketRef,
               }}
             />
           )}
