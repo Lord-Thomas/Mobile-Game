@@ -28,7 +28,8 @@
       "Bash(python -c \"print\\('ok'\\)\")",
       "Bash(node -e \"console.log\\('node ok'\\)\")",
       "Bash(dir /s /b *.cs *.compute *.shader)",
-      "Bash(grep -E \"\\\\.\\(cs|compute|shader|glsl\\)$\")"
+      "Bash(grep -E \"\\\\.\\(cs|compute|shader|glsl\\)$\")",
+      "Bash(ls -la public/models/Waving.fbx)"
     ]
   }
 }

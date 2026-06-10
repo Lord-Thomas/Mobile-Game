@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -1925,24 +1925,38 @@ const DRAGON_WAKE_DISTANCE = 5
 const DRAGON_WAKE_DELAY = 2
 const DRAGON_SLEEP_DELAY = 4
 
-const DRAGON_RIDE_MODEL_YAW_OFFSET = 0
-const DRAGON_RIDE_SEAT_OFFSET_Y = -1.2
+const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI / 2
 const DRAGON_RIDE_GROUND_SPEED = 6
 const DRAGON_RIDE_FLY_SPEED = 9
 const DRAGON_RIDE_TURN_SPEED = 2.2
 const DRAGON_RIDE_CLIMB_SPEED = 4.5
 const DRAGON_RIDE_MAX_ALTITUDE = 16
-const DRAGON_RIDE_RIDER_HEIGHT = 2.6
-const DRAGON_RIDE_SEAT_BONE_NAME = 'NPC Hub01_023'
+const DRAGON_RIDE_RIDER_HEIGHT = 1.0
 
-const dragonRideSeatWorldPos = new Vector3()
-
-function MountedDragon({ positionRef, yawRef, riderAnchorRef }) {
+function MountedDragon({ positionRef, yawRef, animStateRef }) {
   const { scene, animations } = useGLTF('/models/dragon.glb')
   const dragon = useMemo(() => clone(scene), [scene])
-  const { actions, mixer } = useAnimations(animations, dragon)
+  const { actions } = useAnimations(animations, dragon)
   const groupRef = useRef()
-  const seatBoneRef = useRef(null)
+  const currentActionRef = useRef(null)
+
+  const playAction = useCallback((name, { loop = true, pingpong = false, timeScale = 1, fade = 0.5 } = {}) => {
+    const action = actions[name]
+    if (!action || currentActionRef.current === action) return action
+    const prev = currentActionRef.current
+    if (prev) prev.fadeOut(fade)
+    if (!action.isRunning()) action.reset()
+    const loopMode = !loop ? LoopOnce : pingpong ? LoopPingPong : LoopRepeat
+    const loopCount = loop ? Infinity : 1
+    action.setLoop(loopMode, loopCount)
+    action.setEffectiveWeight(1)
+    action.setEffectiveTimeScale(timeScale)
+    action.fadeIn(fade)
+    action.play()
+    action.clampWhenFinished = !loop
+    currentActionRef.current = action
+    return action
+  }, [actions])
 
   useEffect(() => {
     dragon.traverse((object) => {
@@ -1951,43 +1965,19 @@ function MountedDragon({ positionRef, yawRef, riderAnchorRef }) {
         object.receiveShadow = true
       }
     })
-    seatBoneRef.current = dragon.getObjectByName(DRAGON_RIDE_SEAT_BONE_NAME) ?? null
-    const flyTransition = actions?.Dragon_Ancient_Idle_FlyTransition
-    if (flyTransition) {
-      flyTransition.reset().setLoop(LoopOnce, 1).setEffectiveWeight(1).play()
-      flyTransition.clampWhenFinished = true
-    }
-  }, [dragon, actions])
-
-  useEffect(() => {
-    const onFinished = (event) => {
-      if (event.action !== actions?.Dragon_Ancient_Idle_FlyTransition) return
-      const idle = actions?.Dragon_Ancient_Patrol_Idle
-      if (!idle) return
-      event.action.fadeOut(0.4)
-      idle.reset().setLoop(LoopRepeat, Infinity).setEffectiveWeight(1).fadeIn(0.4).play()
-    }
-    mixer.addEventListener('finished', onFinished)
-    return () => mixer.removeEventListener('finished', onFinished)
-  }, [actions, mixer])
+    playAction('Dragon_Fly_Idle', { fade: 0 })
+  }, [dragon, playAction])
 
   useFrame(() => {
     if (!groupRef.current) return
     const pos = positionRef.current
     groupRef.current.position.set(pos.x, pos.y, pos.z)
     groupRef.current.rotation.y = yawRef.current + DRAGON_RIDE_MODEL_YAW_OFFSET
-    groupRef.current.updateWorldMatrix(true, true)
 
-    if (riderAnchorRef) {
-      if (seatBoneRef.current) {
-        seatBoneRef.current.getWorldPosition(dragonRideSeatWorldPos)
-        riderAnchorRef.current.x = dragonRideSeatWorldPos.x
-        riderAnchorRef.current.y = dragonRideSeatWorldPos.y + DRAGON_RIDE_SEAT_OFFSET_Y
-        riderAnchorRef.current.z = dragonRideSeatWorldPos.z
-        riderAnchorRef.current.valid = true
-      } else {
-        riderAnchorRef.current.valid = false
-      }
+    const state = animStateRef?.current
+    if (state) {
+      if (state.airborne && state.moving) playAction('Dragon_Fly', { pingpong: true, timeScale: 2 })
+      else playAction('Dragon_Fly_Idle')
     }
   })
 
@@ -2090,7 +2080,7 @@ function Dragon({ playerPositionRef, visible = true }) {
   return (
     <group
       position={[DRAGON_POSITION.x, DRAGON_POSITION.y, DRAGON_POSITION.z]}
-      rotation={[0, Math.PI, 0]}
+      rotation={[0, Math.PI + Math.PI / 2, 0]}
       scale={2}
       visible={visible}
       userData={{ debugCategory: 'npcs' }}
@@ -2618,21 +2608,16 @@ function Player({
       dragonRide.positionRef.current.x = nextX
       dragonRide.positionRef.current.y = nextY
       dragonRide.positionRef.current.z = nextZ
+
+      if (dragonRide.animStateRef) {
+        dragonRide.animStateRef.current.airborne = nextAltitude > 0.05
+        dragonRide.animStateRef.current.moving = forwardInput !== 0
+      }
       dragonRide.yawRef.current = yaw
 
-      const anchor = dragonRide.riderAnchorRef?.current
-      let riderX
-      let riderY
-      let riderZ
-      if (anchor?.valid) {
-        riderX = anchor.x
-        riderY = anchor.y
-        riderZ = anchor.z
-      } else {
-        riderX = nextX
-        riderY = nextY + DRAGON_RIDE_RIDER_HEIGHT
-        riderZ = nextZ
-      }
+      const riderX = nextX
+      const riderY = nextY + DRAGON_RIDE_RIDER_HEIGHT
+      const riderZ = nextZ
 
       key.actionQueued = false
       touch.actionQueued = false
@@ -10935,7 +10920,7 @@ function App() {
   const catTapCallbackRef = useRef(null)
   const dragonRidePositionRef = useRef({ x: 0, y: 0, z: 0 })
   const dragonRideYawRef = useRef(0)
-  const dragonRiderAnchorRef = useRef({ x: 0, y: 0, z: 0, valid: false })
+  const dragonRideAnimStateRef = useRef({ airborne: false, moving: false })
   const [dragonMounted, setDragonMounted] = useState(false)
   const [cameraOnCat, setCameraOnCat] = useState(false)
   const scoreCooldownRef = useRef(false)
@@ -12319,7 +12304,7 @@ function App() {
     const groundY = currentZone === ZONES.outside ? getTerrainHeight(spawnX, spawnZ) : 0
     dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
     dragonRideYawRef.current = yaw
-    dragonRiderAnchorRef.current.valid = false
+    dragonRideAnimStateRef.current = { airborne: false, moving: false }
     setDragonMounted(true)
   }
 
@@ -12879,7 +12864,7 @@ function App() {
               <MountedDragon
                 positionRef={dragonRidePositionRef}
                 yawRef={dragonRideYawRef}
-                riderAnchorRef={dragonRiderAnchorRef}
+                animStateRef={dragonRideAnimStateRef}
               />
             )}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
@@ -13052,7 +13037,7 @@ function App() {
                 active: dragonMounted,
                 positionRef: dragonRidePositionRef,
                 yawRef: dragonRideYawRef,
-                riderAnchorRef: dragonRiderAnchorRef,
+                animStateRef: dragonRideAnimStateRef,
               }}
             />
           )}
