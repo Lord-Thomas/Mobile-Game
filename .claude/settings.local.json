@@ -29,7 +29,10 @@
       "Bash(node -e \"console.log\\('node ok'\\)\")",
       "Bash(dir /s /b *.cs *.compute *.shader)",
       "Bash(grep -E \"\\\\.\\(cs|compute|shader|glsl\\)$\")",
-      "Bash(ls -la public/models/Waving.fbx)"
+      "Bash(ls -la public/models/Waving.fbx)",
+      "Bash(sed -n '1580,1596p' src/App.jsx)",
+      "Bash(sed -n '6945,6955p' src/App.jsx)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }
