@@ -1942,8 +1942,10 @@ const DRAGON_RIDE_SADDLE_BONE_NAMES = {
   neck1: 'NPC_Neck1_040',
   calibration: 'NPC_Neck2_041',
 }
-const DRAGON_RIDE_SADDLE_LOCAL_DAMPING = 8
-const DRAGON_RIDE_SADDLE_ROTATION_DAMPING = 10
+const DRAGON_RIDE_SADDLE_VERTICAL_DAMPING = 8
+const DRAGON_RIDE_SADDLE_FORWARD_DAMPING = 18
+const DRAGON_RIDE_SADDLE_LATERAL_DAMPING = 32
+const DRAGON_RIDE_SADDLE_ROTATION_DAMPING = 20
 // This rig's local -X points above the back.
 const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
 const DRAGON_RIDE_RIDER_LIFT = 0.32
@@ -2270,9 +2272,23 @@ function MountedDragon({
       virtualSaddleReadyRef.current = true
     } else {
       const safeDelta = Math.min(delta, 0.05)
-      saddleFilteredPosition.lerp(
-        saddleTargetPosition,
-        1 - Math.exp(-DRAGON_RIDE_SADDLE_LOCAL_DAMPING * safeDelta),
+      saddleFilteredPosition.x = MathUtils.damp(
+        saddleFilteredPosition.x,
+        saddleTargetPosition.x,
+        DRAGON_RIDE_SADDLE_VERTICAL_DAMPING,
+        safeDelta,
+      )
+      saddleFilteredPosition.y = MathUtils.damp(
+        saddleFilteredPosition.y,
+        saddleTargetPosition.y,
+        DRAGON_RIDE_SADDLE_FORWARD_DAMPING,
+        safeDelta,
+      )
+      saddleFilteredPosition.z = MathUtils.damp(
+        saddleFilteredPosition.z,
+        saddleTargetPosition.z,
+        DRAGON_RIDE_SADDLE_LATERAL_DAMPING,
+        safeDelta,
       )
       saddleFilteredQuaternion.slerp(
         saddleTargetQuaternion,
