@@ -1946,16 +1946,17 @@ const DRAGON_RIDE_SADDLE_LOCAL_DAMPING = 8
 const DRAGON_RIDE_SADDLE_ROTATION_DAMPING = 10
 // This rig's local -X points above the back.
 const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
-const DRAGON_RIDE_RIDER_LIFT = 0.16
+const DRAGON_RIDE_RIDER_LIFT = 0.32
+const DRAGON_RIDE_RIDER_WORLD_CLEARANCE = 0.28
 const DRAGON_RIDE_DEFAULT_BODY_WIDTH = 0.72
 const DRAGON_RIDE_MIN_BODY_WIDTH = 0.38
 const DRAGON_RIDE_MAX_BODY_WIDTH = 1.35
 const DRAGON_RIDE_HAND_FORWARD_OFFSET = 0.62
 const DRAGON_RIDE_HAND_RAY_HEIGHT = 0.9
-const DRAGON_RIDE_HAND_SURFACE_OFFSET = 0.035
-const DRAGON_RIDE_SEAT_SURFACE_OFFSET = 0.035
-const DRAGON_RIDE_MIN_RIDER_LIFT = 0.02
-const DRAGON_RIDE_MAX_RIDER_LIFT = 0.34
+const DRAGON_RIDE_HAND_SURFACE_OFFSET = 0.005
+const DRAGON_RIDE_SEAT_SURFACE_OFFSET = 0.195
+const DRAGON_RIDE_MIN_RIDER_LIFT = 0.18
+const DRAGON_RIDE_MAX_RIDER_LIFT = 0.52
 
 function aimBoneAtWorldPoint(bone, childBone, target, scratch) {
   if (!bone?.parent || !childBone || !target) return false
@@ -2054,7 +2055,9 @@ function getMountedRiderWorldPosition(
   localLiftOffset
     .set(-riderLift, 0, 0)
     .applyQuaternion(socketQuaternion)
-  return target.add(localLiftOffset)
+  target.add(localLiftOffset)
+  target.y += DRAGON_RIDE_RIDER_WORLD_CLEARANCE
+  return target
 }
 
 function MountedDragon({
@@ -2091,8 +2094,11 @@ function MountedDragon({
   const saddleSpine2Quaternion = useMemo(() => new Quaternion(), [])
   const saddleSpine3Quaternion = useMemo(() => new Quaternion(), [])
   const saddleNeck1Quaternion = useMemo(() => new Quaternion(), [])
+  const saddleCalibrationQuaternion = useMemo(() => new Quaternion(), [])
+  const saddleFrameQuaternion = useMemo(() => new Quaternion(), [])
   const saddleTargetQuaternion = useMemo(() => new Quaternion(), [])
   const saddleFilteredQuaternion = useMemo(() => new Quaternion(), [])
+  const saddleSocketQuaternion = useMemo(() => new Quaternion(), [])
   const saddleDragonWorldQuaternion = useMemo(() => new Quaternion(), [])
   const saddleInverseDragonQuaternion = useMemo(() => new Quaternion(), [])
   const widthRaycaster = useMemo(() => new Raycaster(), [])
@@ -2247,12 +2253,18 @@ function MountedDragon({
       saddleBones.calibration.localToWorld(
         saddleCalibrationPosition.copy(DRAGON_RIDE_SADDLE_LOCAL_POSITION),
       )
+      saddleBones.calibration.getWorldQuaternion(saddleCalibrationQuaternion)
       dragon.worldToLocal(saddleCalibrationPosition)
+      saddleCalibrationQuaternion.premultiply(saddleInverseDragonQuaternion)
       saddleFrameOffset
         .subVectors(saddleCalibrationPosition, saddleTargetPosition)
         .applyQuaternion(
           saddleFilteredQuaternion.copy(saddleTargetQuaternion).invert(),
         )
+      saddleFrameQuaternion
+        .copy(saddleTargetQuaternion)
+        .invert()
+        .multiply(saddleCalibrationQuaternion)
       saddleFilteredPosition.copy(saddleTargetPosition)
       saddleFilteredQuaternion.copy(saddleTargetQuaternion)
       virtualSaddleReadyRef.current = true
@@ -2274,7 +2286,10 @@ function MountedDragon({
     saddleSocket.position
       .copy(saddleFilteredPosition)
       .add(saddleRotatedOffset)
-    saddleSocket.quaternion.copy(saddleFilteredQuaternion)
+    saddleSocketQuaternion
+      .copy(saddleFilteredQuaternion)
+      .multiply(saddleFrameQuaternion)
+    saddleSocket.quaternion.copy(saddleSocketQuaternion)
     saddleSocket.updateWorldMatrix(true, false)
     saddleSocket.getWorldPosition(boneWorldPosition)
     saddleSocket.getWorldQuaternion(boneWorldQuaternion)
@@ -12952,6 +12967,7 @@ function App() {
     dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
     dragonRideYawRef.current = yaw
     dragonRideAnimStateRef.current = { airborne: false, moving: false }
+    dragonRideMountProfileRef.current.riderLift = DRAGON_RIDE_RIDER_LIFT
     dragonRideMountProfileRef.current.ready = false
     dragonRideMountProfileRef.current.handTargetsReady = false
     dragonRideMountProfileRef.current.handTargetsMeasured = false
