@@ -1936,7 +1936,14 @@ const DRAGON_RIDE_RIDER_HEIGHT = 1.0
 const DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING = 9
 const DRAGON_RIDE_CAMERA_VERTICAL_DAMPING = 5
 const DRAGON_RIDE_CAMERA_ZOOM_DAMPING = 10
-const DRAGON_RIDE_SPINE_BONE_NAME = 'NPC_Neck2_041'
+const DRAGON_RIDE_SADDLE_BONE_NAMES = {
+  spine2: 'NPC_Spine2_021',
+  spine3: 'NPC_Spine3_022',
+  neck1: 'NPC_Neck1_040',
+  calibration: 'NPC_Neck2_041',
+}
+const DRAGON_RIDE_SADDLE_LOCAL_DAMPING = 8
+const DRAGON_RIDE_SADDLE_ROTATION_DAMPING = 10
 // This rig's local -X points above the back.
 const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
 const DRAGON_RIDE_RIDER_LIFT = 0.16
@@ -2064,15 +2071,30 @@ function MountedDragon({
   const groupRef = useRef()
   const currentActionRef = useRef(null)
   const [poseReady, setPoseReady] = useState(false)
-  const riderBoneRef = useRef(null)
+  const saddleBonesRef = useRef(null)
+  const virtualSaddleReadyRef = useRef(false)
   const saddleSocket = useMemo(() => {
     const socket = new Object3D()
     socket.name = 'DragonRideSocket'
-    socket.position.copy(DRAGON_RIDE_SADDLE_LOCAL_POSITION)
     return socket
   }, [])
   const boneWorldPosition = useMemo(() => new Vector3(), [])
   const boneWorldQuaternion = useMemo(() => new Quaternion(), [])
+  const saddleSpine2Position = useMemo(() => new Vector3(), [])
+  const saddleSpine3Position = useMemo(() => new Vector3(), [])
+  const saddleNeck1Position = useMemo(() => new Vector3(), [])
+  const saddleCalibrationPosition = useMemo(() => new Vector3(), [])
+  const saddleTargetPosition = useMemo(() => new Vector3(), [])
+  const saddleFilteredPosition = useMemo(() => new Vector3(), [])
+  const saddleFrameOffset = useMemo(() => new Vector3(), [])
+  const saddleRotatedOffset = useMemo(() => new Vector3(), [])
+  const saddleSpine2Quaternion = useMemo(() => new Quaternion(), [])
+  const saddleSpine3Quaternion = useMemo(() => new Quaternion(), [])
+  const saddleNeck1Quaternion = useMemo(() => new Quaternion(), [])
+  const saddleTargetQuaternion = useMemo(() => new Quaternion(), [])
+  const saddleFilteredQuaternion = useMemo(() => new Quaternion(), [])
+  const saddleDragonWorldQuaternion = useMemo(() => new Quaternion(), [])
+  const saddleInverseDragonQuaternion = useMemo(() => new Quaternion(), [])
   const widthRaycaster = useMemo(() => new Raycaster(), [])
   const widthRayCenter = useMemo(() => new Vector3(), [])
   const widthRayRight = useMemo(() => new Vector3(), [])
@@ -2117,8 +2139,14 @@ function MountedDragon({
         object.receiveShadow = true
       }
     })
-    riderBoneRef.current = dragon.getObjectByName(DRAGON_RIDE_SPINE_BONE_NAME) ?? null
-    riderBoneRef.current?.add(saddleSocket)
+    saddleBonesRef.current = {
+      spine2: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.spine2),
+      spine3: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.spine3),
+      neck1: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.neck1),
+      calibration: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.calibration),
+    }
+    dragon.add(saddleSocket)
+    virtualSaddleReadyRef.current = false
     widthMeasureFramesRef.current = 0
     if (riderSocketRef) riderSocketRef.current = saddleSocket
     if (riderTransformRef) riderTransformRef.current.ready = false
@@ -2144,13 +2172,14 @@ function MountedDragon({
     return () => {
       saddleSocket.removeFromParent()
       if (riderSocketRef?.current === saddleSocket) riderSocketRef.current = null
-      riderBoneRef.current = null
+      saddleBonesRef.current = null
+      virtualSaddleReadyRef.current = false
       if (riderTransformRef) riderTransformRef.current.ready = false
       if (mountProfileRef) mountProfileRef.current.ready = false
     }
   }, [dragon, mixer, mountProfileRef, playAction, riderTransformRef, riderSocketRef, saddleSocket])
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (!groupRef.current) return
     const pos = positionRef.current
     groupRef.current.position.set(pos.x, pos.y, pos.z)
@@ -2176,7 +2205,76 @@ function MountedDragon({
 
     if (!riderTransformRef) return
 
-    if (!riderBoneRef.current || saddleSocket.parent !== riderBoneRef.current) return
+    const saddleBones = saddleBonesRef.current
+    if (
+      !saddleBones?.spine2 ||
+      !saddleBones.spine3 ||
+      !saddleBones.neck1 ||
+      !saddleBones.calibration ||
+      saddleSocket.parent !== dragon
+    ) {
+      return
+    }
+
+    dragon.updateWorldMatrix(true, false)
+    dragon.getWorldQuaternion(saddleDragonWorldQuaternion)
+    saddleInverseDragonQuaternion.copy(saddleDragonWorldQuaternion).invert()
+
+    saddleBones.spine2.getWorldPosition(saddleSpine2Position)
+    saddleBones.spine3.getWorldPosition(saddleSpine3Position)
+    saddleBones.neck1.getWorldPosition(saddleNeck1Position)
+    dragon.worldToLocal(saddleSpine2Position)
+    dragon.worldToLocal(saddleSpine3Position)
+    dragon.worldToLocal(saddleNeck1Position)
+    saddleTargetPosition
+      .copy(saddleSpine2Position)
+      .multiplyScalar(0.4)
+      .addScaledVector(saddleSpine3Position, 0.4)
+      .addScaledVector(saddleNeck1Position, 0.2)
+
+    saddleBones.spine2.getWorldQuaternion(saddleSpine2Quaternion)
+    saddleBones.spine3.getWorldQuaternion(saddleSpine3Quaternion)
+    saddleBones.neck1.getWorldQuaternion(saddleNeck1Quaternion)
+    saddleSpine2Quaternion.premultiply(saddleInverseDragonQuaternion)
+    saddleSpine3Quaternion.premultiply(saddleInverseDragonQuaternion)
+    saddleNeck1Quaternion.premultiply(saddleInverseDragonQuaternion)
+    saddleTargetQuaternion
+      .copy(saddleSpine2Quaternion)
+      .slerp(saddleSpine3Quaternion, 0.5)
+      .slerp(saddleNeck1Quaternion, 0.2)
+
+    if (!virtualSaddleReadyRef.current) {
+      saddleBones.calibration.localToWorld(
+        saddleCalibrationPosition.copy(DRAGON_RIDE_SADDLE_LOCAL_POSITION),
+      )
+      dragon.worldToLocal(saddleCalibrationPosition)
+      saddleFrameOffset
+        .subVectors(saddleCalibrationPosition, saddleTargetPosition)
+        .applyQuaternion(
+          saddleFilteredQuaternion.copy(saddleTargetQuaternion).invert(),
+        )
+      saddleFilteredPosition.copy(saddleTargetPosition)
+      saddleFilteredQuaternion.copy(saddleTargetQuaternion)
+      virtualSaddleReadyRef.current = true
+    } else {
+      const safeDelta = Math.min(delta, 0.05)
+      saddleFilteredPosition.lerp(
+        saddleTargetPosition,
+        1 - Math.exp(-DRAGON_RIDE_SADDLE_LOCAL_DAMPING * safeDelta),
+      )
+      saddleFilteredQuaternion.slerp(
+        saddleTargetQuaternion,
+        1 - Math.exp(-DRAGON_RIDE_SADDLE_ROTATION_DAMPING * safeDelta),
+      )
+    }
+
+    saddleRotatedOffset
+      .copy(saddleFrameOffset)
+      .applyQuaternion(saddleFilteredQuaternion)
+    saddleSocket.position
+      .copy(saddleFilteredPosition)
+      .add(saddleRotatedOffset)
+    saddleSocket.quaternion.copy(saddleFilteredQuaternion)
     saddleSocket.updateWorldMatrix(true, false)
     saddleSocket.getWorldPosition(boneWorldPosition)
     saddleSocket.getWorldQuaternion(boneWorldQuaternion)
