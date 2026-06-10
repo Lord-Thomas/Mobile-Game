@@ -1943,6 +1943,96 @@ const DRAGON_RIDE_RIDER_LIFT = 0.16
 const DRAGON_RIDE_DEFAULT_BODY_WIDTH = 0.72
 const DRAGON_RIDE_MIN_BODY_WIDTH = 0.38
 const DRAGON_RIDE_MAX_BODY_WIDTH = 1.35
+const DRAGON_RIDE_HAND_FORWARD_OFFSET = 0.62
+const DRAGON_RIDE_HAND_RAY_HEIGHT = 0.9
+const DRAGON_RIDE_HAND_SURFACE_OFFSET = 0.035
+const DRAGON_RIDE_SEAT_SURFACE_OFFSET = 0.08
+const DRAGON_RIDE_MAX_RIDER_LIFT = 0.5
+
+function aimBoneAtWorldPoint(bone, childBone, target, scratch) {
+  if (!bone?.parent || !childBone || !target) return false
+
+  bone.updateWorldMatrix(true, false)
+  childBone.updateWorldMatrix(true, false)
+  scratch.start.setFromMatrixPosition(bone.matrixWorld)
+  scratch.end.setFromMatrixPosition(childBone.matrixWorld)
+  scratch.currentDirection.subVectors(scratch.end, scratch.start)
+  scratch.targetDirection.subVectors(target, scratch.start)
+  if (
+    scratch.currentDirection.lengthSq() < 1e-8 ||
+    scratch.targetDirection.lengthSq() < 1e-8
+  ) {
+    return false
+  }
+
+  scratch.currentDirection.normalize()
+  scratch.targetDirection.normalize()
+  scratch.deltaQuaternion.setFromUnitVectors(
+    scratch.currentDirection,
+    scratch.targetDirection,
+  )
+  bone.getWorldQuaternion(scratch.worldQuaternion)
+  scratch.worldQuaternion.premultiply(scratch.deltaQuaternion)
+  bone.parent.getWorldQuaternion(scratch.parentQuaternion).invert()
+  bone.quaternion.copy(
+    scratch.parentQuaternion.multiply(scratch.worldQuaternion),
+  )
+  bone.updateWorldMatrix(false, true)
+  return true
+}
+
+function solveMountedArmIk(upperArm, foreArm, hand, target, scratch) {
+  if (!upperArm || !foreArm || !hand || !target) return
+
+  upperArm.updateWorldMatrix(true, false)
+  foreArm.updateWorldMatrix(true, false)
+  hand.updateWorldMatrix(true, false)
+  scratch.shoulder.setFromMatrixPosition(upperArm.matrixWorld)
+  scratch.elbow.setFromMatrixPosition(foreArm.matrixWorld)
+  scratch.hand.setFromMatrixPosition(hand.matrixWorld)
+
+  const upperLength = scratch.shoulder.distanceTo(scratch.elbow)
+  const lowerLength = scratch.elbow.distanceTo(scratch.hand)
+  scratch.shoulderToTarget.subVectors(target, scratch.shoulder)
+  const targetDistance = scratch.shoulderToTarget.length()
+  if (upperLength < 1e-5 || lowerLength < 1e-5 || targetDistance < 1e-5) return
+
+  scratch.targetAxis.copy(scratch.shoulderToTarget).normalize()
+  scratch.currentElbowDirection
+    .subVectors(scratch.elbow, scratch.shoulder)
+    .normalize()
+  scratch.bendNormal.crossVectors(
+    scratch.targetAxis,
+    scratch.currentElbowDirection,
+  )
+  if (scratch.bendNormal.lengthSq() < 1e-6) {
+    scratch.bendNormal.crossVectors(scratch.targetAxis, scratch.worldUp)
+  }
+  scratch.bendNormal.normalize()
+  scratch.bendDirection
+    .crossVectors(scratch.bendNormal, scratch.targetAxis)
+    .normalize()
+
+  const reachableDistance = Math.min(
+    Math.max(targetDistance, Math.abs(upperLength - lowerLength) + 1e-4),
+    upperLength + lowerLength - 1e-4,
+  )
+  const elbowAlong =
+    (reachableDistance * reachableDistance +
+      upperLength * upperLength -
+      lowerLength * lowerLength) /
+    (2 * reachableDistance)
+  const elbowOut = Math.sqrt(
+    Math.max(upperLength * upperLength - elbowAlong * elbowAlong, 0),
+  )
+  scratch.elbowTarget
+    .copy(scratch.shoulder)
+    .addScaledVector(scratch.targetAxis, elbowAlong)
+    .addScaledVector(scratch.bendDirection, elbowOut)
+
+  aimBoneAtWorldPoint(upperArm, foreArm, scratch.elbowTarget, scratch)
+  aimBoneAtWorldPoint(foreArm, hand, target, scratch)
+}
 
 function MountedDragon({
   positionRef,
@@ -1972,6 +2062,9 @@ function MountedDragon({
   const widthRayRight = useMemo(() => new Vector3(), [])
   const widthRayOrigin = useMemo(() => new Vector3(), [])
   const widthRayDirection = useMemo(() => new Vector3(), [])
+  const handRayCenter = useMemo(() => new Vector3(), [])
+  const handRayForward = useMemo(() => new Vector3(), [])
+  const handRayRight = useMemo(() => new Vector3(), [])
   const widthMeasureFramesRef = useRef(0)
 
   const playAction = useCallback((name, { fallback = null, loop = true, pingpong = false, timeScale = 1, fade = 0.35 } = {}) => {
@@ -2016,6 +2109,13 @@ function MountedDragon({
     if (mountProfileRef) {
       mountProfileRef.current.width = DRAGON_RIDE_DEFAULT_BODY_WIDTH
       mountProfileRef.current.riderLift = DRAGON_RIDE_RIDER_LIFT
+      mountProfileRef.current.leftHandTarget ??= new Vector3()
+      mountProfileRef.current.rightHandTarget ??= new Vector3()
+      mountProfileRef.current.leftHandLocalTarget ??= new Vector3()
+      mountProfileRef.current.rightHandLocalTarget ??= new Vector3()
+      mountProfileRef.current.handTargetsReady = false
+      mountProfileRef.current.handTargetsMeasured = false
+      mountProfileRef.current.seatHeightMeasured = false
       mountProfileRef.current.ready = false
     }
     playAction('Dragon_Ancient_Dialogue_Relaxed_Idle', {
@@ -2094,6 +2194,75 @@ function MountedDragon({
         }
         mountProfileRef.current.ready = true
       }
+    }
+
+    if (mountProfileRef && !mountProfileRef.current.handTargetsMeasured) {
+      const gripHalfWidth = MathUtils.clamp(
+        mountProfileRef.current.width * 0.3,
+        0.14,
+        0.34,
+      )
+      handRayForward.set(Math.sin(yawRef.current), 0, Math.cos(yawRef.current))
+      handRayRight.set(Math.cos(yawRef.current), 0, -Math.sin(yawRef.current))
+      handRayCenter
+        .copy(boneWorldPosition)
+        .addScaledVector(handRayForward, DRAGON_RIDE_HAND_FORWARD_OFFSET)
+        .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_RAY_HEIGHT)
+
+      widthRayOrigin
+        .copy(handRayCenter)
+        .addScaledVector(handRayRight, -gripHalfWidth)
+      widthRaycaster.set(widthRayOrigin, widthRayDirection.set(0, -1, 0))
+      widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
+      const leftHits = widthRaycaster.intersectObject(dragon, true)
+
+      widthRayOrigin
+        .copy(handRayCenter)
+        .addScaledVector(handRayRight, gripHalfWidth)
+      widthRaycaster.set(widthRayOrigin, widthRayDirection.set(0, -1, 0))
+      widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
+      const rightHits = widthRaycaster.intersectObject(dragon, true)
+
+      if (leftHits.length > 0 && rightHits.length > 0) {
+        mountProfileRef.current.leftHandLocalTarget
+          .copy(leftHits[0].point)
+          .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_SURFACE_OFFSET)
+        saddleSocket.worldToLocal(mountProfileRef.current.leftHandLocalTarget)
+        mountProfileRef.current.rightHandLocalTarget
+          .copy(rightHits[0].point)
+          .addScaledVector(widthRayDirection, DRAGON_RIDE_HAND_SURFACE_OFFSET)
+        saddleSocket.worldToLocal(mountProfileRef.current.rightHandLocalTarget)
+        mountProfileRef.current.handTargetsMeasured = true
+      }
+    }
+
+    if (mountProfileRef && !mountProfileRef.current.seatHeightMeasured) {
+      widthRayOrigin
+        .copy(boneWorldPosition)
+        .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_RAY_HEIGHT)
+      widthRaycaster.set(widthRayOrigin, widthRayDirection.set(0, -1, 0))
+      widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
+      const seatHits = widthRaycaster.intersectObject(dragon, true)
+      if (seatHits.length > 0) {
+        mountProfileRef.current.riderLift = MathUtils.clamp(
+          seatHits[0].point.y -
+            boneWorldPosition.y +
+            DRAGON_RIDE_SEAT_SURFACE_OFFSET,
+          DRAGON_RIDE_RIDER_LIFT,
+          DRAGON_RIDE_MAX_RIDER_LIFT,
+        )
+        mountProfileRef.current.seatHeightMeasured = true
+      }
+    }
+
+    if (mountProfileRef?.current.handTargetsMeasured) {
+      mountProfileRef.current.leftHandTarget
+        .copy(mountProfileRef.current.leftHandLocalTarget)
+      saddleSocket.localToWorld(mountProfileRef.current.leftHandTarget)
+      mountProfileRef.current.rightHandTarget
+        .copy(mountProfileRef.current.rightHandLocalTarget)
+      saddleSocket.localToWorld(mountProfileRef.current.rightHandTarget)
+      mountProfileRef.current.handTargetsReady = true
     }
 
     const riderTransform = riderTransformRef.current
@@ -3947,26 +4116,60 @@ function PlayerAvatar({
   const rightArmBoneRef = useRef(null)
   const rightForeArmBoneRef = useRef(null)
   const rightHandBoneRef = useRef(null)
+  const leftArmBoneRef = useRef(null)
+  const leftForeArmBoneRef = useRef(null)
+  const leftHandBoneRef = useRef(null)
+  const mountedSpineBoneRef = useRef(null)
   const leftUpLegBoneRef = useRef(null)
   const rightUpLegBoneRef = useRef(null)
   const fingerBonesRef = useRef([])
+  const mountedFingerPoseRef = useRef(new Map())
+  const mountedArmScratch = useMemo(() => ({
+    start: new Vector3(),
+    end: new Vector3(),
+    currentDirection: new Vector3(),
+    targetDirection: new Vector3(),
+    shoulder: new Vector3(),
+    elbow: new Vector3(),
+    hand: new Vector3(),
+    shoulderToTarget: new Vector3(),
+    targetAxis: new Vector3(),
+    currentElbowDirection: new Vector3(),
+    bendNormal: new Vector3(),
+    bendDirection: new Vector3(),
+    elbowTarget: new Vector3(),
+    worldUp: new Vector3(0, 1, 0),
+    deltaQuaternion: new Quaternion(),
+    worldQuaternion: new Quaternion(),
+    parentQuaternion: new Quaternion(),
+  }), [])
 
   useEffect(() => {
     const fingers = []
+    const mountedFingerPose = new Map()
     avatar.traverse((child) => {
       if (!child.isBone) return
       if (child.name === 'mixamorigLeftUpLeg') leftUpLegBoneRef.current = child
       else if (child.name === 'mixamorigRightUpLeg') rightUpLegBoneRef.current = child
+      else if (child.name === 'mixamorigSpine2') mountedSpineBoneRef.current = child
+      else if (child.name === 'mixamorigLeftArm') leftArmBoneRef.current = child
+      else if (child.name === 'mixamorigLeftForeArm') leftForeArmBoneRef.current = child
+      else if (child.name === 'mixamorigLeftHand') leftHandBoneRef.current = child
       else if (child.name === 'mixamorigRightArm') rightArmBoneRef.current = child
       else if (child.name === 'mixamorigRightForeArm') rightForeArmBoneRef.current = child
       else if (child.name === 'mixamorigRightHand') {
         rightHandBoneRef.current = child
         if (handBoneRef) handBoneRef.current = child
-      } else if (child.name.startsWith('mixamorigRightHand')) {
+      } else if (
+        child.name.startsWith('mixamorigRightHand') ||
+        child.name.startsWith('mixamorigLeftHand')
+      ) {
         fingers.push(child)
+        mountedFingerPose.set(child, child.quaternion.clone())
       }
     })
     fingerBonesRef.current = fingers
+    mountedFingerPoseRef.current = mountedFingerPose
   }, [avatar, handBoneRef])
 
   useLayoutEffect(() => {
@@ -4098,6 +4301,51 @@ function PlayerAvatar({
     leftUpLeg.rotation.z += spread
     rightUpLeg.rotation.z -= spread
   }, 0.25)
+
+  useFrame(() => {
+    const profile = mountProfileRef?.current
+    if (
+      motion !== 'mountedIdle' ||
+      !profile?.handTargetsReady
+    ) {
+      return
+    }
+
+    const spine = mountedSpineBoneRef.current
+    if (spine) {
+      spine.rotation.x -= 0.28
+      spine.updateWorldMatrix(true, true)
+    }
+
+    solveMountedArmIk(
+      leftArmBoneRef.current,
+      leftForeArmBoneRef.current,
+      leftHandBoneRef.current,
+      profile.rightHandTarget,
+      mountedArmScratch,
+    )
+    solveMountedArmIk(
+      rightArmBoneRef.current,
+      rightForeArmBoneRef.current,
+      rightHandBoneRef.current,
+      profile.leftHandTarget,
+      mountedArmScratch,
+    )
+
+    for (const finger of fingerBonesRef.current) {
+      const lockedPose = mountedFingerPoseRef.current.get(finger)
+      if (!lockedPose) continue
+      finger.quaternion.copy(lockedPose)
+      const isThumb = finger.name.includes('Thumb')
+      finger.rotateX(
+        isThumb
+          ? 0.18
+          : finger.name.endsWith('1')
+            ? 0.38
+            : 0.24,
+      )
+    }
+  }, 0.65)
 
   return (
     <group>
@@ -11162,6 +11410,13 @@ function App() {
   const dragonRideMountProfileRef = useRef({
     width: DRAGON_RIDE_DEFAULT_BODY_WIDTH,
     riderLift: DRAGON_RIDE_RIDER_LIFT,
+    leftHandTarget: new Vector3(),
+    rightHandTarget: new Vector3(),
+    leftHandLocalTarget: new Vector3(),
+    rightHandLocalTarget: new Vector3(),
+    handTargetsReady: false,
+    handTargetsMeasured: false,
+    seatHeightMeasured: false,
     ready: false,
   })
   const dragonRideRiderTransformRef = useRef({
@@ -12554,6 +12809,9 @@ function App() {
     dragonRideYawRef.current = yaw
     dragonRideAnimStateRef.current = { airborne: false, moving: false }
     dragonRideMountProfileRef.current.ready = false
+    dragonRideMountProfileRef.current.handTargetsReady = false
+    dragonRideMountProfileRef.current.handTargetsMeasured = false
+    dragonRideMountProfileRef.current.seatHeightMeasured = false
     dragonRideRiderTransformRef.current.ready = false
     setDragonMounted(true)
   }
