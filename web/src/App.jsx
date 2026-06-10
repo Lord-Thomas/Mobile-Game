@@ -1927,9 +1927,8 @@ const DRAGON_SLEEP_DELAY = 4
 
 const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI / 2
 const PLAYER_MAX_RUN_SPEED = 3.4
-const DRAGON_RIDE_SPEED = PLAYER_MAX_RUN_SPEED * 2
-const DRAGON_RIDE_GROUND_SPEED = DRAGON_RIDE_SPEED
-const DRAGON_RIDE_FLY_SPEED = DRAGON_RIDE_SPEED
+const DRAGON_RIDE_GROUND_SPEED = PLAYER_MAX_RUN_SPEED * 1.6
+const DRAGON_RIDE_FLY_SPEED = PLAYER_MAX_RUN_SPEED * 2.3
 const DRAGON_RIDE_TURN_SPEED = 2.2
 const DRAGON_RIDE_CLIMB_SPEED = 4.5
 const DRAGON_RIDE_MAX_ALTITUDE = 16
@@ -1937,11 +1936,22 @@ const DRAGON_RIDE_RIDER_HEIGHT = 1.0
 const DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING = 9
 const DRAGON_RIDE_CAMERA_VERTICAL_DAMPING = 5
 const DRAGON_RIDE_CAMERA_ZOOM_DAMPING = 10
-const DRAGON_RIDE_SPINE_BONE_NAME = 'NPC_Spine2_021'
+const DRAGON_RIDE_SPINE_BONE_NAME = 'NPC_Neck2_041'
 // This rig's local -X points above the back.
 const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
+const DRAGON_RIDE_RIDER_LIFT = 0.16
+const DRAGON_RIDE_DEFAULT_BODY_WIDTH = 0.72
+const DRAGON_RIDE_MIN_BODY_WIDTH = 0.38
+const DRAGON_RIDE_MAX_BODY_WIDTH = 1.35
 
-function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, riderSocketRef }) {
+function MountedDragon({
+  positionRef,
+  yawRef,
+  animStateRef,
+  riderTransformRef,
+  riderSocketRef,
+  mountProfileRef,
+}) {
   const { scene, animations } = useGLTF('/models/dragon.glb')
   const dragon = useMemo(() => clone(scene), [scene])
   const { actions, mixer } = useAnimations(animations, dragon)
@@ -1957,13 +1967,22 @@ function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, r
   }, [])
   const boneWorldPosition = useMemo(() => new Vector3(), [])
   const boneWorldQuaternion = useMemo(() => new Quaternion(), [])
+  const widthRaycaster = useMemo(() => new Raycaster(), [])
+  const widthRayCenter = useMemo(() => new Vector3(), [])
+  const widthRayRight = useMemo(() => new Vector3(), [])
+  const widthRayOrigin = useMemo(() => new Vector3(), [])
+  const widthRayDirection = useMemo(() => new Vector3(), [])
+  const widthMeasureFramesRef = useRef(0)
 
-  const playAction = useCallback((name, { fallback = null, loop = true, pingpong = false, timeScale = 1, fade = 0.5 } = {}) => {
+  const playAction = useCallback((name, { fallback = null, loop = true, pingpong = false, timeScale = 1, fade = 0.35 } = {}) => {
     const action = actions[name] ?? (fallback ? actions[fallback] : null)
-    if (!action || currentActionRef.current === action) return action
+    if (!action) return action
+    if (currentActionRef.current === action) {
+      action.setEffectiveTimeScale(timeScale)
+      return action
+    }
     const prev = currentActionRef.current
-    if (prev) prev.fadeOut(fade)
-    if (!action.isRunning()) action.reset()
+    action.reset()
     const loopMode = !loop ? LoopOnce : pingpong ? LoopPingPong : LoopRepeat
     const loopCount = loop ? Infinity : 1
     action.setLoop(loopMode, loopCount)
@@ -1971,8 +1990,12 @@ function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, r
     action.paused = false
     action.setEffectiveWeight(1)
     action.setEffectiveTimeScale(timeScale)
-    if (fade > 0) action.fadeIn(fade)
     action.play()
+    if (prev && fade > 0) {
+      action.crossFadeFrom(prev, fade, true)
+    } else if (fade > 0) {
+      action.fadeIn(fade)
+    }
     action.clampWhenFinished = !loop
     currentActionRef.current = action
     return action
@@ -1987,9 +2010,18 @@ function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, r
     })
     riderBoneRef.current = dragon.getObjectByName(DRAGON_RIDE_SPINE_BONE_NAME) ?? null
     riderBoneRef.current?.add(saddleSocket)
+    widthMeasureFramesRef.current = 0
     if (riderSocketRef) riderSocketRef.current = saddleSocket
     if (riderTransformRef) riderTransformRef.current.ready = false
-    playAction('Dragon_Fly_Idle', { fallback: 'Dragon_Fly', fade: 0 })
+    if (mountProfileRef) {
+      mountProfileRef.current.width = DRAGON_RIDE_DEFAULT_BODY_WIDTH
+      mountProfileRef.current.riderLift = DRAGON_RIDE_RIDER_LIFT
+      mountProfileRef.current.ready = false
+    }
+    playAction('Dragon_Ancient_Dialogue_Relaxed_Idle', {
+      fallback: 'Dragon_Ancient_Patrol_Idle',
+      fade: 0,
+    })
     mixer.update(1 / 60)
     dragon.updateMatrixWorld(true)
     setPoseReady(true)
@@ -1998,8 +2030,9 @@ function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, r
       if (riderSocketRef?.current === saddleSocket) riderSocketRef.current = null
       riderBoneRef.current = null
       if (riderTransformRef) riderTransformRef.current.ready = false
+      if (mountProfileRef) mountProfileRef.current.ready = false
     }
-  }, [dragon, mixer, playAction, riderTransformRef, riderSocketRef, saddleSocket])
+  }, [dragon, mixer, mountProfileRef, playAction, riderTransformRef, riderSocketRef, saddleSocket])
 
   useFrame(() => {
     if (!groupRef.current) return
@@ -2009,8 +2042,20 @@ function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, r
 
     const state = animStateRef?.current
     if (state) {
-      if (state.airborne && state.moving) playAction('Dragon_Fly')
-      else playAction('Dragon_Fly_Idle', { fallback: 'Dragon_Fly' })
+      if (state.airborne) {
+        if (state.moving) {
+          playAction('Dragon_Fly', { fade: 0.42 })
+        } else {
+          playAction('Dragon_Fly_Idle', { fallback: 'Dragon_Fly', fade: 0.42 })
+        }
+      } else if (state.moving) {
+        playAction('Dragon_Run', { timeScale: 1.15, fade: 0.28 })
+      } else {
+        playAction('Dragon_Ancient_Dialogue_Relaxed_Idle', {
+          fallback: 'Dragon_Ancient_Patrol_Idle',
+          fade: 0.35,
+        })
+      }
     }
 
     if (!riderTransformRef) return
@@ -2019,6 +2064,37 @@ function MountedDragon({ positionRef, yawRef, animStateRef, riderTransformRef, r
     saddleSocket.updateWorldMatrix(true, false)
     saddleSocket.getWorldPosition(boneWorldPosition)
     saddleSocket.getWorldQuaternion(boneWorldQuaternion)
+
+    if (mountProfileRef && !mountProfileRef.current.ready) {
+      widthMeasureFramesRef.current += 1
+      if (widthMeasureFramesRef.current >= 3) {
+        widthRayCenter.copy(boneWorldPosition)
+        widthRayCenter.y -= 0.18
+        widthRayRight.set(Math.cos(yawRef.current), 0, -Math.sin(yawRef.current))
+        const rayDistance = DRAGON_RIDE_MAX_BODY_WIDTH
+
+        widthRayOrigin.copy(widthRayCenter).addScaledVector(widthRayRight, rayDistance)
+        widthRayDirection.copy(widthRayRight).multiplyScalar(-1)
+        widthRaycaster.set(widthRayOrigin, widthRayDirection)
+        widthRaycaster.far = rayDistance * 2
+        const rightHits = widthRaycaster.intersectObject(dragon, true)
+
+        widthRayOrigin.copy(widthRayCenter).addScaledVector(widthRayRight, -rayDistance)
+        widthRayDirection.copy(widthRayRight)
+        widthRaycaster.set(widthRayOrigin, widthRayDirection)
+        widthRaycaster.far = rayDistance * 2
+        const leftHits = widthRaycaster.intersectObject(dragon, true)
+
+        if (rightHits.length > 0 && leftHits.length > 0) {
+          mountProfileRef.current.width = MathUtils.clamp(
+            rightHits[0].point.distanceTo(leftHits[0].point),
+            DRAGON_RIDE_MIN_BODY_WIDTH,
+            DRAGON_RIDE_MAX_BODY_WIDTH,
+          )
+        }
+        mountProfileRef.current.ready = true
+      }
+    }
 
     const riderTransform = riderTransformRef.current
     riderTransform.position.copy(boneWorldPosition)
@@ -2648,7 +2724,7 @@ function Player({
         nextAltitude = Math.max(0, altitude - DRAGON_RIDE_CLIMB_SPEED * delta)
       }
 
-      const speed = altitude > 0.05 ? DRAGON_RIDE_FLY_SPEED : DRAGON_RIDE_GROUND_SPEED
+      const speed = nextAltitude > 0.05 ? DRAGON_RIDE_FLY_SPEED : DRAGON_RIDE_GROUND_SPEED
       const forwardInput = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
       const dirX = Math.sin(yaw)
       const dirZ = Math.cos(yaw)
@@ -2670,8 +2746,11 @@ function Player({
       dragonRide.yawRef.current = yaw
 
       const riderTransform = dragonRide.riderTransformRef?.current
+      const riderLift = dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT
       const riderX = riderTransform?.ready ? riderTransform.position.x : nextX
-      const riderY = riderTransform?.ready ? riderTransform.position.y : nextY + DRAGON_RIDE_RIDER_HEIGHT
+      const riderY = riderTransform?.ready
+        ? riderTransform.position.y + riderLift
+        : nextY + DRAGON_RIDE_RIDER_HEIGHT + riderLift
       const riderZ = riderTransform?.ready ? riderTransform.position.z : nextZ
 
       key.actionQueued = false
@@ -2692,12 +2771,12 @@ function Player({
       playerBodyRef.current.setNextKinematicTranslation({ x: riderX, y: riderY, z: riderZ })
       if (playerBodyYawRef) playerBodyYawRef.current = yaw
 
-      setPlayerMotion((current) => (current === 'sittingIdle' ? current : 'sittingIdle'))
+      setPlayerMotion((current) => (current === 'mountedIdle' ? current : 'mountedIdle'))
       if (localPlayerStateRef) {
         localPlayerStateRef.current = {
           position: [riderX, riderY, riderZ],
           rotationY: yaw,
-          motion: 'sittingIdle',
+          motion: 'mountedIdle',
           zone: currentZone,
         }
       }
@@ -3359,6 +3438,7 @@ function Player({
     if (!dragonRide?.active || !riderSocket || !playerGroup || !playerParent) return
 
     riderSocket.getWorldPosition(mountedPlayerLocalPosition)
+    mountedPlayerLocalPosition.y += dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT
     playerBodyRef.current?.setNextKinematicTranslation({
       x: mountedPlayerLocalPosition.x,
       y: mountedPlayerLocalPosition.y,
@@ -3374,6 +3454,7 @@ function Player({
     if (!dragonRide?.active || !riderSocket) return
 
     riderSocket.getWorldPosition(dragonCameraSocketPosition)
+    dragonCameraSocketPosition.y += dragonRide.mountProfileRef?.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT
     const dragonPosition = dragonRide.positionRef.current
     const rideOffset = dragonCameraRideOffsetRef.current
     const cameraFocus = dragonCameraFocusRef.current
@@ -3441,6 +3522,7 @@ function Player({
         <PlayerAvatar
           motion={playerMotion}
           handBoneRef={handBoneRef}
+          mountProfileRef={dragonRide?.mountProfileRef}
           equippedWeapon={equippedWeapon}
           appearance={appearance}
           currentZone={currentZone}
@@ -3640,6 +3722,7 @@ function CharacterAuraGlow({ visible }) {
 function PlayerAvatar({
   motion,
   handBoneRef,
+  mountProfileRef,
   equippedWeapon,
   appearance,
   currentZone,
@@ -3836,6 +3919,7 @@ function PlayerAvatar({
       { source: jumpLand.animations[0], name: 'jumpLand' },
       { source: sitDown.animations[0], name: 'sitDown' },
       { source: sittingIdle.animations[0], name: 'sittingIdle' },
+      { source: sittingIdle.animations[0], name: 'mountedIdle' },
       { source: standUp.animations[0], name: 'standUp' },
     ]
 
@@ -3847,7 +3931,7 @@ function PlayerAvatar({
         if (name === 'wave' || name === 'dance' || name === 'pointingUp') {
           lockEmoteHipsHeight(clip, hipsRestHeight)
         }
-        if (name === 'sitDown' || name === 'sittingIdle' || name === 'standUp' || name === 'walk' || name === 'run') {
+        if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run') {
           lockHipsPlanarPosition(clip)
         }
         return clip
@@ -3863,13 +3947,17 @@ function PlayerAvatar({
   const rightArmBoneRef = useRef(null)
   const rightForeArmBoneRef = useRef(null)
   const rightHandBoneRef = useRef(null)
+  const leftUpLegBoneRef = useRef(null)
+  const rightUpLegBoneRef = useRef(null)
   const fingerBonesRef = useRef([])
 
   useEffect(() => {
     const fingers = []
     avatar.traverse((child) => {
       if (!child.isBone) return
-      if (child.name === 'mixamorigRightArm') rightArmBoneRef.current = child
+      if (child.name === 'mixamorigLeftUpLeg') leftUpLegBoneRef.current = child
+      else if (child.name === 'mixamorigRightUpLeg') rightUpLegBoneRef.current = child
+      else if (child.name === 'mixamorigRightArm') rightArmBoneRef.current = child
       else if (child.name === 'mixamorigRightForeArm') rightForeArmBoneRef.current = child
       else if (child.name === 'mixamorigRightHand') {
         rightHandBoneRef.current = child
@@ -3990,6 +4078,26 @@ function PlayerAvatar({
       finger.rotation.z = MathUtils.lerp(finger.rotation.z, 0.0, 0.9)
     }
   })
+
+  useFrame(() => {
+    if (motion !== 'mountedIdle') return
+    const leftUpLeg = leftUpLegBoneRef.current
+    const rightUpLeg = rightUpLegBoneRef.current
+    if (!leftUpLeg || !rightUpLeg) return
+
+    const mountWidth = MathUtils.clamp(
+      mountProfileRef?.current?.width ?? DRAGON_RIDE_DEFAULT_BODY_WIDTH,
+      DRAGON_RIDE_MIN_BODY_WIDTH,
+      DRAGON_RIDE_MAX_BODY_WIDTH,
+    )
+    const spread = MathUtils.lerp(
+      0.12,
+      0.48,
+      MathUtils.smoothstep(mountWidth, DRAGON_RIDE_MIN_BODY_WIDTH, DRAGON_RIDE_MAX_BODY_WIDTH),
+    )
+    leftUpLeg.rotation.z += spread
+    rightUpLeg.rotation.z -= spread
+  }, 0.25)
 
   return (
     <group>
@@ -11051,6 +11159,11 @@ function App() {
   const dragonRideYawRef = useRef(0)
   const dragonRideAnimStateRef = useRef({ airborne: false, moving: false })
   const dragonRideSocketRef = useRef(null)
+  const dragonRideMountProfileRef = useRef({
+    width: DRAGON_RIDE_DEFAULT_BODY_WIDTH,
+    riderLift: DRAGON_RIDE_RIDER_LIFT,
+    ready: false,
+  })
   const dragonRideRiderTransformRef = useRef({
     position: new Vector3(),
     quaternion: new Quaternion(),
@@ -12440,6 +12553,7 @@ function App() {
     dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
     dragonRideYawRef.current = yaw
     dragonRideAnimStateRef.current = { airborne: false, moving: false }
+    dragonRideMountProfileRef.current.ready = false
     dragonRideRiderTransformRef.current.ready = false
     setDragonMounted(true)
   }
@@ -13003,6 +13117,7 @@ function App() {
                 animStateRef={dragonRideAnimStateRef}
                 riderTransformRef={dragonRideRiderTransformRef}
                 riderSocketRef={dragonRideSocketRef}
+                mountProfileRef={dragonRideMountProfileRef}
               />
             )}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
@@ -13178,6 +13293,7 @@ function App() {
                 animStateRef: dragonRideAnimStateRef,
                 riderTransformRef: dragonRideRiderTransformRef,
                 riderSocketRef: dragonRideSocketRef,
+                mountProfileRef: dragonRideMountProfileRef,
               }}
             />
           )}
