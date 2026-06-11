@@ -13,6 +13,7 @@
     "thumbnails": "vite --host 127.0.0.1 --port 5173 --open /?tool=thumbnail"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
     "@colyseus/schema": "^3.0.76",
     "@colyseus/tools": "^0.16.20",
     "@dgreenheck/ez-tree": "^1.1.0",

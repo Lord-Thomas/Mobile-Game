@@ -32,7 +32,12 @@
       "Bash(ls -la public/models/Waving.fbx)",
       "Bash(sed -n '1580,1596p' src/App.jsx)",
       "Bash(sed -n '6945,6955p' src/App.jsx)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(npm install *)",
+      "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies['@anthropic-ai/sdk']\\)\")",
+      "Bash(npx eslint *)"
     ]
   }
 }

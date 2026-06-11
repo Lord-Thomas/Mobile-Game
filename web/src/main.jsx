@@ -8,13 +8,16 @@ import App from './App.jsx'
 ColorManagement.enabled = true
 
 const params = new URLSearchParams(window.location.search)
-const isTreeEditor = params.has('treeeditor') || params.has('editor')
+// ?editor opens the dev editor; optional value picks the mode (?editor=tree|house|particles).
+// ?treeeditor is kept as a legacy alias.
+const isEditor = params.has('editor') || params.has('treeeditor')
 
-if (isTreeEditor) {
-  import('./tools/TreeEditor.jsx').then(({ default: TreeEditor }) => {
+if (isEditor) {
+  const initialMode = params.get('editor') || (params.has('treeeditor') ? 'tree' : '')
+  import('./tools/Editor.jsx').then(({ default: Editor }) => {
     createRoot(document.getElementById('root')).render(
       <StrictMode>
-        <TreeEditor />
+        <Editor initialMode={initialMode || 'tree'} />
       </StrictMode>
     )
   })

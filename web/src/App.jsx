@@ -2196,7 +2196,7 @@ function MountedDragon({
     const state = animStateRef?.current
     if (state) {
       if (state.airborne) {
-        if (state.moving) {
+        if (state.movingForward) {
           playAction('Dragon_Fly', { fade: 0.42 })
         } else {
           playAction('Dragon_Fly_Idle', { fallback: 'Dragon_Fly', fade: 0.42 })
@@ -3043,12 +3043,19 @@ function Player({
       const altitude = pos.y - groundY
       let nextAltitude = altitude
       if (flight.up) {
-        nextAltitude = Math.min(DRAGON_RIDE_MAX_ALTITUDE, altitude + DRAGON_RIDE_CLIMB_SPEED * delta)
+        nextAltitude = Math.min(
+          DRAGON_RIDE_MAX_ALTITUDE,
+          altitude + DRAGON_RIDE_CLIMB_SPEED * delta,
+        )
       } else if (flight.down) {
-        nextAltitude = Math.max(0, altitude - DRAGON_RIDE_CLIMB_SPEED * delta)
+        nextAltitude = Math.max(
+          0,
+          altitude - DRAGON_RIDE_CLIMB_SPEED * delta,
+        )
       }
 
-      const speed = nextAltitude > 0.05 ? DRAGON_RIDE_FLY_SPEED : DRAGON_RIDE_GROUND_SPEED
+      const nextIsFlying = nextAltitude > 0.05
+      const speed = nextIsFlying ? DRAGON_RIDE_FLY_SPEED : DRAGON_RIDE_GROUND_SPEED
       const forwardInput = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
       const dirX = Math.sin(yaw)
       const dirZ = Math.cos(yaw)
@@ -3064,8 +3071,9 @@ function Player({
       dragonRide.positionRef.current.z = nextZ
 
       if (dragonRide.animStateRef) {
-        dragonRide.animStateRef.current.airborne = nextAltitude > 0.05
+        dragonRide.animStateRef.current.airborne = nextIsFlying
         dragonRide.animStateRef.current.moving = forwardInput !== 0
+        dragonRide.animStateRef.current.movingForward = forwardInput > 0
       }
       dragonRide.yawRef.current = yaw
 
@@ -11580,7 +11588,11 @@ function App() {
   const catTapCallbackRef = useRef(null)
   const dragonRidePositionRef = useRef({ x: 0, y: 0, z: 0 })
   const dragonRideYawRef = useRef(0)
-  const dragonRideAnimStateRef = useRef({ airborne: false, moving: false })
+  const dragonRideAnimStateRef = useRef({
+    airborne: false,
+    moving: false,
+    movingForward: false,
+  })
   const dragonRideSocketRef = useRef(null)
   const dragonRideMountProfileRef = useRef({
     width: DRAGON_RIDE_DEFAULT_BODY_WIDTH,
@@ -12982,7 +12994,11 @@ function App() {
     const groundY = currentZone === ZONES.outside ? getTerrainHeight(spawnX, spawnZ) : 0
     dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
     dragonRideYawRef.current = yaw
-    dragonRideAnimStateRef.current = { airborne: false, moving: false }
+    dragonRideAnimStateRef.current = {
+      airborne: false,
+      moving: false,
+      movingForward: false,
+    }
     dragonRideMountProfileRef.current.riderLift = DRAGON_RIDE_RIDER_LIFT
     dragonRideMountProfileRef.current.ready = false
     dragonRideMountProfileRef.current.handTargetsReady = false

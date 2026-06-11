@@ -1,15 +1,38 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { MathUtils } from 'three'
+import { ACESFilmicToneMapping, MathUtils, SRGBColorSpace } from 'three'
 import OutdoorNeighborhood from '../world/OutdoorNeighborhood'
 import { TreeDevScene, TreeDevPanel } from './TreeDevTool'
 import { HouseDevPanel, HouseDevScene } from './HouseDevTool'
+import { ParticleDevScene, ParticleDevPanel } from './ParticleDevTool'
 import { estimateTreeHeight } from '../world/trees/proceduralTreeConfig'
 import { getTerrainHeight } from '../world/terrain/terrainGeometry'
+import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { useTreeEditorStore } from './treeEditorStore'
 
-function TreeEditorCamera({ controlsRef, mode }) {
+// The whole outdoor world (terrain, houses, lights) lives on OUTDOOR_LIGHT_LAYER.
+// The editor camera must enable that layer or nothing renders, and the preview
+// subjects must join it or the outdoor lights ignore them.
+function EditorCameraLayers() {
+  const { camera } = useThree()
+  useEffect(() => {
+    camera.layers.enable(OUTDOOR_LIGHT_LAYER)
+  }, [camera])
+  return null
+}
+
+function EditorStage({ children }) {
+  const groupRef = useRef()
+  useLayoutEffect(() => {
+    groupRef.current?.traverse((object) => {
+      object.layers.set(OUTDOOR_LIGHT_LAYER)
+    })
+  })
+  return <group ref={groupRef}>{children}</group>
+}
+
+function EditorCamera({ controlsRef, mode }) {
   const { camera } = useThree()
   const { config } = useTreeEditorStore()
   const cameraSignature = useMemo(() => JSON.stringify({
@@ -32,6 +55,19 @@ function TreeEditorCamera({ controlsRef, mode }) {
         controlsRef.current.target.set(0, 2.2, 0)
         controlsRef.current.minDistance = 4
         controlsRef.current.maxDistance = 50
+        controlsRef.current.update()
+      }
+      return
+    }
+
+    if (mode === 'particles') {
+      const groundY = getTerrainHeight(0, 0)
+      camera.position.set(5.5, groundY + 3.2, 5.5)
+      camera.lookAt(0, groundY + 1.3, 0)
+      if (controlsRef.current) {
+        controlsRef.current.target.set(0, groundY + 1.3, 0)
+        controlsRef.current.minDistance = 1.5
+        controlsRef.current.maxDistance = 45
         controlsRef.current.update()
       }
       return
@@ -63,10 +99,16 @@ function TreeEditorCamera({ controlsRef, mode }) {
   return null
 }
 
-export default function TreeEditor() {
+const MODES = [
+  { id: 'tree', label: 'Arbre' },
+  { id: 'house', label: 'Maison' },
+  { id: 'particles', label: 'Particules' },
+]
+
+export default function Editor({ initialMode = 'tree' }) {
   const noPlayerRef = useRef({ x: 9999, y: 0, z: 9999 })
   const controlsRef = useRef(null)
-  const [mode, setMode] = useState('tree')
+  const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
@@ -74,19 +116,39 @@ export default function TreeEditor() {
         shadows
         camera={{ fov: 52, position: [30, 18, 30], near: 0.1, far: 300 }}
         gl={{ antialias: true }}
+        onCreated={({ gl }) => {
+          gl.outputColorSpace = SRGBColorSpace
+          gl.toneMapping = ACESFilmicToneMapping
+          gl.toneMappingExposure = 1.1
+        }}
       >
         <Suspense fallback={null}>
           <OutdoorNeighborhood lightingActive={true} playerPositionRef={noPlayerRef} showAuthoredTrees={false} />
-          {mode === 'tree' ? <TreeDevScene /> : <HouseDevScene />}
+          <EditorStage>
+            {mode === 'tree' && <TreeDevScene />}
+            {mode === 'house' && <HouseDevScene />}
+            {mode === 'particles' && <ParticleDevScene />}
+          </EditorStage>
         </Suspense>
-        <TreeEditorCamera controlsRef={controlsRef} mode={mode} />
-        <OrbitControls ref={controlsRef} target={[0, 8, 0]} minDistance={3} maxDistance={150} />
+        <EditorCameraLayers />
+        <EditorCamera controlsRef={controlsRef} mode={mode} />
+        <OrbitControls ref={controlsRef} target={[0, 8, 0]} minDistance={1.5} maxDistance={150} />
       </Canvas>
       <div style={modeSwitchStyle}>
-        <button type="button" onClick={() => setMode('tree')} style={mode === 'tree' ? activeModeButtonStyle : modeButtonStyle}>Arbre</button>
-        <button type="button" onClick={() => setMode('house')} style={mode === 'house' ? activeModeButtonStyle : modeButtonStyle}>Maison</button>
+        {MODES.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            onClick={() => setMode(entry.id)}
+            style={mode === entry.id ? activeModeButtonStyle : modeButtonStyle}
+          >
+            {entry.label}
+          </button>
+        ))}
       </div>
-      {mode === 'tree' ? <TreeDevPanel /> : <HouseDevPanel />}
+      {mode === 'tree' && <TreeDevPanel />}
+      {mode === 'house' && <HouseDevPanel />}
+      {mode === 'particles' && <ParticleDevPanel />}
     </div>
   )
 }
