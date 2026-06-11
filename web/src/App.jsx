@@ -5,6 +5,8 @@ import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, B
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import ParticleEffect from './effects/ParticleEffect'
+import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
@@ -177,6 +179,9 @@ const CHARGE_TIME_MS = 1200
 const MIN_CHARGE_RATIO = 0.2
 const PLAYER_MAX_HP = 100
 const PLAYER_DAMAGE_INVULNERABILITY_MS = 420
+const PLAYER_REGEN_DELAY_MS = 20000
+const PLAYER_REGEN_TICK_MS = 500
+const PLAYER_REGEN_HP_PER_TICK = 2
 const PLAYER_JUMP_START_DURATION = 0.62
 const PLAYER_JUMP_LAND_DURATION = 0.38
 const PLAYER_LANDING_PREPARE_DISTANCE = 0.95
@@ -189,6 +194,8 @@ const PLAYER_DANCE_DURATION = 15.97
 const PLAYER_POINTING_UP_DURATION = 2.4
 const PLAYER_SIT_DOWN_DURATION = 1.05
 const PLAYER_STAND_UP_DURATION = 1.05
+const MOB_DEATH_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'mob_death')
+const HEAL_AURA_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'heal_aura')
 const PLAYER_SITTING_HEIGHT = 0.34
 const SEAT_INTERACTION_DISTANCE = 1.1
 const EMOTE_LONG_PRESS_MS = 420
@@ -2075,7 +2082,7 @@ function MountedDragon({
   const { actions, mixer } = useAnimations(animations, dragon)
   const groupRef = useRef()
   const currentActionRef = useRef(null)
-  const [poseReady, setPoseReady] = useState(false)
+  const revealPendingRef = useRef(true)
   const saddleBonesRef = useRef(null)
   const virtualSaddleReadyRef = useRef(false)
   const saddleSocket = useMemo(() => {
@@ -2141,6 +2148,8 @@ function MountedDragon({
   }, [actions])
 
   useLayoutEffect(() => {
+    if (groupRef.current) groupRef.current.visible = false
+    revealPendingRef.current = true
     dragon.traverse((object) => {
       if (object instanceof Mesh) {
         object.castShadow = true
@@ -2170,14 +2179,73 @@ function MountedDragon({
       mountProfileRef.current.seatHeightMeasured = false
       mountProfileRef.current.ready = false
     }
-    playAction('Dragon_Ancient_Dialogue_Relaxed_Idle', {
+    const initialAction = playAction('Dragon_Ancient_Dialogue_Relaxed_Idle', {
       fallback: 'Dragon_Ancient_Patrol_Idle',
       fade: 0,
     })
-    mixer.update(1 / 60)
+    if (initialAction) {
+      mixer.update(1 / 60)
+      dragon.updateMatrixWorld(true)
+
+      const saddleBones = saddleBonesRef.current
+      if (
+        saddleBones?.spine2 &&
+        saddleBones.spine3 &&
+        saddleBones.neck1 &&
+        saddleBones.calibration
+      ) {
+        dragon.getWorldQuaternion(saddleDragonWorldQuaternion)
+        saddleInverseDragonQuaternion.copy(saddleDragonWorldQuaternion).invert()
+
+        saddleBones.spine2.getWorldPosition(saddleSpine2Position)
+        saddleBones.spine3.getWorldPosition(saddleSpine3Position)
+        saddleBones.neck1.getWorldPosition(saddleNeck1Position)
+        dragon.worldToLocal(saddleSpine2Position)
+        dragon.worldToLocal(saddleSpine3Position)
+        dragon.worldToLocal(saddleNeck1Position)
+        saddleTargetPosition
+          .copy(saddleSpine2Position)
+          .multiplyScalar(0.4)
+          .addScaledVector(saddleSpine3Position, 0.4)
+          .addScaledVector(saddleNeck1Position, 0.2)
+
+        saddleBones.spine2.getWorldQuaternion(saddleSpine2Quaternion)
+        saddleBones.spine3.getWorldQuaternion(saddleSpine3Quaternion)
+        saddleBones.neck1.getWorldQuaternion(saddleNeck1Quaternion)
+        saddleSpine2Quaternion.premultiply(saddleInverseDragonQuaternion)
+        saddleSpine3Quaternion.premultiply(saddleInverseDragonQuaternion)
+        saddleNeck1Quaternion.premultiply(saddleInverseDragonQuaternion)
+        saddleTargetQuaternion
+          .copy(saddleSpine2Quaternion)
+          .slerp(saddleSpine3Quaternion, 0.5)
+          .slerp(saddleNeck1Quaternion, 0.2)
+
+        saddleBones.calibration.localToWorld(
+          saddleCalibrationPosition.copy(DRAGON_RIDE_SADDLE_LOCAL_POSITION),
+        )
+        saddleBones.calibration.getWorldQuaternion(saddleCalibrationQuaternion)
+        dragon.worldToLocal(saddleCalibrationPosition)
+        saddleCalibrationQuaternion.premultiply(saddleInverseDragonQuaternion)
+        saddleFrameOffset
+          .subVectors(saddleCalibrationPosition, saddleTargetPosition)
+          .applyQuaternion(
+            saddleFilteredQuaternion.copy(saddleTargetQuaternion).invert(),
+          )
+        saddleFrameQuaternion
+          .copy(saddleTargetQuaternion)
+          .invert()
+          .multiply(saddleCalibrationQuaternion)
+        saddleFilteredPosition.copy(saddleTargetPosition)
+        saddleFilteredQuaternion.copy(saddleTargetQuaternion)
+        virtualSaddleReadyRef.current = true
+      }
+
+      mixer.update(0.08)
+    }
     dragon.updateMatrixWorld(true)
-    setPoseReady(true)
     return () => {
+      revealPendingRef.current = true
+      if (groupRef.current) groupRef.current.visible = false
       saddleSocket.removeFromParent()
       if (riderSocketRef?.current === saddleSocket) riderSocketRef.current = null
       saddleBonesRef.current = null
@@ -2422,10 +2490,32 @@ function MountedDragon({
     riderTransform.position.copy(boneWorldPosition)
     riderTransform.quaternion.copy(boneWorldQuaternion)
     riderTransform.ready = true
+
+    if (revealPendingRef.current) {
+      const initialAction =
+        actions.Dragon_Ancient_Dialogue_Relaxed_Idle ??
+        actions.Dragon_Ancient_Patrol_Idle
+      if (initialAction) {
+        initialAction
+          .reset()
+          .setLoop(LoopRepeat, Infinity)
+          .setEffectiveWeight(1)
+          .setEffectiveTimeScale(1)
+          .play()
+        initialAction.enabled = true
+        initialAction.paused = false
+        currentActionRef.current = initialAction
+        mixer.update(1 / 30)
+      }
+      dragon.updateMatrixWorld(true)
+      groupRef.current.visible = true
+      revealPendingRef.current = false
+    }
+
   }, 0.1)
 
   return (
-    <group ref={groupRef} scale={2} visible={poseReady} userData={{ debugCategory: 'npcs' }}>
+    <group ref={groupRef} scale={2} userData={{ debugCategory: 'npcs' }}>
       <primitive object={dragon} />
     </group>
   )
@@ -7734,6 +7824,58 @@ function canMobSeePlayer(enemyPosition, enemyYaw, playerPosition, visibilityRang
   return dot >= minDot
 }
 
+function RuntimeParticleEffect({
+  preset,
+  playing = true,
+  loop = false,
+  playbackId = 0,
+  layer = OUTDOOR_LIGHT_LAYER,
+}) {
+  const groupRef = useRef()
+
+  useLayoutEffect(() => {
+    groupRef.current?.traverse((object) => {
+      object.layers.set(layer)
+    })
+  }, [layer])
+
+  if (!preset) return null
+
+  return (
+    <group ref={groupRef}>
+      <ParticleEffect
+        preset={preset}
+        playing={playing}
+        loop={loop}
+        playbackId={playbackId}
+      />
+    </group>
+  )
+}
+
+function PlayerHealingAura({ active, playerPositionRef, layer }) {
+  const groupRef = useRef()
+
+  useFrame(() => {
+    const position = playerPositionRef?.current
+    if (!groupRef.current || !position) return
+    groupRef.current.position.set(position.x, position.y - PLAYER_HEIGHT, position.z)
+  })
+
+  if (!active) return null
+
+  return (
+    <group ref={groupRef}>
+      <RuntimeParticleEffect
+        preset={HEAL_AURA_PARTICLE_PRESET}
+        playing
+        loop
+        layer={layer}
+      />
+    </group>
+  )
+}
+
 function SmallMushroomEnemy({
   enemyId,
   spawnIndex = 0,
@@ -8331,10 +8473,16 @@ function SmallMushroomEnemy({
         </>
       )}
       {defeated && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
-          <ringGeometry args={[0.28, 0.42, 32]} />
-          <meshBasicMaterial color="#83d37b" transparent opacity={0.34} />
-        </mesh>
+        <>
+          <RuntimeParticleEffect
+            preset={MOB_DEATH_PARTICLE_PRESET}
+            playbackId={enemyId}
+          />
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
+            <ringGeometry args={[0.28, 0.42, 32]} />
+            <meshBasicMaterial color="#83d37b" transparent opacity={0.34} />
+          </mesh>
+        </>
       )}
       {damageNumbers.map((number) => (
         <Html key={number.id} position={[number.x, number.y, number.z]} center transform sprite distanceFactor={4.6}>
@@ -11619,9 +11767,12 @@ function App() {
   const [scorePopups, setScorePopups] = useState([])
   const [coins, setCoins] = useState(isAdminMode ? 850 : 0)
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP)
+  const [playerHealing, setPlayerHealing] = useState(false)
   const playerHpRef = useRef(PLAYER_MAX_HP)
   const playerDamageLockRef = useRef(false)
   const playerRespawnTimerRef = useRef(null)
+  const playerRegenDelayRef = useRef(null)
+  const playerRegenIntervalRef = useRef(null)
   const [ownedSkins, setOwnedSkins] = useState(['classic'])
   const [selectedSkinId, setSelectedSkinId] = useState('classic')
   const [previewSkinId, setPreviewSkinId] = useState('classic')
@@ -12671,6 +12822,51 @@ function App() {
     ])
   }
 
+  const stopPlayerRegeneration = useCallback(() => {
+    if (playerRegenDelayRef.current) {
+      window.clearTimeout(playerRegenDelayRef.current)
+      playerRegenDelayRef.current = null
+    }
+    if (playerRegenIntervalRef.current) {
+      window.clearInterval(playerRegenIntervalRef.current)
+      playerRegenIntervalRef.current = null
+    }
+    setPlayerHealing(false)
+  }, [])
+
+  const schedulePlayerRegeneration = useCallback(() => {
+    stopPlayerRegeneration()
+    playerRegenDelayRef.current = window.setTimeout(() => {
+      playerRegenDelayRef.current = null
+      if (playerHpRef.current <= 0 || playerHpRef.current >= PLAYER_MAX_HP) return
+
+      setPlayerHealing(true)
+      const healTick = () => {
+        const nextHp = Math.min(PLAYER_MAX_HP, playerHpRef.current + PLAYER_REGEN_HP_PER_TICK)
+        playerHpRef.current = nextHp
+        setPlayerHp(nextHp)
+
+        if (nextHp >= PLAYER_MAX_HP) {
+          if (playerRegenIntervalRef.current) {
+            window.clearInterval(playerRegenIntervalRef.current)
+          }
+          playerRegenIntervalRef.current = null
+          setPlayerHealing(false)
+        }
+      }
+
+      healTick()
+      if (playerHpRef.current < PLAYER_MAX_HP) {
+        playerRegenIntervalRef.current = window.setInterval(healTick, PLAYER_REGEN_TICK_MS)
+      }
+    }, PLAYER_REGEN_DELAY_MS)
+  }, [stopPlayerRegeneration])
+
+  useEffect(() => () => {
+    if (playerRegenDelayRef.current) window.clearTimeout(playerRegenDelayRef.current)
+    if (playerRegenIntervalRef.current) window.clearInterval(playerRegenIntervalRef.current)
+  }, [])
+
   const handlePlayerHit = useCallback(({ damage = MUSHROOM_ENEMY_ATTACK_DAMAGE } = {}) => {
     if (playerDamageLockRef.current || playerHpRef.current <= 0) return false
     playerDamageLockRef.current = true
@@ -12678,28 +12874,30 @@ function App() {
       playerDamageLockRef.current = false
     }, PLAYER_DAMAGE_INVULNERABILITY_MS)
 
-    setPlayerHp((current) => {
-      const nextHp = Math.max(0, current - damage)
-      playerHpRef.current = nextHp
-      if (nextHp <= 0 && !playerRespawnTimerRef.current) {
-        playerRespawnTimerRef.current = window.setTimeout(() => {
-          playerRespawnTimerRef.current = null
-          playerDamageLockRef.current = false
-          playerHpRef.current = PLAYER_MAX_HP
-          setPlayerHp(PLAYER_MAX_HP)
-          const spawn = PLAYER_SPAWNS.outside
-          setSpawnRequest({ zone: ZONES.outside, position: spawn, token: Date.now() })
-          touchRef.current.moveX = 0
-          touchRef.current.moveY = 0
-          touchRef.current.actionQueued = false
-          touchRef.current.emoteQueued = null
-        }, 900)
-      }
-      return nextHp
-    })
+    stopPlayerRegeneration()
+    const nextHp = Math.max(0, playerHpRef.current - damage)
+    playerHpRef.current = nextHp
+    setPlayerHp(nextHp)
+
+    if (nextHp > 0) {
+      schedulePlayerRegeneration()
+    } else if (!playerRespawnTimerRef.current) {
+      playerRespawnTimerRef.current = window.setTimeout(() => {
+        playerRespawnTimerRef.current = null
+        playerDamageLockRef.current = false
+        playerHpRef.current = PLAYER_MAX_HP
+        setPlayerHp(PLAYER_MAX_HP)
+        const spawn = PLAYER_SPAWNS.outside
+        setSpawnRequest({ zone: ZONES.outside, position: spawn, token: Date.now() })
+        touchRef.current.moveX = 0
+        touchRef.current.moveY = 0
+        touchRef.current.actionQueued = false
+        touchRef.current.emoteQueued = null
+      }, 900)
+    }
 
     return true
-  }, [])
+  }, [schedulePlayerRegeneration, stopPlayerRegeneration])
 
   const handleBallZoneEnter = () => {
     if (scoreCooldownRef.current) return
@@ -13694,6 +13892,11 @@ function App() {
           <FireballManager
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
+          />
+          <PlayerHealingAura
+            active={playerHealing}
+            playerPositionRef={playerPositionRef}
+            layer={currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0}
           />
           <ChargingFireball
             active={isCharging && equippedWeapon === 'magic_book'}
