@@ -39,6 +39,7 @@ export const EMITTER_BLENDINGS = [
 
 export const MAX_EMITTERS = 4
 export const MAX_PARTICLES_PER_EMITTER = 500
+export const MAX_SHELLS = 2
 
 export const DEFAULT_EMITTER = {
   shape: 'sphere',
@@ -67,6 +68,24 @@ export const DEFAULT_EMITTER = {
   delay: 0,
 }
 
+// Noise-displaced shader shell ("energy ball"), rendered by ShaderShell.jsx.
+// Same technique as the in-game fireball flame, but fully preset-driven.
+export const DEFAULT_SHELL = {
+  radius: 0.25,
+  distortion: 0.4,
+  noiseScale: 1,
+  speed: 1,
+  colorHot: '#ffeb61',
+  colorMid: '#ff4705',
+  colorDark: '#6b0700',
+  opacity: 0.85,
+  wobble: 1,
+  spin: 1,
+  scaleEnd: 1,
+  fadeOut: true,
+  offset: [0, 0.9, 0],
+}
+
 export const DEFAULT_PARTICLE_PRESET = {
   id: 'new_effect',
   name: 'Nouvel effet',
@@ -74,6 +93,7 @@ export const DEFAULT_PARTICLE_PRESET = {
   duration: 0.8,
   loop: false,
   emitters: [{ ...DEFAULT_EMITTER }],
+  shells: [],
   light: {
     enabled: false,
     color: '#ffaa44',
@@ -133,10 +153,32 @@ export function normalizeEmitter(raw = {}) {
   }
 }
 
+export function normalizeShell(raw = {}) {
+  const base = DEFAULT_SHELL
+  return {
+    radius: clamp(asNumber(raw.radius, base.radius), 0.02, 3),
+    distortion: clamp(asNumber(raw.distortion, base.distortion), 0, 1.2),
+    noiseScale: clamp(asNumber(raw.noiseScale, base.noiseScale), 0.2, 4),
+    speed: clamp(asNumber(raw.speed, base.speed), 0, 4),
+    colorHot: asColor(raw.colorHot, base.colorHot),
+    colorMid: asColor(raw.colorMid, base.colorMid),
+    colorDark: asColor(raw.colorDark, base.colorDark),
+    opacity: clamp(asNumber(raw.opacity, base.opacity), 0, 1),
+    wobble: clamp(asNumber(raw.wobble, base.wobble), 0, 2.5),
+    spin: clamp(asNumber(raw.spin, base.spin), -4, 4),
+    scaleEnd: clamp(asNumber(raw.scaleEnd, base.scaleEnd), 0, 4),
+    fadeOut: raw.fadeOut === undefined ? base.fadeOut : Boolean(raw.fadeOut),
+    offset: asVec3(raw.offset, base.offset),
+  }
+}
+
 export function normalizeParticlePreset(raw = {}) {
   const emitters = Array.isArray(raw.emitters) && raw.emitters.length > 0
     ? raw.emitters.slice(0, MAX_EMITTERS).map(normalizeEmitter)
     : [{ ...DEFAULT_EMITTER }]
+  const shells = Array.isArray(raw.shells)
+    ? raw.shells.slice(0, MAX_SHELLS).map(normalizeShell)
+    : []
   const light = raw.light ?? {}
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : 'new_effect',
@@ -145,6 +187,7 @@ export function normalizeParticlePreset(raw = {}) {
     duration: clamp(asNumber(raw.duration, 0.8), 0.1, 10),
     loop: Boolean(raw.loop),
     emitters,
+    shells,
     light: {
       enabled: Boolean(light.enabled),
       color: asColor(light.color, '#ffaa44'),
@@ -187,6 +230,48 @@ export const BUILTIN_PARTICLE_PRESETS = [
       },
     ],
     light: { enabled: true, color: '#ff6600', intensity: 4 },
+  },
+  {
+    id: 'fireball_projectile',
+    name: 'Projectile boule de feu',
+    category: 'trail',
+    duration: 1.5,
+    loop: true,
+    shells: [
+      {
+        radius: 0.2, distortion: 0.42, noiseScale: 1, speed: 1,
+        colorHot: '#ffeb61', colorMid: '#ff4705', colorDark: '#6b0700',
+        opacity: 0.85, wobble: 1, spin: 1, scaleEnd: 1, fadeOut: false,
+        offset: [0, 0.9, 0],
+      },
+    ],
+    emitters: [
+      {
+        shape: 'point', mode: 'loop', count: 40, texture: 'flame', blending: 'additive',
+        colorStart: '#ffb347', colorEnd: '#d61e00', alphaStart: 0.9, alphaEnd: 0,
+        sizeStart: 0.18, sizeEnd: 0.03, sizeVariance: 0.4,
+        speed: 0.7, speedVariance: 0.4, spread: 0.55, direction: [0, 0.6, 0],
+        gravity: 0.4, turbulence: 0.5, rotationSpeed: 1.5,
+        lifetime: 0.5, lifetimeVariance: 0.4, radius: 0.16, offset: [0, 0.9, 0], delay: 0,
+      },
+      {
+        shape: 'point', mode: 'loop', count: 14, texture: 'spark', blending: 'additive',
+        colorStart: '#fff2bb', colorEnd: '#ff7711', alphaStart: 1, alphaEnd: 0,
+        sizeStart: 0.08, sizeEnd: 0.02, sizeVariance: 0.5,
+        speed: 1.4, speedVariance: 0.5, spread: 0.9, direction: [0, 0.4, 0],
+        gravity: -2.2, turbulence: 0.4, rotationSpeed: 4,
+        lifetime: 0.45, lifetimeVariance: 0.4, radius: 0.12, offset: [0, 0.9, 0], delay: 0,
+      },
+      {
+        shape: 'point', mode: 'loop', count: 12, texture: 'smoke', blending: 'normal',
+        colorStart: '#4d4540', colorEnd: '#262220', alphaStart: 0.35, alphaEnd: 0,
+        sizeStart: 0.2, sizeEnd: 0.6, sizeVariance: 0.4,
+        speed: 0.6, speedVariance: 0.4, spread: 0.4, direction: [0, 1, 0],
+        gravity: 0.4, turbulence: 0.4, rotationSpeed: 0.7,
+        lifetime: 1, lifetimeVariance: 0.4, radius: 0.08, offset: [0, 1, 0], delay: 0,
+      },
+    ],
+    light: { enabled: true, color: '#ff7722', intensity: 3 },
   },
   {
     id: 'chest_open',

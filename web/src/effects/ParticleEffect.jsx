@@ -10,6 +10,7 @@ import {
   Vector3,
 } from 'three'
 import { getParticleTexture } from './particleTextures'
+import ShaderShell from './ShaderShell'
 
 // GPU particle renderer. Each emitter is a single THREE.Points whose particles
 // are fully simulated in the vertex shader: the only per-frame CPU work is one
@@ -314,6 +315,8 @@ export default function ParticleEffect({
   const doneRef = useRef(false)
   const materialsRef = useRef(new Set())
   const lightRef = useRef()
+  // Shared effect clock read by the shader shells so they stay in sync.
+  const timeRef = useRef(0)
   const totalTime = useMemo(() => computeEffectTotalTime(preset), [preset])
 
   useEffect(() => {
@@ -330,6 +333,7 @@ export default function ParticleEffect({
     if (!playing) return
     if (startRef.current === null) startRef.current = state.clock.elapsedTime
     const time = state.clock.elapsedTime - startRef.current
+    timeRef.current = time
     const pixelScale = (state.size.height * state.viewport.dpr)
       / (2 * Math.tan((state.camera.fov * Math.PI) / 360))
 
@@ -365,6 +369,16 @@ export default function ParticleEffect({
           loop={isLoop}
           seed={1337 + index * 101}
           registerMaterial={registerMaterial}
+        />
+      ))}
+      {(preset.shells ?? []).map((shell, index) => (
+        <ShaderShell
+          key={index}
+          shell={shell}
+          duration={preset.duration}
+          loop={isLoop}
+          timeRef={timeRef}
+          phase={index * 7.3}
         />
       ))}
       {preset.light.enabled && (

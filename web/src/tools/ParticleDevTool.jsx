@@ -7,6 +7,7 @@ import {
   EMITTER_SHAPES,
   EMITTER_TEXTURES,
   MAX_EMITTERS,
+  MAX_SHELLS,
   PARTICLE_CATEGORIES,
 } from '../effects/particlePresets'
 import { getTerrainHeight } from '../world/terrain/terrainGeometry'
@@ -15,6 +16,7 @@ import { ColorField, Section, SelectField, SliderField } from './editorControls'
 import { styles } from './editorStyles'
 import {
   addParticleEmitter,
+  addParticleShell,
   deleteParticleFromLibrary,
   duplicateParticlePreset,
   getParticleEditorState,
@@ -22,12 +24,14 @@ import {
   playParticleEffect,
   randomizeParticlePreset,
   removeParticleEmitter,
+  removeParticleShell,
   replaceParticlePreset,
   saveParticleToLibrary,
   setParticleApiKey,
   setParticleEditorState,
   setParticleEmitter,
   setParticlePreset,
+  setParticleShell,
   stopParticleEffect,
   useParticleEditorStore,
 } from './particleEditorStore'
@@ -172,6 +176,41 @@ function EmitterSection({ emitter, index, total }) {
   )
 }
 
+function ShellSection({ shell, index }) {
+  const update = (key) => (value) => setParticleShell(index, { [key]: value })
+  const updateOffsetY = (value) => setParticleShell(index, {
+    offset: [shell.offset[0], value, shell.offset[2]],
+  })
+
+  return (
+    <Section title={`Coquille shader ${index + 1}`}>
+      <SliderField label="Rayon" value={shell.radius} min={0.05} max={1.5} step={0.01} onChange={update('radius')} />
+      <SliderField label="Distorsion" value={shell.distortion} min={0} max={1.2} step={0.01} onChange={update('distortion')} />
+      <SliderField label="Échelle du bruit" value={shell.noiseScale} min={0.2} max={4} step={0.05} onChange={update('noiseScale')} />
+      <SliderField label="Vitesse animation" value={shell.speed} min={0} max={4} step={0.05} onChange={update('speed')} />
+      <SliderField label="Opacité" value={shell.opacity} min={0} max={1} step={0.01} onChange={update('opacity')} />
+      <SliderField label="Pulsation" value={shell.wobble} min={0} max={2.5} step={0.05} onChange={update('wobble')} />
+      <SliderField label="Rotation" value={shell.spin} min={-4} max={4} step={0.1} onChange={update('spin')} />
+      <SliderField label="Échelle de fin" value={shell.scaleEnd} min={0} max={4} step={0.05} onChange={update('scaleEnd')} />
+      <SliderField label="Hauteur (offset Y)" value={shell.offset[1]} min={-1} max={3} step={0.05} onChange={updateOffsetY} />
+      <ColorField label="Couleur chaude" value={shell.colorHot} onChange={update('colorHot')} />
+      <ColorField label="Couleur moyenne" value={shell.colorMid} onChange={update('colorMid')} />
+      <ColorField label="Couleur sombre" value={shell.colorDark} onChange={update('colorDark')} />
+      <label style={styles.checkboxRow}>
+        <input
+          type="checkbox"
+          checked={shell.fadeOut}
+          onChange={(event) => setParticleShell(index, { fadeOut: event.target.checked })}
+        />
+        <span>Fondu sur la durée de l'effet</span>
+      </label>
+      <button type="button" onClick={() => removeParticleShell(index)} style={styles.dangerButton}>
+        Supprimer cette coquille
+      </button>
+    </Section>
+  )
+}
+
 export function ParticleDevPanel() {
   const { preset, library, playing, loopPreview, target, apiKey, aiBusy, aiError } = useParticleEditorStore()
   const [message, setMessage] = useState('')
@@ -303,6 +342,15 @@ export function ParticleDevPanel() {
         {preset.emitters.length < MAX_EMITTERS && (
           <button type="button" onClick={addParticleEmitter} style={{ ...styles.primaryButton, marginTop: 10 }}>
             Ajouter un émetteur
+          </button>
+        )}
+
+        {preset.shells.map((shell, index) => (
+          <ShellSection key={index} shell={shell} index={index} />
+        ))}
+        {preset.shells.length < MAX_SHELLS && (
+          <button type="button" onClick={addParticleShell} style={{ ...styles.secondaryButton, width: '100%', marginTop: 10 }}>
+            Ajouter une coquille shader (boule d'énergie)
           </button>
         )}
 

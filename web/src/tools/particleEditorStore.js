@@ -3,10 +3,12 @@ import {
   BUILTIN_PARTICLE_PRESETS,
   DEFAULT_EMITTER,
   DEFAULT_PARTICLE_PRESET,
+  DEFAULT_SHELL,
   EMITTER_BLENDINGS,
   EMITTER_SHAPES,
   EMITTER_TEXTURES,
   MAX_EMITTERS,
+  MAX_SHELLS,
   normalizeParticlePreset,
 } from '../effects/particlePresets'
 
@@ -110,6 +112,22 @@ export function addParticleEmitter() {
 export function removeParticleEmitter(index) {
   if (state.preset.emitters.length <= 1) return
   setParticlePreset({ emitters: state.preset.emitters.filter((_, i) => i !== index) })
+}
+
+export function setParticleShell(index, patch) {
+  const shells = state.preset.shells.map((shell, i) => (
+    i === index ? { ...shell, ...patch } : shell
+  ))
+  setParticlePreset({ shells })
+}
+
+export function addParticleShell() {
+  if (state.preset.shells.length >= MAX_SHELLS) return
+  setParticlePreset({ shells: [...state.preset.shells, { ...DEFAULT_SHELL }] })
+}
+
+export function removeParticleShell(index) {
+  setParticlePreset({ shells: state.preset.shells.filter((_, i) => i !== index) })
 }
 
 export function playParticleEffect() {

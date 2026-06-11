@@ -52,6 +52,31 @@ const EMITTER_SCHEMA = {
   ],
 }
 
+const SHELL_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    radius: { type: 'number', description: 'Rayon de la boule en mètres, 0.1 à 0.6 typique' },
+    distortion: { type: 'number', description: '0 à 1.2 — déformation par le bruit (0.4 = flammes vivantes)' },
+    noiseScale: { type: 'number', description: '0.2 à 4 — fréquence du bruit (haut = détails fins, foudre)' },
+    speed: { type: 'number', description: '0 à 4 — vitesse d\'animation (haut = crépitement nerveux)' },
+    colorHot: { type: 'string', description: 'Couleur hex la plus chaude/brillante' },
+    colorMid: { type: 'string', description: 'Couleur hex intermédiaire' },
+    colorDark: { type: 'string', description: 'Couleur hex des creux sombres' },
+    opacity: { type: 'number', description: '0 à 1' },
+    wobble: { type: 'number', description: '0 à 2.5 — pulsation de l\'échelle' },
+    spin: { type: 'number', description: '-4 à 4 — rotation de la boule' },
+    scaleEnd: { type: 'number', description: 'Échelle relative en fin d\'effet (2 = onde de choc qui grossit), 1 = constant' },
+    fadeOut: { type: 'boolean', description: 'Fondu sur la durée (true pour les impacts)' },
+    offset: { type: 'array', items: { type: 'number' }, description: 'Position [x,y,z], souvent [0,0.9,0]' },
+  },
+  required: [
+    'radius', 'distortion', 'noiseScale', 'speed',
+    'colorHot', 'colorMid', 'colorDark', 'opacity',
+    'wobble', 'spin', 'scaleEnd', 'fadeOut', 'offset',
+  ],
+}
+
 const PRESET_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -62,6 +87,7 @@ const PRESET_SCHEMA = {
     duration: { type: 'number', description: 'Durée de l\'effet en secondes (0.3 à 2 typique)' },
     loop: { type: 'boolean', description: 'true pour les auras/feux permanents' },
     emitters: { type: 'array', items: EMITTER_SCHEMA, description: '1 à 4 émetteurs' },
+    shells: { type: 'array', items: SHELL_SCHEMA, description: '0 à 2 coquilles shader : boules d\'énergie volumétriques déformées par du bruit (coeur de projectile, onde de choc)' },
     light: {
       type: 'object',
       additionalProperties: false,
@@ -73,7 +99,7 @@ const PRESET_SCHEMA = {
       required: ['enabled', 'color', 'intensity'],
     },
   },
-  required: ['id', 'name', 'category', 'duration', 'loop', 'emitters', 'light'],
+  required: ['id', 'name', 'category', 'duration', 'loop', 'emitters', 'shells', 'light'],
 }
 
 const SYSTEM_PROMPT = `Tu es un artiste VFX pour un jeu 3D low-poly cosy (style village, vue troisième personne, jouable sur mobile).
@@ -86,7 +112,9 @@ Principes pour des effets réussis et lisibles :
 - La fumée monte (gravity positif ~0.5) et grossit (sizeEnd > sizeStart). Les étincelles retombent (gravity -4 à -8).
 - alphaEnd est presque toujours 0 pour une disparition propre.
 - Mobile : reste sous ~200 particules au total. Lumière dynamique seulement si l'effet le mérite.
-- mode "loop" pour les émissions continues (aura, feu), "burst" pour les explosions.`
+- mode "loop" pour les émissions continues (aura, feu), "burst" pour les explosions.
+- Les "shells" sont des boules d'énergie volumétriques (sphère déformée par du bruit, style boule de feu). Utilise-les pour le coeur d'un projectile ou une onde de choc d'impact (scaleEnd 2-3 + fadeOut), et combine-les avec des particules autour. Maximum 2, et seulement quand l'effet le mérite.
+- Pour une boule de foudre : shell avec noiseScale 2-3, speed 2.5-4, distortion 0.5+, couleurs blanc/cyan/bleu profond, plus des particules spark.`
 
 export function buildParticlePrompt(userText, currentPreset) {
   return `Demande : ${userText}
