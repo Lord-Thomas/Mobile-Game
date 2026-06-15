@@ -6,6 +6,17 @@ const PLAYER_ACTIVE_GRACE_MS = 220
 const BALL_ACTIVE_INTERVAL_MS = 50
 const BALL_IDLE_INTERVAL_MS = 200
 const CHAT_MAX_LENGTH = 120
+const APPEARANCE_COLOR_KEYS = [
+  'skinColor',
+  'hairColor',
+  'eyeColor',
+  'eyebrowsColor',
+  'shirtColor',
+  'pantsColor',
+  'pantsDetailsColor',
+  'shoesColor',
+  'socksColor',
+]
 
 function now() {
   return Date.now()
@@ -21,6 +32,37 @@ function isVector(value, length = 3) {
 
 function sanitizeVector(value, fallback = [0, 0, 0]) {
   return isVector(value) ? value.map((entry) => Number(entry)) : fallback
+}
+
+function sanitizeMount(value) {
+  if (!value || typeof value !== 'object') return null
+
+  const id = typeof value.id === 'string' ? value.id.trim().slice(0, 40) : ''
+  if (!id || !isVector(value.position)) return null
+
+  return {
+    id,
+    position: sanitizeVector(value.position),
+    yaw: isFiniteNumber(value.yaw) ? Number(value.yaw) : 0,
+    airborne: Boolean(value.airborne),
+    moving: Boolean(value.moving),
+    movingForward: Boolean(value.movingForward),
+    jumping: Boolean(value.jumping),
+  }
+}
+
+function sanitizeCharacterAppearance(value) {
+  if (!value || typeof value !== 'object') return null
+
+  const appearance = {}
+  APPEARANCE_COLOR_KEYS.forEach((key) => {
+    if (typeof value[key] === 'string' && /^#[0-9a-f]{6}$/i.test(value[key])) {
+      appearance[key] = value[key]
+    }
+  })
+  appearance.goldCoat = Boolean(value.goldCoat)
+  appearance.auraEquipped = Boolean(value.auraEquipped)
+  return appearance
 }
 
 function sanitizePlayerState(message, client, player) {
@@ -41,7 +83,9 @@ function sanitizePlayerState(message, client, player) {
     grounded: Boolean(message?.grounded ?? true),
     motion: typeof message?.motion === 'string' ? message.motion.slice(0, 32) : 'idle',
     zone: typeof message?.zone === 'string' ? message.zone.slice(0, 32) : 'interior',
+    mount: sanitizeMount(message?.mount),
     equippedTitleId,
+    characterAppearance: sanitizeCharacterAppearance(message?.characterAppearance),
   }
 }
 
@@ -127,7 +171,9 @@ export class VisitRoom extends Room {
       grounded: true,
       motion: 'idle',
       zone: 'interior',
+      mount: null,
       equippedTitleId: null,
+      characterAppearance: null,
       lastUpdateAt: 0,
       lastBroadcastAt: 0,
     }
@@ -187,7 +233,9 @@ export class VisitRoom extends Room {
     player.grounded = state.grounded
     player.motion = state.motion
     player.zone = state.zone
+    player.mount = state.mount
     player.equippedTitleId = state.equippedTitleId
+    player.characterAppearance = state.characterAppearance
     player.lastUpdateAt = now()
   }
 
@@ -271,7 +319,9 @@ export class VisitRoom extends Room {
         grounded: player.grounded,
         motion: player.motion,
         zone: player.zone,
+        mount: player.mount,
         equippedTitleId: player.equippedTitleId,
+        characterAppearance: player.characterAppearance,
       }, { except: sourceClient })
       player.lastBroadcastAt = time
     })

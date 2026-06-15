@@ -5585,11 +5585,13 @@ function RemotePlayer({
   label = 'Visiteur',
   fallbackTitleId = null,
   transport = 'none',
+  currentZone = ZONES.interior,
   serverTimeOffsetRef = null,
   chatBubblesRef = null,
   chatVersion = 0,
   showOverlays = true,
 }) {
+  const rootRef = useRef(null)
   const groupRef = useRef(null)
   const samplesRef = useRef([])
   const lastSeqRef = useRef(-1)
@@ -5612,6 +5614,18 @@ function RemotePlayer({
   const remoteMountYawRef = useRef(0)
   const remoteMountAnimRef = useRef({ airborne: false, moving: false, movingForward: false, jumping: false })
   const remoteMountRiderTransformRef = useRef({ position: new Vector3(), quaternion: new Quaternion(), ready: false })
+  const remoteMountProfileRef = useRef({
+    width: DRAGON_RIDE_DEFAULT_BODY_WIDTH,
+    riderLift: DRAGON_RIDE_RIDER_LIFT,
+    leftHandTarget: new Vector3(),
+    rightHandTarget: new Vector3(),
+    leftHandLocalTarget: new Vector3(),
+    rightHandLocalTarget: new Vector3(),
+    handTargetsReady: false,
+    handTargetsMeasured: false,
+    seatHeightMeasured: false,
+    ready: false,
+  })
   const remoteMountInitRef = useRef(false)
   const displayedMountIdRef = useRef(stateRef.current?.mount?.id ?? null)
   const [displayedMountId, setDisplayedMountId] = useState(stateRef.current?.mount?.id ?? null)
@@ -5631,6 +5645,9 @@ function RemotePlayer({
 
     // Process new network samples directly from ref — no React cycle involved
     const state = stateRef.current
+    if (rootRef.current) {
+      rootRef.current.visible = !state?.zone || state.zone === currentZone
+    }
     if (state?.position) {
       const seq = state.seq ?? 0
       if (seq > lastSeqRef.current) {
@@ -5665,7 +5682,9 @@ function RemotePlayer({
           nextAppearance.pantsColor !== cur.pantsColor ||
           nextAppearance.pantsDetailsColor !== cur.pantsDetailsColor ||
           nextAppearance.shoesColor !== cur.shoesColor ||
-          nextAppearance.socksColor !== cur.socksColor) {
+          nextAppearance.socksColor !== cur.socksColor ||
+          nextAppearance.goldCoat !== cur.goldCoat ||
+          nextAppearance.auraEquipped !== cur.auraEquipped) {
           displayedAppearanceRef.current = nextAppearance
           setDisplayedAppearance({ ...nextAppearance })
         }
@@ -5783,7 +5802,7 @@ function RemotePlayer({
   const displayedTitle = getTitleDefinition(displayedTitleId ?? fallbackTitleId)
 
   return (
-    <>
+    <group ref={rootRef}>
       {remoteMountConfig && (
         <MountedMount
           key={remoteMountConfig.id}
@@ -5792,10 +5811,16 @@ function RemotePlayer({
           yawRef={remoteMountYawRef}
           animStateRef={remoteMountAnimRef}
           riderTransformRef={remoteMountRiderTransformRef}
+          mountProfileRef={remoteMountProfileRef}
         />
       )}
       <group ref={groupRef}>
-        <PlayerAvatar motion={displayedMotion} appearance={displayedAppearance} />
+        <PlayerAvatar
+          motion={displayedMotion}
+          mountProfileRef={remoteMountProfileRef}
+          appearance={displayedAppearance}
+          currentZone={currentZone}
+        />
         {showOverlays && (
           <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
             <div className="remote-player-nameplate">
@@ -5810,7 +5835,7 @@ function RemotePlayer({
         )}
         {showOverlays && chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
       </group>
-    </>
+    </group>
   )
 }
 
@@ -14176,6 +14201,7 @@ function App() {
             label={multiplayerRole === 'host' ? multiplayerSession?.guestDisplayName : multiplayerSession?.hostDisplayName}
             fallbackTitleId={remotePresenceTitleId}
             transport={sessionTransport}
+            currentZone={currentZone}
             serverTimeOffsetRef={hostTimeOffsetRef}
             chatBubblesRef={remoteChatBubblesRef}
             chatVersion={chatBubbleVersion}
