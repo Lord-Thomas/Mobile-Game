@@ -3306,8 +3306,8 @@ function Player({
       const pos = dragonRide.positionRef.current
       let yaw = dragonRide.yawRef.current
 
-      // Keyboard keeps the existing mounted controls. The mobile joystick picks
-      // a camera-relative direction, then reuses the normal forward movement.
+      // Keyboard and mobile joystick both pick a camera-relative direction,
+      // then reuse the normal forward movement.
       //  - the jump button (mountAscend) jumps on the ground / climbs in flight
       //  - the descend button (mountDescend) lowers a flying mount
       const ascendInput = flight.up || touch.mountAscend
@@ -3315,21 +3315,20 @@ function Player({
       const joystickX = touch.moveX ?? 0
       const joystickY = touch.moveY ?? 0
       const joystickLength = Math.hypot(joystickX, joystickY)
-      const turnInput = (key.left ? 1 : 0) - (key.right ? 1 : 0)
-      let forwardInput = MathUtils.clamp(
-        (key.forward ? 1 : 0) - (key.back ? 1 : 0),
-        -1,
-        1,
-      )
+      const keyboardX = (key.right ? 1 : 0) - (key.left ? 1 : 0)
+      const keyboardY = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
+      const keyboardLength = Math.hypot(keyboardX, keyboardY)
+      const controlX = joystickLength > 0.08 ? joystickX : keyboardX
+      const controlY = joystickLength > 0.08 ? joystickY : keyboardY
+      const controlLength = joystickLength > 0.08 ? joystickLength : keyboardLength
+      let forwardInput = 0
 
-      if (joystickLength > 0.08) {
+      if (controlLength > 0.08) {
         const cameraYaw = touch.cameraYaw
-        const worldX = Math.cos(cameraYaw) * joystickX - Math.sin(cameraYaw) * joystickY
-        const worldZ = -Math.sin(cameraYaw) * joystickX - Math.cos(cameraYaw) * joystickY
+        const worldX = Math.cos(cameraYaw) * controlX - Math.sin(cameraYaw) * controlY
+        const worldZ = -Math.sin(cameraYaw) * controlX - Math.cos(cameraYaw) * controlY
         yaw = dampAngle(yaw, Math.atan2(worldX, worldZ), 12, delta)
-        forwardInput = MathUtils.clamp(joystickLength, 0, 1)
-      } else {
-        yaw += turnInput * mountConfig.turnSpeed * delta
+        forwardInput = MathUtils.clamp(controlLength, 0, 1)
       }
 
       const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
