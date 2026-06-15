@@ -2229,6 +2229,7 @@ function MountedMount({
   riderTransformRef,
   riderSocketRef,
   mountProfileRef,
+  currentZone = ZONES.interior,
 }) {
   const { scene, animations } = useGLTF(config.modelUrl)
   const dragon = useMemo(() => clone(scene), [scene])
@@ -2305,6 +2306,7 @@ function MountedMount({
     if (groupRef.current) groupRef.current.visible = false
     revealPendingRef.current = true
     dragon.traverse((object) => {
+      object.layers.set(currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0)
       if (object instanceof Mesh) {
         object.castShadow = true
         object.receiveShadow = true
@@ -2409,7 +2411,7 @@ function MountedMount({
       if (riderTransformRef) riderTransformRef.current.ready = false
       if (mountProfileRef) mountProfileRef.current.ready = false
     }
-  }, [dragon, mixer, mountProfileRef, playAction, riderTransformRef, riderSocketRef, saddleSocket])
+  }, [currentZone, dragon, mixer, mountProfileRef, playAction, riderTransformRef, riderSocketRef, saddleSocket])
 
   useFrame((_, delta) => {
     if (!groupRef.current) return
@@ -5812,6 +5814,7 @@ function RemotePlayer({
           animStateRef={remoteMountAnimRef}
           riderTransformRef={remoteMountRiderTransformRef}
           mountProfileRef={remoteMountProfileRef}
+          currentZone={currentZone}
         />
       )}
       <group ref={groupRef}>
@@ -12505,7 +12508,7 @@ function App() {
     if (typeof parsed.lightIntensity === 'number') {
       setLightIntensity(MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
     }
-    if (parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
+    if (includeIdentity && parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
       setCharacterAppearance({ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
     }
 
@@ -13397,7 +13400,6 @@ function App() {
   }
 
   const openCharacterCustomizationFromBag = () => {
-    if (!canModifyWorld) return
     if (!PUBLIC_BUILD_FLAGS.showCharacterCustomization) return
     setIsWeaponMenuOpen(false)
     setIsCharacterMenuOpen(true)
@@ -14144,6 +14146,7 @@ function App() {
                 riderTransformRef={dragonRideRiderTransformRef}
                 riderSocketRef={dragonRideSocketRef}
                 mountProfileRef={dragonRideMountProfileRef}
+                currentZone={currentZone}
               />
             )}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
@@ -14450,7 +14453,7 @@ function App() {
           equippedWeapon={equippedWeapon}
           onEquip={(weapon) => { setEquippedWeapon(weapon) }}
           onCustomizeCharacter={
-            canModifyWorld && PUBLIC_BUILD_FLAGS.showCharacterCustomization
+            PUBLIC_BUILD_FLAGS.showCharacterCustomization
               ? openCharacterCustomizationFromBag
               : undefined
           }
