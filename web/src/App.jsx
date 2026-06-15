@@ -3306,20 +3306,31 @@ function Player({
       const pos = dragonRide.positionRef.current
       let yaw = dragonRide.yawRef.current
 
-      // Inputs combine keyboard and mobile touch controls:
-      //  - joystick X turns (right = turn right), joystick Y drives forward/back
+      // Keyboard keeps the existing mounted controls. The mobile joystick picks
+      // a camera-relative direction, then reuses the normal forward movement.
       //  - the jump button (mountAscend) jumps on the ground / climbs in flight
       //  - the descend button (mountDescend) lowers a flying mount
       const ascendInput = flight.up || touch.mountAscend
       const descendInput = flight.down || touch.mountDescend
-      const turnInput = (key.left ? 1 : 0) - (key.right ? 1 : 0) - (touch.moveX ?? 0)
-      const forwardInput = MathUtils.clamp(
-        (key.forward ? 1 : 0) - (key.back ? 1 : 0) + (touch.moveY ?? 0),
+      const joystickX = touch.moveX ?? 0
+      const joystickY = touch.moveY ?? 0
+      const joystickLength = Math.hypot(joystickX, joystickY)
+      const turnInput = (key.left ? 1 : 0) - (key.right ? 1 : 0)
+      let forwardInput = MathUtils.clamp(
+        (key.forward ? 1 : 0) - (key.back ? 1 : 0),
         -1,
         1,
       )
 
-      yaw += turnInput * mountConfig.turnSpeed * delta
+      if (joystickLength > 0.08) {
+        const cameraYaw = touch.cameraYaw
+        const worldX = Math.cos(cameraYaw) * joystickX - Math.sin(cameraYaw) * joystickY
+        const worldZ = -Math.sin(cameraYaw) * joystickX - Math.cos(cameraYaw) * joystickY
+        yaw = dampAngle(yaw, Math.atan2(worldX, worldZ), 12, delta)
+        forwardInput = MathUtils.clamp(joystickLength, 0, 1)
+      } else {
+        yaw += turnInput * mountConfig.turnSpeed * delta
+      }
 
       const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
       const altitude = pos.y - groundY
@@ -13564,8 +13575,8 @@ function App() {
     const yaw = playerBodyYawRef.current
     const px = playerPositionRef.current.x
     const pz = playerPositionRef.current.z
-    const spawnX = px + Math.sin(yaw) * 3
-    const spawnZ = pz + Math.cos(yaw) * 3
+    const spawnX = px
+    const spawnZ = pz
     const groundY = currentZone === ZONES.outside ? getTerrainHeight(spawnX, spawnZ) : 0
     dragonRidePositionRef.current = { x: spawnX, y: groundY, z: spawnZ }
     dragonRideYawRef.current = yaw
