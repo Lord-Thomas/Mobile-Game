@@ -1935,7 +1935,7 @@ const DRAGON_SLEEP_DELAY = 4
 const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI / 2
 const PLAYER_MAX_RUN_SPEED = 3.4
 const DRAGON_RIDE_GROUND_SPEED = PLAYER_MAX_RUN_SPEED * 1.6
-const DRAGON_RIDE_FLY_SPEED = PLAYER_MAX_RUN_SPEED * 2.3
+const DRAGON_RIDE_FLY_SPEED = PLAYER_MAX_RUN_SPEED * 3
 const DRAGON_RIDE_TURN_SPEED = 2.2
 const DRAGON_RIDE_CLIMB_SPEED = 4.5
 const DRAGON_RIDE_MAX_ALTITUDE = 16
@@ -1971,6 +1971,143 @@ const DRAGON_RIDE_TORSO_LEAN = -0.7
 const DRAGON_RIDE_SEAT_SURFACE_OFFSET = 0.195
 const DRAGON_RIDE_MIN_RIDER_LIFT = 0.18
 const DRAGON_RIDE_MAX_RIDER_LIFT = 0.52
+const MOUNT_JUMP_GRAVITY = 22
+
+// Per-mount configuration. Everything that differs between a rideable creature
+// (model, scale, orientation, animations, saddle bones, speeds, rider pose)
+// lives here so the mount component and the rider logic stay generic. The
+// dragon entry reuses the tuned DRAGON_RIDE_* constants so its behaviour is
+// unchanged; new mounts only need a new entry.
+const MOUNT_CONFIGS = {
+  dragon: {
+    id: 'dragon',
+    label: 'le dragon',
+    icon: '\u{1F409}',
+    modelUrl: '/models/dragon.glb',
+    scale: 2,
+    modelYawOffset: DRAGON_RIDE_MODEL_YAW_OFFSET,
+    canFly: true,
+    groundSpeed: DRAGON_RIDE_GROUND_SPEED,
+    flySpeed: DRAGON_RIDE_FLY_SPEED,
+    turnSpeed: DRAGON_RIDE_TURN_SPEED,
+    climbSpeed: DRAGON_RIDE_CLIMB_SPEED,
+    maxAltitude: DRAGON_RIDE_MAX_ALTITUDE,
+    saddleBones: DRAGON_RIDE_SADDLE_BONE_NAMES,
+    saddleLocalPosition: DRAGON_RIDE_SADDLE_LOCAL_POSITION,
+    riderLift: DRAGON_RIDE_RIDER_LIFT,
+    defaultBodyWidth: DRAGON_RIDE_DEFAULT_BODY_WIDTH,
+    torsoLean: DRAGON_RIDE_TORSO_LEAN,
+    handForward: DRAGON_RIDE_HAND_FALLBACK_FORWARD,
+    handDrop: DRAGON_RIDE_HAND_FALLBACK_DROP,
+    anims: {
+      idle: { name: 'Dragon_Ancient_Dialogue_Relaxed_Idle', fallback: 'Dragon_Ancient_Patrol_Idle' },
+      run: { name: 'Dragon_Run', timeScale: 1.15 },
+      fly: { name: 'Dragon_Fly' },
+      flyIdle: { name: 'Dragon_Fly_Idle', fallback: 'Dragon_Fly' },
+    },
+  },
+  wolf: {
+    id: 'wolf',
+    label: 'le loup noir',
+    icon: '\u{1F43A}',
+    modelUrl: '/models/wolf.glb',
+    // Terrestrial-only mount, faster than the dragon on the ground.
+    scale: 0.6,
+    modelYawOffset: 0,
+    canFly: false,
+    canJump: true,
+    jumpSpeed: 8,
+    groundSpeed: PLAYER_MAX_RUN_SPEED * 2.6,
+    flySpeed: PLAYER_MAX_RUN_SPEED * 2.6,
+    turnSpeed: 2.8,
+    climbSpeed: 0,
+    maxAltitude: 0,
+    saddleBones: {
+      spine2: 'Back',
+      spine3: 'Torso',
+      neck1: 'Torso',
+      calibration: 'Torso',
+    },
+    saddleLocalPosition: new Vector3(0, 0, 0),
+    liftWorldUp: true,
+    // Manual lift on this rig: the auto back-height raycast is disabled so the
+    // value below is used directly (set autoRiderLift: true to re-enable the
+    // automatic measurement, which would otherwise overwrite riderLift).
+    autoRiderLift: false,
+    riderLift: -0.2,
+    seatSurfaceOffset: 0.10,
+    minRiderLift: -2,
+    maxRiderLift: 0.4,
+    defaultBodyWidth: 0.42,
+    torsoLean: -0.35,
+    // Anchor the rider's hands to a specific bone (the neck base) instead of the
+    // geometric forward/down guess. handForward/handDrop then fine-tune from it.
+    handBone: 'Torso3',
+    handForward: -0.25,
+    handDrop: 0.4,
+    anims: {
+      idle: { name: 'AnimalArmature|AnimalArmature|Idle' },
+      run: { name: 'AnimalArmature|AnimalArmature|Gallop', timeScale: 1 },
+      fly: { name: 'AnimalArmature|AnimalArmature|Gallop' },
+      flyIdle: { name: 'AnimalArmature|AnimalArmature|Idle' },
+      jump: { name: 'AnimalArmature|AnimalArmature|Jump_ToIdle' },
+    },
+  },
+  horse: {
+    id: 'horse',
+    label: 'le cheval',
+    icon: '\u{1F40E}',
+    modelUrl: '/models/horse.glb',
+    // Same AnimalArmature rig as the wolf. Terrestrial, fast. The horse model
+    // has no Jump or Walk clip, so the hop plays the gallop/idle (jump physics
+    // still apply); run uses Gallop.
+    scale: 0.45,
+    modelYawOffset: 0,
+    canFly: false,
+    canJump: true,
+    jumpSpeed: 8,
+    groundSpeed: PLAYER_MAX_RUN_SPEED * 2.4,
+    flySpeed: PLAYER_MAX_RUN_SPEED * 2.4,
+    turnSpeed: 2.6,
+    climbSpeed: 0,
+    maxAltitude: 0,
+    // Bone Z grows toward the head: Back(-1.43)=hindquarters, Torso(-0.72)=rear,
+    // Torso2(+0.09)=centre of the back, Torso3(+1.02)=withers. Anchor on Torso2
+    // so the rider sits centred. (Shift toward Torso3 to move forward.)
+    saddleBones: {
+      spine2: 'Torso2',
+      spine3: 'Torso2',
+      neck1: 'Torso2',
+      calibration: 'Torso2',
+    },
+    saddleLocalPosition: new Vector3(0, 0, 0),
+    liftWorldUp: true,
+    autoRiderLift: true,
+    riderLift: -0.2,
+    seatSurfaceOffset: 0.10,
+    // Lowers the rider by the bent-leg height of the seated pose so the butt
+    // (not the feet) rests on the back. Increase if the feet still touch.
+    riderSeatDrop: 0.4,
+    minRiderLift: -2,
+    maxRiderLift: 0.4,
+    defaultBodyWidth: 0.42,
+    torsoLean: -0.35,
+    handBone: 'Neck1',
+    handForward: -0.25,
+    handDrop: 0.4,
+    anims: {
+      idle: { name: 'AnimalArmature|AnimalArmature|Idle' },
+      run: { name: 'AnimalArmature|AnimalArmature|Gallop', timeScale: 1 },
+      fly: { name: 'AnimalArmature|AnimalArmature|Gallop' },
+      flyIdle: { name: 'AnimalArmature|AnimalArmature|Idle' },
+      jump: { name: 'AnimalArmature|AnimalArmature|Jump_toIdle' },
+    },
+  },
+}
+
+function getMountConfig(id) {
+  return MOUNT_CONFIGS[id] ?? null
+}
 
 function aimBoneAtWorldPoint(bone, childBone, target, scratch) {
   if (!bone?.parent || !childBone || !target) return false
@@ -2063,18 +2200,29 @@ function getMountedRiderWorldPosition(
   target,
   socketQuaternion,
   localLiftOffset,
+  liftWorldUp = false,
 ) {
   riderSocket.getWorldPosition(target)
-  riderSocket.getWorldQuaternion(socketQuaternion)
-  localLiftOffset
-    .set(-riderLift, 0, 0)
-    .applyQuaternion(socketQuaternion)
-  target.add(localLiftOffset)
+  if (liftWorldUp) {
+    // Lift the rider straight up in world space. Rig-independent and keeps the
+    // rider centred on the back regardless of how the mount's bones are
+    // oriented.
+    target.y += riderLift
+  } else {
+    // Dragon rig: local -X points above the back, so lift along that axis to
+    // stay perpendicular to the back as the dragon pitches in flight.
+    riderSocket.getWorldQuaternion(socketQuaternion)
+    localLiftOffset
+      .set(-riderLift, 0, 0)
+      .applyQuaternion(socketQuaternion)
+    target.add(localLiftOffset)
+  }
   target.y += DRAGON_RIDE_RIDER_WORLD_CLEARANCE
   return target
 }
 
-function MountedDragon({
+function MountedMount({
+  config,
   positionRef,
   yawRef,
   animStateRef,
@@ -2082,7 +2230,7 @@ function MountedDragon({
   riderSocketRef,
   mountProfileRef,
 }) {
-  const { scene, animations } = useGLTF('/models/dragon.glb')
+  const { scene, animations } = useGLTF(config.modelUrl)
   const dragon = useMemo(() => clone(scene), [scene])
   const { actions, mixer } = useAnimations(animations, dragon)
   const groupRef = useRef()
@@ -2122,6 +2270,8 @@ function MountedDragon({
   const widthRayDirection = useMemo(() => new Vector3(), [])
   const handRayForward = useMemo(() => new Vector3(), [])
   const handRayRight = useMemo(() => new Vector3(), [])
+  const handAnchorWorld = useMemo(() => new Vector3(), [])
+  const handBoneRef = useRef(null)
   const widthMeasureFramesRef = useRef(0)
 
   const playAction = useCallback((name, { fallback = null, loop = true, pingpong = false, timeScale = 1, fade = 0.35 } = {}) => {
@@ -2161,19 +2311,21 @@ function MountedDragon({
       }
     })
     saddleBonesRef.current = {
-      spine2: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.spine2),
-      spine3: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.spine3),
-      neck1: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.neck1),
-      calibration: dragon.getObjectByName(DRAGON_RIDE_SADDLE_BONE_NAMES.calibration),
+      spine2: dragon.getObjectByName(config.saddleBones.spine2),
+      spine3: dragon.getObjectByName(config.saddleBones.spine3),
+      neck1: dragon.getObjectByName(config.saddleBones.neck1),
+      calibration: dragon.getObjectByName(config.saddleBones.calibration),
     }
+    handBoneRef.current = config.handBone ? dragon.getObjectByName(config.handBone) : null
     dragon.add(saddleSocket)
     virtualSaddleReadyRef.current = false
     widthMeasureFramesRef.current = 0
     if (riderSocketRef) riderSocketRef.current = saddleSocket
     if (riderTransformRef) riderTransformRef.current.ready = false
     if (mountProfileRef) {
-      mountProfileRef.current.width = DRAGON_RIDE_DEFAULT_BODY_WIDTH
-      mountProfileRef.current.riderLift = DRAGON_RIDE_RIDER_LIFT
+      mountProfileRef.current.width = config.defaultBodyWidth
+      mountProfileRef.current.riderLift = config.riderLift
+      mountProfileRef.current.torsoLean = config.torsoLean
       mountProfileRef.current.leftHandTarget ??= new Vector3()
       mountProfileRef.current.rightHandTarget ??= new Vector3()
       mountProfileRef.current.leftHandLocalTarget ??= new Vector3()
@@ -2183,8 +2335,8 @@ function MountedDragon({
       mountProfileRef.current.seatHeightMeasured = false
       mountProfileRef.current.ready = false
     }
-    const initialAction = playAction('Dragon_Ancient_Dialogue_Relaxed_Idle', {
-      fallback: 'Dragon_Ancient_Patrol_Idle',
+    const initialAction = playAction(config.anims.idle.name, {
+      fallback: config.anims.idle.fallback ?? null,
       fade: 0,
     })
     if (initialAction) {
@@ -2225,7 +2377,7 @@ function MountedDragon({
           .slerp(saddleNeck1Quaternion, 0.2)
 
         saddleBones.calibration.localToWorld(
-          saddleCalibrationPosition.copy(DRAGON_RIDE_SADDLE_LOCAL_POSITION),
+          saddleCalibrationPosition.copy(config.saddleLocalPosition),
         )
         saddleBones.calibration.getWorldQuaternion(saddleCalibrationQuaternion)
         dragon.worldToLocal(saddleCalibrationPosition)
@@ -2263,23 +2415,23 @@ function MountedDragon({
     if (!groupRef.current) return
     const pos = positionRef.current
     groupRef.current.position.set(pos.x, pos.y, pos.z)
-    groupRef.current.rotation.y = yawRef.current + DRAGON_RIDE_MODEL_YAW_OFFSET
+    groupRef.current.rotation.y = yawRef.current + config.modelYawOffset
 
     const state = animStateRef?.current
     if (state) {
-      if (state.airborne) {
+      const anims = config.anims
+      if (config.canJump && state.jumping && anims.jump) {
+        playAction(anims.jump.name, { fallback: anims.jump.fallback ?? null, timeScale: anims.jump.timeScale ?? 1, fade: 0.18 })
+      } else if (config.canFly && state.airborne) {
         if (state.movingForward) {
-          playAction('Dragon_Fly', { fade: 0.42 })
+          playAction(anims.fly.name, { fallback: anims.fly.fallback ?? null, timeScale: anims.fly.timeScale ?? 1, fade: 0.42 })
         } else {
-          playAction('Dragon_Fly_Idle', { fallback: 'Dragon_Fly', fade: 0.42 })
+          playAction(anims.flyIdle.name, { fallback: anims.flyIdle.fallback ?? null, timeScale: anims.flyIdle.timeScale ?? 1, fade: 0.42 })
         }
       } else if (state.moving) {
-        playAction('Dragon_Run', { timeScale: 1.15, fade: 0.28 })
+        playAction(anims.run.name, { fallback: anims.run.fallback ?? null, timeScale: anims.run.timeScale ?? 1, fade: 0.28 })
       } else {
-        playAction('Dragon_Ancient_Dialogue_Relaxed_Idle', {
-          fallback: 'Dragon_Ancient_Patrol_Idle',
-          fade: 0.35,
-        })
+        playAction(anims.idle.name, { fallback: anims.idle.fallback ?? null, timeScale: anims.idle.timeScale ?? 1, fade: 0.35 })
       }
     }
 
@@ -2413,7 +2565,7 @@ function MountedDragon({
       }
     }
 
-    if (mountProfileRef && !mountProfileRef.current.handTargetsMeasured) {
+    if (mountProfileRef && !config.handBone && !mountProfileRef.current.handTargetsMeasured) {
       // Hands are placed geometrically just in front of the seat, not via a
       // mesh raycast: raycasting the skinned dragon is unreliable and tends to
       // hit the folded wings or the raised back spines, which pulls the hand
@@ -2429,20 +2581,20 @@ function MountedDragon({
 
       mountProfileRef.current.leftHandLocalTarget
         .copy(boneWorldPosition)
-        .addScaledVector(handRayForward, DRAGON_RIDE_HAND_FALLBACK_FORWARD)
+        .addScaledVector(handRayForward, config.handForward)
         .addScaledVector(handRayRight, -gripHalfWidth)
-        .addScaledVector(widthRayDirection.set(0, 1, 0), -DRAGON_RIDE_HAND_FALLBACK_DROP)
+        .addScaledVector(widthRayDirection.set(0, 1, 0), -config.handDrop)
       saddleSocket.worldToLocal(mountProfileRef.current.leftHandLocalTarget)
       mountProfileRef.current.rightHandLocalTarget
         .copy(boneWorldPosition)
-        .addScaledVector(handRayForward, DRAGON_RIDE_HAND_FALLBACK_FORWARD)
+        .addScaledVector(handRayForward, config.handForward)
         .addScaledVector(handRayRight, gripHalfWidth)
-        .addScaledVector(widthRayDirection.set(0, 1, 0), -DRAGON_RIDE_HAND_FALLBACK_DROP)
+        .addScaledVector(widthRayDirection.set(0, 1, 0), -config.handDrop)
       saddleSocket.worldToLocal(mountProfileRef.current.rightHandLocalTarget)
       mountProfileRef.current.handTargetsMeasured = true
     }
 
-    if (mountProfileRef && !mountProfileRef.current.seatHeightMeasured) {
+    if (config.autoRiderLift !== false && mountProfileRef && !mountProfileRef.current.seatHeightMeasured) {
       handRayRight.set(Math.cos(yawRef.current), 0, -Math.sin(yawRef.current))
       const seatHalfWidth = MathUtils.clamp(
         mountProfileRef.current.width * 0.28,
@@ -2464,18 +2616,43 @@ function MountedDragon({
         seatSamples += 1
       }
       if (seatSamples >= 2) {
+        // Auto rider lift: place the rider just above the measured back surface.
+        // measuredSeatY is the back surface in world space; the socket sits on
+        // the spine, so the gap (+ a small clearance) is the lift. riderSeatDrop
+        // lowers the rider by the bent-leg height of the seated pose so the
+        // BUTT (not the feet) rests on the back.
         mountProfileRef.current.riderLift = MathUtils.clamp(
           measuredSeatY -
             boneWorldPosition.y +
-            DRAGON_RIDE_SEAT_SURFACE_OFFSET,
-          DRAGON_RIDE_MIN_RIDER_LIFT,
-          DRAGON_RIDE_MAX_RIDER_LIFT,
+            (config.seatSurfaceOffset ?? DRAGON_RIDE_SEAT_SURFACE_OFFSET) -
+            (config.riderSeatDrop ?? 0),
+          config.minRiderLift ?? DRAGON_RIDE_MIN_RIDER_LIFT,
+          config.maxRiderLift ?? DRAGON_RIDE_MAX_RIDER_LIFT,
         )
         mountProfileRef.current.seatHeightMeasured = true
       }
     }
 
-    if (mountProfileRef?.current.handTargetsMeasured) {
+    if (mountProfileRef && config.handBone && handBoneRef.current) {
+      // Hands grip a specific bone (e.g. the neck). Recomputed live each frame
+      // so they track that bone through the animation. handForward/handDrop are
+      // fine offsets in world forward/up; the grip spreads the two hands apart.
+      const gripHalfWidth = MathUtils.clamp(mountProfileRef.current.width * 0.3, 0.14, 0.34)
+      handRayForward.set(Math.sin(yawRef.current), 0, Math.cos(yawRef.current))
+      handRayRight.set(Math.cos(yawRef.current), 0, -Math.sin(yawRef.current))
+      handBoneRef.current.getWorldPosition(handAnchorWorld)
+      mountProfileRef.current.leftHandTarget
+        .copy(handAnchorWorld)
+        .addScaledVector(handRayForward, config.handForward)
+        .addScaledVector(handRayRight, -gripHalfWidth)
+        .addScaledVector(widthRayDirection.set(0, 1, 0), -config.handDrop)
+      mountProfileRef.current.rightHandTarget
+        .copy(handAnchorWorld)
+        .addScaledVector(handRayForward, config.handForward)
+        .addScaledVector(handRayRight, gripHalfWidth)
+        .addScaledVector(widthRayDirection.set(0, 1, 0), -config.handDrop)
+      mountProfileRef.current.handTargetsReady = true
+    } else if (mountProfileRef?.current.handTargetsMeasured) {
       mountProfileRef.current.leftHandTarget
         .copy(mountProfileRef.current.leftHandLocalTarget)
       saddleSocket.localToWorld(mountProfileRef.current.leftHandTarget)
@@ -2514,7 +2691,7 @@ function MountedDragon({
   }, 0.1)
 
   return (
-    <group ref={groupRef} scale={2} userData={{ debugCategory: 'npcs' }}>
+    <group ref={groupRef} scale={config.scale} userData={{ debugCategory: 'npcs' }}>
       <primitive object={dragon} />
     </group>
   )
@@ -3004,6 +3181,7 @@ function Player({
   const [playerMotion, setPlayerMotion] = useState('idle')
   const keyboardRef = useKeyboardInput()
   const dragonFlightInputRef = useRef({ up: false, down: false })
+  const mountJumpRef = useRef({ vy: 0, wasPressed: false })
   const { camera } = useThree()
   const { world, rapier } = useRapier()
 
@@ -3121,31 +3299,60 @@ function Player({
     }
 
     if (dragonRide?.active && dragonRide.positionRef && dragonRide.yawRef) {
+      const mountConfig = dragonRide.config ?? MOUNT_CONFIGS.dragon
       const flight = dragonFlightInputRef.current
       const pos = dragonRide.positionRef.current
       let yaw = dragonRide.yawRef.current
 
-      if (key.left) yaw += DRAGON_RIDE_TURN_SPEED * delta
-      if (key.right) yaw -= DRAGON_RIDE_TURN_SPEED * delta
+      // Inputs combine keyboard and mobile touch controls:
+      //  - joystick X turns (right = turn right), joystick Y drives forward/back
+      //  - the jump button (mountAscend) jumps on the ground / climbs in flight
+      //  - the descend button (mountDescend) lowers a flying mount
+      const ascendInput = flight.up || touch.mountAscend
+      const descendInput = flight.down || touch.mountDescend
+      const turnInput = (key.left ? 1 : 0) - (key.right ? 1 : 0) - (touch.moveX ?? 0)
+      const forwardInput = MathUtils.clamp(
+        (key.forward ? 1 : 0) - (key.back ? 1 : 0) + (touch.moveY ?? 0),
+        -1,
+        1,
+      )
+
+      yaw += turnInput * mountConfig.turnSpeed * delta
 
       const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
       const altitude = pos.y - groundY
       let nextAltitude = altitude
-      if (flight.up) {
+      let nextIsJumping = false
+      if (mountConfig.canFly && ascendInput) {
         nextAltitude = Math.min(
-          DRAGON_RIDE_MAX_ALTITUDE,
-          altitude + DRAGON_RIDE_CLIMB_SPEED * delta,
+          mountConfig.maxAltitude,
+          altitude + mountConfig.climbSpeed * delta,
         )
-      } else if (flight.down) {
+      } else if (mountConfig.canFly && descendInput) {
         nextAltitude = Math.max(
           0,
-          altitude - DRAGON_RIDE_CLIMB_SPEED * delta,
+          altitude - mountConfig.climbSpeed * delta,
         )
+      } else if (mountConfig.canJump) {
+        // Terrestrial hop: the jump button launches the mount, then gravity
+        // pulls it back.
+        const jump = mountJumpRef.current
+        const grounded = altitude <= 0.02
+        if (ascendInput && !jump.wasPressed && grounded) {
+          jump.vy = mountConfig.jumpSpeed
+        }
+        jump.wasPressed = ascendInput
+        jump.vy -= MOUNT_JUMP_GRAVITY * delta
+        nextAltitude = altitude + jump.vy * delta
+        if (nextAltitude <= 0) {
+          nextAltitude = 0
+          jump.vy = 0
+        }
+        nextIsJumping = nextAltitude > 0.02
       }
 
-      const nextIsFlying = nextAltitude > 0.05
-      const speed = nextIsFlying ? DRAGON_RIDE_FLY_SPEED : DRAGON_RIDE_GROUND_SPEED
-      const forwardInput = (key.forward ? 1 : 0) - (key.back ? 1 : 0)
+      const nextIsFlying = mountConfig.canFly && nextAltitude > 0.05
+      const speed = nextIsFlying ? mountConfig.flySpeed : mountConfig.groundSpeed
       const dirX = Math.sin(yaw)
       const dirZ = Math.cos(yaw)
 
@@ -3163,6 +3370,7 @@ function Player({
         dragonRide.animStateRef.current.airborne = nextIsFlying
         dragonRide.animStateRef.current.moving = forwardInput !== 0
         dragonRide.animStateRef.current.movingForward = forwardInput > 0
+        dragonRide.animStateRef.current.jumping = nextIsJumping
       }
       dragonRide.yawRef.current = yaw
 
@@ -3178,6 +3386,7 @@ function Player({
           mountedPlayerLocalPosition,
           mountedRiderSocketQuaternion,
           mountedRiderLiftOffset,
+          mountConfig.liftWorldUp,
         )
         riderX = mountedPlayerLocalPosition.x
         riderY = mountedPlayerLocalPosition.y
@@ -3209,6 +3418,16 @@ function Player({
           rotationY: yaw,
           motion: 'mountedIdle',
           zone: currentZone,
+          // Mount transform so remote players can render this mount under us.
+          mount: {
+            id: mountConfig.id,
+            position: [nextX, nextY, nextZ],
+            yaw,
+            airborne: nextIsFlying,
+            moving: forwardInput !== 0,
+            movingForward: forwardInput > 0,
+            jumping: nextIsJumping,
+          },
         }
       }
 
@@ -3874,6 +4093,7 @@ function Player({
       mountedPlayerLocalPosition,
       mountedRiderSocketQuaternion,
       mountedRiderLiftOffset,
+      dragonRide.config?.liftWorldUp,
     )
     playerBodyRef.current?.setNextKinematicTranslation({
       x: mountedPlayerLocalPosition.x,
@@ -3895,6 +4115,7 @@ function Player({
       dragonCameraSocketPosition,
       mountedRiderSocketQuaternion,
       mountedRiderLiftOffset,
+      dragonRide.config?.liftWorldUp,
     )
     const dragonPosition = dragonRide.positionRef.current
     const rideOffset = dragonCameraRideOffsetRef.current
@@ -4394,6 +4615,7 @@ function PlayerAvatar({
   const mountedSpineBoneRef = useRef(null)
   const mountedSpine0BoneRef = useRef(null)
   const mountedSpine1BoneRef = useRef(null)
+  const mountedHeadBoneRef = useRef(null)
   const leftUpLegBoneRef = useRef(null)
   const rightUpLegBoneRef = useRef(null)
   const fingerBonesRef = useRef([])
@@ -4428,6 +4650,7 @@ function PlayerAvatar({
       else if (child.name === 'mixamorigSpine') mountedSpine0BoneRef.current = child
       else if (child.name === 'mixamorigSpine1') mountedSpine1BoneRef.current = child
       else if (child.name === 'mixamorigSpine2') mountedSpineBoneRef.current = child
+      else if (child.name === 'mixamorigHead') mountedHeadBoneRef.current = child
       else if (child.name === 'mixamorigLeftArm') leftArmBoneRef.current = child
       else if (child.name === 'mixamorigLeftForeArm') leftForeArmBoneRef.current = child
       else if (child.name === 'mixamorigLeftHand') leftHandBoneRef.current = child
@@ -4590,12 +4813,17 @@ function PlayerAvatar({
     // Lean from the base of the spine upward so the whole back tips forward as
     // a unit, rather than only hunching the upper spine/neck. Weight the lower
     // vertebrae most heavily.
+    const torsoLean = profile.torsoLean ?? DRAGON_RIDE_TORSO_LEAN
     const spine0 = mountedSpine0BoneRef.current
     const spine1 = mountedSpine1BoneRef.current
     const spine2 = mountedSpineBoneRef.current
-    if (spine0) spine0.rotation.x -= DRAGON_RIDE_TORSO_LEAN * 0.5
-    if (spine1) spine1.rotation.x -= DRAGON_RIDE_TORSO_LEAN * 0.3
-    if (spine2) spine2.rotation.x -= DRAGON_RIDE_TORSO_LEAN * 0.2
+    if (spine0) spine0.rotation.x -= torsoLean * 0.5
+    if (spine1) spine1.rotation.x -= torsoLean * 0.3
+    if (spine2) spine2.rotation.x -= torsoLean * 0.2
+    // Counter-rotate the head so the rider keeps looking forward despite the
+    // forward lean of the whole spine.
+    const head = mountedHeadBoneRef.current
+    if (head) head.rotation.x += torsoLean
     if (spine0) spine0.updateWorldMatrix(true, true)
     else if (spine2) spine2.updateWorldMatrix(true, true)
 
@@ -5379,6 +5607,14 @@ function RemotePlayer({
     receivedAt: Date.now(),
     motion: 'idle',
   })
+  // Remote mount (the creature this player rides), driven by networked state.
+  const remoteMountPosRef = useRef({ x: 0, y: 0, z: 0 })
+  const remoteMountYawRef = useRef(0)
+  const remoteMountAnimRef = useRef({ airborne: false, moving: false, movingForward: false, jumping: false })
+  const remoteMountRiderTransformRef = useRef({ position: new Vector3(), quaternion: new Quaternion(), ready: false })
+  const remoteMountInitRef = useRef(false)
+  const displayedMountIdRef = useRef(stateRef.current?.mount?.id ?? null)
+  const [displayedMountId, setDisplayedMountId] = useState(stateRef.current?.mount?.id ?? null)
 
   // Initialize group position imperatively on mount — never via JSX props
   useLayoutEffect(() => {
@@ -5509,31 +5745,76 @@ function RemotePlayer({
       motionSwitchAtRef.current = now
       setDisplayedMotion(nextMotion)
     }
+
+    // Remote mount: mount/unmount the model when the id changes, and smoothly
+    // follow the networked mount transform + animation flags.
+    const mount = stateRef.current?.mount ?? null
+    const mountId = mount?.id ?? null
+    if (mountId !== displayedMountIdRef.current) {
+      displayedMountIdRef.current = mountId
+      setDisplayedMountId(mountId)
+    }
+    if (mount && Array.isArray(mount.position)) {
+      const mp = remoteMountPosRef.current
+      if (!remoteMountInitRef.current) {
+        mp.x = mount.position[0]
+        mp.y = mount.position[1]
+        mp.z = mount.position[2]
+        remoteMountYawRef.current = mount.yaw ?? 0
+        remoteMountInitRef.current = true
+      } else {
+        mp.x = MathUtils.damp(mp.x, mount.position[0], 10, delta)
+        mp.y = MathUtils.damp(mp.y, mount.position[1], 10, delta)
+        mp.z = MathUtils.damp(mp.z, mount.position[2], 10, delta)
+        remoteMountYawRef.current = dampAngle(remoteMountYawRef.current, mount.yaw ?? 0, 10, delta)
+      }
+      const a = remoteMountAnimRef.current
+      a.airborne = Boolean(mount.airborne)
+      a.moving = Boolean(mount.moving)
+      a.movingForward = Boolean(mount.movingForward)
+      a.jumping = Boolean(mount.jumping)
+    } else {
+      remoteMountInitRef.current = false
+    }
   })
+
+  const remoteMountConfig = displayedMountId ? getMountConfig(displayedMountId) : null
 
   const displayedTitle = getTitleDefinition(displayedTitleId ?? fallbackTitleId)
 
   return (
-    <group ref={groupRef}>
-      <PlayerAvatar motion={displayedMotion} appearance={displayedAppearance} />
-      {showOverlays && (
-        <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
-          <div className="remote-player-nameplate">
-            <div className="remote-player-label">{label}</div>
-            {displayedTitle && (
-              <div className="remote-player-title" style={{ '--title-color': getTitleRarity(displayedTitle).color }}>
-                {displayedTitle.name}
-              </div>
-            )}
-          </div>
-        </Html>
+    <>
+      {remoteMountConfig && (
+        <MountedMount
+          key={remoteMountConfig.id}
+          config={remoteMountConfig}
+          positionRef={remoteMountPosRef}
+          yawRef={remoteMountYawRef}
+          animStateRef={remoteMountAnimRef}
+          riderTransformRef={remoteMountRiderTransformRef}
+        />
       )}
-      {showOverlays && chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
-    </group>
+      <group ref={groupRef}>
+        <PlayerAvatar motion={displayedMotion} appearance={displayedAppearance} />
+        {showOverlays && (
+          <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
+            <div className="remote-player-nameplate">
+              <div className="remote-player-label">{label}</div>
+              {displayedTitle && (
+                <div className="remote-player-title" style={{ '--title-color': getTitleRarity(displayedTitle).color }}>
+                  {displayedTitle.name}
+                </div>
+              )}
+            </div>
+          </Html>
+        )}
+        {showOverlays && chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
+      </group>
+    </>
   )
 }
 
-function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false, showJumpAction = true, onTap }) {
+function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false, showJumpAction = true, mountFlying = false, onTap }) {
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookPointersRef = useRef(new Map())
@@ -5775,6 +6056,22 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
     touchRef.current.actionQueued = true
   }
 
+  // Jump button also acts as held "ascend" while mounted (jump on ground, climb
+  // in flight); the descend button lowers a flying mount.
+  const onJumpDown = () => {
+    touchRef.current.actionQueued = true
+    touchRef.current.mountAscend = true
+  }
+  const onJumpUp = () => {
+    touchRef.current.mountAscend = false
+  }
+  const onDescendDown = () => {
+    touchRef.current.mountDescend = true
+  }
+  const onDescendUp = () => {
+    touchRef.current.mountDescend = false
+  }
+
   return (
     <div className="hud">
       <div
@@ -5833,8 +6130,27 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
       )}
 
       {!uiHidden && showJumpAction && (
-        <button className="action-btn" type="button" onPointerDown={triggerAction} aria-label="Sauter">
-          <span className="action-symbol">{'\u2423'}</span>
+        <button
+          className={`action-btn${mountFlying ? ' action-btn-ascend' : ''}`}
+          type="button"
+          onPointerDown={onJumpDown}
+          onPointerUp={onJumpUp}
+          onPointerCancel={onJumpUp}
+          aria-label={mountFlying ? 'Monter' : 'Sauter'}
+        >
+          <span className="action-symbol">{mountFlying ? '\u25b2' : '\u2423'}</span>
+        </button>
+      )}
+      {!uiHidden && mountFlying && (
+        <button
+          className="action-btn action-btn-descend"
+          type="button"
+          onPointerDown={onDescendDown}
+          onPointerUp={onDescendUp}
+          onPointerCancel={onDescendUp}
+          aria-label="Descendre"
+        >
+          <span className="action-symbol">{'\u25bc'}</span>
         </button>
       )}
     </div>
@@ -5847,7 +6163,7 @@ const BAG_ITEM_DEFS = [
 
 const BAG_GRID_SIZE = 12
 
-function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, dragonMounted, onToggleDragonMount, onClose }) {
+function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, mountedMountId, onToggleMount, onClose }) {
   const lastTapRef = useRef({})
 
   function handleSlotInteraction(itemId) {
@@ -5882,16 +6198,17 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
             Personnaliser le personnage
           </button>
         )}
-        {onToggleDragonMount && (
+        {onToggleMount && Object.values(MOUNT_CONFIGS).map((mount) => (
           <button
+            key={mount.id}
             type="button"
             className="bag-character-customization-btn"
-            onClick={onToggleDragonMount}
+            onClick={() => onToggleMount(mount.id)}
           >
-            <span aria-hidden="true">🐉</span>
-            {dragonMounted ? 'Désinvoquer le dragon' : 'Invoquer le dragon'}
+            <span aria-hidden="true">{mount.icon}</span>
+            {mountedMountId === mount.id ? `Désinvoquer ${mount.label}` : `Invoquer ${mount.label}`}
           </button>
-        )}
+        ))}
         <p className="bag-hint">Double-cliquer pour équiper</p>
         <div className="bag-grid">
           {slots.map((item, i) => {
@@ -6509,6 +6826,17 @@ function MultiplayerBridge({
         grounded: true,
         motion: localPlayerStateRef.current.motion,
         zone: localPlayerStateRef.current.zone,
+        mount: localPlayerStateRef.current.mount
+          ? {
+              id: localPlayerStateRef.current.mount.id,
+              position: roundNetVector(localPlayerStateRef.current.mount.position),
+              yaw: localPlayerStateRef.current.mount.yaw,
+              airborne: localPlayerStateRef.current.mount.airborne,
+              moving: localPlayerStateRef.current.mount.moving,
+              movingForward: localPlayerStateRef.current.mount.movingForward,
+              jumping: localPlayerStateRef.current.mount.jumping,
+            }
+          : null,
         equippedTitleId,
         characterAppearance,
         sentAt: estimatedHostTime,
@@ -11676,6 +12004,8 @@ function App() {
     punchQueued: false,
     kickQueued: false,
     emoteQueued: null,
+    mountAscend: false,
+    mountDescend: false,
   })
   const playerCombatActionsRef = useRef({ canKick: false, canPunch: false })
   const { canKick, canPunch } = useCombatActionsAvailability(playerCombatActionsRef)
@@ -11691,6 +12021,8 @@ function App() {
       touchRef.current.punchQueued = false
       touchRef.current.kickQueued = false
       touchRef.current.emoteQueued = null
+      touchRef.current.mountAscend = false
+      touchRef.current.mountDescend = false
     }
 
     const onVisibilityChange = () => {
@@ -11768,7 +12100,9 @@ function App() {
     quaternion: new Quaternion(),
     ready: false,
   })
-  const [dragonMounted, setDragonMounted] = useState(false)
+  const [mountedMountId, setMountedMountId] = useState(null)
+  const dragonMounted = mountedMountId !== null
+  const activeMountConfig = getMountConfig(mountedMountId)
   const [cameraOnCat, setCameraOnCat] = useState(false)
   const scoreCooldownRef = useRef(false)
   const respawnTimerRef = useRef(null)
@@ -13178,20 +13512,27 @@ function App() {
     setCatActive((v) => !v)
   }
 
-  const toggleDragonMount = () => {
+  const toggleMount = (mountId) => {
     if (mode !== 'play') return
-    if (dragonMounted) {
+    // Already mounted: a click on the active mount dismisses it; a click on a
+    // different mount swaps to it (only when landed).
+    if (mountedMountId) {
       const pos = dragonRidePositionRef.current
       const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
       if (pos.y - groundY > 0.15) return
-      setDragonMounted(false)
-      setSpawnRequest({
-        zone: currentZone,
-        position: [pos.x, groundY + PLAYER_HEIGHT, pos.z],
-        token: Date.now(),
-      })
-      return
+      if (mountId === mountedMountId) {
+        setMountedMountId(null)
+        setSpawnRequest({
+          zone: currentZone,
+          position: [pos.x, groundY + PLAYER_HEIGHT, pos.z],
+          token: Date.now(),
+        })
+        return
+      }
     }
+
+    const config = getMountConfig(mountId)
+    if (!config) return
 
     const yaw = playerBodyYawRef.current
     const px = playerPositionRef.current.x
@@ -13206,13 +13547,14 @@ function App() {
       moving: false,
       movingForward: false,
     }
-    dragonRideMountProfileRef.current.riderLift = DRAGON_RIDE_RIDER_LIFT
+    dragonRideMountProfileRef.current.riderLift = config.riderLift
+    dragonRideMountProfileRef.current.torsoLean = config.torsoLean
     dragonRideMountProfileRef.current.ready = false
     dragonRideMountProfileRef.current.handTargetsReady = false
     dragonRideMountProfileRef.current.handTargetsMeasured = false
     dragonRideMountProfileRef.current.seatHeightMeasured = false
     dragonRideRiderTransformRef.current.ready = false
-    setDragonMounted(true)
+    setMountedMountId(mountId)
   }
 
   const toggleCameraOnCat = useCallback(() => setCameraOnCat(v => !v), [])
@@ -13767,8 +14109,10 @@ function App() {
                 />
             </group>
             {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
-            {dragonMounted && (
-              <MountedDragon
+            {activeMountConfig && (
+              <MountedMount
+                key={activeMountConfig.id}
+                config={activeMountConfig}
                 positionRef={dragonRidePositionRef}
                 yawRef={dragonRideYawRef}
                 animStateRef={dragonRideAnimStateRef}
@@ -13950,6 +14294,7 @@ function App() {
               playerCombatActionsRef={playerCombatActionsRef}
               dragonRide={{
                 active: dragonMounted,
+                config: activeMountConfig,
                 positionRef: dragonRidePositionRef,
                 yawRef: dragonRideYawRef,
                 animStateRef: dragonRideAnimStateRef,
@@ -14022,6 +14367,7 @@ function App() {
           touchRef={touchRef}
           adminCameraControls={isAdminMode || isVerticalFrameMode || (isLocalNetwork && freeCameraActive)}
           uiHidden={!showCaptureUi}
+          mountFlying={dragonMounted && activeMountConfig?.canFly === true}
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
       )}
@@ -14082,8 +14428,8 @@ function App() {
               ? openCharacterCustomizationFromBag
               : undefined
           }
-          dragonMounted={dragonMounted}
-          onToggleDragonMount={mode === 'play' ? toggleDragonMount : undefined}
+          mountedMountId={mountedMountId}
+          onToggleMount={mode === 'play' ? toggleMount : undefined}
           onClose={() => setIsWeaponMenuOpen(false)}
         />
       )}
@@ -14649,6 +14995,8 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
 
 useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')
+useGLTF.preload('/models/wolf.glb')
+useGLTF.preload('/models/horse.glb')
 useGLTF.preload('/models/cat.glb')
 useGLTF.preload(MAGIC_BOOK_MODEL_URL)
 useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)

@@ -598,6 +598,15 @@ canvas {
   background: rgba(39, 162, 255, 0.95);
 }
 
+/* When flying a mount, stack ascend (▲) above descend (▼) above the jump slot. */
+.action-btn-ascend {
+  bottom: 86px;
+}
+
+.action-btn-descend {
+  bottom: 18px;
+}
+
 .score-wrap {
   position: absolute;
   top: 14px;

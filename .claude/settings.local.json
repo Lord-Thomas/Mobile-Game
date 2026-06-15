@@ -37,7 +37,8 @@
       "Skill(claude-api:*)",
       "Bash(npm install *)",
       "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies['@anthropic-ai/sdk']\\)\")",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(cp \"Modèles a classer/Black-wolf-anim.glb\" web/public/models/wolf.glb)"
     ]
   }
 }
