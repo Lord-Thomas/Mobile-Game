@@ -1960,9 +1960,14 @@ const DRAGON_RIDE_RIDER_WORLD_CLEARANCE = 0.28
 const DRAGON_RIDE_DEFAULT_BODY_WIDTH = 0.72
 const DRAGON_RIDE_MIN_BODY_WIDTH = 0.38
 const DRAGON_RIDE_MAX_BODY_WIDTH = 1.35
-const DRAGON_RIDE_HAND_FORWARD_OFFSET = 0.62
 const DRAGON_RIDE_HAND_RAY_HEIGHT = 0.9
-const DRAGON_RIDE_HAND_SURFACE_OFFSET = 0.005
+// Geometric grip pose: hands rest this far forward of, and just below, the
+// saddle socket so they settle on the dragon's back.
+const DRAGON_RIDE_HAND_FALLBACK_FORWARD = -0.5
+const DRAGON_RIDE_HAND_FALLBACK_DROP = 0.7
+// Forward lean of the rider's upper torso (radians) so the arms can reach down
+// onto the dragon's back. Larger = leans further forward.
+const DRAGON_RIDE_TORSO_LEAN = -0.7
 const DRAGON_RIDE_SEAT_SURFACE_OFFSET = 0.195
 const DRAGON_RIDE_MIN_RIDER_LIFT = 0.18
 const DRAGON_RIDE_MAX_RIDER_LIFT = 0.52
@@ -2115,7 +2120,6 @@ function MountedDragon({
   const widthRayRight = useMemo(() => new Vector3(), [])
   const widthRayOrigin = useMemo(() => new Vector3(), [])
   const widthRayDirection = useMemo(() => new Vector3(), [])
-  const handRayCenter = useMemo(() => new Vector3(), [])
   const handRayForward = useMemo(() => new Vector3(), [])
   const handRayRight = useMemo(() => new Vector3(), [])
   const widthMeasureFramesRef = useRef(0)
@@ -2410,6 +2414,11 @@ function MountedDragon({
     }
 
     if (mountProfileRef && !mountProfileRef.current.handTargetsMeasured) {
+      // Hands are placed geometrically just in front of the seat, not via a
+      // mesh raycast: raycasting the skinned dragon is unreliable and tends to
+      // hit the folded wings or the raised back spines, which pulls the hand
+      // targets (and therefore the arms) upward. A deterministic forward/down
+      // offset from the saddle socket keeps the hands resting on the back.
       const gripHalfWidth = MathUtils.clamp(
         mountProfileRef.current.width * 0.3,
         0.14,
@@ -2417,30 +2426,20 @@ function MountedDragon({
       )
       handRayForward.set(Math.sin(yawRef.current), 0, Math.cos(yawRef.current))
       handRayRight.set(Math.cos(yawRef.current), 0, -Math.sin(yawRef.current))
-      handRayCenter
+
+      mountProfileRef.current.leftHandLocalTarget
         .copy(boneWorldPosition)
-        .addScaledVector(handRayForward, DRAGON_RIDE_HAND_FORWARD_OFFSET)
-        .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_RAY_HEIGHT)
-
-      widthRayOrigin
-        .copy(handRayCenter)
+        .addScaledVector(handRayForward, DRAGON_RIDE_HAND_FALLBACK_FORWARD)
         .addScaledVector(handRayRight, -gripHalfWidth)
-      widthRaycaster.set(widthRayOrigin, widthRayDirection.set(0, -1, 0))
-      widthRaycaster.far = DRAGON_RIDE_HAND_RAY_HEIGHT * 2.5
-      const leftHits = widthRaycaster.intersectObject(dragon, true)
-
-      if (leftHits.length > 0) {
-        mountProfileRef.current.leftHandLocalTarget
-          .copy(leftHits[0].point)
-          .addScaledVector(widthRayDirection.set(0, 1, 0), DRAGON_RIDE_HAND_SURFACE_OFFSET)
-        saddleSocket.worldToLocal(mountProfileRef.current.leftHandLocalTarget)
-        mountProfileRef.current.rightHandLocalTarget
-          .copy(leftHits[0].point)
-          .addScaledVector(handRayRight, gripHalfWidth * 2)
-          .addScaledVector(widthRayDirection, DRAGON_RIDE_HAND_SURFACE_OFFSET)
-        saddleSocket.worldToLocal(mountProfileRef.current.rightHandLocalTarget)
-        mountProfileRef.current.handTargetsMeasured = true
-      }
+        .addScaledVector(widthRayDirection.set(0, 1, 0), -DRAGON_RIDE_HAND_FALLBACK_DROP)
+      saddleSocket.worldToLocal(mountProfileRef.current.leftHandLocalTarget)
+      mountProfileRef.current.rightHandLocalTarget
+        .copy(boneWorldPosition)
+        .addScaledVector(handRayForward, DRAGON_RIDE_HAND_FALLBACK_FORWARD)
+        .addScaledVector(handRayRight, gripHalfWidth)
+        .addScaledVector(widthRayDirection.set(0, 1, 0), -DRAGON_RIDE_HAND_FALLBACK_DROP)
+      saddleSocket.worldToLocal(mountProfileRef.current.rightHandLocalTarget)
+      mountProfileRef.current.handTargetsMeasured = true
     }
 
     if (mountProfileRef && !mountProfileRef.current.seatHeightMeasured) {
@@ -4393,6 +4392,8 @@ function PlayerAvatar({
   const leftForeArmBoneRef = useRef(null)
   const leftHandBoneRef = useRef(null)
   const mountedSpineBoneRef = useRef(null)
+  const mountedSpine0BoneRef = useRef(null)
+  const mountedSpine1BoneRef = useRef(null)
   const leftUpLegBoneRef = useRef(null)
   const rightUpLegBoneRef = useRef(null)
   const fingerBonesRef = useRef([])
@@ -4424,6 +4425,8 @@ function PlayerAvatar({
       if (!child.isBone) return
       if (child.name === 'mixamorigLeftUpLeg') leftUpLegBoneRef.current = child
       else if (child.name === 'mixamorigRightUpLeg') rightUpLegBoneRef.current = child
+      else if (child.name === 'mixamorigSpine') mountedSpine0BoneRef.current = child
+      else if (child.name === 'mixamorigSpine1') mountedSpine1BoneRef.current = child
       else if (child.name === 'mixamorigSpine2') mountedSpineBoneRef.current = child
       else if (child.name === 'mixamorigLeftArm') leftArmBoneRef.current = child
       else if (child.name === 'mixamorigLeftForeArm') leftForeArmBoneRef.current = child
@@ -4584,11 +4587,17 @@ function PlayerAvatar({
       return
     }
 
-    const spine = mountedSpineBoneRef.current
-    if (spine) {
-      spine.rotation.x -= 0.28
-      spine.updateWorldMatrix(true, true)
-    }
+    // Lean from the base of the spine upward so the whole back tips forward as
+    // a unit, rather than only hunching the upper spine/neck. Weight the lower
+    // vertebrae most heavily.
+    const spine0 = mountedSpine0BoneRef.current
+    const spine1 = mountedSpine1BoneRef.current
+    const spine2 = mountedSpineBoneRef.current
+    if (spine0) spine0.rotation.x -= DRAGON_RIDE_TORSO_LEAN * 0.5
+    if (spine1) spine1.rotation.x -= DRAGON_RIDE_TORSO_LEAN * 0.3
+    if (spine2) spine2.rotation.x -= DRAGON_RIDE_TORSO_LEAN * 0.2
+    if (spine0) spine0.updateWorldMatrix(true, true)
+    else if (spine2) spine2.updateWorldMatrix(true, true)
 
     solveMountedArmIk(
       leftArmBoneRef.current,
