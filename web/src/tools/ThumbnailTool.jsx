@@ -83,7 +83,11 @@ function PlainPreviewModel({ item, rotationY, controlsRef }) {
     fitCameraToModel(camera, controlsRef.current, model)
   }, [camera, controlsRef, model])
 
-  return <primitive object={model} rotation={[0, rotationY, 0]} />
+  return (
+    <group rotation={[0, rotationY, 0]}>
+      <primitive object={model} />
+    </group>
+  )
 }
 
 function TexturedPreviewModel({ item, rotationY, controlsRef }) {
@@ -101,7 +105,11 @@ function TexturedPreviewModel({ item, rotationY, controlsRef }) {
     fitCameraToModel(camera, controlsRef.current, model)
   }, [camera, controlsRef, model])
 
-  return <primitive object={model} rotation={[0, rotationY, 0]} />
+  return (
+    <group rotation={[0, rotationY, 0]}>
+      <primitive object={model} />
+    </group>
+  )
 }
 
 function PreviewModel({ item, rotationY, controlsRef }) {

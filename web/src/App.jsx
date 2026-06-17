@@ -69,6 +69,7 @@ const WORLD_NAMEPLATE_Z_INDEX_RANGE = [2, 0]
 const FREE_CAMERA_SPEED = 8
 const SOLO_NAMEPLATE_STORAGE_KEY = 'lab_show_solo_nameplate_v1'
 const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
+const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
@@ -6352,7 +6353,7 @@ function AchievementToast({ toast }) {
   )
 }
 
-function SettingsPanel({ settings, onToggle }) {
+function SettingsPanel({ settings, onToggle, isLocalNetwork = false, showLocalCoinButton = true, onToggleLocalCoinButton }) {
   const rows = [
     ['showFps', 'Afficher les FPS', 'Montre un compteur pendant le jeu.'],
     ['autoQuality', 'Qualite auto', 'Ajuste la resolution si le telephone rame.'],
@@ -6377,6 +6378,22 @@ function SettingsPanel({ settings, onToggle }) {
           </span>
         </label>
       ))}
+      {isLocalNetwork && (
+        <>
+          <div className="settings-group-title">Local</div>
+          <label className="settings-toggle-row">
+            <input
+              type="checkbox"
+              checked={showLocalCoinButton}
+              onChange={onToggleLocalCoinButton}
+            />
+            <span>
+              <strong>Bouton +500 pieces</strong>
+              <small>Affiche le bouton de test local pour ajouter des pieces.</small>
+            </span>
+          </label>
+        </>
+      )}
     </div>
   )
 }
@@ -6411,6 +6428,8 @@ function GameMenuPanel({
   titleActionState,
   soloNameplateVisible,
   performanceSettings,
+  isLocalNetwork,
+  showLocalCoinButton,
   onToggle,
   onTabChange,
   onEmailChange,
@@ -6430,6 +6449,7 @@ function GameMenuPanel({
   onToggleTitle,
   onToggleSoloNameplate,
   onTogglePerformanceSetting,
+  onToggleLocalCoinButton,
 }) {
   const isConnected = Boolean(user)
   const statusText = configured
@@ -6544,6 +6564,9 @@ function GameMenuPanel({
             <SettingsPanel
               settings={performanceSettings}
               onToggle={onTogglePerformanceSetting}
+              isLocalNetwork={isLocalNetwork}
+              showLocalCoinButton={showLocalCoinButton}
+              onToggleLocalCoinButton={onToggleLocalCoinButton}
             />
           )}
 
@@ -12088,6 +12111,14 @@ function App() {
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
   const [performanceSettings, setPerformanceSettings] = useState(loadPerformanceSettings)
+  const [showLocalCoinButton, setShowLocalCoinButton] = useState(() => {
+    if (typeof window === 'undefined') return true
+    try {
+      return localStorage.getItem(LOCAL_COIN_BUTTON_STORAGE_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
   const [dynamicRenderScale, setDynamicRenderScale] = useState(MAX_DYNAMIC_RENDER_SCALE)
   const effectiveRenderScale = performanceSettings.lowResolution
     ? Math.min(performanceSettings.autoQuality ? dynamicRenderScale : MAX_DYNAMIC_RENDER_SCALE, LOW_RESOLUTION_RENDER_SCALE)
@@ -12120,8 +12151,20 @@ function App() {
     }
   }, [performanceSettings])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_COIN_BUTTON_STORAGE_KEY, showLocalCoinButton ? '1' : '0')
+    } catch {
+      // localStorage can be unavailable in private browsing or embedded contexts.
+    }
+  }, [showLocalCoinButton])
+
   const togglePerformanceSetting = useCallback((key) => {
     setPerformanceSettings((current) => ({ ...current, [key]: !current[key] }))
+  }, [])
+
+  const toggleLocalCoinButton = useCallback(() => {
+    setShowLocalCoinButton((current) => !current)
   }, [])
 
   const touchRef = useRef({
@@ -14596,7 +14639,7 @@ function App() {
           onClose={() => setIsWeaponMenuOpen(false)}
         />
       )}
-      {showCaptureUi && isLocalNetwork && canModifyWorld && (
+      {showCaptureUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
           +500
         </button>
@@ -14637,6 +14680,8 @@ function App() {
           titleActionState={titleActionState}
           soloNameplateVisible={soloNameplateVisible}
           performanceSettings={performanceSettings}
+          isLocalNetwork={isLocalNetwork}
+          showLocalCoinButton={showLocalCoinButton}
           onToggle={() => setIsAccountOpen((current) => !current)}
           onTabChange={setMainMenuTab}
           onEmailChange={setAuthEmail}
@@ -14659,6 +14704,7 @@ function App() {
           onToggleTitle={toggleEquippedTitle}
           onToggleSoloNameplate={() => setSoloNameplateVisible((current) => !current)}
           onTogglePerformanceSetting={togglePerformanceSetting}
+          onToggleLocalCoinButton={toggleLocalCoinButton}
         />
       )}
       {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
