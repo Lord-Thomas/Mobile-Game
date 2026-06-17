@@ -449,6 +449,17 @@ export const objectCatalog = {
     thumbnailRotationY: Math.PI * 1.7,
     thumbnailScale: 1.0,
   },
+  magic_book: {
+    id: 'magic_book',
+    type: 'weapon',
+    name: 'Livre Magique',
+    category: 'weapons',
+    modelUrl: '/models/weapons/magic_book.glb',
+    thumbnail: '/ui/object-thumbnails/magic_book.webp',
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 1.7,
+    thumbnailMargin: 1.2,
+  },
   wolf: {
     id: 'wolf',
     type: 'mount',

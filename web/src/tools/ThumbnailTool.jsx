@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Canvas, useLoader } from '@react-three/fiber'
-import { Bounds, Center, OrbitControls } from '@react-three/drei'
-import { SRGBColorSpace, TextureLoader } from 'three'
+import { Canvas, useLoader, useThree } from '@react-three/fiber'
+import { OrbitControls } from '@react-three/drei'
+import { Box3, MathUtils, SRGBColorSpace, TextureLoader, Vector3 } from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -42,18 +42,51 @@ function cloneLoadedModel(loaded, modelUrl, texture = null) {
     child.receiveShadow = true
   })
 
+  model.updateWorldMatrix(true, true)
+  const box = new Box3().setFromObject(model)
+  const center = box.getCenter(new Vector3())
+  if (Number.isFinite(center.x) && Number.isFinite(center.y) && Number.isFinite(center.z)) {
+    model.position.sub(center)
+    model.updateWorldMatrix(true, true)
+  }
+
   return model
 }
 
-function PlainPreviewModel({ item, rotationY }) {
+function fitCameraToModel(camera, controls, model) {
+  if (!model) return
+  model.updateWorldMatrix(true, true)
+  const box = new Box3().setFromObject(model)
+  const size = box.getSize(new Vector3())
+  const maxSize = Math.max(size.x, size.y, size.z, 0.001)
+  const distance = (maxSize / 2 / Math.tan(MathUtils.degToRad(camera.fov) / 2)) * 1.45
+
+  camera.position.set(distance * 0.82, distance * 0.42, distance * 0.82)
+  camera.near = Math.max(0.001, distance / 100)
+  camera.far = Math.max(100, distance * 10)
+  camera.lookAt(0, 0, 0)
+  camera.updateProjectionMatrix()
+
+  if (controls) {
+    controls.target.set(0, 0, 0)
+    controls.update()
+  }
+}
+
+function PlainPreviewModel({ item, rotationY, controlsRef }) {
   const modelUrl = item.thumbnailModelUrl ?? item.modelUrl
   const loaded = useLoader(getModelLoader(modelUrl), modelUrl)
   const model = useMemo(() => cloneLoadedModel(loaded, modelUrl), [loaded, modelUrl])
+  const { camera } = useThree()
+
+  useEffect(() => {
+    fitCameraToModel(camera, controlsRef.current, model)
+  }, [camera, controlsRef, model])
 
   return <primitive object={model} rotation={[0, rotationY, 0]} />
 }
 
-function TexturedPreviewModel({ item, rotationY }) {
+function TexturedPreviewModel({ item, rotationY, controlsRef }) {
   const modelUrl = item.thumbnailModelUrl ?? item.modelUrl
   const loaded = useLoader(getModelLoader(modelUrl), modelUrl)
   const texture = useLoader(TextureLoader, item.thumbnailTextureUrl)
@@ -62,23 +95,24 @@ function TexturedPreviewModel({ item, rotationY }) {
     nextTexture.colorSpace = SRGBColorSpace
     return cloneLoadedModel(loaded, modelUrl, nextTexture)
   }, [loaded, modelUrl, texture])
+  const { camera } = useThree()
+
+  useEffect(() => {
+    fitCameraToModel(camera, controlsRef.current, model)
+  }, [camera, controlsRef, model])
 
   return <primitive object={model} rotation={[0, rotationY, 0]} />
 }
 
-function PreviewModel({ item, rotationY }) {
+function PreviewModel({ item, rotationY, controlsRef }) {
   const ModelComponent = item.thumbnailTextureUrl ? TexturedPreviewModel : PlainPreviewModel
 
-  return (
-    <Bounds fit clip observe margin={1.18}>
-      <Center>
-        <ModelComponent item={item} rotationY={rotationY} />
-      </Center>
-    </Bounds>
-  )
+  return <ModelComponent item={item} rotationY={rotationY} controlsRef={controlsRef} />
 }
 
 function ThumbnailStudioCanvas({ item, rotationY, canvasRef }) {
+  const controlsRef = useRef(null)
+
   return (
     <Canvas
       gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
@@ -91,9 +125,9 @@ function ThumbnailStudioCanvas({ item, rotationY, canvasRef }) {
       <directionalLight position={[3, 4, 5]} intensity={2.3} />
       <directionalLight position={[-4, 2, 3]} intensity={0.85} />
       <Suspense fallback={null}>
-        <PreviewModel item={item} rotationY={rotationY} />
+        <PreviewModel item={item} rotationY={rotationY} controlsRef={controlsRef} />
       </Suspense>
-      <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+      <OrbitControls ref={controlsRef} makeDefault target={[0, 0, 0]} enableDamping dampingFactor={0.08} />
     </Canvas>
   )
 }

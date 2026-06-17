@@ -6287,7 +6287,23 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
               >
                 {item && (
                   <>
-                    <span className="bag-slot-icon">{item.icon}</span>
+                    {item.thumbnail ? (
+                      <>
+                        <img
+                          className="bag-slot-img"
+                          src={item.thumbnail}
+                          alt=""
+                          onError={(event) => {
+                            event.currentTarget.style.display = 'none'
+                            const fallback = event.currentTarget.nextElementSibling
+                            if (fallback) fallback.hidden = false
+                          }}
+                        />
+                        <span className="bag-slot-icon" hidden>{item.icon}</span>
+                      </>
+                    ) : (
+                      <span className="bag-slot-icon">{item.icon}</span>
+                    )}
                     {isEquipped && <span className="bag-slot-equipped-dot" title="Équipé" />}
                   </>
                 )}
@@ -10887,6 +10903,7 @@ function EnvironmentMenu({
   const cartItemCount = cartEntries.reduce((total, entry) => total + entry.quantity, 0)
   const cartTotal = cartEntries.reduce((total, entry) => total + entry.lineTotal, 0)
   const canCheckoutCart = cartItemCount > 0 && (hasUnlimitedCoins || coins >= cartTotal)
+  const magicBookShopItem = objectCatalog.magic_book
 
   return (
     <div className="skin-menu-overlay environment-shop-overlay">
@@ -10996,27 +11013,33 @@ function EnvironmentMenu({
         ) : isWeaponsTab ? (
           <>
             <div className="skin-title">Armes</div>
-            <div className="animals-shop-grid">
-              <div className="animal-shop-card">
-                <div className="animal-shop-preview" style={{ fontSize: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📖</div>
-                <span className="animal-shop-name">Livre Magique</span>
-                <span style={{ fontSize: '0.7rem', color: '#aaa', textAlign: 'center', marginBottom: 4 }}>Lance des boules de feu</span>
-                {!ownedMagicBook ? (
-                  <>
-                    <span className="animal-shop-price">{MAGIC_BOOK_PRICE} pieces</span>
-                    <button
-                      type="button"
-                      className="animal-buy-btn"
-                      onClick={onBuyMagicBook}
-                      disabled={coins < MAGIC_BOOK_PRICE}
-                    >
-                      Acheter
-                    </button>
-                  </>
-                ) : (
-                  <span className="animal-toggle-btn summon" style={{ pointerEvents: 'none' }}>Possédé ✓</span>
-                )}
-              </div>
+            <div className="furniture-shop-grid">
+              <button
+                type="button"
+                className="furniture-shop-card"
+                onClick={onBuyMagicBook}
+                disabled={ownedMagicBook || (!hasUnlimitedCoins && coins < MAGIC_BOOK_PRICE)}
+              >
+                <div className="furniture-shop-preview">
+                  {magicBookShopItem?.thumbnail ? (
+                    <img
+                      src={magicBookShopItem.thumbnail}
+                      alt=""
+                      onError={(event) => {
+                        event.currentTarget.style.display = 'none'
+                        event.currentTarget.parentElement.textContent = '\u{1F4D6}'
+                      }}
+                    />
+                  ) : (
+                    <span aria-hidden="true">{'\u{1F4D6}'}</span>
+                  )}
+                  {ownedMagicBook && <span className="furniture-owned-badge">OK</span>}
+                </div>
+                <span className="furniture-shop-name">{magicBookShopItem?.name ?? 'Livre Magique'}</span>
+                <span className="furniture-shop-price">
+                  {ownedMagicBook ? 'Possede' : `${MAGIC_BOOK_PRICE} pieces`}
+                </span>
+              </button>
             </div>
           </>
         ) : isMountsTab ? (
@@ -14553,7 +14576,13 @@ function App() {
       {showCaptureUi && (
         <BagPanel
           open={PUBLIC_BUILD_FLAGS.showWeaponInventory && isWeaponMenuOpen}
-          ownedItems={BAG_ITEM_DEFS.filter((def) => def.id === 'magic_book' ? ownedMagicBook : false)}
+          ownedItems={BAG_ITEM_DEFS
+            .filter((def) => def.id === 'magic_book' ? ownedMagicBook : false)
+            .map((def) => ({
+              ...def,
+              name: objectCatalog[def.id]?.name ?? def.name,
+              thumbnail: objectCatalog[def.id]?.thumbnail ?? def.thumbnail,
+            }))}
           equippedWeapon={equippedWeapon}
           onEquip={(weapon) => { setEquippedWeapon(weapon) }}
           onCustomizeCharacter={

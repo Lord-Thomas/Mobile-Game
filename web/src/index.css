@@ -3806,6 +3806,14 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   user-select: none;
 }
 
+.bag-slot-img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
 .bag-slot-equipped-dot {
   position: absolute;
   bottom: 3px;
