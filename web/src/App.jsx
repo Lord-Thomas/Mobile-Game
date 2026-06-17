@@ -1983,6 +1983,8 @@ const MOUNT_CONFIGS = {
     id: 'dragon',
     label: 'le dragon',
     icon: '\u{1F409}',
+    price: 10000,
+    currencyLabel: "pieces d'or",
     modelUrl: '/models/dragon.glb',
     scale: 2,
     modelYawOffset: DRAGON_RIDE_MODEL_YAW_OFFSET,
@@ -2010,6 +2012,8 @@ const MOUNT_CONFIGS = {
     id: 'wolf',
     label: 'le loup noir',
     icon: '\u{1F43A}',
+    price: 5000,
+    currencyLabel: 'euros',
     modelUrl: '/models/wolf.glb',
     // Terrestrial-only mount, faster than the dragon on the ground.
     scale: 0.6,
@@ -2057,6 +2061,8 @@ const MOUNT_CONFIGS = {
     id: 'horse',
     label: 'le cheval',
     icon: '\u{1F40E}',
+    price: 5000,
+    currencyLabel: 'euros',
     modelUrl: '/models/horse.glb',
     // Same AnimalArmature rig as the wolf. Terrestrial, fast. The horse model
     // has no Jump or Walk clip, so the hop plays the gallop/idle (jump physics
@@ -2107,6 +2113,24 @@ const MOUNT_CONFIGS = {
 
 function getMountConfig(id) {
   return MOUNT_CONFIGS[id] ?? null
+}
+
+const MOUNT_SHOP_ITEMS = ['wolf', 'horse', 'dragon']
+  .map((id) => {
+    const mount = MOUNT_CONFIGS[id]
+    const catalogItem = objectCatalog[id]
+    return mount ? {
+      ...mount,
+      name: catalogItem?.name ?? mount.label,
+      thumbnail: catalogItem?.thumbnail ?? null,
+    } : null
+  })
+  .filter(Boolean)
+
+const VALID_MOUNT_IDS = new Set(Object.keys(MOUNT_CONFIGS))
+
+function formatMountPrice(mount) {
+  return `${mount.price} ${mount.currencyLabel ?? 'pieces'}`
 }
 
 function aimBoneAtWorldPoint(bone, childBone, target, scratch) {
@@ -6201,7 +6225,7 @@ const BAG_ITEM_DEFS = [
 
 const BAG_GRID_SIZE = 12
 
-function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, mountedMountId, onToggleMount, onClose }) {
+function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, ownedMountIds = [], mountedMountId, onToggleMount, onClose }) {
   const lastTapRef = useRef({})
 
   function handleSlotInteraction(itemId) {
@@ -6236,7 +6260,7 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
             Personnaliser le personnage
           </button>
         )}
-        {onToggleMount && Object.values(MOUNT_CONFIGS).map((mount) => (
+        {onToggleMount && MOUNT_SHOP_ITEMS.filter((mount) => ownedMountIds.includes(mount.id)).map((mount) => (
           <button
             key={mount.id}
             type="button"
@@ -10834,11 +10858,15 @@ function EnvironmentMenu({
   ownedMagicBook,
   onBuyMagicBook,
   showWeaponShop = true,
+  mountItems = [],
+  ownedMountIds = [],
+  onBuyMount,
 }) {
   if (!open) return null
 
   const isAnimalsTab = activeTab === 'animals'
   const isWeaponsTab = showWeaponShop && activeTab === 'weapons'
+  const isMountsTab = activeTab === 'mounts'
   const isFurnitureTab = activeTab === 'furniture'
   const isCartTab = activeTab === 'cart'
   const isFloorTab = activeTab === 'floor'
@@ -10904,6 +10932,13 @@ function EnvironmentMenu({
             onClick={() => onTabChange('animals')}
           >
             Animaux
+          </button>
+          <button
+            type="button"
+            className={`env-tab-btn ${isMountsTab ? 'active' : ''}`}
+            onClick={() => onTabChange('mounts')}
+          >
+            Montures
           </button>
           {showWeaponShop && (
             <button
@@ -10982,6 +11017,43 @@ function EnvironmentMenu({
                   <span className="animal-toggle-btn summon" style={{ pointerEvents: 'none' }}>Possédé ✓</span>
                 )}
               </div>
+            </div>
+          </>
+        ) : isMountsTab ? (
+          <>
+            <div className="skin-title">Montures</div>
+            <div className="furniture-shop-grid">
+              {mountItems.map((mount) => {
+                const owned = ownedMountIds.includes(mount.id)
+                const canBuyMount = hasUnlimitedCoins || coins >= mount.price
+                return (
+                  <button
+                    key={mount.id}
+                    type="button"
+                    className="furniture-shop-card"
+                    onClick={() => onBuyMount?.(mount.id)}
+                    disabled={!owned && !canBuyMount}
+                  >
+                    <div className="furniture-shop-preview">
+                      {mount.thumbnail ? (
+                        <img
+                          src={mount.thumbnail}
+                          alt=""
+                          onError={(event) => {
+                            event.currentTarget.style.display = 'none'
+                            event.currentTarget.parentElement.textContent = mount.icon
+                          }}
+                        />
+                      ) : (
+                        <span aria-hidden="true">{mount.icon}</span>
+                      )}
+                      {owned && <span className="furniture-owned-badge">OK</span>}
+                    </div>
+                    <span className="furniture-shop-name">{mount.name}</span>
+                    <span className="furniture-shop-price">{owned ? 'Possede' : formatMountPrice(mount)}</span>
+                  </button>
+                )
+              })}
             </div>
           </>
         ) : isAnimalsTab ? (
@@ -12193,6 +12265,7 @@ function App() {
   const [ownedCat, setOwnedCat] = useState(false)
   const [catActive, setCatActive] = useState(false)
   const [ownedMagicBook, setOwnedMagicBook] = useState(false)
+  const [ownedMounts, setOwnedMounts] = useState([])
   const [equippedWeapon, setEquippedWeapon] = useState(null)
   const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
   const [characterAppearance, setCharacterAppearance] = useState(CHARACTER_DEFAULT_APPEARANCE)
@@ -12412,7 +12485,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -12457,6 +12530,7 @@ function App() {
     catActive,
     ownedMagicBook,
     ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
+    ownedMounts,
     equippedWeapon,
     equippedTitleId,
     characterAppearance,
@@ -12490,6 +12564,8 @@ function App() {
     setOwnedCat(false)
     setCatActive(false)
     setOwnedMagicBook(false)
+    setOwnedMounts([])
+    setMountedMountId(null)
     setEquippedWeapon(null)
     setIsWeaponMenuOpen(false)
     setCharacterAppearance(CHARACTER_DEFAULT_APPEARANCE)
@@ -12593,6 +12669,10 @@ function App() {
     const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
     const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
     setOwnedMagicBook(hasMagicBook)
+    const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
+      ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
+      : []
+    setOwnedMounts(Array.from(new Set(parsedOwnedMounts)))
     const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
     setEquippedWeapon(hasMagicBook && savedEquipped === 'magic_book' ? 'magic_book' : null)
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
@@ -12688,7 +12768,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -13032,7 +13112,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -13494,6 +13574,19 @@ function App() {
     setOwnedMagicBook(true)
   }
 
+  const buyMount = async (mountId) => {
+    if (!canModifyWorld) return
+    const mount = getMountConfig(mountId)
+    if (!mount) return
+    if (ownedMounts.includes(mount.id)) return
+    if (!isAdminMode && coins < mount.price) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-mount.price)
+    if (!paid) return
+    setOwnedMounts((current) => (
+      current.includes(mount.id) ? current : [...current, mount.id]
+    ))
+  }
+
   const startCharge = useCallback(() => {
     if (mode !== 'play') return
     if (equippedWeapon !== 'magic_book') return
@@ -13551,6 +13644,7 @@ function App() {
 
   const toggleMount = (mountId) => {
     if (mode !== 'play') return
+    if (!ownedMounts.includes(mountId)) return
     // Already mounted: a click on the active mount dismisses it; a click on a
     // different mount swaps to it (only when landed).
     if (mountedMountId) {
@@ -14467,6 +14561,7 @@ function App() {
               ? openCharacterCustomizationFromBag
               : undefined
           }
+          ownedMountIds={ownedMounts}
           mountedMountId={mountedMountId}
           onToggleMount={mode === 'play' ? toggleMount : undefined}
           onClose={() => setIsWeaponMenuOpen(false)}
@@ -14712,6 +14807,9 @@ function App() {
         ownedMagicBook={ownedMagicBook}
         onBuyMagicBook={buyMagicBook}
         showWeaponShop={PUBLIC_BUILD_FLAGS.showWeaponShop}
+        mountItems={MOUNT_SHOP_ITEMS}
+        ownedMountIds={ownedMounts}
+        onBuyMount={buyMount}
       />
       <div className={`zone-fade${zoneFadeActive ? ' active' : ''}`} />
     </main>

@@ -50,6 +50,7 @@ function mergeProgressRow(existingRow, progress) {
   if (!existingRow) return progress
   const existing = fromProgressRow(existingRow)
   const ownedWeapons = mergeUnique(existing.ownedWeapons, progress.ownedWeapons)
+  const ownedMounts = mergeUnique(existing.ownedMounts, progress.ownedMounts)
   const friends = mergeFriends(existing.friends, progress.friends)
   const ownedMagicBook = Boolean(existing.ownedMagicBook || progress.ownedMagicBook || ownedWeapons.includes('magic_book'))
   const equippedWeapon = ownedWeapons.includes(progress.equippedWeapon) || (progress.equippedWeapon === 'magic_book' && ownedMagicBook)
@@ -72,6 +73,7 @@ function mergeProgressRow(existingRow, progress) {
       ? existing.selectedWallSkinId
       : progress.selectedWallSkinId,
     ownedWeapons,
+    ownedMounts,
     friends,
     ownedCat: Boolean(existing.ownedCat || progress.ownedCat),
     ownedMagicBook,
@@ -175,6 +177,7 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       catActive: progress.catActive ?? false,
       ownedMagicBook: progress.ownedMagicBook ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
+      ownedMounts: progress.ownedMounts ?? [],
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
@@ -206,6 +209,7 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       catActive: progress.catActive ?? false,
       ownedMagicBook: progress.ownedMagicBook ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
+      ownedMounts: progress.ownedMounts ?? [],
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
@@ -219,6 +223,9 @@ export function fromProgressRow(row) {
     ? row.world_settings.ownedWeapons
     : []
   const ownedMagicBook = Boolean(row.world_settings?.ownedMagicBook || ownedWeapons.includes('magic_book'))
+  const ownedMounts = Array.isArray(row.world_settings?.ownedMounts)
+    ? row.world_settings.ownedMounts
+    : []
 
   return {
     coins: row.coins ?? 0,
@@ -238,6 +245,7 @@ export function fromProgressRow(row) {
     catActive: Boolean(row.world_settings?.catActive),
     ownedMagicBook,
     ownedWeapons: ownedMagicBook ? mergeUnique(ownedWeapons, ['magic_book']) : ownedWeapons,
+    ownedMounts,
     equippedWeapon: typeof row.world_settings?.equippedWeapon === 'string' ? row.world_settings.equippedWeapon : null,
     equippedTitleId: row.equipped_title_id ?? null,
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],
