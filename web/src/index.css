@@ -12,6 +12,20 @@ body,
   overscroll-behavior: none;
 }
 
+html.app-browser-fullscreen,
+html.app-browser-fullscreen body {
+  min-height: calc(var(--app-viewport-height, 100dvh) + 80px);
+  overflow: auto;
+  background: #000;
+}
+
+html.app-browser-fullscreen #root {
+  position: fixed;
+  inset: 0;
+  height: var(--app-viewport-height, 100dvh);
+  overflow: hidden;
+}
+
 body:has(.thumbnail-capture-page) {
   background: #eef3f8;
 }
@@ -2498,19 +2512,22 @@ html[data-orientation='landscape'] .charge-bar-wrap {
 
 .main-menu-tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
   gap: 6px;
 }
 
 .main-menu-tabs button {
   min-width: 0;
   min-height: 34px;
+  padding: 5px 4px;
   border: 0;
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.08);
   color: #f8fbff;
   font-size: 11px;
   font-weight: 900;
+  line-height: 1.05;
+  white-space: nowrap;
 }
 
 .main-menu-tabs button.active {
@@ -2631,25 +2648,47 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   gap: 8px;
 }
 
+.settings-action-row {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #dbe8f6;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-action-row:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .settings-toggle-row input {
   width: 16px;
   height: 16px;
   accent-color: #f2c14e;
 }
 
-.settings-toggle-row span {
+.settings-toggle-row span,
+.settings-action-row span {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.settings-toggle-row strong {
+.settings-toggle-row strong,
+.settings-action-row strong {
   color: #f8fbff;
   font-size: 11px;
   font-weight: 950;
 }
 
-.settings-toggle-row small {
+.settings-toggle-row small,
+.settings-action-row small {
   color: #aebccd;
   font-size: 10px;
   font-weight: 800;
@@ -2820,7 +2859,8 @@ html[data-orientation='landscape'] .charge-bar-wrap {
 
 .env-tabs {
   width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
   gap: 6px;
   padding: 4px;
   border-radius: 12px;
@@ -2829,8 +2869,8 @@ html[data-orientation='landscape'] .charge-bar-wrap {
 }
 
 .env-tab-btn {
-  flex: 1 1 0;
   min-width: 0;
+  min-height: 36px;
   border: none;
   border-radius: 9px;
   background: transparent;
@@ -2838,6 +2878,9 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   padding: 9px 8px;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1.05;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition: background 0.2s, color 0.2s, box-shadow 0.2s;
   cursor: pointer;
 }
@@ -3864,6 +3907,7 @@ html[data-orientation='landscape'] .charge-bar-wrap {
 }
 
 .char-menu {
+  position: relative;
   width: min(92vw, 380px);
   max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);
   overflow-x: hidden;
@@ -3882,7 +3926,33 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   scrollbar-color: rgba(230, 240, 248, 0.36) rgba(255, 255, 255, 0.06);
 }
 
+.char-menu-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 18px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+
+.char-menu-close:hover {
+  background: rgba(255, 80, 80, 0.18);
+  color: #ff8a8a;
+  border-color: rgba(255, 80, 80, 0.3);
+}
+
 .char-menu-title {
+  padding: 0 36px;
   font-size: 1.1rem;
   font-weight: 800;
   text-align: center;
@@ -4085,6 +4155,7 @@ html[data-orientation='landscape'] .charge-bar-wrap {
 }
 
 .char-menu {
+  position: relative;
   width: min(92vw, 380px);
   max-height: calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);
   overflow-x: hidden;
@@ -4403,7 +4474,7 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   }
 
   .main-menu-tabs {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
   }
 
   .weapon-inventory-panel {

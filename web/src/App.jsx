@@ -1988,6 +1988,7 @@ const DRAGON_RIDE_SADDLE_ROTATION_DAMPING = 20
 const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
 const DRAGON_RIDE_RIDER_LIFT = 0.32
 const DRAGON_RIDE_RIDER_WORLD_CLEARANCE = 0.28
+const REMOTE_MOUNT_RIDER_VISUAL_LIFT = DRAGON_RIDE_RIDER_WORLD_CLEARANCE
 const DRAGON_RIDE_DEFAULT_BODY_WIDTH = 0.72
 const DRAGON_RIDE_MIN_BODY_WIDTH = 0.38
 const DRAGON_RIDE_MAX_BODY_WIDTH = 1.35
@@ -5907,6 +5908,7 @@ function RemotePlayer({
       remoteMountedLiftOffset,
       remoteMountConfig.liftWorldUp,
     )
+    remoteMountedPlayerPosition.y += REMOTE_MOUNT_RIDER_VISUAL_LIFT
     groupParent.worldToLocal(remoteMountedPlayerPosition)
     group.position.copy(remoteMountedPlayerPosition)
     group.rotation.set(0, remoteMountYawRef.current, 0)
@@ -6495,7 +6497,16 @@ function AchievementToast({ toast }) {
   )
 }
 
-function SettingsPanel({ settings, onToggle, isLocalNetwork = false, showLocalCoinButton = true, onToggleLocalCoinButton }) {
+function SettingsPanel({
+  settings,
+  onToggle,
+  isLocalNetwork = false,
+  showLocalCoinButton = true,
+  onToggleLocalCoinButton,
+  fullscreenSupported = false,
+  fullscreenActive = false,
+  onToggleFullscreen,
+}) {
   const rows = [
     ['showFps', 'Afficher les FPS', 'Montre un compteur pendant le jeu.'],
     ['autoQuality', 'Qualite auto', 'Ajuste la resolution si le telephone rame.'],
@@ -6520,6 +6531,25 @@ function SettingsPanel({ settings, onToggle, isLocalNetwork = false, showLocalCo
           </span>
         </label>
       ))}
+      <div className="settings-group-title">Affichage</div>
+      <button
+        type="button"
+        className="settings-action-row"
+        onClick={onToggleFullscreen}
+      >
+        <span>
+          <strong>{fullscreenActive ? 'Quitter le mode plein ecran' : 'Mode plein ecran'}</strong>
+          <small>
+            {fullscreenActive
+              ? fullscreenSupported
+                ? 'Plein ecran actif.'
+                : 'Mode immersif mobile actif.'
+              : fullscreenSupported
+                ? 'Demande le plein ecran au navigateur.'
+                : 'Active un mode immersif mobile quand le vrai plein ecran est bloque.'}
+          </small>
+        </span>
+      </button>
       {isLocalNetwork && (
         <>
           <div className="settings-group-title">Local</div>
@@ -6572,6 +6602,8 @@ function GameMenuPanel({
   performanceSettings,
   isLocalNetwork,
   showLocalCoinButton,
+  fullscreenSupported,
+  fullscreenActive,
   onToggle,
   onTabChange,
   onEmailChange,
@@ -6593,6 +6625,7 @@ function GameMenuPanel({
   onToggleSoloNameplate,
   onTogglePerformanceSetting,
   onToggleLocalCoinButton,
+  onToggleFullscreen,
 }) {
   const isConnected = Boolean(user)
   const statusText = configured
@@ -6710,6 +6743,9 @@ function GameMenuPanel({
               isLocalNetwork={isLocalNetwork}
               showLocalCoinButton={showLocalCoinButton}
               onToggleLocalCoinButton={onToggleLocalCoinButton}
+              fullscreenSupported={fullscreenSupported}
+              fullscreenActive={fullscreenActive}
+              onToggleFullscreen={onToggleFullscreen}
             />
           )}
 
@@ -10971,6 +11007,9 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   return (
     <div className="char-menu-overlay">
       <div className="char-menu">
+        <button type="button" className="char-menu-close" onClick={onClose} aria-label="Fermer la personnalisation">
+          x
+        </button>
         <div className="char-menu-title">Personnage</div>
         <button
           type="button"
@@ -12299,6 +12338,9 @@ function App() {
       return true
     }
   })
+  const [fullscreenSupported, setFullscreenSupported] = useState(false)
+  const [fullscreenActive, setFullscreenActive] = useState(false)
+  const [browserFullscreenFallback, setBrowserFullscreenFallback] = useState(false)
   const [dynamicRenderScale, setDynamicRenderScale] = useState(MAX_DYNAMIC_RENDER_SCALE)
   const effectiveRenderScale = performanceSettings.lowResolution
     ? Math.min(performanceSettings.autoQuality ? dynamicRenderScale : MAX_DYNAMIC_RENDER_SCALE, LOW_RESOLUTION_RENDER_SCALE)
@@ -12339,6 +12381,48 @@ function App() {
     }
   }, [showLocalCoinButton])
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('app-browser-fullscreen', browserFullscreenFallback)
+    if (browserFullscreenFallback) {
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 1)
+        window.dispatchEvent(new Event('resize'))
+      })
+    }
+    return () => {
+      document.documentElement.classList.remove('app-browser-fullscreen')
+    }
+  }, [browserFullscreenFallback])
+
+  useEffect(() => {
+    const doc = document
+    const root = doc.documentElement
+    const body = doc.body
+    const canRequest = Boolean(
+      root?.requestFullscreen ||
+      root?.webkitRequestFullscreen ||
+      body?.requestFullscreen ||
+      body?.webkitRequestFullscreen,
+    )
+
+    const syncFullscreenState = () => {
+      const nativeActive = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement)
+      setFullscreenActive(nativeActive)
+      if (nativeActive) {
+        setBrowserFullscreenFallback(false)
+      }
+    }
+
+    setFullscreenSupported(canRequest)
+    syncFullscreenState()
+    doc.addEventListener('fullscreenchange', syncFullscreenState)
+    doc.addEventListener('webkitfullscreenchange', syncFullscreenState)
+    return () => {
+      doc.removeEventListener('fullscreenchange', syncFullscreenState)
+      doc.removeEventListener('webkitfullscreenchange', syncFullscreenState)
+    }
+  }, [])
+
   const togglePerformanceSetting = useCallback((key) => {
     setPerformanceSettings((current) => ({ ...current, [key]: !current[key] }))
   }, [])
@@ -12346,6 +12430,40 @@ function App() {
   const toggleLocalCoinButton = useCallback(() => {
     setShowLocalCoinButton((current) => !current)
   }, [])
+
+  const toggleFullscreenMode = useCallback(async () => {
+    const doc = document
+    const activeElement = doc.fullscreenElement || doc.webkitFullscreenElement
+
+    try {
+      if (activeElement || browserFullscreenFallback) {
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen()
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen()
+        }
+        setBrowserFullscreenFallback(false)
+        return
+      }
+
+      const root = doc.documentElement
+      const body = doc.body
+      const requestTarget = root?.requestFullscreen || root?.webkitRequestFullscreen ? root : body
+      const requestFullscreen = requestTarget?.requestFullscreen || requestTarget?.webkitRequestFullscreen
+      if (requestFullscreen) {
+        await requestFullscreen.call(requestTarget)
+        window.scrollTo(0, 1)
+      } else {
+        setFullscreenSupported(false)
+        setBrowserFullscreenFallback(true)
+      }
+    } catch {
+      const nativeActive = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement)
+      setFullscreenActive(nativeActive)
+      setFullscreenSupported(nativeActive)
+      setBrowserFullscreenFallback(!nativeActive)
+    }
+  }, [browserFullscreenFallback])
 
   const touchRef = useRef({
     moveX: 0,
@@ -15194,6 +15312,8 @@ function App() {
           performanceSettings={performanceSettings}
           isLocalNetwork={isLocalNetwork}
           showLocalCoinButton={showLocalCoinButton}
+          fullscreenSupported={fullscreenSupported}
+          fullscreenActive={fullscreenActive || browserFullscreenFallback}
           onToggle={() => setIsAccountOpen((current) => !current)}
           onTabChange={setMainMenuTab}
           onEmailChange={setAuthEmail}
@@ -15218,6 +15338,7 @@ function App() {
           onToggleSoloNameplate={() => setSoloNameplateVisible((current) => !current)}
           onTogglePerformanceSetting={togglePerformanceSetting}
           onToggleLocalCoinButton={toggleLocalCoinButton}
+          onToggleFullscreen={toggleFullscreenMode}
         />
       )}
       {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
