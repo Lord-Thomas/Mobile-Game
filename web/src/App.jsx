@@ -2090,7 +2090,7 @@ const MOUNT_CONFIGS = {
     saddleLocalPosition: new Vector3(0, 0, 0),
     liftWorldUp: true,
     autoRiderLift: true,
-    riderLift: -0.2,
+    riderLift: 0.01,
     seatSurfaceOffset: 0.10,
     // Lowers the rider by the bent-leg height of the seated pose so the butt
     // (not the feet) rests on the back. Increase if the feet still touch.
@@ -5666,6 +5666,13 @@ function RemotePlayer({
   const remoteMountInitRef = useRef(false)
   const displayedMountIdRef = useRef(stateRef.current?.mount?.id ?? null)
   const [displayedMountId, setDisplayedMountId] = useState(stateRef.current?.mount?.id ?? null)
+  // Remote pet (cat): follows this player when they have summoned it.
+  const remotePlayerPosRef = useRef({ x: 0, y: 0, z: 0 })
+  const remotePlayerVelRef = useRef({ x: 0, z: 0 })
+  const remoteCatPositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const remoteCatGroupRef = useRef(null)
+  const displayedCatActiveRef = useRef(Boolean(stateRef.current?.catActive))
+  const [displayedCatActive, setDisplayedCatActive] = useState(Boolean(stateRef.current?.catActive))
 
   // Initialize group position imperatively on mount — never via JSX props
   useLayoutEffect(() => {
@@ -5832,6 +5839,22 @@ function RemotePlayer({
     } else {
       remoteMountInitRef.current = false
     }
+
+    // Remote pet (cat): track this player's smoothed position + velocity so the
+    // cat can follow them, and toggle it from the networked catActive flag.
+    const prev = remotePlayerPosRef.current
+    const safeDelta = Math.max(delta, 1e-3)
+    remotePlayerVelRef.current.x = (group.position.x - prev.x) / safeDelta
+    remotePlayerVelRef.current.z = (group.position.z - prev.z) / safeDelta
+    prev.x = group.position.x
+    prev.y = group.position.y
+    prev.z = group.position.z
+
+    const catActive = Boolean(stateRef.current?.catActive)
+    if (catActive !== displayedCatActiveRef.current) {
+      displayedCatActiveRef.current = catActive
+      setDisplayedCatActive(catActive)
+    }
   })
 
   const remoteMountConfig = displayedMountId ? getMountConfig(displayedMountId) : null
@@ -5850,6 +5873,15 @@ function RemotePlayer({
           riderTransformRef={remoteMountRiderTransformRef}
           mountProfileRef={remoteMountProfileRef}
           currentZone={currentZone}
+        />
+      )}
+      {displayedCatActive && (
+        <Cat
+          playerPositionRef={remotePlayerPosRef}
+          playerVelocityRef={remotePlayerVelRef}
+          currentZone={currentZone}
+          catPositionRef={remoteCatPositionRef}
+          catGroupRef={remoteCatGroupRef}
         />
       )}
       <group ref={groupRef}>
@@ -6899,6 +6931,7 @@ function MultiplayerBridge({
   hostTimeOffsetRef,
   equippedTitleId,
   characterAppearance,
+  catActive = false,
 }) {
   const lastSendRef = useRef(0)
   const lastBallSendRef = useRef(0)
@@ -6938,6 +6971,7 @@ function MultiplayerBridge({
               jumping: localPlayerStateRef.current.mount.jumping,
             }
           : null,
+        catActive: catActive === true,
         equippedTitleId,
         characterAppearance,
         sentAt: estimatedHostTime,
@@ -12642,7 +12676,7 @@ function App() {
     setPlayerHp(PLAYER_MAX_HP)
   }
 
-  const applyProgressSnapshot = (parsed, { includeCoins = true, includeIdentity = includeCoins } = {}) => {
+  const applyProgressSnapshot = (parsed, { includeCoins = true, includeIdentity = includeCoins, includeInventory = includeCoins } = {}) => {
     if (!parsed) return
     if (includeIdentity && typeof parsed.displayName === 'string') setDisplayName(parsed.displayName)
     if (includeCoins && typeof parsed.coins === 'number') {
@@ -12650,8 +12684,11 @@ function App() {
     } else if (includeCoins) {
       setCoins(isAdminMode ? 850 : 0)
     }
-    if (Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setOwnedSkins(parsed.ownedSkins)
-    if (typeof parsed.selectedSkinId === 'string') {
+    // Personal inventory (owned skins) must never be taken from a visited
+    // player's snapshot — otherwise visiting someone would show their purchases
+    // as yours. Gated behind includeInventory (false during a visit).
+    if (includeInventory && Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setOwnedSkins(parsed.ownedSkins)
+    if (includeIdentity && typeof parsed.selectedSkinId === 'string') {
       setSelectedSkinId(parsed.selectedSkinId)
       setPreviewSkinId(parsed.selectedSkinId)
     }
@@ -12673,8 +12710,12 @@ function App() {
       ? ['wall-classic', ...parsed.ownedWallSkins.filter((id) => validWallSkinIds.has(id) && id !== 'wall-classic')]
       : ['wall-classic']
 
-    setOwnedFloorSkins(ownedFloorSkinIds)
-    setOwnedWallSkins(ownedWallSkinIds)
+    // Owned floor/wall skins are inventory (keep the visitor's own); the
+    // selected ones below are the host's house appearance (apply always).
+    if (includeInventory) {
+      setOwnedFloorSkins(ownedFloorSkinIds)
+      setOwnedWallSkins(ownedWallSkinIds)
+    }
 
     if (typeof parsed.selectedFloorSkinId === 'string' && validFloorSkinIds.has(parsed.selectedFloorSkinId)) {
       setSelectedFloorSkinId(parsed.selectedFloorSkinId)
@@ -12730,17 +12771,21 @@ function App() {
 
       setEditableObjects([...mergedObjects, ...savedShopObjects])
     }
-    if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
-    if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
-    const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
-    const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
-    setOwnedMagicBook(hasMagicBook)
-    const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
-      ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
-      : []
-    setOwnedMounts(Array.from(new Set(parsedOwnedMounts)))
-    const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
-    setEquippedWeapon(hasMagicBook && savedEquipped === 'magic_book' ? 'magic_book' : null)
+    // Pets, mounts, weapons are personal inventory: never apply them from a
+    // visited player's snapshot (that would show their animals/mounts as yours).
+    if (includeInventory) {
+      if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
+      if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
+      const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
+      const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
+      setOwnedMagicBook(hasMagicBook)
+      const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
+        ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
+        : []
+      setOwnedMounts(Array.from(new Set(parsedOwnedMounts)))
+      const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
+      setEquippedWeapon(hasMagicBook && savedEquipped === 'magic_book' ? 'magic_book' : null)
+    }
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
     if (includeIdentity && Array.isArray(parsed.friends)) {
       setFriends((current) => mergeSocialFriends(current, parsed.friends))
@@ -13703,7 +13748,9 @@ function App() {
   }, [])
 
   const toggleCat = () => {
-    if (!canModifyWorld) return
+    // Summoning your own pet is a personal action (not a world edit), so it is
+    // allowed while visiting too — the other player sees it via networked state.
+    if (mode !== 'play') return
     if (!ownedCat) return
     setCatActive((v) => !v)
   }
@@ -14272,6 +14319,7 @@ function App() {
           hostTimeOffsetRef={hostTimeOffsetRef}
           equippedTitleId={equippedTitleId}
           characterAppearance={characterAppearance}
+          catActive={catActive}
         />
         <InteriorLighting
           active={currentZone !== ZONES.outside}
