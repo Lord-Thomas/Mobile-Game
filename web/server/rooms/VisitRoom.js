@@ -84,6 +84,7 @@ function sanitizePlayerState(message, client, player) {
     motion: typeof message?.motion === 'string' ? message.motion.slice(0, 32) : 'idle',
     zone: typeof message?.zone === 'string' ? message.zone.slice(0, 32) : 'interior',
     mount: sanitizeMount(message?.mount),
+    catActive: Boolean(message?.catActive),
     equippedTitleId,
     characterAppearance: sanitizeCharacterAppearance(message?.characterAppearance),
   }
@@ -120,6 +121,18 @@ function sanitizeChatText(message) {
   return message.text.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_LENGTH)
 }
 
+function sanitizeCoinGain(message) {
+  const delta = Number(message?.delta)
+  if (!Number.isFinite(delta) || delta <= 0 || delta > 10000) return null
+
+  return {
+    id: typeof message?.id === 'string' ? message.id.slice(0, 80) : `${now()}`,
+    delta: Math.floor(delta),
+    reason: typeof message?.reason === 'string' ? message.reason.slice(0, 40) : 'reward',
+    position: isVector(message?.position) ? sanitizeVector(message.position) : null,
+  }
+}
+
 export class VisitRoom extends Room {
   maxClients = MAX_CLIENTS
 
@@ -149,6 +162,7 @@ export class VisitRoom extends Room {
     this.onMessage('guest-kick', (client, message) => this.handleGuestKick(client, message))
     this.onMessage('chat-message', (client, message) => this.handleChatMessage(client, message))
     this.onMessage('world-state', (client, message) => this.handleWorldState(client, message))
+    this.onMessage('coin-gain', (client, message) => this.handleCoinGain(client, message))
     this.onMessage('time-ping', (client, message) => {
       client.send('time-pong', {
         pingId: message?.pingId,
@@ -172,6 +186,7 @@ export class VisitRoom extends Room {
       motion: 'idle',
       zone: 'interior',
       mount: null,
+      catActive: false,
       equippedTitleId: null,
       characterAppearance: null,
       lastUpdateAt: 0,
@@ -234,6 +249,7 @@ export class VisitRoom extends Room {
     player.motion = state.motion
     player.zone = state.zone
     player.mount = state.mount
+    player.catActive = state.catActive
     player.equippedTitleId = state.equippedTitleId
     player.characterAppearance = state.characterAppearance
     player.lastUpdateAt = now()
@@ -298,6 +314,23 @@ export class VisitRoom extends Room {
     this.broadcast('world-state', this.latestWorldState, { except: client })
   }
 
+  handleCoinGain(client, message) {
+    const player = this.players.get(client.sessionId)
+    if (!player) return
+
+    const gain = sanitizeCoinGain(message)
+    if (!gain) return
+
+    this.broadcast('coin-gain', {
+      ...gain,
+      serverTime: now(),
+      userId: player.userId,
+      sessionId: client.sessionId,
+      displayName: player.displayName,
+      role: player.role,
+    }, { except: client })
+  }
+
   flushNetworkState() {
     const time = now()
     this.players.forEach((player, sessionId) => {
@@ -320,6 +353,7 @@ export class VisitRoom extends Room {
         motion: player.motion,
         zone: player.zone,
         mount: player.mount,
+        catActive: player.catActive,
         equippedTitleId: player.equippedTitleId,
         characterAppearance: player.characterAppearance,
       }, { except: sourceClient })

@@ -10952,6 +10952,7 @@ function EnvironmentMenu({
   ownedFloorSkinIds,
   ownedWallSkinIds,
   applyWallToCeiling,
+  canApplyWorldSkins = true,
   onApplyWallToCeilingChange,
   onClose,
   onPrevious,
@@ -11261,7 +11262,8 @@ function EnvironmentMenu({
                 <input
                   type="checkbox"
                   checked={applyWallToCeiling}
-                  onChange={(event) => onApplyWallToCeilingChange(event.target.checked)}
+                  disabled={!canApplyWorldSkins}
+                  onChange={(event) => canApplyWorldSkins && onApplyWallToCeilingChange(event.target.checked)}
                 />
                 <span>Appliquer au plafond</span>
               </label>
@@ -11275,10 +11277,11 @@ function EnvironmentMenu({
                 Acheter - {skin.price}
               </button>
             )}
-            {isOwned && !isSelected && (
+            {isOwned && !isSelected && canApplyWorldSkins && (
               <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
             )}
-            {isOwned && isSelected && <div className="skin-equipped">Equipe</div>}
+            {isOwned && isSelected && canApplyWorldSkins && <div className="skin-equipped">Equipe</div>}
+            {isOwned && !canApplyWorldSkins && <div className="skin-equipped">Possede</div>}
           </>
         )}
         {!isCartTab && (
@@ -12450,6 +12453,8 @@ function App() {
   const skipNextCloudSaveRef = useRef(false)
   const authUserRef = useRef(null)
   const latestProgressRef = useRef(null)
+  const personalProgressRef = useRef(null)
+  const [personalProgressVersion, setPersonalProgressVersion] = useState(0)
   const cloudSaveTimeoutRef = useRef(null)
   const onlinePresenceRef = useRef(null)
   const multiplayerChannelRef = useRef(null)
@@ -12679,6 +12684,41 @@ function App() {
     friends,
   })
 
+  const rememberPersonalProgress = (snapshot) => {
+    if (!snapshot) return
+    personalProgressRef.current = snapshot
+    setPersonalProgressVersion((version) => version + 1)
+  }
+
+  const createPersonalProgressSnapshot = (worldOverride = null) => {
+    const savedWorld = worldOverride ?? personalProgressRef.current ?? latestProgressRef.current ?? {}
+    return {
+      ...savedWorld,
+      displayName,
+      coins,
+      ownedSkins,
+      selectedSkinId,
+      ownedFloorSkins,
+      ownedWallSkins,
+      ownedCat,
+      catActive,
+      ownedMagicBook,
+      ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
+      ownedMounts,
+      equippedWeapon,
+      equippedTitleId,
+      characterAppearance,
+      friends,
+      roomLightOn: savedWorld.roomLightOn ?? roomLightOn,
+      lightColor: savedWorld.lightColor ?? lightColor,
+      lightIntensity: savedWorld.lightIntensity ?? lightIntensity,
+      selectedFloorSkinId: savedWorld.selectedFloorSkinId ?? selectedFloorSkinId,
+      selectedWallSkinId: savedWorld.selectedWallSkinId ?? selectedWallSkinId,
+      applyWallToCeiling: savedWorld.applyWallToCeiling ?? applyWallToCeiling,
+      editableObjects: Array.isArray(savedWorld.editableObjects) ? savedWorld.editableObjects : editableObjects,
+    }
+  }
+
   const resetGuestProgress = () => {
     setCoins(isAdminMode ? 850 : 0)
     setOwnedSkins(['classic'])
@@ -12879,7 +12919,10 @@ function App() {
       if (saved.role === 'guest') {
         try {
           const hostWorld = await loadPlayerPublicWorld(saved.session.hostUserId, { scope: progressScope })
-          if (!cancelled && hostWorld) applyProgressSnapshot(hostWorld, { includeCoins: false })
+          if (!cancelled && hostWorld) {
+            rememberPersonalProgress(latestProgressRef.current ?? createCurrentProgressSnapshot())
+            applyProgressSnapshot(hostWorld, { includeCoins: false })
+          }
         } catch {
           // Non-fatal: still attempt to rejoin; the world may already be loaded.
         }
@@ -12939,11 +12982,14 @@ function App() {
   }
 
   const saveCurrentProgressToCloud = async () => {
-    if (isGuestVisit) return false
     if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return false
     setCloudSaveState('saving')
     try {
-      await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
+      const snapshot = isGuestVisit
+        ? createPersonalProgressSnapshot()
+        : latestProgressRef.current ?? createCurrentProgressSnapshot()
+      await savePlayerProgress(snapshot, { scope: progressScope })
+      if (isGuestVisit) rememberPersonalProgress(snapshot)
       setCloudSaveState('synced')
       return true
     } catch {
@@ -12952,15 +12998,27 @@ function App() {
     }
   }
 
-  const applyCoinDelta = async (delta) => {
-    if (isGuestVisit) return false
+  const applyCoinDelta = async (delta, { share = delta > 0, reason = 'reward', position = null } = {}) => {
     const previousCoins = latestProgressRef.current?.coins ?? coins
     setCoins((current) => Math.max(0, current + delta))
-    if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return true
+    const shareGain = () => {
+      if (!share || delta <= 0 || !isMultiplayerSession) return
+      multiplayerChannelRef.current?.sendCoinGain?.({
+        id: `${authUserRef.current?.id ?? 'local'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        delta,
+        reason,
+        position,
+      })
+    }
+    if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) {
+      shareGain()
+      return true
+    }
 
     try {
       const nextCoins = await addPlayerCoins(delta, { scope: progressScope })
       if (typeof nextCoins === 'number') setCoins(Math.max(0, nextCoins))
+      shareGain()
       return true
     } catch {
       if (delta > 0 || previousCoins + delta >= 0) {
@@ -12970,6 +13028,7 @@ function App() {
             coins: Math.max(0, previousCoins + delta),
           }, { includeCoins: true, scope: progressScope })
           setCloudSaveState('synced')
+          shareGain()
           return true
         } catch {}
       }
@@ -13005,9 +13064,9 @@ function App() {
   }, [progressStorageKey])
 
   useEffect(() => {
-    if (isGuestVisit) return
-    const snapshot = createCurrentProgressSnapshot()
+    const snapshot = isGuestVisit ? createPersonalProgressSnapshot() : createCurrentProgressSnapshot()
     latestProgressRef.current = snapshot
+    if (!isGuestVisit) rememberPersonalProgress(snapshot)
     localStorage.setItem(
       progressStorageKey,
       JSON.stringify(snapshot),
@@ -13090,6 +13149,7 @@ function App() {
             setMultiplayerMessage('Impossible de charger ce monde. Verifie le SQL Supabase.')
             return
           }
+          rememberPersonalProgress(latestProgressRef.current ?? createCurrentProgressSnapshot())
           applyProgressSnapshot(hostWorld, { includeCoins: false })
           setMultiplayerSession(response.session)
           setMultiplayerRole('guest')
@@ -13197,6 +13257,27 @@ function App() {
       lastRemoteWorldSeqRef.current = seq
       applyProgressSnapshot(message.snapshot, { includeCoins: false })
     }
+    const applyRemoteCoinGain = async (message) => {
+      const delta = Number(message?.delta)
+      if (!Number.isFinite(delta) || delta <= 0) return
+      const rewarded = await applyCoinDelta(delta, { share: false })
+      if (!rewarded) return
+
+      const position = Array.isArray(message?.position) ? message.position : null
+      if (!position) return
+      setScorePopups((previous) => [
+        ...previous,
+        {
+          id: message.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          value: delta,
+          x: position[0] ?? 0,
+          y: position[1] ?? 1,
+          z: position[2] ?? 0,
+          startAt: Date.now(),
+          duration: 700,
+        },
+      ])
+    }
 
     const connectFallbackSupabase = () => {
       const channel = connectMultiplayerSession({
@@ -13210,6 +13291,7 @@ function App() {
         },
         onChatMessage: (payload) => addChatBubble('remote', payload),
         onWorldState: applyRemoteWorldState,
+        onCoinGain: applyRemoteCoinGain,
         onStatusChange: setSessionConnectionState,
         onHostTimeOffsetChange: (offset) => {
           hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
@@ -13240,6 +13322,7 @@ function App() {
       },
       onChatMessage: (payload) => addChatBubble('remote', payload),
       onWorldState: applyRemoteWorldState,
+      onCoinGain: applyRemoteCoinGain,
       onPlayerLeft: () => {
         clearRemoteState()
         setMultiplayerMessage('Le joueur distant a quitte la visite.')
@@ -13300,10 +13383,13 @@ function App() {
         const cloudProgress = await loadPlayerProgress({ scope: progressScope })
         if (cancelled) return
         if (cloudProgress) {
+          rememberPersonalProgress(cloudProgress)
           skipNextCloudSaveRef.current = true
           applyProgressSnapshot(cloudProgress, { includeWorld: !hasSavedGuestSession(user.id) })
         } else {
-          await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
+          const snapshot = latestProgressRef.current ?? createCurrentProgressSnapshot()
+          await savePlayerProgress(snapshot, { scope: progressScope })
+          rememberPersonalProgress(snapshot)
         }
         await refreshPlayerTitles()
         hasLoadedCloudProgressRef.current = true
@@ -13328,10 +13414,13 @@ function App() {
         setCloudSaveState('loading')
         const cloudProgress = await loadPlayerProgress({ scope: progressScope })
         if (cloudProgress) {
+          rememberPersonalProgress(cloudProgress)
           skipNextCloudSaveRef.current = true
           applyProgressSnapshot(cloudProgress, { includeWorld: !hasSavedGuestSession(user.id) })
         } else {
-          await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
+          const snapshot = latestProgressRef.current ?? createCurrentProgressSnapshot()
+          await savePlayerProgress(snapshot, { scope: progressScope })
+          rememberPersonalProgress(snapshot)
         }
         await refreshPlayerTitles()
         hasLoadedCloudProgressRef.current = true
@@ -13350,7 +13439,6 @@ function App() {
   }, [progressScope])
 
   useEffect(() => {
-    if (isGuestVisit) return undefined
     if (!isSupabaseConfigured || !authUser || !hasLoadedCloudProgressRef.current) return undefined
     if (skipNextCloudSaveRef.current) {
       skipNextCloudSaveRef.current = false
@@ -13360,8 +13448,14 @@ function App() {
     if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     setCloudSaveState('saving')
     cloudSaveTimeoutRef.current = window.setTimeout(() => {
-      savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
-        .then(() => setCloudSaveState('synced'))
+      const snapshot = isGuestVisit
+        ? createPersonalProgressSnapshot()
+        : latestProgressRef.current ?? createCurrentProgressSnapshot()
+      savePlayerProgress(snapshot, { scope: progressScope })
+        .then(() => {
+          if (isGuestVisit) rememberPersonalProgress(snapshot)
+          setCloudSaveState('synced')
+        })
         .catch(() => setCloudSaveState('error'))
     }, 800)
 
@@ -13446,21 +13540,27 @@ function App() {
 
   const handleGoal = () => {
     if (scoreCooldownRef.current) return
+    if (isGuestVisit) return
 
     scoreCooldownRef.current = true
-    applyCoinDelta(GOAL_POINTS)
 
     const ball = ballRef.current
     const ballPosition = ball?.translation()
     const goalPosition = editableObjects.find((object) => object.id === 'goal_01')?.position ?? [0, 0, GOAL_Z]
+    const popupPosition = [
+      ballPosition?.x ?? 0,
+      Math.max(0.9, ballPosition?.y ?? 0.9),
+      ballPosition?.z ?? goalPosition[2] - 0.55,
+    ]
+    applyCoinDelta(GOAL_POINTS, { reason: 'goal', position: popupPosition })
     setScorePopups((previous) => [
       ...previous,
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         value: GOAL_POINTS,
-        x: ballPosition?.x ?? 0,
-        y: Math.max(0.9, ballPosition?.y ?? 0.9),
-        z: ballPosition?.z ?? goalPosition[2] - 0.55,
+        x: popupPosition[0],
+        y: popupPosition[1],
+        z: popupPosition[2],
         startAt: Date.now(),
         duration: 620,
       },
@@ -13474,7 +13574,8 @@ function App() {
   }
 
   const handleTrainingDummyDefeated = async ({ position, reward = 50 }) => {
-    const rewarded = await applyCoinDelta(reward)
+    const popupPosition = [position?.[0] ?? 0, (position?.[1] ?? 0) + 1.55, position?.[2] ?? 0]
+    const rewarded = await applyCoinDelta(reward, { reason: 'training_dummy', position: popupPosition })
     if (!rewarded) return
 
     setScorePopups((previous) => [
@@ -13482,9 +13583,9 @@ function App() {
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         value: reward,
-        x: position?.[0] ?? 0,
-        y: (position?.[1] ?? 0) + 1.55,
-        z: position?.[2] ?? 0,
+        x: popupPosition[0],
+        y: popupPosition[1],
+        z: popupPosition[2],
         startAt: Date.now(),
         duration: 700,
       },
@@ -13492,7 +13593,8 @@ function App() {
   }
 
   const handleSmallEnemyDefeated = async ({ position, reward = MUSHROOM_ENEMY_REWARD_COINS }) => {
-    const rewarded = await applyCoinDelta(reward)
+    const popupPosition = [position?.[0] ?? 0, (position?.[1] ?? 0) + 1.05, position?.[2] ?? 0]
+    const rewarded = await applyCoinDelta(reward, { reason: 'enemy_defeat', position: popupPosition })
     if (!rewarded) return
 
     if (!isAdminMode && !isGuestVisit && authUserRef.current) {
@@ -13530,9 +13632,9 @@ function App() {
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         value: reward,
-        x: position?.[0] ?? 0,
-        y: (position?.[1] ?? 0) + 1.05,
-        z: position?.[2] ?? 0,
+        x: popupPosition[0],
+        y: popupPosition[1],
+        z: popupPosition[2],
         startAt: Date.now(),
         duration: 700,
       },
@@ -13651,7 +13753,10 @@ function App() {
   const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
   const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
-  const furnitureCounts = editableObjects.reduce((counts, object) => {
+  const furnitureInventoryObjects = isGuestVisit && personalProgressVersion >= 0
+    ? personalProgressRef.current?.editableObjects ?? []
+    : editableObjects
+  const furnitureCounts = furnitureInventoryObjects.reduce((counts, object) => {
     if (shopObjectIds.includes(object.objectId)) {
       counts[object.objectId] = (counts[object.objectId] ?? 0) + 1
     }
@@ -13659,7 +13764,6 @@ function App() {
   }, {})
 
   const openSkinMenu = () => {
-    if (!canModifyWorld) return
     setPreviewSkinId(selectedSkinId)
     setIsCharacterMenuOpen(false)
     setIsCustomizationChoiceOpen(false)
@@ -13671,7 +13775,6 @@ function App() {
     setIsSkinMenuOpen(false)
   }
   const openEnvironmentMenu = () => {
-    if (!canModifyWorld) return
     setEnvironmentTab('floor')
     setPreviewFloorSkinId(selectedFloorSkinId)
     setPreviewWallSkinId(selectedWallSkinId)
@@ -13686,7 +13789,6 @@ function App() {
   }
 
   const addFurnitureToCart = (objectId) => {
-    if (!canModifyWorld) return
     const item = objectCatalog[objectId]
     if (!item || !shopObjectIds.includes(objectId)) return
     setFurnitureCart((current) => {
@@ -13716,7 +13818,7 @@ function App() {
   }
 
   const checkoutFurnitureCart = async () => {
-    if (!canModifyWorld || furnitureCart.length === 0) return
+    if (furnitureCart.length === 0) return
     const instances = []
     let total = 0
     for (const entry of furnitureCart) {
@@ -13732,6 +13834,30 @@ function App() {
     if (!isAdminMode && coins < total) return
     const paid = isAdminMode ? true : await applyCoinDelta(-total)
     if (!paid) return
+    if (isGuestVisit) {
+      const previousPersonal = personalProgressRef.current ?? latestProgressRef.current ?? createCurrentProgressSnapshot()
+      const nextEditableObjects = [
+        ...(Array.isArray(previousPersonal.editableObjects) ? previousPersonal.editableObjects : defaultEditableObjects),
+        ...instances.map((object) => ({ ...object, status: 'stored', position: null })),
+      ]
+      const nextPersonal = createPersonalProgressSnapshot({
+        ...previousPersonal,
+        editableObjects: nextEditableObjects,
+      })
+      rememberPersonalProgress(nextPersonal)
+      try {
+        localStorage.setItem(progressStorageKey, JSON.stringify(nextPersonal))
+        if (isSupabaseConfigured && authUserRef.current && hasLoadedCloudProgressRef.current) {
+          await savePlayerProgress(nextPersonal, { scope: progressScope })
+          setCloudSaveState('synced')
+        }
+      } catch {
+        setCloudSaveState('error')
+      }
+      setFurnitureCart([])
+      setEnvironmentTab('furniture')
+      return
+    }
     setEditableObjects((current) => [...current, ...instances])
     setFurnitureCart([])
     setEnvironmentTab('furniture')
@@ -13769,7 +13895,6 @@ function App() {
   }
 
   const buyPreviewSkin = async () => {
-    if (!canModifyWorld) return
     const skin = ballSkins[previewIndex]
     if (ownedSkins.includes(skin.id)) return
     if (!isAdminMode && coins < skin.price) return
@@ -13779,14 +13904,12 @@ function App() {
   }
 
   const selectPreviewSkin = () => {
-    if (!canModifyWorld) return
     const skin = ballSkins[previewIndex]
     if (!ownedSkins.includes(skin.id)) return
     setSelectedSkinId(skin.id)
     setIsSkinMenuOpen(false)
   }
   const buyPreviewEnvironmentSkin = async () => {
-    if (!canModifyWorld) return
     const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : availableWallSkins[previewWallIndex]
     const owned = environmentTab === 'floor' ? ownedFloorSkins : ownedWallSkins
     if (owned.includes(skin.id)) return
@@ -13813,7 +13936,6 @@ function App() {
   }
 
   const buyCat = async () => {
-    if (!canModifyWorld) return
     if (ownedCat) return
     if (!isAdminMode && coins < 500) return
     const paid = isAdminMode ? true : await applyCoinDelta(-500)
@@ -13822,7 +13944,6 @@ function App() {
   }
 
   const buyMagicBook = async () => {
-    if (!canModifyWorld) return
     if (ownedMagicBook) return
     if (!isAdminMode && coins < MAGIC_BOOK_PRICE) return
     const paid = isAdminMode ? true : await applyCoinDelta(-MAGIC_BOOK_PRICE)
@@ -13831,7 +13952,6 @@ function App() {
   }
 
   const buyMount = async (mountId) => {
-    if (!canModifyWorld) return
     const mount = getMountConfig(mountId)
     if (!mount) return
     if (ownedMounts.includes(mount.id)) return
@@ -14430,8 +14550,8 @@ function App() {
   const showInteriorHouseDetails = !isOutsideZone
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
     isNearOutdoorDoor ||
-    (canModifyWorld && isNearSkinStation) ||
-    (canModifyWorld && currentZone !== ZONES.outside && isNearEnvironmentStation) ||
+    isNearSkinStation ||
+    (currentZone !== ZONES.outside && isNearEnvironmentStation) ||
     (canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation) ||
     Boolean(nearbyTv) ||
     Boolean(nearbySeat) ||
@@ -14921,12 +15041,12 @@ function App() {
           {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
         </button>
       )}
-      {showCaptureUi && canModifyWorld && isNearSkinStation && !isSkinMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
+      {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
           Personnaliser le ballon
         </button>
       )}
-      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
+      {showCaptureUi && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
         <button className="skin-open-btn environment-open-btn" type="button" onClick={openEnvironmentMenu}>
           Boutique
         </button>
@@ -15073,6 +15193,7 @@ function App() {
         ownedFloorSkinIds={ownedFloorSkins}
         ownedWallSkinIds={ownedWallSkins}
         applyWallToCeiling={applyWallToCeiling}
+        canApplyWorldSkins={canModifyWorld}
         onApplyWallToCeilingChange={setApplyWallToCeiling}
         onClose={closeEnvironmentMenu}
         onPrevious={() => goEnvironmentPreview(-1)}
