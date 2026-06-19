@@ -163,6 +163,8 @@ function sanitizeSpellCast(message) {
     kind: 'fireball',
     position: sanitizeVector(message.position),
     direction: [direction[0] / length, direction[1] / length],
+    startedAt: isFiniteNumber(message.startedAt) ? Number(message.startedAt) : null,
+    sentAt: isFiniteNumber(message.sentAt) ? Number(message.sentAt) : null,
     phase: isFiniteNumber(message.phase) ? Number(message.phase) : 0,
   }
 }

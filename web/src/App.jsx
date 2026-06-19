@@ -48,12 +48,15 @@ const RENDER_SCALE_STEP = 0.05
 const BASE_CAMERA_VERTICAL_FOV = 52
 const MAX_CAMERA_HORIZONTAL_FOV = 72
 const MULTIPLAYER_INTERP_DELAY_MS = 150
-const MULTIPLAYER_PLAYER_SEND_INTERVAL = 1 / 20
+const MULTIPLAYER_PLAYER_SEND_INTERVAL = 1 / 15
+const MULTIPLAYER_PLAYER_IDLE_SEND_INTERVAL = 1 / 4
+const MULTIPLAYER_PLAYER_PET_SEND_INTERVAL = 1 / 8
 const MULTIPLAYER_BALL_ACTIVE_SEND_INTERVAL = 1 / 20
 const MULTIPLAYER_BALL_SLEEP_SEND_INTERVAL = 1 / 5
 const MULTIPLAYER_MAX_EXTRAPOLATION_MS = 180
 const MULTIPLAYER_REMOTE_SNAP_DISTANCE = 4
 const MULTIPLAYER_REMOTE_VISUAL_SMOOTHING = 10
+const REMOTE_SPELL_LATENCY_COMPENSATION_MAX_MS = 450
 const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
@@ -5527,10 +5530,12 @@ function RuntimeWarmupRig() {
 function FireballManager({ projectilesRef, combatTargetsRef }) {
   const [, setRenderTick] = useState(0)
   const impactsRef = useRef([])
+  const hadVisualsRef = useRef(false)
 
   useFrame((_, delta) => {
     const now = Date.now()
     const projs = projectilesRef.current
+    const hadVisuals = hadVisualsRef.current || projs.length > 0 || impactsRef.current.length > 0
     const next = []
 
     for (const p of projs) {
@@ -5562,7 +5567,11 @@ function FireballManager({ projectilesRef, combatTargetsRef }) {
 
     impactsRef.current = impactsRef.current.filter((imp) => now - imp.createdAt < 520)
     projectilesRef.current = next
-    setRenderTick((t) => t + 1)
+    const hasVisuals = next.length > 0 || impactsRef.current.length > 0
+    if (hadVisuals || hasVisuals) {
+      hadVisualsRef.current = hasVisuals
+      setRenderTick((t) => t + 1)
+    }
   })
 
   const projs = projectilesRef.current
@@ -5680,6 +5689,10 @@ function RemotePlayer({
   const remoteMountYawRef = useRef(0)
   const remoteMountAnimRef = useRef({ airborne: false, moving: false, movingForward: false, jumping: false })
   const remoteMountRiderTransformRef = useRef({ position: new Vector3(), quaternion: new Quaternion(), ready: false })
+  const remoteMountSocketRef = useRef(null)
+  const remoteMountedPlayerPosition = useMemo(() => new Vector3(), [])
+  const remoteMountedSocketQuaternion = useMemo(() => new Quaternion(), [])
+  const remoteMountedLiftOffset = useMemo(() => new Vector3(), [])
   const remoteMountProfileRef = useRef({
     width: DRAGON_RIDE_DEFAULT_BODY_WIDTH,
     riderLift: DRAGON_RIDE_RIDER_LIFT,
@@ -5880,6 +5893,25 @@ function RemotePlayer({
 
   const remoteMountConfig = displayedMountId ? getMountConfig(displayedMountId) : null
 
+  useFrame(() => {
+    const group = groupRef.current
+    const riderSocket = remoteMountSocketRef.current
+    const groupParent = group?.parent
+    if (!remoteMountConfig || !stateRef.current?.mount || !riderSocket || !group || !groupParent) return
+
+    getMountedRiderWorldPosition(
+      riderSocket,
+      remoteMountProfileRef.current?.riderLift ?? DRAGON_RIDE_RIDER_LIFT,
+      remoteMountedPlayerPosition,
+      remoteMountedSocketQuaternion,
+      remoteMountedLiftOffset,
+      remoteMountConfig.liftWorldUp,
+    )
+    groupParent.worldToLocal(remoteMountedPlayerPosition)
+    group.position.copy(remoteMountedPlayerPosition)
+    group.rotation.set(0, remoteMountYawRef.current, 0)
+  }, 0.5)
+
   const displayedTitle = getTitleDefinition(displayedTitleId ?? fallbackTitleId)
 
   return (
@@ -5892,6 +5924,7 @@ function RemotePlayer({
           yawRef={remoteMountYawRef}
           animStateRef={remoteMountAnimRef}
           riderTransformRef={remoteMountRiderTransformRef}
+          riderSocketRef={remoteMountSocketRef}
           mountProfileRef={remoteMountProfileRef}
           currentZone={currentZone}
         />
@@ -7039,9 +7072,19 @@ function MultiplayerBridge({
     const now = clock.elapsedTime
     const estimatedHostTime = Date.now() + (hostTimeOffsetRef?.current ?? 0)
 
-    if (now - lastSendRef.current > MULTIPLAYER_PLAYER_SEND_INTERVAL) {
+    const velocity = playerVelocityRef?.current ?? { x: 0, z: 0 }
+    const motion = localPlayerStateRef.current.motion
+    const mountState = localPlayerStateRef.current.mount
+    const playerActive =
+      Math.hypot(velocity.x, velocity.z) > 0.02 ||
+      motion !== 'idle' ||
+      Boolean(mountState?.moving || mountState?.airborne || mountState?.jumping)
+    const playerSendInterval = playerActive
+      ? MULTIPLAYER_PLAYER_SEND_INTERVAL
+      : (catActive ? MULTIPLAYER_PLAYER_PET_SEND_INTERVAL : MULTIPLAYER_PLAYER_IDLE_SEND_INTERVAL)
+
+    if (now - lastSendRef.current > playerSendInterval) {
       const position = playerPositionRef.current
-      const velocity = playerVelocityRef?.current ?? { x: 0, z: 0 }
       const catState = catActive ? catNetworkStateRef?.current : null
       channel.sendPlayerState({
         seq: playerSeqRef.current++,
@@ -7050,17 +7093,17 @@ function MultiplayerBridge({
         rotationY: localPlayerStateRef.current.rotationY,
         velocity: roundNetVector([velocity.x, 0, velocity.z]),
         grounded: true,
-        motion: localPlayerStateRef.current.motion,
+        motion,
         zone: localPlayerStateRef.current.zone,
-        mount: localPlayerStateRef.current.mount
+        mount: mountState
           ? {
-              id: localPlayerStateRef.current.mount.id,
-              position: roundNetVector(localPlayerStateRef.current.mount.position),
-              yaw: localPlayerStateRef.current.mount.yaw,
-              airborne: localPlayerStateRef.current.mount.airborne,
-              moving: localPlayerStateRef.current.mount.moving,
-              movingForward: localPlayerStateRef.current.mount.movingForward,
-              jumping: localPlayerStateRef.current.mount.jumping,
+              id: mountState.id,
+              position: roundNetVector(mountState.position),
+              yaw: mountState.yaw,
+              airborne: mountState.airborne,
+              moving: mountState.moving,
+              movingForward: mountState.movingForward,
+              jumping: mountState.jumping,
             }
           : null,
         catActive: catActive === true,
@@ -12676,7 +12719,7 @@ function App() {
   useEffect(() => {
     if (!isHostVisit || !multiplayerSession || !authUser) return undefined
 
-    const snapshot = createCurrentProgressSnapshot()
+    const snapshot = createWorldSyncSnapshot()
     const payload = JSON.stringify(snapshot)
     if (payload === lastWorldSyncPayloadRef.current) return undefined
 
@@ -12695,7 +12738,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, roomLightOn, lightColor, lightIntensity, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -12745,6 +12788,16 @@ function App() {
     equippedTitleId,
     characterAppearance,
     friends,
+  })
+
+  const createWorldSyncSnapshot = () => ({
+    roomLightOn,
+    lightColor,
+    lightIntensity,
+    selectedFloorSkinId,
+    selectedWallSkinId,
+    applyWallToCeiling,
+    editableObjects,
   })
 
   const rememberPersonalProgress = (snapshot) => {
@@ -13350,17 +13403,32 @@ function App() {
       const [x, y, z] = message.position
       const [dirX, dirZ] = message.direction
       if (![x, y, z, dirX, dirZ].every(Number.isFinite)) return
+      const dirLength = Math.hypot(dirX, dirZ)
+      if (dirLength < 0.001) return
+      const safeDirX = dirX / dirLength
+      const safeDirZ = dirZ / dirLength
+      const localNow = Date.now()
+      const estimatedServerNow = localNow + (hostTimeOffsetRef.current ?? 0)
+      const serverAgeMs = Number.isFinite(message.serverTime) ? estimatedServerNow - message.serverTime : NaN
+      const sentAgeMs = Number.isFinite(message.sentAt) ? localNow - message.sentAt : NaN
+      const rawAgeMs = Number.isFinite(serverAgeMs) ? serverAgeMs : (Number.isFinite(sentAgeMs) ? sentAgeMs : 0)
+      const ageMs = MathUtils.clamp(
+        rawAgeMs,
+        0,
+        REMOTE_SPELL_LATENCY_COMPENSATION_MAX_MS,
+      )
+      const travelled = FIREBALL_SPEED * (ageMs / 1000)
 
       remoteProjectilesRef.current = [
         ...remoteProjectilesRef.current.slice(-(MAX_ACTIVE_FIREBALLS - 1)),
         {
           id: message.id ?? `remote_fb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          x,
+          x: x + safeDirX * travelled,
           y,
-          z,
-          dirX,
-          dirZ,
-          startedAt: Date.now(),
+          z: z + safeDirZ * travelled,
+          dirX: safeDirX,
+          dirZ: safeDirZ,
+          startedAt: localNow - ageMs,
           phase: Number.isFinite(message.phase) ? message.phase : Math.random() * Math.PI * 2,
         },
       ]
@@ -14097,6 +14165,8 @@ function App() {
       kind: 'fireball',
       position: [projectile.x, projectile.y, projectile.z],
       direction: [projectile.dirX, projectile.dirZ],
+      startedAt: projectile.startedAt,
+      sentAt: Date.now(),
       phase: projectile.phase,
     })
   }, [])
