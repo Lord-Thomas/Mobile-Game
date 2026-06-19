@@ -169,6 +169,7 @@ export function connectMultiplayerSession({
   onGuestKick,
   onChatMessage,
   onWorldState,
+  onCoinGain,
   onSessionEnded,
   onStatusChange,
   onHostTimeOffsetChange,
@@ -181,6 +182,7 @@ export function connectMultiplayerSession({
       sendGuestKick: async () => false,
       sendChatMessage: async () => false,
       sendWorldState: async () => false,
+      sendCoinGain: async () => false,
       sendSessionEnded: async () => false,
     }
   }
@@ -223,6 +225,9 @@ export function connectMultiplayerSession({
     })
     .on('broadcast', { event: 'world-state' }, ({ payload }) => {
       if (role === 'guest' && payload?.userId !== userId) onWorldState?.(payload)
+    })
+    .on('broadcast', { event: 'coin-gain' }, ({ payload }) => {
+      if (payload?.userId !== userId) onCoinGain?.(payload)
     })
     .on('broadcast', { event: 'time-ping' }, ({ payload }) => {
       if (role !== 'host' || !payload?.pingId) return
@@ -294,6 +299,8 @@ export function connectMultiplayerSession({
       sendWhenReady({ type: 'broadcast', event: 'ball-state', payload }),
     sendGuestKick: (payload) =>
       sendWhenReady({ type: 'broadcast', event: 'guest-kick', payload: { ...payload, userId } }),
+    sendCoinGain: (payload) =>
+      sendWhenReady({ type: 'broadcast', event: 'coin-gain', payload: { ...payload, userId } }),
     sendChatMessage: (text) =>
       sendWhenReady({
         type: 'broadcast',
