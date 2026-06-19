@@ -30,6 +30,7 @@ export async function connectColyseusVisitSession({
   onChatMessage,
   onWorldState,
   onCoinGain,
+  onSpellCast,
   onPlayerLeft,
   onStatusChange,
   onServerTimeOffsetChange,
@@ -75,6 +76,9 @@ export async function connectColyseusVisitSession({
   room.onMessage('coin-gain', (message) => {
     if (message?.userId !== user.id) onCoinGain?.(message)
   })
+  room.onMessage('spell-cast', (message) => {
+    if (message?.userId !== user.id) onSpellCast?.(message)
+  })
   room.onMessage('player-left', (message) => onPlayerLeft?.(message))
   room.onLeave(() => onStatusChange?.('closed'))
   room.onError(() => onStatusChange?.('error'))
@@ -91,6 +95,7 @@ export async function connectColyseusVisitSession({
     sendBallState: (payload) => room.send('ball-state', payload),
     sendGuestKick: (payload) => room.send('guest-kick', payload),
     sendCoinGain: (payload) => room.send('coin-gain', payload),
+    sendSpellCast: (payload) => room.send('spell-cast', payload),
     sendChatMessage: (text) => room.send('chat-message', { text }),
     sendWorldState: (snapshot) => room.send('world-state', { snapshot }),
     sendSessionEnded: () => room.leave(true),

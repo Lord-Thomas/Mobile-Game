@@ -65,6 +65,20 @@ function sanitizeCharacterAppearance(value) {
   return appearance
 }
 
+function sanitizeEquippedWeapon(value) {
+  return value === 'magic_book' ? 'magic_book' : null
+}
+
+function sanitizeCatState(value) {
+  if (!value || typeof value !== 'object' || !isVector(value.position)) return null
+
+  return {
+    position: sanitizeVector(value.position),
+    rotationY: isFiniteNumber(value.rotationY) ? Number(value.rotationY) : 0,
+    motion: typeof value.motion === 'string' ? value.motion.slice(0, 24) : 'Idle',
+  }
+}
+
 function sanitizePlayerState(message, client, player) {
   const equippedTitleId = typeof message?.equippedTitleId === 'string'
     ? message.equippedTitleId.slice(0, 80)
@@ -85,6 +99,8 @@ function sanitizePlayerState(message, client, player) {
     zone: typeof message?.zone === 'string' ? message.zone.slice(0, 32) : 'interior',
     mount: sanitizeMount(message?.mount),
     catActive: Boolean(message?.catActive),
+    cat: sanitizeCatState(message?.cat),
+    equippedWeapon: sanitizeEquippedWeapon(message?.equippedWeapon),
     equippedTitleId,
     characterAppearance: sanitizeCharacterAppearance(message?.characterAppearance),
   }
@@ -133,6 +149,24 @@ function sanitizeCoinGain(message) {
   }
 }
 
+function sanitizeSpellCast(message) {
+  if (!message || typeof message !== 'object') return null
+  if (message.kind !== 'fireball') return null
+  if (!isVector(message.position) || !isVector(message.direction, 2)) return null
+
+  const direction = sanitizeVector(message.direction, [0, -1]).slice(0, 2)
+  const length = Math.hypot(direction[0], direction[1])
+  if (length < 0.001) return null
+
+  return {
+    id: typeof message.id === 'string' ? message.id.slice(0, 80) : `${now()}`,
+    kind: 'fireball',
+    position: sanitizeVector(message.position),
+    direction: [direction[0] / length, direction[1] / length],
+    phase: isFiniteNumber(message.phase) ? Number(message.phase) : 0,
+  }
+}
+
 export class VisitRoom extends Room {
   maxClients = MAX_CLIENTS
 
@@ -163,6 +197,7 @@ export class VisitRoom extends Room {
     this.onMessage('chat-message', (client, message) => this.handleChatMessage(client, message))
     this.onMessage('world-state', (client, message) => this.handleWorldState(client, message))
     this.onMessage('coin-gain', (client, message) => this.handleCoinGain(client, message))
+    this.onMessage('spell-cast', (client, message) => this.handleSpellCast(client, message))
     this.onMessage('time-ping', (client, message) => {
       client.send('time-pong', {
         pingId: message?.pingId,
@@ -187,6 +222,8 @@ export class VisitRoom extends Room {
       zone: 'interior',
       mount: null,
       catActive: false,
+      cat: null,
+      equippedWeapon: null,
       equippedTitleId: null,
       characterAppearance: null,
       lastUpdateAt: 0,
@@ -250,6 +287,8 @@ export class VisitRoom extends Room {
     player.zone = state.zone
     player.mount = state.mount
     player.catActive = state.catActive
+    player.cat = state.cat
+    player.equippedWeapon = state.equippedWeapon
     player.equippedTitleId = state.equippedTitleId
     player.characterAppearance = state.characterAppearance
     player.lastUpdateAt = now()
@@ -331,6 +370,23 @@ export class VisitRoom extends Room {
     }, { except: client })
   }
 
+  handleSpellCast(client, message) {
+    const player = this.players.get(client.sessionId)
+    if (!player) return
+
+    const spell = sanitizeSpellCast(message)
+    if (!spell) return
+
+    this.broadcast('spell-cast', {
+      ...spell,
+      serverTime: now(),
+      userId: player.userId,
+      sessionId: client.sessionId,
+      displayName: player.displayName,
+      role: player.role,
+    }, { except: client })
+  }
+
   flushNetworkState() {
     const time = now()
     this.players.forEach((player, sessionId) => {
@@ -354,6 +410,8 @@ export class VisitRoom extends Room {
         zone: player.zone,
         mount: player.mount,
         catActive: player.catActive,
+        cat: player.cat,
+        equippedWeapon: player.equippedWeapon,
         equippedTitleId: player.equippedTitleId,
         characterAppearance: player.characterAppearance,
       }, { except: sourceClient })

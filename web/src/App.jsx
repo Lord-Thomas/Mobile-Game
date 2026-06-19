@@ -5662,9 +5662,11 @@ function RemotePlayer({
   const displayedMotionRef = useRef('idle')
   const motionSwitchAtRef = useRef(0)
   const displayedTitleIdRef = useRef(stateRef.current?.equippedTitleId ?? null)
+  const displayedEquippedWeaponRef = useRef(stateRef.current?.equippedWeapon ?? null)
   const displayedAppearanceRef = useRef(stateRef.current?.characterAppearance ?? null)
   const [displayedMotion, setDisplayedMotion] = useState('idle')
   const [displayedTitleId, setDisplayedTitleId] = useState(stateRef.current?.equippedTitleId ?? null)
+  const [displayedEquippedWeapon, setDisplayedEquippedWeapon] = useState(stateRef.current?.equippedWeapon ?? null)
   const [displayedAppearance, setDisplayedAppearance] = useState(stateRef.current?.characterAppearance ?? null)
   const targetRef = useRef({
     position: stateRef.current?.position ?? [0, PLAYER_HEIGHT, 2.2],
@@ -5693,13 +5695,9 @@ function RemotePlayer({
   const remoteMountInitRef = useRef(false)
   const displayedMountIdRef = useRef(stateRef.current?.mount?.id ?? null)
   const [displayedMountId, setDisplayedMountId] = useState(stateRef.current?.mount?.id ?? null)
-  // Remote pet (cat): follows this player when they have summoned it.
-  const remotePlayerPosRef = useRef({ x: 0, y: 0, z: 0 })
-  const remotePlayerVelRef = useRef({ x: 0, z: 0 })
-  const remoteCatPositionRef = useRef({ x: 0, y: 0, z: 0 })
-  const remoteCatGroupRef = useRef(null)
   const displayedCatActiveRef = useRef(Boolean(stateRef.current?.catActive))
   const [displayedCatActive, setDisplayedCatActive] = useState(Boolean(stateRef.current?.catActive))
+  const remoteHandBoneRef = useRef(null)
 
   // Initialize group position imperatively on mount — never via JSX props
   useLayoutEffect(() => {
@@ -5739,6 +5737,12 @@ function RemotePlayer({
       if (nextTitleId !== displayedTitleIdRef.current) {
         displayedTitleIdRef.current = nextTitleId
         setDisplayedTitleId(nextTitleId)
+      }
+
+      const nextEquippedWeapon = state.equippedWeapon === 'magic_book' ? 'magic_book' : null
+      if (nextEquippedWeapon !== displayedEquippedWeaponRef.current) {
+        displayedEquippedWeaponRef.current = nextEquippedWeapon
+        setDisplayedEquippedWeapon(nextEquippedWeapon)
       }
 
       const nextAppearance = state.characterAppearance
@@ -5867,16 +5871,6 @@ function RemotePlayer({
       remoteMountInitRef.current = false
     }
 
-    // Remote pet (cat): track this player's smoothed position + velocity so the
-    // cat can follow them, and toggle it from the networked catActive flag.
-    const prev = remotePlayerPosRef.current
-    const safeDelta = Math.max(delta, 1e-3)
-    remotePlayerVelRef.current.x = (group.position.x - prev.x) / safeDelta
-    remotePlayerVelRef.current.z = (group.position.z - prev.z) / safeDelta
-    prev.x = group.position.x
-    prev.y = group.position.y
-    prev.z = group.position.z
-
     const catActive = Boolean(stateRef.current?.catActive)
     if (catActive !== displayedCatActiveRef.current) {
       displayedCatActiveRef.current = catActive
@@ -5903,21 +5897,18 @@ function RemotePlayer({
         />
       )}
       {displayedCatActive && (
-        <Cat
-          playerPositionRef={remotePlayerPosRef}
-          playerVelocityRef={remotePlayerVelRef}
-          currentZone={currentZone}
-          catPositionRef={remoteCatPositionRef}
-          catGroupRef={remoteCatGroupRef}
-        />
+        <NetworkCat stateRef={stateRef} currentZone={currentZone} />
       )}
       <group ref={groupRef}>
         <PlayerAvatar
           motion={displayedMotion}
+          handBoneRef={remoteHandBoneRef}
           mountProfileRef={remoteMountProfileRef}
+          equippedWeapon={displayedEquippedWeapon}
           appearance={displayedAppearance}
           currentZone={currentZone}
         />
+        <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
         {showOverlays && (
           <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
             <div className="remote-player-nameplate">
@@ -5932,6 +5923,65 @@ function RemotePlayer({
         )}
         {showOverlays && chatBubblesRef && <ChatBubbles bubblesRef={chatBubblesRef} version={chatVersion} />}
       </group>
+    </group>
+  )
+}
+
+function NetworkCat({ stateRef, currentZone }) {
+  const { scene, animations } = useGLTF('/models/cat.glb')
+  const cat = useMemo(() => clone(scene), [scene])
+  const { actions } = useAnimations(animations, cat)
+  const groupRef = useRef(null)
+  const currentActionRef = useRef(null)
+  const currentAnimRef = useRef('')
+  const initializedRef = useRef(false)
+
+  const playAnim = useCallback((name, loop = true, fade = 0.18) => {
+    if (currentAnimRef.current === name) return
+    const action = actions[name] ?? actions.Idle
+    if (!action) return
+    currentActionRef.current?.fadeOut(fade)
+    action.reset().setLoop(loop ? LoopRepeat : LoopOnce, loop ? Infinity : 1).play()
+    action.setEffectiveWeight(1).setEffectiveTimeScale(1)
+    if (fade > 0) action.fadeIn(fade)
+    action.clampWhenFinished = !loop
+    currentActionRef.current = action
+    currentAnimRef.current = name
+  }, [actions])
+
+  useEffect(() => {
+    cat.traverse((obj) => {
+      if (obj instanceof Mesh) { obj.castShadow = true; obj.receiveShadow = true }
+    })
+    playAnim('Idle')
+  }, [cat, playAnim])
+
+  useFrame((_, delta) => {
+    const group = groupRef.current
+    const catState = stateRef.current?.cat
+    if (!group || !catState?.position) return
+
+    const [x, y, z] = catState.position
+    if (![x, y, z].every(Number.isFinite)) return
+    if (!initializedRef.current) {
+      group.position.set(x, y, z)
+      group.rotation.y = Number.isFinite(catState.rotationY) ? catState.rotationY : 0
+      initializedRef.current = true
+    } else {
+      group.position.x = MathUtils.damp(group.position.x, x, 18, delta)
+      group.position.y = MathUtils.damp(group.position.y, y, 18, delta)
+      group.position.z = MathUtils.damp(group.position.z, z, 18, delta)
+      group.rotation.y = dampAngle(group.rotation.y, Number.isFinite(catState.rotationY) ? catState.rotationY : group.rotation.y, 18, delta)
+    }
+    if (currentZone === ZONES.outside && !Number.isFinite(y)) {
+      group.position.y = getTerrainHeight(group.position.x, group.position.z)
+    }
+    playAnim(typeof catState.motion === 'string' ? catState.motion : 'Idle')
+  })
+
+  return (
+    <group ref={groupRef} position={[0, -500, 0]} userData={{ debugCategory: 'npcs' }}>
+      <primitive object={cat} />
     </group>
   )
 }
@@ -6969,8 +7019,10 @@ function MultiplayerBridge({
   guestKickQueueRef,
   hostTimeOffsetRef,
   equippedTitleId,
+  equippedWeapon,
   characterAppearance,
   catActive = false,
+  catNetworkStateRef = null,
 }) {
   const lastSendRef = useRef(0)
   const lastBallSendRef = useRef(0)
@@ -6990,6 +7042,7 @@ function MultiplayerBridge({
     if (now - lastSendRef.current > MULTIPLAYER_PLAYER_SEND_INTERVAL) {
       const position = playerPositionRef.current
       const velocity = playerVelocityRef?.current ?? { x: 0, z: 0 }
+      const catState = catActive ? catNetworkStateRef?.current : null
       channel.sendPlayerState({
         seq: playerSeqRef.current++,
         hostTime: estimatedHostTime,
@@ -7011,6 +7064,14 @@ function MultiplayerBridge({
             }
           : null,
         catActive: catActive === true,
+        cat: catState?.position
+          ? {
+              position: roundNetVector(catState.position),
+              rotationY: roundNetValue(catState.rotationY ?? 0),
+              motion: catState.motion ?? 'Idle',
+            }
+          : null,
+        equippedWeapon,
         equippedTitleId,
         characterAppearance,
         sentAt: estimatedHostTime,
@@ -12326,6 +12387,7 @@ function App() {
   const mobGroupRef = useRef(new Map())
   const catPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const catGroupRef = useRef(null)
+  const catNetworkStateRef = useRef(null)
   const catTapCallbackRef = useRef(null)
   const dragonRidePositionRef = useRef({ x: 0, y: 0, z: 0 })
   const dragonRideYawRef = useRef(0)
@@ -12414,6 +12476,7 @@ function App() {
   const [isCharacterMenuOpen, setIsCharacterMenuOpen] = useState(false)
   const [isCustomizationChoiceOpen, setIsCustomizationChoiceOpen] = useState(false)
   const projectilesRef = useRef([])
+  const remoteProjectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
   const isChargingRef = useRef(false)
   const [isCharging, setIsCharging] = useState(false)
@@ -12691,7 +12754,8 @@ function App() {
   }
 
   const createPersonalProgressSnapshot = (worldOverride = null) => {
-    const savedWorld = worldOverride ?? personalProgressRef.current ?? latestProgressRef.current ?? {}
+    const savedWorld = worldOverride ?? personalProgressRef.current ?? (isGuestVisit ? {} : latestProgressRef.current) ?? {}
+    const fallbackEditableObjects = isGuestVisit ? defaultEditableObjects : editableObjects
     return {
       ...savedWorld,
       displayName,
@@ -12715,7 +12779,7 @@ function App() {
       selectedFloorSkinId: savedWorld.selectedFloorSkinId ?? selectedFloorSkinId,
       selectedWallSkinId: savedWorld.selectedWallSkinId ?? selectedWallSkinId,
       applyWallToCeiling: savedWorld.applyWallToCeiling ?? applyWallToCeiling,
-      editableObjects: Array.isArray(savedWorld.editableObjects) ? savedWorld.editableObjects : editableObjects,
+      editableObjects: Array.isArray(savedWorld.editableObjects) ? savedWorld.editableObjects : fallbackEditableObjects,
     }
   }
 
@@ -13023,8 +13087,11 @@ function App() {
     } catch {
       if (delta > 0 || previousCoins + delta >= 0) {
         try {
+          const fallbackSnapshot = isGuestVisit
+            ? createPersonalProgressSnapshot()
+            : latestProgressRef.current ?? createCurrentProgressSnapshot()
           await savePlayerProgress({
-            ...(latestProgressRef.current ?? createCurrentProgressSnapshot()),
+            ...fallbackSnapshot,
             coins: Math.max(0, previousCoins + delta),
           }, { includeCoins: true, scope: progressScope })
           setCloudSaveState('synced')
@@ -13278,6 +13345,26 @@ function App() {
         },
       ])
     }
+    const applyRemoteSpellCast = (message) => {
+      if (message?.kind !== 'fireball' || !Array.isArray(message.position) || !Array.isArray(message.direction)) return
+      const [x, y, z] = message.position
+      const [dirX, dirZ] = message.direction
+      if (![x, y, z, dirX, dirZ].every(Number.isFinite)) return
+
+      remoteProjectilesRef.current = [
+        ...remoteProjectilesRef.current.slice(-(MAX_ACTIVE_FIREBALLS - 1)),
+        {
+          id: message.id ?? `remote_fb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          x,
+          y,
+          z,
+          dirX,
+          dirZ,
+          startedAt: Date.now(),
+          phase: Number.isFinite(message.phase) ? message.phase : Math.random() * Math.PI * 2,
+        },
+      ]
+    }
 
     const connectFallbackSupabase = () => {
       const channel = connectMultiplayerSession({
@@ -13292,6 +13379,7 @@ function App() {
         onChatMessage: (payload) => addChatBubble('remote', payload),
         onWorldState: applyRemoteWorldState,
         onCoinGain: applyRemoteCoinGain,
+        onSpellCast: applyRemoteSpellCast,
         onStatusChange: setSessionConnectionState,
         onHostTimeOffsetChange: (offset) => {
           hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
@@ -13323,6 +13411,7 @@ function App() {
       onChatMessage: (payload) => addChatBubble('remote', payload),
       onWorldState: applyRemoteWorldState,
       onCoinGain: applyRemoteCoinGain,
+      onSpellCast: applyRemoteSpellCast,
       onPlayerLeft: () => {
         clearRemoteState()
         setMultiplayerMessage('Le joueur distant a quitte la visite.')
@@ -13835,7 +13924,7 @@ function App() {
     const paid = isAdminMode ? true : await applyCoinDelta(-total)
     if (!paid) return
     if (isGuestVisit) {
-      const previousPersonal = personalProgressRef.current ?? latestProgressRef.current ?? createCurrentProgressSnapshot()
+      const previousPersonal = personalProgressRef.current ?? {}
       const nextEditableObjects = [
         ...(Array.isArray(previousPersonal.editableObjects) ? previousPersonal.editableObjects : defaultEditableObjects),
         ...instances.map((object) => ({ ...object, status: 'stored', position: null })),
@@ -13989,19 +14078,27 @@ function App() {
     fireballCooldownRef.current = now
     const pos = playerPositionRef.current
     const yaw = chargeAimYawRef.current // direction clampée dans le cône
+    const projectile = {
+      id: `fb_${now}_${Math.random().toString(36).slice(2, 6)}`,
+      x: pos.x - Math.sin(yaw) * 0.85,
+      y: pos.y + 0.3,
+      z: pos.z - Math.cos(yaw) * 0.85,
+      dirX: -Math.sin(yaw),
+      dirZ: -Math.cos(yaw),
+      startedAt: now,
+      phase: Math.random() * Math.PI * 2,
+    }
     projectilesRef.current = [
       ...projectilesRef.current,
-      {
-        id: `fb_${now}_${Math.random().toString(36).slice(2, 6)}`,
-        x: pos.x - Math.sin(yaw) * 0.85,
-        y: pos.y + 0.3,
-        z: pos.z - Math.cos(yaw) * 0.85,
-        dirX: -Math.sin(yaw),
-        dirZ: -Math.cos(yaw),
-        startedAt: now,
-        phase: Math.random() * Math.PI * 2,
-      },
+      projectile,
     ]
+    multiplayerChannelRef.current?.sendSpellCast?.({
+      id: projectile.id,
+      kind: 'fireball',
+      position: [projectile.x, projectile.y, projectile.z],
+      direction: [projectile.dirX, projectile.dirZ],
+      phase: projectile.phase,
+    })
   }, [])
 
   const cancelCharge = useCallback(() => {
@@ -14598,8 +14695,10 @@ function App() {
           guestKickQueueRef={guestKickQueueRef}
           hostTimeOffsetRef={hostTimeOffsetRef}
           equippedTitleId={equippedTitleId}
+          equippedWeapon={equippedWeapon}
           characterAppearance={characterAppearance}
           catActive={catActive}
+          catNetworkStateRef={catNetworkStateRef}
         />
         <InteriorLighting
           active={currentZone !== ZONES.outside}
@@ -14633,7 +14732,18 @@ function App() {
                   lightweight={performanceSettings.lowResolution}
                 />
             </group>
-            {catActive && <Cat playerPositionRef={playerPositionRef} playerVelocityRef={playerVelocityRef} currentZone={currentZone} catPositionRef={catPositionRef} catGroupRef={catGroupRef} />}
+            {catActive && (
+              <Cat
+                playerPositionRef={playerPositionRef}
+                playerVelocityRef={playerVelocityRef}
+                currentZone={currentZone}
+                catPositionRef={catPositionRef}
+                catGroupRef={catGroupRef}
+                onNetworkState={(nextState) => {
+                  catNetworkStateRef.current = nextState
+                }}
+              />
+            )}
             {activeMountConfig && (
               <MountedMount
                 key={activeMountConfig.id}
@@ -14772,6 +14882,10 @@ function App() {
           <FireballManager
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
+          />
+          <FireballManager
+            projectilesRef={remoteProjectilesRef}
+            combatTargetsRef={null}
           />
           <PlayerHealingAura
             active={playerHealing}
@@ -15300,7 +15414,7 @@ const CAT_OFFSETS = [
   { side:  0.0, back: 1.1 },
 ]
 
-function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef, catGroupRef }) {
+function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef, catGroupRef, onNetworkState = null }) {
   const { scene, animations } = useGLTF('/models/cat.glb')
   const cat = useMemo(() => clone(scene), [scene])
   const { actions } = useAnimations(animations, cat)
@@ -15402,6 +15516,20 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
 
     const playerSpeed = Math.sqrt(pv.x * pv.x + pv.z * pv.z)
     const dist = Math.hypot(pp.x - pos.x, pp.z - pos.z)
+    const publishCatState = (motion = currentAnimRef.current || 'Idle') => {
+      if (catPositionRef) {
+        catPositionRef.current.x = pos.x
+        catPositionRef.current.y = pos.y
+        catPositionRef.current.z = pos.z
+      }
+      if (onNetworkState) {
+        onNetworkState({
+          position: [pos.x, pos.y, pos.z],
+          rotationY: groupRef.current.rotation.y,
+          motion,
+        })
+      }
+    }
 
     // Colle toujours le chat au sol, même quand il est immobile
     pos.y = getFloorY(pos.x, pos.z)
@@ -15429,8 +15557,9 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
       }
 
       timerRef.current -= delta
-      if (timerRef.current <= 0) playAnim('Sit')
-      else playAnim('Idle')
+      const motion = timerRef.current <= 0 ? 'Sit' : 'Idle'
+      playAnim(motion)
+      publishCatState(motion)
       return
     }
 
@@ -15440,6 +15569,7 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
       timerRef.current = CAT_SIT_DELAY
       lazyTimerRef.current = 0
       playAnim('Idle')
+      publishCatState('Idle')
       return
     }
 
@@ -15463,7 +15593,9 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
       const tgt = computeTarget(pp, pv, side, back)
       turnToward(tgt.x, tgt.z, delta)
       const remaining = arriveToward(tgt.x, tgt.z, CAT_MAX_WALK_SPEED, delta)
-      playAnim(remaining > 0.15 ? 'Walk' : 'Idle')
+      const motion = remaining > 0.15 ? 'Walk' : 'Idle'
+      playAnim(motion)
+      publishCatState(motion)
       return
     }
 
@@ -15471,6 +15603,7 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
       playAnim('Run')
       turnToward(pp.x, pp.z, delta)
       arriveToward(pp.x, pp.z, CAT_MAX_RUN_SPEED, delta)
+      publishCatState('Run')
       return
     }
 
@@ -15480,6 +15613,7 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
       playAnim('Run')
       turnToward(tgt.x, tgt.z, delta)
       arriveToward(tgt.x, tgt.z, CAT_MAX_RUN_SPEED, delta)
+      publishCatState('Run')
       return
     }
 
@@ -15488,20 +15622,18 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
       const wt = wanderTargetRef.current
       turnToward(wt.x, wt.z, delta)
       const remaining = arriveToward(wt.x, wt.z, CAT_MAX_WALK_SPEED * 0.75, delta)
-      playAnim(remaining > 0.1 ? 'Walk' : 'Idle')
+      const motion = remaining > 0.1 ? 'Walk' : 'Idle'
+      playAnim(motion)
       timerRef.current -= delta
       if (remaining < 0.2 || timerRef.current <= 0) {
         stateRef.current = PET_STATE.IDLE_NEAR
         timerRef.current = CAT_SIT_DELAY
         lazyTimerRef.current = 0
         playAnim('Idle')
+        publishCatState('Idle')
+        return
       }
-    }
-
-    if (catPositionRef) {
-      catPositionRef.current.x = pos.x
-      catPositionRef.current.y = pos.y
-      catPositionRef.current.z = pos.z
+      publishCatState(motion)
     }
   })
 
