@@ -6506,6 +6506,11 @@ function SettingsPanel({
   fullscreenSupported = false,
   fullscreenActive = false,
   onToggleFullscreen,
+  pwaStandalone = false,
+  deferredPrompt = null,
+  isIosDevice = false,
+  onInstallPwa,
+  onShowPwaGuide,
 }) {
   const rows = [
     ['showFps', 'Afficher les FPS', 'Montre un compteur pendant le jeu.'],
@@ -6532,24 +6537,54 @@ function SettingsPanel({
         </label>
       ))}
       <div className="settings-group-title">Affichage</div>
-      <button
-        type="button"
-        className="settings-action-row"
-        onClick={onToggleFullscreen}
-      >
-        <span>
-          <strong>{fullscreenActive ? 'Quitter le mode plein ecran' : 'Mode plein ecran'}</strong>
-          <small>
-            {fullscreenActive
-              ? fullscreenSupported
+
+      {pwaStandalone && (
+        <div className="settings-toggle-row">
+          <span style={{ gridColumn: '1 / span 2', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <strong style={{ color: '#8dffb0' }}>📱 Mode Application Actif</strong>
+            <small>Le jeu est lancé depuis votre écran d'accueil en mode plein écran autonome.</small>
+          </span>
+        </div>
+      )}
+
+      {!pwaStandalone && (
+        <button
+          type="button"
+          className="settings-action-row"
+          onClick={onToggleFullscreen}
+        >
+          <span>
+            <strong>
+              {fullscreenActive
+                ? 'Quitter le mode plein ecran'
+                : isIosDevice
+                  ? '✨ Plein ecran — Guide installation'
+                  : 'Mode plein ecran'}
+            </strong>
+            <small>
+              {fullscreenActive
                 ? 'Plein ecran actif.'
-                : 'Mode immersif mobile actif.'
-              : fullscreenSupported
-                ? 'Demande le plein ecran au navigateur.'
-                : 'Active un mode immersif mobile quand le vrai plein ecran est bloque.'}
-          </small>
-        </span>
-      </button>
+                : isIosDevice
+                  ? 'Sur iPhone, installe le jeu sur l\'écran d\'accueil pour jouer sans barres.'
+                  : 'Cache les barres du navigateur pour jouer en grand.'}
+            </small>
+          </span>
+        </button>
+      )}
+
+      {!pwaStandalone && deferredPrompt && (
+        <button
+          type="button"
+          className="settings-action-row"
+          onClick={onInstallPwa}
+        >
+          <span>
+            <strong>✨ Installer le jeu</strong>
+            <small>Ajouter un raccourci plein écran sur votre écran d'accueil.</small>
+          </span>
+        </button>
+      )}
+
       {isLocalNetwork && (
         <>
           <div className="settings-group-title">Local</div>
@@ -6626,6 +6661,11 @@ function GameMenuPanel({
   onTogglePerformanceSetting,
   onToggleLocalCoinButton,
   onToggleFullscreen,
+  pwaStandalone = false,
+  deferredPrompt = null,
+  isIosDevice = false,
+  onInstallPwa,
+  onShowPwaGuide,
 }) {
   const isConnected = Boolean(user)
   const statusText = configured
@@ -6746,6 +6786,11 @@ function GameMenuPanel({
               fullscreenSupported={fullscreenSupported}
               fullscreenActive={fullscreenActive}
               onToggleFullscreen={onToggleFullscreen}
+              pwaStandalone={pwaStandalone}
+              deferredPrompt={deferredPrompt}
+              isIosDevice={isIosDevice}
+              onInstallPwa={onInstallPwa}
+              onShowPwaGuide={onShowPwaGuide}
             />
           )}
 
@@ -12341,6 +12386,10 @@ function App() {
   const [fullscreenSupported, setFullscreenSupported] = useState(false)
   const [fullscreenActive, setFullscreenActive] = useState(false)
   const [browserFullscreenFallback, setBrowserFullscreenFallback] = useState(false)
+  const [pwaStandalone, setPwaStandalone] = useState(false)
+  const [deferredPrompt, setDeferredPrompt] = useState(null)
+  const [showPwaGuide, setShowPwaGuide] = useState(false)
+  const [isIosDevice, setIsIosDevice] = useState(false)
   const [dynamicRenderScale, setDynamicRenderScale] = useState(MAX_DYNAMIC_RENDER_SCALE)
   const effectiveRenderScale = performanceSettings.lowResolution
     ? Math.min(performanceSettings.autoQuality ? dynamicRenderScale : MAX_DYNAMIC_RENDER_SCALE, LOW_RESOLUTION_RENDER_SCALE)
@@ -12423,6 +12472,37 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    // Detect iOS
+    const ua = window.navigator.userAgent.toLowerCase()
+    const isIos = /iphone|ipad|ipod/.test(ua)
+    setIsIosDevice(isIos)
+
+    // Detect standalone PWA mode
+    const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches
+    setPwaStandalone(Boolean(isStandalone))
+
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    }
+  }, [])
+
+  const installPwa = useCallback(async () => {
+    if (!deferredPrompt) return
+    deferredPrompt.prompt()
+    const { outcome } = await deferredPrompt.userChoice
+    console.log(`User response to PWA install: ${outcome}`)
+    setDeferredPrompt(null)
+  }, [deferredPrompt])
+
   const togglePerformanceSetting = useCallback((key) => {
     setPerformanceSettings((current) => ({ ...current, [key]: !current[key] }))
   }, [])
@@ -12436,13 +12516,18 @@ function App() {
     const activeElement = doc.fullscreenElement || doc.webkitFullscreenElement
 
     try {
-      if (activeElement || browserFullscreenFallback) {
+      if (activeElement) {
         if (doc.exitFullscreen) {
           await doc.exitFullscreen()
         } else if (doc.webkitExitFullscreen) {
           doc.webkitExitFullscreen()
         }
-        setBrowserFullscreenFallback(false)
+        return
+      }
+
+      // Sur iOS, il n'y a pas d'API fullscreen — on ouvre directement le guide
+      if (isIosDevice) {
+        setShowPwaGuide(true)
         return
       }
 
@@ -12452,18 +12537,16 @@ function App() {
       const requestFullscreen = requestTarget?.requestFullscreen || requestTarget?.webkitRequestFullscreen
       if (requestFullscreen) {
         await requestFullscreen.call(requestTarget)
-        window.scrollTo(0, 1)
-      } else {
-        setFullscreenSupported(false)
-        setBrowserFullscreenFallback(true)
       }
     } catch {
       const nativeActive = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement)
       setFullscreenActive(nativeActive)
       setFullscreenSupported(nativeActive)
-      setBrowserFullscreenFallback(!nativeActive)
+      if (!nativeActive && isIosDevice) {
+        setShowPwaGuide(true)
+      }
     }
-  }, [browserFullscreenFallback])
+  }, [isIosDevice])
 
   const touchRef = useRef({
     moveX: 0,
@@ -15313,7 +15396,7 @@ function App() {
           isLocalNetwork={isLocalNetwork}
           showLocalCoinButton={showLocalCoinButton}
           fullscreenSupported={fullscreenSupported}
-          fullscreenActive={fullscreenActive || browserFullscreenFallback}
+          fullscreenActive={fullscreenActive}
           onToggle={() => setIsAccountOpen((current) => !current)}
           onTabChange={setMainMenuTab}
           onEmailChange={setAuthEmail}
@@ -15339,6 +15422,11 @@ function App() {
           onTogglePerformanceSetting={togglePerformanceSetting}
           onToggleLocalCoinButton={toggleLocalCoinButton}
           onToggleFullscreen={toggleFullscreenMode}
+          pwaStandalone={pwaStandalone}
+          deferredPrompt={deferredPrompt}
+          isIosDevice={isIosDevice}
+          onInstallPwa={installPwa}
+          onShowPwaGuide={() => setShowPwaGuide(true)}
         />
       )}
       {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
@@ -15522,6 +15610,45 @@ function App() {
         onBuyMount={buyMount}
       />
       <div className={`zone-fade${zoneFadeActive ? ' active' : ''}`} />
+
+      {showPwaGuide && (
+        <div className="pwa-guide-overlay" onClick={() => setShowPwaGuide(false)}>
+          <div className="pwa-guide-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="pwa-guide-header">
+              <div className="pwa-guide-logo">⚽</div>
+              <div>
+                <h3 className="pwa-guide-title">Jouer en Plein Écran</h3>
+                <p className="pwa-guide-subtitle">Ajouter Lord Thomas Mobile Game à votre écran d'accueil</p>
+              </div>
+            </div>
+            <div className="pwa-guide-steps">
+              <div className="pwa-guide-step">
+                <span className="pwa-guide-step-num">1</span>
+                <p className="pwa-guide-step-text">
+                  Appuyez sur le bouton <strong>Partager</strong> dans la barre Safari du bas (ou du haut sur iPad) : 📤
+                </p>
+              </div>
+              <div className="pwa-guide-step">
+                <span className="pwa-guide-step-num">2</span>
+                <p className="pwa-guide-step-text">
+                  Faites défiler le menu vers le bas et choisissez <strong>Sur l'écran d'accueil</strong> : ➕
+                </p>
+              </div>
+              <div className="pwa-guide-step">
+                <span className="pwa-guide-step-num">3</span>
+                <p className="pwa-guide-step-text">
+                  Renommez-le si vous le souhaitez et appuyez sur <strong>Ajouter</strong> en haut à droite.
+                </p>
+              </div>
+            </div>
+            <div className="pwa-guide-footer">
+              <button className="pwa-guide-close-btn" type="button" onClick={() => setShowPwaGuide(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 
