@@ -1988,6 +1988,7 @@ const DRAGON_RIDE_SADDLE_ROTATION_DAMPING = 20
 const DRAGON_RIDE_SADDLE_LOCAL_POSITION = new Vector3(-1.55, 0, 0)
 const DRAGON_RIDE_RIDER_LIFT = 0.32
 const DRAGON_RIDE_RIDER_WORLD_CLEARANCE = 0.28
+const REMOTE_MOUNT_RIDER_VISUAL_LIFT = DRAGON_RIDE_RIDER_WORLD_CLEARANCE
 const DRAGON_RIDE_DEFAULT_BODY_WIDTH = 0.72
 const DRAGON_RIDE_MIN_BODY_WIDTH = 0.38
 const DRAGON_RIDE_MAX_BODY_WIDTH = 1.35
@@ -5907,6 +5908,7 @@ function RemotePlayer({
       remoteMountedLiftOffset,
       remoteMountConfig.liftWorldUp,
     )
+    remoteMountedPlayerPosition.y += REMOTE_MOUNT_RIDER_VISUAL_LIFT
     groupParent.worldToLocal(remoteMountedPlayerPosition)
     group.position.copy(remoteMountedPlayerPosition)
     group.rotation.set(0, remoteMountYawRef.current, 0)
@@ -6635,6 +6637,8 @@ function GameMenuPanel({
   performanceSettings,
   isLocalNetwork,
   showLocalCoinButton,
+  fullscreenSupported,
+  fullscreenActive,
   onToggle,
   onTabChange,
   onEmailChange,
@@ -6779,7 +6783,6 @@ function GameMenuPanel({
               isLocalNetwork={isLocalNetwork}
               showLocalCoinButton={showLocalCoinButton}
               onToggleLocalCoinButton={onToggleLocalCoinButton}
-
               fullscreenSupported={fullscreenSupported}
               fullscreenActive={fullscreenActive}
               onToggleFullscreen={onToggleFullscreen}
@@ -11049,6 +11052,9 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   return (
     <div className="char-menu-overlay">
       <div className="char-menu">
+        <button type="button" className="char-menu-close" onClick={onClose} aria-label="Fermer la personnalisation">
+          x
+        </button>
         <div className="char-menu-title">Personnage</div>
         <button
           type="button"
