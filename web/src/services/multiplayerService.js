@@ -70,6 +70,7 @@ export function connectOnlinePresence({
   onPlayers,
   onVisitRequest,
   onVisitResponse,
+  onVisitCancel,
   onFriendRequest,
   onFriendResponse,
   onSessionEnded,
@@ -80,6 +81,7 @@ export function connectOnlinePresence({
       disconnect: () => {},
       sendVisitRequest: async () => false,
       sendVisitResponse: async () => false,
+      sendVisitCancel: async () => false,
       sendFriendRequest: async () => false,
       sendFriendResponse: async () => false,
       sendSessionEnded: async () => false,
@@ -113,6 +115,9 @@ export function connectOnlinePresence({
     .on('broadcast', { event: 'visit-response' }, ({ payload }) => {
       if (payload?.toUserId === user.id) onVisitResponse?.(payload)
     })
+    .on('broadcast', { event: 'visit-cancel' }, ({ payload }) => {
+      if (payload?.toUserId === user.id) onVisitCancel?.(payload)
+    })
     .on('broadcast', { event: 'friend-request' }, ({ payload }) => {
       if (payload?.toUserId === user.id) onFriendRequest?.(payload)
     })
@@ -144,6 +149,8 @@ export function connectOnlinePresence({
       channel.send({ type: 'broadcast', event: 'visit-request', payload: request }),
     sendVisitResponse: (response) =>
       channel.send({ type: 'broadcast', event: 'visit-response', payload: response }),
+    sendVisitCancel: (payload) =>
+      channel.send({ type: 'broadcast', event: 'visit-cancel', payload }),
     sendFriendRequest: (request) =>
       channel.send({ type: 'broadcast', event: 'friend-request', payload: request }),
     sendFriendResponse: (response) =>

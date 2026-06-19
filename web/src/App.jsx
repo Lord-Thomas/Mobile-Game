@@ -68,6 +68,33 @@ const WORLD_CHAT_Z_INDEX_RANGE = [3, 0]
 const WORLD_NAMEPLATE_Z_INDEX_RANGE = [2, 0]
 const FREE_CAMERA_SPEED = 8
 const SOLO_NAMEPLATE_STORAGE_KEY = 'lab_show_solo_nameplate_v1'
+// Remembers an active multiplayer session so a reload can rejoin it if it is
+// still live. Keyed per user. Expires after a short window.
+const ACTIVE_SESSION_STORAGE_PREFIX = 'lab_active_session_v1:'
+const ACTIVE_SESSION_MAX_AGE_MS = 10 * 60 * 1000
+const ACTIVE_SESSION_REJOIN_TIMEOUT_MS = 20000
+const activeSessionStorageKey = (userId) => `${ACTIVE_SESSION_STORAGE_PREFIX}${userId}`
+
+// Reads the persisted session (if any) for a user without applying it.
+function readSavedSession(userId) {
+  if (typeof window === 'undefined' || !userId) return null
+  try {
+    const raw = localStorage.getItem(activeSessionStorageKey(userId))
+    if (!raw) return null
+    const saved = JSON.parse(raw)
+    if (!saved?.session || !saved.role || saved.role === 'solo') return null
+    if (!saved.savedAt || Date.now() - saved.savedAt > ACTIVE_SESSION_MAX_AGE_MS) return null
+    return saved
+  } catch {
+    return null
+  }
+}
+
+// True when this user has a pending guest-visit session to rejoin — used to keep
+// own-progress loads from overwriting the host's world during a reconnect.
+function hasSavedGuestSession(userId) {
+  return readSavedSession(userId)?.role === 'guest'
+}
 const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
 const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
@@ -6472,6 +6499,7 @@ function GameMenuPanel({
   onSignOut,
   onSelectPlayer,
   onRequestVisit,
+  onCancelVisit,
   onAcceptRequest,
   onRejectRequest,
   onLeaveSession,
@@ -6630,7 +6658,12 @@ function GameMenuPanel({
                 </div>
               )}
               {configured && user && role === 'solo' && outgoingRequest && (
-                <p className="multiplayer-help">Demande envoyee a {outgoingRequest.toDisplayName}. Expire dans {visitRemainingSeconds}s.</p>
+                <div className="multiplayer-request">
+                  <p className="multiplayer-help">Demande envoyee a {outgoingRequest.toDisplayName}. Expire dans {visitRemainingSeconds}s.</p>
+                  <div className="multiplayer-actions">
+                    <button type="button" onClick={onCancelVisit}>Annuler la demande</button>
+                  </div>
+                </div>
               )}
               {configured && user && (
                 <>
@@ -6775,6 +6808,7 @@ function MultiplayerPanel({
   message,
   onToggle,
   onRequestVisit,
+  onCancelVisit,
   onAcceptRequest,
   onRejectRequest,
   onLeaveSession,
@@ -6818,7 +6852,12 @@ function MultiplayerPanel({
             </div>
           )}
           {configured && user && role === 'solo' && outgoingRequest && (
-            <p className="multiplayer-help">Demande envoyee a {outgoingRequest.toDisplayName}.</p>
+            <div className="multiplayer-request">
+              <p className="multiplayer-help">Demande envoyee a {outgoingRequest.toDisplayName}.</p>
+              <div className="multiplayer-actions">
+                <button type="button" onClick={onCancelVisit}>Annuler la demande</button>
+              </div>
+            </div>
           )}
           {configured && user && role === 'solo' && (
             <>
@@ -12426,6 +12465,9 @@ function App() {
   const [incomingVisitRequest, setIncomingVisitRequest] = useState(null)
   const [outgoingVisitRequest, setOutgoingVisitRequest] = useState(null)
   const outgoingVisitRequestIdRef = useRef(null)
+  const didAttemptRejoinRef = useRef(false)
+  const rejoinPendingRef = useRef(false)
+  const rejoinTimerRef = useRef(null)
   const [visitRequestNow, setVisitRequestNow] = useState(Date.now())
   const [selectedSocialPlayerId, setSelectedSocialPlayerId] = useState(null)
   const [friends, setFriends] = useState([])
@@ -12676,7 +12718,7 @@ function App() {
     setPlayerHp(PLAYER_MAX_HP)
   }
 
-  const applyProgressSnapshot = (parsed, { includeCoins = true, includeIdentity = includeCoins, includeInventory = includeCoins } = {}) => {
+  const applyProgressSnapshot = (parsed, { includeCoins = true, includeIdentity = includeCoins, includeInventory = includeCoins, includeWorld = true } = {}) => {
     if (!parsed) return
     if (includeIdentity && typeof parsed.displayName === 'string') setDisplayName(parsed.displayName)
     if (includeCoins && typeof parsed.coins === 'number') {
@@ -12692,9 +12734,12 @@ function App() {
       setSelectedSkinId(parsed.selectedSkinId)
       setPreviewSkinId(parsed.selectedSkinId)
     }
-    if (typeof parsed.roomLightOn === 'boolean') setRoomLightOn(parsed.roomLightOn)
-    if (typeof parsed.lightColor === 'string') setLightColor(parsed.lightColor)
-    if (typeof parsed.lightIntensity === 'number') {
+    // House appearance (lighting). includeWorld is false when reloading our own
+    // progress while we are rejoining someone else's world as a guest, so our
+    // own house doesn't overwrite the host's.
+    if (includeWorld && typeof parsed.roomLightOn === 'boolean') setRoomLightOn(parsed.roomLightOn)
+    if (includeWorld && typeof parsed.lightColor === 'string') setLightColor(parsed.lightColor)
+    if (includeWorld && typeof parsed.lightIntensity === 'number') {
       setLightIntensity(MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
     }
     if (includeIdentity && parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
@@ -12717,19 +12762,19 @@ function App() {
       setOwnedWallSkins(ownedWallSkinIds)
     }
 
-    if (typeof parsed.selectedFloorSkinId === 'string' && validFloorSkinIds.has(parsed.selectedFloorSkinId)) {
+    if (includeWorld && typeof parsed.selectedFloorSkinId === 'string' && validFloorSkinIds.has(parsed.selectedFloorSkinId)) {
       setSelectedFloorSkinId(parsed.selectedFloorSkinId)
       setPreviewFloorSkinId(parsed.selectedFloorSkinId)
     }
-    if (typeof parsed.selectedWallSkinId === 'string' && validWallSkinIds.has(parsed.selectedWallSkinId)) {
+    if (includeWorld && typeof parsed.selectedWallSkinId === 'string' && validWallSkinIds.has(parsed.selectedWallSkinId)) {
       setSelectedWallSkinId(parsed.selectedWallSkinId)
       setPreviewWallSkinId(parsed.selectedWallSkinId)
     }
-    if (typeof parsed.applyWallToCeiling === 'boolean') {
+    if (includeWorld && typeof parsed.applyWallToCeiling === 'boolean') {
       setApplyWallToCeiling(parsed.applyWallToCeiling)
     }
 
-    if (Array.isArray(parsed.editableObjects)) {
+    if (includeWorld && Array.isArray(parsed.editableObjects)) {
       const knownIds = new Set(defaultEditableObjects.map((object) => object.id))
       const savedObjectsById = new Map(parsed.editableObjects.map((object) => [object?.id, object]))
       const mergedObjects = defaultEditableObjects.map((baseObject) => {
@@ -12791,6 +12836,93 @@ function App() {
       setFriends((current) => mergeSocialFriends(current, parsed.friends))
     }
   }
+
+  // Remember the active session so a reload can rejoin it (auto-cleared when the
+  // session ends or the player goes solo). The world snapshot is dropped — it is
+  // reloaded fresh on rejoin.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !authUser?.id) return
+    // Only WRITE the active session here. It must NOT be cleared just because we
+    // are solo at mount — otherwise it would be wiped before the rejoin effect
+    // can read it. Clearing happens explicitly on leave / session-ended / dead
+    // rejoin.
+    if (!multiplayerSession || multiplayerRole === 'solo') return
+    try {
+      const { worldSnapshot, ...sessionLite } = multiplayerSession
+      localStorage.setItem(
+        activeSessionStorageKey(authUser.id),
+        JSON.stringify({ session: sessionLite, role: multiplayerRole, savedAt: Date.now() }),
+      )
+    } catch {
+      // Ignore storage errors (private mode, quota).
+    }
+  }, [authUser?.id, multiplayerSession, multiplayerRole])
+
+  // On load, if a recent session was saved, rejoin it. If no peer responds
+  // within a short window, the session is treated as dead and we fall back to
+  // solo.
+  useEffect(() => {
+    if (didAttemptRejoinRef.current) return
+    if (!authUser?.id || !isMultiplayerAvailable()) return
+    if (multiplayerRole !== 'solo' || multiplayerSession) return
+    didAttemptRejoinRef.current = true
+
+    const saved = readSavedSession(authUser.id)
+    if (!saved) {
+      // Drop an expired/invalid entry so it can't accumulate.
+      try { localStorage.removeItem(activeSessionStorageKey(authUser.id)) } catch { /* ignore */ }
+      return
+    }
+
+    let cancelled = false
+    const rejoin = async () => {
+      if (saved.role === 'guest') {
+        try {
+          const hostWorld = await loadPlayerPublicWorld(saved.session.hostUserId, { scope: progressScope })
+          if (!cancelled && hostWorld) applyProgressSnapshot(hostWorld, { includeCoins: false })
+        } catch {
+          // Non-fatal: still attempt to rejoin; the world may already be loaded.
+        }
+      }
+      if (cancelled) return
+      setMultiplayerSession(saved.session)
+      setMultiplayerRole(saved.role)
+      setMode('play')
+      setMultiplayerMessage('Reconnexion a la session...')
+      // The give-up countdown is armed only once the channel is actually
+      // connected (see effect below) so the long initial world load doesn't eat
+      // the window.
+      rejoinPendingRef.current = true
+    }
+    rejoin()
+    return () => { cancelled = true }
+  }, [authUser?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Drive the rejoin outcome from the live connection:
+  //  - peer state arrived  -> confirmed, session is live.
+  //  - channel connected but no peer within the window -> session is dead.
+  useEffect(() => {
+    if (!rejoinPendingRef.current) return undefined
+    if (hasRemotePlayer) {
+      rejoinPendingRef.current = false
+      if (rejoinTimerRef.current) { window.clearTimeout(rejoinTimerRef.current); rejoinTimerRef.current = null }
+      setMultiplayerMessage('Reconnecte a la session.')
+      return undefined
+    }
+    if (sessionConnectionState !== 'connected') return undefined
+    if (rejoinTimerRef.current) return undefined
+    rejoinTimerRef.current = window.setTimeout(() => {
+      rejoinTimerRef.current = null
+      if (rejoinPendingRef.current && !hasRemotePlayerRef.current) {
+        rejoinPendingRef.current = false
+        setMultiplayerRole('solo')
+        setMultiplayerSession(null)
+        try { if (authUser?.id) localStorage.removeItem(activeSessionStorageKey(authUser.id)) } catch { /* ignore */ }
+        setMultiplayerMessage('La session precedente n est plus active.')
+      }
+    }, ACTIVE_SESSION_REJOIN_TIMEOUT_MS)
+    return undefined
+  }, [hasRemotePlayer, sessionConnectionState, authUser?.id])
 
   const refreshPlayerTitles = async () => {
     if (!isSupabaseConfigured || !authUserRef.current) {
@@ -12867,7 +12999,8 @@ function App() {
     try {
       const raw = localStorage.getItem(progressStorageKey)
       if (!raw) return
-      applyProgressSnapshot(JSON.parse(raw))
+      // Don't let our own house overwrite the host's while rejoining a visit.
+      applyProgressSnapshot(JSON.parse(raw), { includeWorld: !hasSavedGuestSession(authUserRef.current?.id) })
     } catch {}
   }, [progressStorageKey])
 
@@ -12929,6 +13062,16 @@ function App() {
         setIsAccountOpen(true)
         setMainMenuTab('social')
         setMultiplayerMessage(`${request.fromDisplayName} veut visiter ton monde.`)
+      },
+      onVisitCancel: (payload) => {
+        // The requester changed their mind: drop the matching incoming request.
+        setIncomingVisitRequest((current) => {
+          if (!current) return current
+          if (payload?.requestId && current.id !== payload.requestId) return current
+          if (payload?.fromUserId && current.fromUserId !== payload.fromUserId) return current
+          setMultiplayerMessage('Demande de visite annulee.')
+          return null
+        })
       },
       onVisitResponse: async (response) => {
         if (response?.requestId && outgoingVisitRequestIdRef.current && response.requestId !== outgoingVisitRequestIdRef.current) return
@@ -12994,6 +13137,8 @@ function App() {
         clearChatBubbles()
         if (hasRemotePlayerRef.current) { hasRemotePlayerRef.current = false; setHasRemotePlayer(false) }
         setSessionConnectionState('idle')
+        rejoinPendingRef.current = false
+        try { if (authUserRef.current?.id) localStorage.removeItem(activeSessionStorageKey(authUserRef.current.id)) } catch { /* ignore */ }
         if (authUserRef.current) {
           loadPlayerProgress({ scope: progressScope })
             .then((progress) => {
@@ -13156,7 +13301,7 @@ function App() {
         if (cancelled) return
         if (cloudProgress) {
           skipNextCloudSaveRef.current = true
-          applyProgressSnapshot(cloudProgress)
+          applyProgressSnapshot(cloudProgress, { includeWorld: !hasSavedGuestSession(user.id) })
         } else {
           await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
         }
@@ -13184,7 +13329,7 @@ function App() {
         const cloudProgress = await loadPlayerProgress({ scope: progressScope })
         if (cloudProgress) {
           skipNextCloudSaveRef.current = true
-          applyProgressSnapshot(cloudProgress)
+          applyProgressSnapshot(cloudProgress, { includeWorld: !hasSavedGuestSession(user.id) })
         } else {
           await savePlayerProgress(latestProgressRef.current ?? createCurrentProgressSnapshot(), { scope: progressScope })
         }
@@ -14057,6 +14202,18 @@ function App() {
     await onlinePresenceRef.current?.sendVisitRequest(request)
   }
 
+  const cancelVisitRequest = async () => {
+    const request = outgoingVisitRequest
+    if (!request) return
+    setOutgoingVisitRequest(null)
+    setMultiplayerMessage('Demande annulee.')
+    await onlinePresenceRef.current?.sendVisitCancel({
+      requestId: request.id,
+      toUserId: request.toUserId,
+      fromUserId: authUser?.id,
+    })
+  }
+
   const acceptVisitRequest = async () => {
     if (!incomingVisitRequest || !authUser || multiplayerRole !== 'solo') return
     if (incomingVisitRequest.expiresAt && new Date(incomingVisitRequest.expiresAt).getTime() <= Date.now()) {
@@ -14186,6 +14343,9 @@ function App() {
     setIncomingVisitRequest(null)
     setOutgoingVisitRequest(null)
     setMultiplayerMessage('Visite terminee.')
+    // Explicit leave: forget the session so a later reload won't try to rejoin.
+    rejoinPendingRef.current = false
+    try { if (authUser?.id) localStorage.removeItem(activeSessionStorageKey(authUser.id)) } catch { /* ignore */ }
 
     if (isGuestVisit) {
       try {
@@ -14743,6 +14903,7 @@ function App() {
           onSignOut={requestSignOut}
           onSelectPlayer={selectSocialPlayer}
           onRequestVisit={requestVisitPlayer}
+          onCancelVisit={cancelVisitRequest}
           onAcceptRequest={acceptVisitRequest}
           onRejectRequest={rejectVisitRequest}
           onLeaveSession={leaveMultiplayerSession}
