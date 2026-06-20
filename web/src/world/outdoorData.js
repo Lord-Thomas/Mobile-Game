@@ -4,6 +4,7 @@ import { getWallColliderTransform, splitWallIntoSolidRects } from './house/wallU
 import { roadLayout } from './roads/roadLayout'
 import { getRoadLotTransform } from './roads/roadGeometry'
 import { getLibraryTreeConfig } from './trees/treeLibrary'
+import { MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './mapObjects'
 
 export const PLAYER_PLOT_SIZE = 32
 export const OUTDOOR_WORLD_SIZE = 360
@@ -285,6 +286,16 @@ function createNeighborHouseColliders(house) {
 export const OUTDOOR_PLAYER_COLLIDERS = [
   ...createHouseWallColliders(houseLayout.walls),
   ...NEIGHBOR_HOUSES.flatMap((house) => createNeighborHouseColliders(house)),
+  ...MAP_OBJECT_PLACEMENTS.map((placement) => {
+    const catalogItem = MAP_OBJECT_CATALOG[placement.objectId]
+    return {
+      type: 'circle',
+      id: placement.id,
+      x: placement.position[0],
+      z: placement.position[2],
+      radius: (catalogItem?.colliderRadius ?? 1) * (placement.scale ?? 1),
+    }
+  }),
   ...AUTHORED_TREES.map(({ id, config, colliderRadius }) => ({
     type: 'circle',
     id,

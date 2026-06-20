@@ -7,6 +7,7 @@ import TerrainGroundCover from './TerrainGroundCover'
 import CloudSky from './CloudSky'
 import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
+import MapObjectPlaceables from './MapObjectPlaceables'
 import { AUTHORED_TREES, DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from './lightingLayers'
 
@@ -74,6 +75,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showTerrain = true,
   showRoad = true,
   showNeighborHouses = true,
+  showMapObjects = true,
   showSky = true,
   castShadows = true,
   viewerOutside = true,
@@ -97,6 +99,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />
       ))}
+      {showMapObjects && <MapObjectPlaceables />}
       {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} playerPositionRef={playerPositionRef} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}
       {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} debugStats={debugStats} />}

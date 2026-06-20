@@ -6,10 +6,12 @@ import OutdoorNeighborhood from '../world/OutdoorNeighborhood'
 import { TreeDevScene, TreeDevPanel } from './TreeDevTool'
 import { HouseDevPanel, HouseDevScene } from './HouseDevTool'
 import { ParticleDevScene, ParticleDevPanel } from './ParticleDevTool'
+import { MapEditorPanel, MapEditorScene } from './MapEditorTool'
 import { estimateTreeHeight } from '../world/trees/proceduralTreeConfig'
 import { getTerrainHeight } from '../world/terrain/terrainGeometry'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { useTreeEditorStore } from './treeEditorStore'
+import { MAP_OBJECT_PLACEMENTS, normalizeMapObjectPlacement } from '../world/mapObjects'
 
 // The whole outdoor world (terrain, houses, lights) lives on OUTDOOR_LIGHT_LAYER.
 // The editor camera must enable that layer or nothing renders, and the preview
@@ -48,6 +50,21 @@ function EditorCamera({ controlsRef, mode }) {
   }), [config])
 
   useEffect(() => {
+    if (mode === 'map') {
+      camera.position.set(0, 96, 0.01)
+      camera.lookAt(0, 0, 0)
+      if (controlsRef.current) {
+        controlsRef.current.target.set(0, 0, 0)
+        controlsRef.current.minDistance = 12
+        controlsRef.current.maxDistance = 190
+        controlsRef.current.enableRotate = false
+        controlsRef.current.enablePan = true
+        controlsRef.current.screenSpacePanning = true
+        controlsRef.current.update()
+      }
+      return
+    }
+
     if (mode === 'house') {
       camera.position.set(14, 9, 14)
       camera.lookAt(0, 2.2, 0)
@@ -55,6 +72,9 @@ function EditorCamera({ controlsRef, mode }) {
         controlsRef.current.target.set(0, 2.2, 0)
         controlsRef.current.minDistance = 4
         controlsRef.current.maxDistance = 50
+        controlsRef.current.enableRotate = true
+        controlsRef.current.enablePan = true
+        controlsRef.current.screenSpacePanning = false
         controlsRef.current.update()
       }
       return
@@ -68,6 +88,9 @@ function EditorCamera({ controlsRef, mode }) {
         controlsRef.current.target.set(0, groundY + 1.3, 0)
         controlsRef.current.minDistance = 1.5
         controlsRef.current.maxDistance = 45
+        controlsRef.current.enableRotate = true
+        controlsRef.current.enablePan = true
+        controlsRef.current.screenSpacePanning = false
         controlsRef.current.update()
       }
       return
@@ -92,6 +115,9 @@ function EditorCamera({ controlsRef, mode }) {
       controlsRef.current.target.set(config.position.x, targetY, config.position.z)
       controlsRef.current.minDistance = Math.max(2, treeHeight * 0.35)
       controlsRef.current.maxDistance = Math.max(35, distance * 3.5)
+      controlsRef.current.enableRotate = true
+      controlsRef.current.enablePan = true
+      controlsRef.current.screenSpacePanning = false
       controlsRef.current.update()
     }
   }, [camera, cameraSignature, config, controlsRef, mode])
@@ -103,11 +129,28 @@ const MODES = [
   { id: 'tree', label: 'Arbre' },
   { id: 'house', label: 'Maison' },
   { id: 'particles', label: 'Particules' },
+  { id: 'map', label: 'Map' },
 ]
+
+function useMapEditorState() {
+  const [objects, setObjects] = useState(() => MAP_OBJECT_PLACEMENTS.map(normalizeMapObjectPlacement))
+  const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
+  const [draggingId, setDraggingId] = useState(null)
+
+  return {
+    objects,
+    selectedId,
+    draggingId,
+    setObjects,
+    setSelectedId,
+    setDraggingId,
+  }
+}
 
 export default function Editor({ initialMode = 'tree' }) {
   const noPlayerRef = useRef({ x: 9999, y: 0, z: 9999 })
   const controlsRef = useRef(null)
+  const mapEditor = useMapEditorState()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
 
   return (
@@ -128,11 +171,33 @@ export default function Editor({ initialMode = 'tree' }) {
             {mode === 'tree' && <TreeDevScene />}
             {mode === 'house' && <HouseDevScene />}
             {mode === 'particles' && <ParticleDevScene />}
+            {mode === 'map' && (
+              <MapEditorScene
+                objects={mapEditor.objects}
+                selectedId={mapEditor.selectedId}
+                draggingId={mapEditor.draggingId}
+                onSelect={mapEditor.setSelectedId}
+                onStartDragging={mapEditor.setDraggingId}
+                onStopDragging={() => mapEditor.setDraggingId(null)}
+                onMove={(id, position) => {
+                  mapEditor.setObjects((current) => current.map((object) => (
+                    object.id === id ? { ...object, position } : object
+                  )))
+                }}
+              />
+            )}
           </EditorStage>
         </Suspense>
         <EditorCameraLayers />
         <EditorCamera controlsRef={controlsRef} mode={mode} />
-        <OrbitControls ref={controlsRef} target={[0, 8, 0]} minDistance={1.5} maxDistance={150} />
+        <OrbitControls
+          ref={controlsRef}
+          target={[0, 8, 0]}
+          minDistance={1.5}
+          maxDistance={190}
+          enableRotate={mode !== 'map'}
+          screenSpacePanning={mode === 'map'}
+        />
       </Canvas>
       <div style={modeSwitchStyle}>
         {MODES.map((entry) => (
@@ -149,6 +214,19 @@ export default function Editor({ initialMode = 'tree' }) {
       {mode === 'tree' && <TreeDevPanel />}
       {mode === 'house' && <HouseDevPanel />}
       {mode === 'particles' && <ParticleDevPanel />}
+      {mode === 'map' && (
+        <MapEditorPanel
+          objects={mapEditor.objects}
+          selectedId={mapEditor.selectedId}
+          onObjectsChange={(nextObjects) => {
+            mapEditor.setObjects(nextObjects)
+            if (mapEditor.selectedId && !nextObjects.some((object) => object.id === mapEditor.selectedId)) {
+              mapEditor.setSelectedId(nextObjects[0]?.id ?? null)
+            }
+          }}
+          onSelect={mapEditor.setSelectedId}
+        />
+      )}
     </div>
   )
 }
