@@ -14,6 +14,7 @@ import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequ
 import { connectColyseusVisitSession, getColyseusConnectionLabel } from './services/colyseusSessionService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
 import { TITLES, getTitleDefinition, getTitleRarity } from './gameProgress/titles'
+import { LOCAL_ACHIEVEMENTS, getLocalAchievement, evaluateMetricAchievements } from './gameProgress/achievements'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
@@ -119,6 +120,9 @@ const PLAYER_PUNCH_DURATION = 0.82
 const PLAYER_PUNCH_CONTACT_DELAY = 0.28
 const PLAYER_PUNCH_CONTACT_WINDOW = 0.14
 const PLAYER_PUNCH_DAMAGE = 10
+const PLAYER_PUNCH_COMBO_STEP = 5    // +dégâts par coup enchaîné
+const PLAYER_PUNCH_DAMAGE_MAX = 30   // plafond des dégâts de combo
+const PUNCH_COMBO_WINDOW = 2.0       // secondes max entre deux coups pour garder le combo
 const PLAYER_PUNCH_RANGE = 1.15
 const PLAYER_PUNCH_FRONT_MIN = 0.15
 const PLAYER_PUNCH_LATERAL_RANGE = 0.62
@@ -126,7 +130,7 @@ const MUSHROOM_ENEMY_ID = 'mushroom_enemy_01'
 const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
 const MUSHROOM_ENEMY_COUNT = 4
 const MUSHROOM_ENEMY_MAX_HP = 30
-const MUSHROOM_ENEMY_REWARD_COINS = 5
+const MUSHROOM_ENEMY_REWARD_COINS = 10  // 0.33 pièce/PV
 const MUSHROOM_ENEMY_RESPAWN_MS = 30000
 const MUSHROOM_ENEMY_VISIBILITY_RANGE = 6.2
 const MUSHROOM_ENEMY_VIEW_CONE_DEGREES = 95
@@ -161,8 +165,8 @@ const SKELETON_ENEMY_ID = 'skeleton_enemy_01'
 const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'
 const SKELETON_ENEMY_TEXTURE_URL = '/models/enemies/skeleton/skeleton.fbm'
 const SKELETON_ENEMY_COUNT = 5
-const SKELETON_ENEMY_MAX_HP = 150
-const SKELETON_ENEMY_REWARD_COINS = 15
+const SKELETON_ENEMY_MAX_HP = 80          // réduit (150 était abusé)
+const SKELETON_ENEMY_REWARD_COINS = 40    // 0.5 pièce/PV : plus rentable que le champignon
 const SKELETON_ENEMY_ATTACK_DAMAGE = 25
 
 // ── Config système ─────────────────────────────────────────────────────────────
@@ -256,7 +260,7 @@ const GROUP_AGGRO_RADIUS = 5.5    // rayon dans lequel les alliés réagissent
 const GROUP_AGGRO_MAX_MOBS = 2    // max 2 mobs rejoignent le combat
 const GROUP_AGGRO_DELAY_MIN = 300 // délai min avant qu'un allié aggro (ms)
 const GROUP_AGGRO_DELAY_MAX = 700 // délai max
-const MAGIC_BOOK_PRICE = 1000
+const MAGIC_BOOK_PRICE = 600
 const FIREBALL_DAMAGE = 20
 const FIREBALL_SPEED = 12
 const FIREBALL_LIFETIME_MS = 2500
@@ -269,7 +273,7 @@ const CHARGE_TIME_MS = 1200
 const MIN_CHARGE_RATIO = 0.2
 
 // ── Crâne nécromancien : invocation de squelettes alliés ─────────────────────
-const MAGIC_SKULL_PRICE = 1500
+const MAGIC_SKULL_PRICE = 1200
 const SUMMON_SKELETON_COUNT = 3                 // squelettes invoqués par sort
 const SUMMON_SKELETON_DURATION_MS = 30000       // durée de vie avant disparition
 const SUMMON_RECAST_EXTRA_MS = 15000            // délai supplémentaire avant réinvocation
@@ -2105,7 +2109,7 @@ const MOUNT_CONFIGS = {
     id: 'dragon',
     label: 'le dragon',
     icon: '\u{1F409}',
-    price: 10000,
+    price: 5000,
     currencyLabel: "pieces d'or",
     modelUrl: '/models/dragon.glb',
     scale: 2,
@@ -2134,7 +2138,7 @@ const MOUNT_CONFIGS = {
     id: 'wolf',
     label: 'le loup noir',
     icon: '\u{1F43A}',
-    price: 5000,
+    price: 2500,
     currencyLabel: 'euros',
     modelUrl: '/models/wolf.glb',
     // Terrestrial-only mount, faster than the dragon on the ground.
@@ -2183,7 +2187,7 @@ const MOUNT_CONFIGS = {
     id: 'horse',
     label: 'le cheval',
     icon: '\u{1F40E}',
-    price: 5000,
+    price: 2500,
     currencyLabel: 'euros',
     modelUrl: '/models/horse.glb',
     // Same AnimalArmature rig as the wolf. Terrestrial, fast. The horse model
@@ -3314,6 +3318,8 @@ function Player({
   const mountedPlayerLocalPosition = useMemo(() => new Vector3(), [])
   const punchUntilRef = useRef(0)
   const pendingPunchRef = useRef(null)
+  // Combo de coups de poing : enchaîner dans le délai augmente les dégâts.
+  const punchComboRef = useRef({ count: 0, lastHitAt: -Infinity })
   const jumpStartUntilRef = useRef(0)
   const jumpLandUntilRef = useRef(0)
   const waveUntilRef = useRef(0)
@@ -3510,6 +3516,7 @@ function Player({
       }
 
       const nextIsFlying = mountConfig.canFly && nextAltitude > 0.05
+      if (nextIsFlying) dragonRide.onFlight?.()
       const speed = nextIsFlying ? mountConfig.flySpeed : mountConfig.groundSpeed
       const dirX = Math.sin(yaw)
       const dirZ = Math.cos(yaw)
@@ -4087,9 +4094,20 @@ function Player({
         })
 
         if (contact.isInPunchArc) {
+          // Combo : si on enchaîne dans la fenêtre, les dégâts montent
+          // (10 → 15 → 20 → 25 → 30). Sinon le combo repart de zéro.
+          const nowSec = state.clock.elapsedTime
+          const combo = punchComboRef.current
+          if (nowSec - combo.lastHitAt > PUNCH_COMBO_WINDOW) combo.count = 0
+          const punchDamage = Math.min(
+            PLAYER_PUNCH_DAMAGE_MAX,
+            PLAYER_PUNCH_DAMAGE + combo.count * PLAYER_PUNCH_COMBO_STEP,
+          )
+          combo.count += 1
+          combo.lastHitAt = nowSec
           onCombatHit?.({
             targetId: target.id,
-            damage: PLAYER_PUNCH_DAMAGE,
+            damage: punchDamage,
             direction: { x: contact.forwardX, z: contact.forwardZ },
             hitPoint: [
               target.position.x,
@@ -6654,6 +6672,16 @@ function PlayerHealthOverlay({ hp }) {
 function AchievementToast({ toast }) {
   if (!toast) return null
 
+  if (toast.kind === 'local') {
+    return (
+      <div className="achievement-toast" role="status">
+        <span className="achievement-toast-kicker">Haut fait débloqué</span>
+        <strong>{toast.icon ? `${toast.icon} ` : ''}{toast.name}</strong>
+        {toast.description && <span>{toast.description}</span>}
+      </div>
+    )
+  }
+
   return (
     <div className="achievement-toast" role="status">
       <span className="achievement-toast-kicker">Titre rare obtenu</span>
@@ -6799,6 +6827,8 @@ function GameMenuPanel({
   ownedTitleIds,
   equippedTitleId,
   titleActionState,
+  unlockedAchievements,
+  achievementProgress,
   soloNameplateVisible,
   performanceSettings,
   isLocalNetwork,
@@ -6939,6 +6969,8 @@ function GameMenuPanel({
               equippedTitleId={equippedTitleId}
               titleActionState={titleActionState}
               onToggleTitle={onToggleTitle}
+              unlockedAchievements={unlockedAchievements}
+              achievementProgress={achievementProgress}
             />
           )}
 
@@ -7074,21 +7106,49 @@ function AchievementsPanel({
   equippedTitleId,
   titleActionState,
   onToggleTitle,
+  unlockedAchievements = [],
+  achievementProgress = {},
 }) {
   const ownedSet = new Set(ownedTitleIds)
+  const unlockedAchievementSet = new Set(unlockedAchievements)
   const titles = Object.values(TITLES)
 
-  if (!configured) {
-    return <p className="multiplayer-help">Supabase doit etre configure pour les hauts faits.</p>
-  }
-
-  if (!user) {
-    return <p className="multiplayer-help">Connecte ton compte pour debloquer et equiper des titres.</p>
-  }
+  const unlockedCount = LOCAL_ACHIEVEMENTS.filter((a) => unlockedAchievementSet.has(a.id)).length
 
   return (
     <div className="achievement-panel">
+      {/* ── Hauts faits locaux (toujours visibles, solo comme connecté) ── */}
+      <div className="multiplayer-title">
+        Hauts faits ({unlockedCount}/{LOCAL_ACHIEVEMENTS.length})
+      </div>
+      <div className="title-list">
+        {LOCAL_ACHIEVEMENTS.map((achievement) => {
+          const unlocked = unlockedAchievementSet.has(achievement.id)
+          const current = achievement.metric ? (achievementProgress[achievement.metric] ?? 0) : null
+          const showProgress = !unlocked && achievement.metric && achievement.goal
+          return (
+            <div
+              key={achievement.id}
+              className={`title-card achievement-card ${unlocked ? 'unlocked' : 'locked'}`}
+            >
+              <span className="title-card-name">{achievement.icon} {achievement.name}</span>
+              <span className="title-card-meta">
+                {unlocked ? 'Débloqué' : 'Verrouillé'}
+                {showProgress ? ` / ${Math.min(current, achievement.goal)}/${achievement.goal}` : ''}
+              </span>
+              <span className="title-card-desc">{achievement.description}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Titres (limités, nécessitent un compte) ── */}
       <div className="multiplayer-title">Titres</div>
+      {!configured ? (
+        <p className="multiplayer-help">Supabase doit etre configure pour les titres.</p>
+      ) : !user ? (
+        <p className="multiplayer-help">Connecte ton compte pour debloquer et equiper des titres.</p>
+      ) : (
       <div className="title-list">
         {titles.map((title) => {
           const unlocked = ownedSet.has(title.id)
@@ -7119,6 +7179,7 @@ function AchievementsPanel({
           )
         })}
       </div>
+      )}
     </div>
   )
 }
@@ -13478,6 +13539,12 @@ function App() {
   const [equippedTitleId, setEquippedTitleId] = useState(null)
   const [titleActionState, setTitleActionState] = useState(null)
   const [achievementToast, setAchievementToast] = useState(null)
+  // Hauts faits locaux (débloqués pour tout le monde, persistés dans la progression)
+  const [unlockedAchievements, setUnlockedAchievements] = useState([])
+  const unlockedAchievementsRef = useRef([])
+  const [mobKillCount, setMobKillCount] = useState(0)
+  // Tant que true, on débloque en silence (hydratation/rattrapage) sans toast
+  const suppressAchievementToastsRef = useRef(true)
   const [soloNameplateVisible, setSoloNameplateVisible] = useState(() => {
     try {
       return localStorage.getItem(SOLO_NAMEPLATE_STORAGE_KEY) !== '0'
@@ -13575,6 +13642,36 @@ function App() {
       achievementToastTimerRef.current = null
       setAchievementToast(null)
     }, 4200)
+  }, [])
+
+  // Débloque un haut fait local (idempotent). Affiche un toast sauf en période
+  // de silence (hydratation / rattrapage des hauts faits déjà mérités).
+  const unlockAchievement = useCallback((id) => {
+    if (unlockedAchievementsRef.current.includes(id)) return
+    const def = getLocalAchievement(id)
+    if (!def) return
+    unlockedAchievementsRef.current = [...unlockedAchievementsRef.current, id]
+    setUnlockedAchievements(unlockedAchievementsRef.current)
+    if (!suppressAchievementToastsRef.current) {
+      showAchievementToast({ kind: 'local', name: def.name, icon: def.icon, description: def.description })
+    }
+  }, [showAchievementToast])
+
+  // Réévalue en continu les hauts faits basés sur un état mesurable.
+  useEffect(() => {
+    const furnitureCount = editableObjects.filter(
+      (object) => objectCatalog[object.objectId]?.category === 'furniture',
+    ).length
+    const earned = evaluateMetricAchievements({ mobKills: mobKillCount, furniture: furnitureCount, coins })
+    if (ownedMounts.length > 0) earned.push('own_mount')
+    if (ownedMagicBook || ownedMagicSkull) earned.push('own_weapon')
+    earned.forEach(unlockAchievement)
+  }, [mobKillCount, coins, editableObjects, ownedMounts, ownedMagicBook, ownedMagicSkull, unlockAchievement])
+
+  // Fin de la période de silence : les déblocages suivants affichent un toast.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { suppressAchievementToastsRef.current = false }, 2500)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
@@ -13715,6 +13812,8 @@ function App() {
     ownedMagicBook,
     ownedMagicSkull,
     ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
+    unlockedAchievements,
+    mobKillCount,
     ownedMounts,
     equippedWeapon,
     equippedTitleId,
@@ -13754,6 +13853,8 @@ function App() {
       ownedMagicBook,
       ownedMagicSkull,
       ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
+      unlockedAchievements,
+      mobKillCount,
       ownedMounts,
       equippedWeapon,
       equippedTitleId,
@@ -13801,6 +13902,9 @@ function App() {
     summonGroupPositionsRef.current.clear()
     summonCooldownRef.current = 0
     setSummonCooldownUntil(0)
+    unlockedAchievementsRef.current = []
+    setUnlockedAchievements([])
+    setMobKillCount(0)
     setOwnedMounts([])
     setMountedMountId(null)
     setEquippedWeapon(null)
@@ -13916,6 +14020,16 @@ function App() {
     if (includeInventory) {
       if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
       if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
+      // Hauts faits locaux : on charge le set sauvegardé (les hauts faits
+      // événementiels ne sont pas redérivables, il faut les conserver).
+      const parsedAchievements = Array.isArray(parsed.unlockedAchievements)
+        ? parsed.unlockedAchievements.filter((id) => getLocalAchievement(id))
+        : []
+      unlockedAchievementsRef.current = parsedAchievements
+      setUnlockedAchievements(parsedAchievements)
+      if (typeof parsed.mobKillCount === 'number' && parsed.mobKillCount >= 0) {
+        setMobKillCount(parsed.mobKillCount)
+      }
       const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
       const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
@@ -14134,7 +14248,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -14562,7 +14676,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -14692,10 +14806,14 @@ function App() {
     ])
   }
 
-  const handleSmallEnemyDefeated = async ({ position, reward = MUSHROOM_ENEMY_REWARD_COINS }) => {
+  const handleSmallEnemyDefeated = async ({ enemyId, position, reward = MUSHROOM_ENEMY_REWARD_COINS }) => {
     const popupPosition = [position?.[0] ?? 0, (position?.[1] ?? 0) + 1.05, position?.[2] ?? 0]
     const rewarded = await applyCoinDelta(reward, { reason: 'enemy_defeat', position: popupPosition })
     if (!rewarded) return
+
+    // Hauts faits : compteur de kills + type de monstre
+    setMobKillCount((current) => current + 1)
+    if (typeof enemyId === 'string' && enemyId.includes('skeleton')) unlockAchievement('kill_skeleton')
 
     if (!isAdminMode && !isGuestVisit && authUserRef.current) {
       try {
@@ -14831,6 +14949,11 @@ function App() {
   const activeSkinId = isSkinMenuOpen ? previewSkinId : selectedSkinId
   const activeSkin = ballSkins.find((skin) => skin.id === activeSkinId) || ballSkins[0]
   const equippedTitle = getTitleDefinition(equippedTitleId)
+  const achievementProgress = useMemo(() => ({
+    mobKills: mobKillCount,
+    coins,
+    furniture: editableObjects.filter((object) => objectCatalog[object.objectId]?.category === 'furniture').length,
+  }), [mobKillCount, coins, editableObjects])
   const showLocalNameplate = mode !== 'customize' &&
     (isMultiplayerSession || soloNameplateVisible) &&
     (authUser || displayName || equippedTitle)
@@ -15099,7 +15222,8 @@ function App() {
     // Verrou : durée d'invocation + délai supplémentaire avant de réinvoquer
     summonCooldownRef.current = expiresAt + SUMMON_RECAST_EXTRA_MS
     setSummonCooldownUntil(summonCooldownRef.current)
-  }, [mode, equippedWeapon, currentZone])
+    unlockAchievement('first_summon')
+  }, [mode, equippedWeapon, currentZone, unlockAchievement])
 
   const buyMount = async (mountId) => {
     const mount = getMountConfig(mountId)
@@ -16067,6 +16191,7 @@ function App() {
                 riderTransformRef: dragonRideRiderTransformRef,
                 riderSocketRef: dragonRideSocketRef,
                 mountProfileRef: dragonRideMountProfileRef,
+                onFlight: () => unlockAchievement('first_fly'),
               }}
             />
           )}
@@ -16248,6 +16373,8 @@ function App() {
           ownedTitleIds={ownedTitleIds}
           equippedTitleId={equippedTitleId}
           titleActionState={titleActionState}
+          unlockedAchievements={unlockedAchievements}
+          achievementProgress={achievementProgress}
           soloNameplateVisible={soloNameplateVisible}
           performanceSettings={performanceSettings}
           isLocalNetwork={isLocalNetwork}
