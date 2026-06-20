@@ -257,6 +257,20 @@ const FIREBALL_PROJECTILE_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_
 const FIREBALL_IMPACT_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
 const CHARGE_TIME_MS = 1200
 const MIN_CHARGE_RATIO = 0.2
+
+// ── Crâne nécromancien : invocation de squelettes alliés ─────────────────────
+const MAGIC_SKULL_PRICE = 1500
+const SUMMON_SKELETON_COUNT = 3                 // squelettes invoqués par sort
+const SUMMON_SKELETON_DURATION_MS = 30000       // durée de vie avant disparition
+const SUMMON_RECAST_EXTRA_MS = 15000            // délai supplémentaire avant réinvocation
+const SUMMON_SKELETON_MAX_HP = 60               // points de vie de chaque squelette
+const SUMMON_SKELETON_DAMAGE = 18               // dégâts infligés par coup
+const SUMMON_SKELETON_ATTACK_COOLDOWN = 1.1     // secondes entre deux coups
+const SUMMON_SKELETON_ATTACK_RANGE = 1.45       // portée d'attaque
+const SUMMON_SKELETON_MOVE_SPEED = 3.0          // vitesse de poursuite
+const SUMMON_SKELETON_AGGRO_RANGE = 16          // distance de détection d'un ennemi
+const SUMMON_SKELETON_FOLLOW_DISTANCE = 2.4     // distance de suivi du joueur au repos
+const SUMMON_ENEMY_RETALIATION_DPS = 13         // dégâts subis par seconde en mêlée
 const PLAYER_MAX_HP = 100
 const PLAYER_DAMAGE_INVULNERABILITY_MS = 420
 const PLAYER_REGEN_DELAY_MS = 20000
@@ -461,6 +475,7 @@ function charHexToVec(hex) {
 const PLAYER_MODEL_URL = '/models/player/player.glb'
 const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png'
 const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
+const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
 const CHARACTER_MATERIAL_COLOR_KEYS = {
   skin:          'skinColor',
   hair:          'hairColor',
@@ -1170,6 +1185,21 @@ function CombatActionDock({
           <span className="combat-action-label">Sort</span>
         </button>
       )}
+    </div>
+  )
+}
+
+function SummonCooldownBadge({ until }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(interval)
+  }, [])
+  const remaining = Math.max(0, until - now)
+  if (remaining <= 0) return null
+  return (
+    <div className="charge-bar-wrap summon-cooldown-wrap">
+      <span className="charge-bar-label">💀 Réinvocation dans {Math.ceil(remaining / 1000)}s</span>
     </div>
   )
 }
@@ -4311,6 +4341,7 @@ function Player({
           currentZone={currentZone}
         />
         <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+        <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
       </group>
     </>
   )
@@ -4867,7 +4898,7 @@ function PlayerAvatar({
   })
 
   useFrame(() => {
-    if (equippedWeapon !== 'magic_book') return
+    if (equippedWeapon !== 'magic_book' && equippedWeapon !== 'magic_skull') return
     const arm = rightArmBoneRef.current
     const foreArm = rightForeArmBoneRef.current
     const hand = rightHandBoneRef.current
@@ -5049,6 +5080,74 @@ function FloatingMagicBook({ active, handBoneRef, playerGroupRef }) {
         <MagicBookMesh />
       </Suspense>
       <pointLight color="#ff5a00" intensity={active ? 1.35 : 0} distance={2.7} />
+    </group>
+  )
+}
+
+function MagicSkullMesh() {
+  const { scene } = useGLTF(MAGIC_SKULL_MODEL_URL)
+  const skullScene = useMemo(() => {
+    const next = scene.clone(true)
+    next.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.frustumCulled = false
+      }
+    })
+    return next
+  }, [scene])
+  // Normalise l'échelle du modèle (taille inconnue) vers une hauteur de main
+  const fitScale = useMemo(() => {
+    const box = new Box3().setFromObject(skullScene)
+    const size = box.getSize(new Vector3())
+    const target = 0.34
+    return target / Math.max(size.x, size.y, size.z, 0.001)
+  }, [skullScene])
+  return <primitive object={skullScene} scale={fitScale} />
+}
+
+function FloatingMagicSkull({ active, handBoneRef, playerGroupRef }) {
+  const groupRef = useRef(null)
+  const worldPos = useRef(new Vector3())
+  const localTarget = useRef(new Vector3(0.4, 0.9, 0))
+
+  useFrame((state, delta) => {
+    const g = groupRef.current
+    if (!g) return
+    if (!active) {
+      g.position.set(0, -500, 0)
+      return
+    }
+
+    const hand = handBoneRef?.current
+    const playerGroup = playerGroupRef?.current
+
+    if (hand && playerGroup) {
+      hand.getWorldPosition(worldPos.current)
+      playerGroup.worldToLocal(worldPos.current)
+      localTarget.current.set(
+        worldPos.current.x,
+        worldPos.current.y + 0.2 + Math.sin(state.clock.elapsedTime * 2.2) * 0.05,
+        worldPos.current.z + 0.18,
+      )
+    } else {
+      localTarget.current.set(
+        0.4,
+        0.9 + Math.sin(state.clock.elapsedTime * 2.2) * 0.05,
+        0.1,
+      )
+    }
+
+    g.position.lerp(localTarget.current, 0.18)
+    g.rotation.y = Math.PI
+  })
+
+  return (
+    <group ref={groupRef} position={[0.4, 0.9, 0]}>
+      <Suspense fallback={null}>
+        <MagicSkullMesh />
+      </Suspense>
+      <pointLight color="#8b5cf6" intensity={active ? 1.2 : 0} distance={2.7} />
     </group>
   )
 }
@@ -5997,6 +6096,7 @@ function RemotePlayer({
           currentZone={currentZone}
         />
         <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+        <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
         {showOverlays && (
           <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
             <div className="remote-player-nameplate">
@@ -6419,6 +6519,7 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
 
 const BAG_ITEM_DEFS = [
   { id: 'magic_book', icon: '📖', name: 'Livre Magique', desc: 'Lance des boules de feu' },
+  { id: 'magic_skull', icon: '💀', name: 'Crâne Nécromancien', desc: 'Invoque 3 squelettes alliés' },
 ]
 
 const BAG_GRID_SIZE = 12
@@ -9357,6 +9458,236 @@ function SmallMushroomEnemy({
   )
 }
 
+// ── Squelette invoqué (allié du joueur) ─────────────────────────────────────
+// Réutilise le modèle/texture du squelette ennemi mais avec une IA qui cible
+// les ennemis (combatTargetsRef) au lieu du joueur. Possède ses propres PV,
+// disparaît à l'expiration de la durée d'invocation ou quand il est tué.
+function SummonedSkeleton({
+  id,
+  spawnPosition,
+  expiresAt,
+  outdoor = true,
+  playerPositionRef,
+  combatTargetsRef,
+  onExpire,
+}) {
+  const cfg = MOB_CONFIGS.skeleton
+  const sourceModel = useFBX(cfg.modelUrl)
+  const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
+  const idle = useFBX('/models/player/player-idle.fbx')
+  const walk = useFBX('/models/player/player-walk.fbx')
+  const punch = useFBX('/models/player/player-punch.fbx')
+
+  const groupRef = useRef()
+  const [hp, setHp] = useState(SUMMON_SKELETON_MAX_HP)
+  const [motion, setMotion] = useState('idle')
+  const hpRef = useRef(SUMMON_SKELETON_MAX_HP)
+  const expiredRef = useRef(false)
+  const nextAttackAtRef = useRef(0)
+  const stuckTimerRef = useRef(0)
+  const stuckDeflectionRef = useRef(1)
+  const lastPositionRef = useRef({ x: 0, z: 0 })
+  const currentPositionRef = useRef({
+    x: spawnPosition[0],
+    y: spawnPosition[1],
+    z: spawnPosition[2],
+  })
+
+  const model = useMemo(() => {
+    const source = clone(sourceModel)
+    if (cfg.textureUrl) {
+      forcedTexture.colorSpace = SRGBColorSpace
+      forcedTexture.needsUpdate = true
+    }
+    source.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(source)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const targetHeight = (cfg.modelTargetHeight ?? 0.85) * WORLD_UNITS_PER_METER
+    const scale = targetHeight / Math.max(size.y, 0.001)
+
+    source.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.frustumCulled = false
+        if (cfg.textureUrl && forcedTexture) {
+          const materials = Array.isArray(child.material) ? child.material : [child.material]
+          const patched = materials.map((material) => {
+            if (!material) return material
+            const next = material.clone()
+            next.map = forcedTexture
+            next.alphaMap = null
+            next.transparent = false
+            next.opacity = 1
+            next.depthWrite = true
+            next.side = DoubleSide
+            // Teinte spectrale bleutée pour distinguer l'allié de l'ennemi
+            next.color?.set('#acd6ff')
+            next.emissive?.set('#1b3a6b')
+            next.needsUpdate = true
+            return next
+          })
+          child.material = Array.isArray(child.material) ? patched : patched[0]
+        }
+      }
+    })
+
+    return { object: source, offset: [-center.x, -box.min.y, -center.z], scale }
+  }, [cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, sourceModel])
+
+  const skeletonHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
+  const animationClips = useMemo(() => {
+    return [
+      { source: idle.animations[0], name: 'idle' },
+      { source: walk.animations[0], name: 'walk' },
+      { source: punch.animations[0], name: 'punch' },
+    ]
+      .filter(({ source }) => source)
+      .map(({ source, name }) => {
+        const clip = source.clone()
+        clip.name = name
+        lockEmoteHipsHeight(clip, skeletonHipsRestHeight)
+        lockHipsPlanarPosition(clip)
+        return clip
+      })
+  }, [idle.animations, walk.animations, punch.animations, skeletonHipsRestHeight])
+
+  const { actions } = useAnimations(animationClips, model.object)
+  const currentActionRef = useRef(null)
+  const currentMotionRef = useRef(null)
+
+  const playSummonMotion = useCallback((nextMotion) => {
+    const nextAction = actions[nextMotion]
+    if (!nextAction || currentActionRef.current === nextAction) return
+    const previousAction = currentActionRef.current
+    const isOneShot = nextMotion === 'punch'
+    nextAction
+      .reset()
+      .setLoop(isOneShot ? LoopOnce : LoopRepeat, isOneShot ? 1 : Infinity)
+      .setEffectiveWeight(1)
+      .setEffectiveTimeScale(isOneShot ? 1.4 : 1)
+      .play()
+    nextAction.clampWhenFinished = isOneShot
+    if (previousAction && previousAction !== nextAction) {
+      nextAction.crossFadeFrom(previousAction, isOneShot ? 0.08 : 0.16, false)
+    }
+    currentActionRef.current = nextAction
+    currentMotionRef.current = nextMotion
+  }, [actions])
+
+  const expire = useCallback(() => {
+    if (expiredRef.current) return
+    expiredRef.current = true
+    onExpire?.(id)
+  }, [id, onExpire])
+
+  useFrame((state, delta) => {
+    if (expiredRef.current) return
+    if (currentMotionRef.current !== motion) playSummonMotion(motion)
+
+    const now = Date.now()
+    if (now >= expiresAt || hpRef.current <= 0) {
+      expire()
+      return
+    }
+
+    const pos = currentPositionRef.current
+    const playerPosition = playerPositionRef?.current
+
+    // ── Cible : ennemi vivant le plus proche dans le rayon d'aggro ────────────
+    let target = null
+    let targetDist = Infinity
+    if (combatTargetsRef?.current) {
+      for (const [, candidate] of combatTargetsRef.current) {
+        if (!candidate?.position || candidate.disabled) continue
+        const d = Math.hypot(candidate.position.x - pos.x, candidate.position.z - pos.z)
+        if (d < targetDist) {
+          targetDist = d
+          target = candidate
+        }
+      }
+    }
+    const hasEnemy = target && targetDist <= SUMMON_SKELETON_AGGRO_RANGE
+
+    if (hasEnemy) {
+      if (targetDist > SUMMON_SKELETON_ATTACK_RANGE) {
+        moveMushroomEnemyToward(
+          pos, target.position, SUMMON_SKELETON_MOVE_SPEED, delta,
+          SUMMON_SKELETON_ATTACK_RANGE * 0.8, stuckTimerRef, stuckDeflectionRef, lastPositionRef,
+        )
+        setMotion('walk')
+      } else {
+        // En mêlée : on frappe et on encaisse la riposte de l'ennemi
+        hpRef.current = Math.max(0, hpRef.current - SUMMON_ENEMY_RETALIATION_DPS * delta)
+        setHp(Math.ceil(hpRef.current))
+        if (state.clock.elapsedTime >= nextAttackAtRef.current) {
+          nextAttackAtRef.current = state.clock.elapsedTime + SUMMON_SKELETON_ATTACK_COOLDOWN
+          const dx = target.position.x - pos.x
+          const dz = target.position.z - pos.z
+          const len = Math.hypot(dx, dz) || 1
+          target.takeDamage?.({
+            damage: SUMMON_SKELETON_DAMAGE,
+            direction: { x: dx / len, z: dz / len },
+          })
+          setMotion('punch')
+          window.setTimeout(() => setMotion('idle'), 360)
+        }
+      }
+    } else if (playerPosition) {
+      // Pas d'ennemi : reste près du joueur
+      const distToPlayer = Math.hypot(playerPosition.x - pos.x, playerPosition.z - pos.z)
+      if (distToPlayer > SUMMON_SKELETON_FOLLOW_DISTANCE) {
+        moveMushroomEnemyToward(
+          pos, playerPosition, SUMMON_SKELETON_MOVE_SPEED, delta,
+          SUMMON_SKELETON_FOLLOW_DISTANCE * 0.8, stuckTimerRef, stuckDeflectionRef, lastPositionRef,
+        )
+        setMotion('walk')
+      } else {
+        setMotion('idle')
+      }
+    }
+
+    pos.y = outdoor ? getTerrainHeight(pos.x, pos.z) : 0
+
+    const g = groupRef.current
+    if (g) {
+      g.position.set(pos.x, pos.y, pos.z)
+      const look = hasEnemy ? target.position : (motion === 'walk' ? playerPosition : null)
+      if (look) {
+        const dx = look.x - pos.x
+        const dz = look.z - pos.z
+        if (Math.hypot(dx, dz) > 0.001) {
+          g.rotation.y = dampAngle(g.rotation.y, Math.atan2(dx, dz), 10, delta)
+        }
+      }
+    }
+  })
+
+  const hpRatio = MathUtils.clamp(hp / SUMMON_SKELETON_MAX_HP, 0, 1)
+
+  return (
+    <group ref={groupRef} position={spawnPosition}>
+      <group scale={model.scale}>
+        <primitive object={model.object} position={model.offset} />
+      </group>
+      {/* Aura spectrale au sol pour signaler un allié */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+        <ringGeometry args={[0.28, 0.42, 28]} />
+        <meshBasicMaterial color="#7cc4ff" transparent opacity={0.4} depthWrite={false} />
+      </mesh>
+      <pointLight color="#6da8ff" intensity={0.7} distance={2.2} position={[0, 0.6, 0]} />
+      <Html position={[0, cfg.hudHeight ?? 1.1, 0]} center transform sprite distanceFactor={5}>
+        <div className="training-dummy-hud enemy-hud">
+          <div className="training-dummy-bar enemy-hp-bar" style={{ '--hp-color': '#5aa9ff' }}>
+            <span style={{ width: `${hpRatio * 100}%`, background: '#5aa9ff' }} />
+            <div className="training-dummy-hp">{hp} / {SUMMON_SKELETON_MAX_HP}</div>
+          </div>
+        </div>
+      </Html>
+    </group>
+  )
+}
+
 function getTwitchParentHost() {
   if (typeof window === 'undefined') return 'localhost'
   return window.location.hostname || 'localhost'
@@ -11326,6 +11657,8 @@ function EnvironmentMenu({
   onToggleCat,
   ownedMagicBook,
   onBuyMagicBook,
+  ownedMagicSkull,
+  onBuyMagicSkull,
   showWeaponShop = true,
   mountItems = [],
   ownedMountIds = [],
@@ -11357,6 +11690,7 @@ function EnvironmentMenu({
   const cartTotal = cartEntries.reduce((total, entry) => total + entry.lineTotal, 0)
   const canCheckoutCart = cartItemCount > 0 && (hasUnlimitedCoins || coins >= cartTotal)
   const magicBookShopItem = objectCatalog.magic_book
+  const magicSkullShopItem = objectCatalog.magic_skull
 
   return (
     <div className="skin-menu-overlay environment-shop-overlay">
@@ -11491,6 +11825,32 @@ function EnvironmentMenu({
                 <span className="furniture-shop-name">{magicBookShopItem?.name ?? 'Livre Magique'}</span>
                 <span className="furniture-shop-price">
                   {ownedMagicBook ? 'Possede' : `${MAGIC_BOOK_PRICE} pieces`}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="furniture-shop-card"
+                onClick={onBuyMagicSkull}
+                disabled={ownedMagicSkull || (!hasUnlimitedCoins && coins < MAGIC_SKULL_PRICE)}
+              >
+                <div className="furniture-shop-preview">
+                  {magicSkullShopItem?.thumbnail ? (
+                    <img
+                      src={magicSkullShopItem.thumbnail}
+                      alt=""
+                      onError={(event) => {
+                        event.currentTarget.style.display = 'none'
+                        event.currentTarget.parentElement.textContent = '\u{1F480}'
+                      }}
+                    />
+                  ) : (
+                    <span aria-hidden="true">{'\u{1F480}'}</span>
+                  )}
+                  {ownedMagicSkull && <span className="furniture-owned-badge">OK</span>}
+                </div>
+                <span className="furniture-shop-name">{magicSkullShopItem?.name ?? 'Crâne Nécromancien'}</span>
+                <span className="furniture-shop-price">
+                  {ownedMagicSkull ? 'Possede' : `${MAGIC_SKULL_PRICE} pieces`}
                 </span>
               </button>
             </div>
@@ -12891,6 +13251,10 @@ function App() {
   const [ownedCat, setOwnedCat] = useState(false)
   const [catActive, setCatActive] = useState(false)
   const [ownedMagicBook, setOwnedMagicBook] = useState(false)
+  const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
+  const [summonedSkeletons, setSummonedSkeletons] = useState([])
+  const summonCooldownRef = useRef(0)
+  const [summonCooldownUntil, setSummonCooldownUntil] = useState(0)
   const [ownedMounts, setOwnedMounts] = useState([])
   const [equippedWeapon, setEquippedWeapon] = useState(null)
   const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
@@ -13161,7 +13525,8 @@ function App() {
     ownedCat,
     catActive,
     ownedMagicBook,
-    ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
+    ownedMagicSkull,
+    ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
     ownedMounts,
     equippedWeapon,
     equippedTitleId,
@@ -13199,7 +13564,8 @@ function App() {
       ownedCat,
       catActive,
       ownedMagicBook,
-      ownedWeapons: ownedMagicBook ? ['magic_book'] : [],
+      ownedMagicSkull,
+      ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
       ownedMounts,
       equippedWeapon,
       equippedTitleId,
@@ -13242,6 +13608,10 @@ function App() {
     setOwnedCat(false)
     setCatActive(false)
     setOwnedMagicBook(false)
+    setOwnedMagicSkull(false)
+    setSummonedSkeletons([])
+    summonCooldownRef.current = 0
+    setSummonCooldownUntil(0)
     setOwnedMounts([])
     setMountedMountId(null)
     setEquippedWeapon(null)
@@ -13359,13 +13729,18 @@ function App() {
       if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
       const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
       const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
+      const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
       setOwnedMagicBook(hasMagicBook)
+      setOwnedMagicSkull(hasMagicSkull)
       const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
         ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
         : []
       setOwnedMounts(Array.from(new Set(parsedOwnedMounts)))
       const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
-      setEquippedWeapon(hasMagicBook && savedEquipped === 'magic_book' ? 'magic_book' : null)
+      const equippedIsValid =
+        (savedEquipped === 'magic_book' && hasMagicBook) ||
+        (savedEquipped === 'magic_skull' && hasMagicSkull)
+      setEquippedWeapon(equippedIsValid ? savedEquipped : null)
     }
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
     if (includeIdentity && Array.isArray(parsed.friends)) {
@@ -13570,7 +13945,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -13998,7 +14373,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -14487,6 +14862,48 @@ function App() {
     setOwnedMagicBook(true)
   }
 
+  const buyMagicSkull = async () => {
+    if (ownedMagicSkull) return
+    if (!isAdminMode && coins < MAGIC_SKULL_PRICE) return
+    const paid = isAdminMode ? true : await applyCoinDelta(-MAGIC_SKULL_PRICE)
+    if (!paid) return
+    setOwnedMagicSkull(true)
+  }
+
+  const handleSummonExpire = useCallback((skeletonId) => {
+    setSummonedSkeletons((current) => current.filter((s) => s.id !== skeletonId))
+  }, [])
+
+  const summonSkeletons = useCallback(() => {
+    if (mode !== 'play') return
+    if (equippedWeapon !== 'magic_skull') return
+    const now = Date.now()
+    if (now < summonCooldownRef.current) return // réinvocation verrouillée
+
+    const pos = playerPositionRef.current
+    const baseYaw = playerBodyYawRef.current
+    const expiresAt = now + SUMMON_SKELETON_DURATION_MS
+    const outdoor = currentZone === ZONES.outside
+    const spread = 0.6
+    const distance = 1.5
+    const next = Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => {
+      const angle = baseYaw + (index - (SUMMON_SKELETON_COUNT - 1) / 2) * spread
+      const sx = pos.x - Math.sin(angle) * distance
+      const sz = pos.z - Math.cos(angle) * distance
+      const sy = outdoor ? getTerrainHeight(sx, sz) : 0
+      return {
+        id: `summon_${now}_${index}`,
+        spawnPosition: [sx, sy, sz],
+        expiresAt,
+        outdoor,
+      }
+    })
+    setSummonedSkeletons(next) // remplace les squelettes précédents
+    // Verrou : durée d'invocation + délai supplémentaire avant de réinvoquer
+    summonCooldownRef.current = expiresAt + SUMMON_RECAST_EXTRA_MS
+    setSummonCooldownUntil(summonCooldownRef.current)
+  }, [mode, equippedWeapon, currentZone])
+
   const buyMount = async (mountId) => {
     const mount = getMountConfig(mountId)
     if (!mount) return
@@ -14557,6 +14974,16 @@ function App() {
     chargeProgressRef.current = 0
     setChargeProgress(0)
   }, [])
+
+  // Route l'action de sort selon l'arme équipée : charge de boule de feu
+  // (livre) ou invocation de squelettes (crâne nécromancien).
+  const handleSpellPress = useCallback(() => {
+    if (equippedWeapon === 'magic_skull') {
+      summonSkeletons()
+      return
+    }
+    startCharge()
+  }, [equippedWeapon, summonSkeletons, startCharge])
 
   const toggleCat = () => {
     // Summoning your own pet is a personal action (not a world edit), so it is
@@ -14700,11 +15127,11 @@ function App() {
         (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
       if (isTyping) return
       event.preventDefault()
-      startCharge()
+      handleSpellPress()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [startCharge])
+  }, [handleSpellPress])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -15353,6 +15780,19 @@ function App() {
             projectilesRef={remoteProjectilesRef}
             combatTargetsRef={null}
           />
+          {summonedSkeletons.map((skeleton) => (
+            <Suspense key={skeleton.id} fallback={null}>
+              <SummonedSkeleton
+                id={skeleton.id}
+                spawnPosition={skeleton.spawnPosition}
+                expiresAt={skeleton.expiresAt}
+                outdoor={skeleton.outdoor}
+                playerPositionRef={playerPositionRef}
+                combatTargetsRef={combatTargetsRef}
+                onExpire={handleSummonExpire}
+              />
+            </Suspense>
+          ))}
           <PlayerHealingAura
             active={playerHealing}
             playerPositionRef={playerPositionRef}
@@ -15500,13 +15940,16 @@ function App() {
           <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
         </div>
       )}
+      {showCaptureUi && mode === 'play' && equippedWeapon === 'magic_skull' && (
+        <SummonCooldownBadge until={summonCooldownUntil} />
+      )}
       {showCaptureUi && mode === 'play' && (
         <CombatActionDock
           touchRef={touchRef}
           canKick={canKick}
           canPunch={canPunch}
-          showSpell={equippedWeapon === 'magic_book'}
-          onSpellPress={startCharge}
+          showSpell={equippedWeapon === 'magic_book' || equippedWeapon === 'magic_skull'}
+          onSpellPress={handleSpellPress}
         />
       )}
       {showCaptureUi && (
@@ -15528,7 +15971,7 @@ function App() {
         <BagPanel
           open={PUBLIC_BUILD_FLAGS.showWeaponInventory && isWeaponMenuOpen}
           ownedItems={BAG_ITEM_DEFS
-            .filter((def) => def.id === 'magic_book' ? ownedMagicBook : false)
+            .filter((def) => def.id === 'magic_book' ? ownedMagicBook : def.id === 'magic_skull' ? ownedMagicSkull : false)
             .map((def) => ({
               ...def,
               name: objectCatalog[def.id]?.name ?? def.name,
@@ -15799,6 +16242,8 @@ function App() {
         onToggleCat={toggleCat}
         ownedMagicBook={ownedMagicBook}
         onBuyMagicBook={buyMagicBook}
+        ownedMagicSkull={ownedMagicSkull}
+        onBuyMagicSkull={buyMagicSkull}
         showWeaponShop={PUBLIC_BUILD_FLAGS.showWeaponShop}
         mountItems={MOUNT_SHOP_ITEMS}
         ownedMountIds={ownedMounts}
@@ -16186,6 +16631,7 @@ useGLTF.preload('/models/wolf.glb')
 useGLTF.preload('/models/horse.glb')
 useGLTF.preload('/models/cat.glb')
 useGLTF.preload(MAGIC_BOOK_MODEL_URL)
+useGLTF.preload(MAGIC_SKULL_MODEL_URL)
 useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
 useFBX.preload(SKELETON_ENEMY_MODEL_URL)
 useTexture.preload(SKELETON_ENEMY_TEXTURE_URL)

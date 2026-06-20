@@ -460,6 +460,17 @@ export const objectCatalog = {
     thumbnailRotationY: Math.PI * 1.7,
     thumbnailMargin: 1.2,
   },
+  magic_skull: {
+    id: 'magic_skull',
+    type: 'weapon',
+    name: 'Crâne Nécromancien',
+    category: 'weapons',
+    modelUrl: '/models/weapons/magic_skull_necromancer.glb',
+    thumbnail: '/ui/object-thumbnails/magic_skull.webp',
+    frontAxis: OBJECT_FRONT_AXIS,
+    thumbnailRotationY: Math.PI * 1.7,
+    thumbnailMargin: 1.2,
+  },
   wolf: {
     id: 'wolf',
     type: 'mount',
