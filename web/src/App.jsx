@@ -201,7 +201,7 @@ const MOB_CONFIGS = {
     modelTargetHeight: 1.15,
     targetRadius: 0.48,
     targetHeight: 1.2,
-    hudHeight: 1.55,
+    hudHeight: 2.0,
   },
   skeleton: {
     modelFormat: 'fbx',
@@ -237,9 +237,13 @@ const MOB_CONFIGS = {
     modelTargetHeight: 0.85,
     targetRadius: 0.48,
     targetHeight: 0.85,
-    hudHeight: 1.1,
+    hudHeight: 1.6,
   },
 }
+
+// ── Séparation des monstres (anti-chevauchement) ────────────────────────────────
+const MOB_SEPARATION_DISTANCE = 0.95 // distance min entre deux monstres
+const MOB_SEPARATION_STRENGTH = 4.0  // force de répulsion mutuelle
 
 // ── Aggro de groupe ────────────────────────────────────────────────────────────
 const GROUP_AGGRO_RADIUS = 5.5    // rayon dans lequel les alliés réagissent
@@ -271,6 +275,8 @@ const SUMMON_SKELETON_MOVE_SPEED = 3.0          // vitesse de poursuite
 const SUMMON_SKELETON_AGGRO_RANGE = 16          // distance de détection d'un ennemi
 const SUMMON_SKELETON_FOLLOW_DISTANCE = 2.4     // distance de suivi du joueur au repos
 const SUMMON_ENEMY_RETALIATION_DPS = 13         // dégâts subis par seconde en mêlée
+const SUMMON_SKELETON_SEPARATION_DISTANCE = 1.0 // distance min entre deux squelettes
+const SUMMON_SKELETON_SEPARATION_STRENGTH = 5.0 // force de répulsion mutuelle
 const PLAYER_MAX_HP = 100
 const PLAYER_DAMAGE_INVULNERABILITY_MS = 420
 const PLAYER_REGEN_DELAY_MS = 20000
@@ -5100,7 +5106,7 @@ function MagicSkullMesh() {
   const fitScale = useMemo(() => {
     const box = new Box3().setFromObject(skullScene)
     const size = box.getSize(new Vector3())
-    const target = 0.34
+    const target = 0.2
     return target / Math.max(size.x, size.y, size.z, 0.001)
   }, [skullScene])
   return <primitive object={skullScene} scale={fitScale} />
@@ -9351,6 +9357,31 @@ function SmallMushroomEnemy({
       setMotion('punch')
     }
 
+    // ── Séparation : empêche les monstres de se chevaucher ────────────────────
+    if (mobGroupRef?.current) {
+      let pushX = 0
+      let pushZ = 0
+      for (const [otherId, mob] of mobGroupRef.current) {
+        if (otherId === enemyId) continue
+        const op = mob.getPosition()
+        const dx = enemyPosition.x - op.x
+        const dz = enemyPosition.z - op.z
+        const d = Math.hypot(dx, dz)
+        if (d > 0.0001 && d < MOB_SEPARATION_DISTANCE) {
+          const f = (MOB_SEPARATION_DISTANCE - d) / MOB_SEPARATION_DISTANCE
+          pushX += (dx / d) * f
+          pushZ += (dz / d) * f
+        } else if (d <= 0.0001) {
+          pushX += Math.random() - 0.5
+          pushZ += Math.random() - 0.5
+        }
+      }
+      if (pushX !== 0 || pushZ !== 0) {
+        enemyPosition.x += pushX * MOB_SEPARATION_STRENGTH * delta
+        enemyPosition.z += pushZ * MOB_SEPARATION_STRENGTH * delta
+      }
+    }
+
     targetRef.current.position.x = enemyPosition.x
     targetRef.current.position.y = enemyPosition.y
     targetRef.current.position.z = enemyPosition.z
@@ -9424,7 +9455,7 @@ function SmallMushroomEnemy({
             </mesh>
           )}
           {hudVisible && !isEvading && (
-            <Html position={[0, hudHeight, 0]} center transform sprite distanceFactor={5.2}>
+            <Html position={[0, hudHeight, 0]} center transform sprite distanceFactor={3.8}>
               <div className="training-dummy-hud enemy-hud">
                 <div className="training-dummy-bar enemy-hp-bar">
                   <span style={{ width: `${hpRatio * 100}%` }} />
@@ -9462,13 +9493,18 @@ function SmallMushroomEnemy({
 // Réutilise le modèle/texture du squelette ennemi mais avec une IA qui cible
 // les ennemis (combatTargetsRef) au lieu du joueur. Possède ses propres PV,
 // disparaît à l'expiration de la durée d'invocation ou quand il est tué.
+//
+// Pool monté en permanence (tant que le crâne est possédé) : chaque instance
+// occupe un "slot". Un slot `null` = squelette inactif (caché). Invoquer remplit
+// les slots. Comme le modèle/les animations sont déjà construits, l'invocation
+// ne provoque aucun freeze (le coût est payé une fois au montage, comme les
+// squelettes ennemis qui existent dès le chargement du monde).
 function SummonedSkeleton({
-  id,
-  spawnPosition,
-  expiresAt,
-  outdoor = true,
+  index,
+  slot,
   playerPositionRef,
   combatTargetsRef,
+  groupPositionsRef,
   onExpire,
 }) {
   const cfg = MOB_CONFIGS.skeleton
@@ -9483,15 +9519,12 @@ function SummonedSkeleton({
   const [motion, setMotion] = useState('idle')
   const hpRef = useRef(SUMMON_SKELETON_MAX_HP)
   const expiredRef = useRef(false)
+  const activeTokenRef = useRef(null)
   const nextAttackAtRef = useRef(0)
   const stuckTimerRef = useRef(0)
   const stuckDeflectionRef = useRef(1)
   const lastPositionRef = useRef({ x: 0, z: 0 })
-  const currentPositionRef = useRef({
-    x: spawnPosition[0],
-    y: spawnPosition[1],
-    z: spawnPosition[2],
-  })
+  const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
@@ -9578,20 +9611,46 @@ function SummonedSkeleton({
   const expire = useCallback(() => {
     if (expiredRef.current) return
     expiredRef.current = true
-    onExpire?.(id)
-  }, [id, onExpire])
+    groupPositionsRef?.current?.delete(index)
+    onExpire?.(index)
+  }, [index, onExpire, groupPositionsRef])
 
   useFrame((state, delta) => {
-    if (expiredRef.current) return
     if (currentMotionRef.current !== motion) playSummonMotion(motion)
 
+    // ── Activation / réinitialisation sur nouveau slot ────────────────────────
+    const token = slot?.token ?? null
+    if (token !== activeTokenRef.current) {
+      activeTokenRef.current = token
+      if (slot) {
+        currentPositionRef.current.x = slot.spawnPosition[0]
+        currentPositionRef.current.y = slot.spawnPosition[1]
+        currentPositionRef.current.z = slot.spawnPosition[2]
+        hpRef.current = SUMMON_SKELETON_MAX_HP
+        setHp(SUMMON_SKELETON_MAX_HP)
+        expiredRef.current = false
+        nextAttackAtRef.current = 0
+      }
+    }
+
+    const active = Boolean(slot) && !expiredRef.current
+    if (!active) {
+      groupPositionsRef?.current?.delete(index)
+      const g = groupRef.current
+      if (g) g.position.set(0, -500, 0)
+      return
+    }
+
     const now = Date.now()
-    if (now >= expiresAt || hpRef.current <= 0) {
+    if (now >= slot.expiresAt || hpRef.current <= 0) {
       expire()
+      const g = groupRef.current
+      if (g) g.position.set(0, -500, 0)
       return
     }
 
     const pos = currentPositionRef.current
+    groupPositionsRef?.current?.set(index, pos)
     const playerPosition = playerPositionRef?.current
 
     // ── Cible : ennemi vivant le plus proche dans le rayon d'aggro ────────────
@@ -9647,7 +9706,32 @@ function SummonedSkeleton({
       }
     }
 
-    pos.y = outdoor ? getTerrainHeight(pos.x, pos.z) : 0
+    // ── Séparation : repousse les squelettes qui se chevauchent ───────────────
+    if (groupPositionsRef?.current) {
+      let pushX = 0
+      let pushZ = 0
+      for (const [otherIndex, other] of groupPositionsRef.current) {
+        if (otherIndex === index) continue
+        const dx = pos.x - other.x
+        const dz = pos.z - other.z
+        const d = Math.hypot(dx, dz)
+        if (d > 0.0001 && d < SUMMON_SKELETON_SEPARATION_DISTANCE) {
+          const f = (SUMMON_SKELETON_SEPARATION_DISTANCE - d) / SUMMON_SKELETON_SEPARATION_DISTANCE
+          pushX += (dx / d) * f
+          pushZ += (dz / d) * f
+        } else if (d <= 0.0001) {
+          // Chevauchement exact : petite poussée aléatoire pour les décoller
+          pushX += Math.random() - 0.5
+          pushZ += Math.random() - 0.5
+        }
+      }
+      if (pushX !== 0 || pushZ !== 0) {
+        pos.x += pushX * SUMMON_SKELETON_SEPARATION_STRENGTH * delta
+        pos.z += pushZ * SUMMON_SKELETON_SEPARATION_STRENGTH * delta
+      }
+    }
+
+    pos.y = slot.outdoor ? getTerrainHeight(pos.x, pos.z) : 0
 
     const g = groupRef.current
     if (g) {
@@ -9663,27 +9747,37 @@ function SummonedSkeleton({
     }
   })
 
+  useEffect(() => {
+    const positions = groupPositionsRef?.current
+    return () => { positions?.delete(index) }
+  }, [groupPositionsRef, index])
+
   const hpRatio = MathUtils.clamp(hp / SUMMON_SKELETON_MAX_HP, 0, 1)
+  const isActive = Boolean(slot)
 
   return (
-    <group ref={groupRef} position={spawnPosition}>
+    <group ref={groupRef} position={[0, -500, 0]}>
       <group scale={model.scale}>
         <primitive object={model.object} position={model.offset} />
       </group>
-      {/* Aura spectrale au sol pour signaler un allié */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
-        <ringGeometry args={[0.28, 0.42, 28]} />
-        <meshBasicMaterial color="#7cc4ff" transparent opacity={0.4} depthWrite={false} />
-      </mesh>
-      <pointLight color="#6da8ff" intensity={0.7} distance={2.2} position={[0, 0.6, 0]} />
-      <Html position={[0, cfg.hudHeight ?? 1.1, 0]} center transform sprite distanceFactor={5}>
-        <div className="training-dummy-hud enemy-hud">
-          <div className="training-dummy-bar enemy-hp-bar" style={{ '--hp-color': '#5aa9ff' }}>
-            <span style={{ width: `${hpRatio * 100}%`, background: '#5aa9ff' }} />
-            <div className="training-dummy-hp">{hp} / {SUMMON_SKELETON_MAX_HP}</div>
-          </div>
-        </div>
-      </Html>
+      {isActive && (
+        <>
+          {/* Aura spectrale au sol pour signaler un allié */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+            <ringGeometry args={[0.28, 0.42, 28]} />
+            <meshBasicMaterial color="#7cc4ff" transparent opacity={0.4} depthWrite={false} />
+          </mesh>
+          <pointLight color="#6da8ff" intensity={0.7} distance={2.2} position={[0, 0.6, 0]} />
+          <Html position={[0, cfg.hudHeight ?? 1.1, 0]} center transform sprite distanceFactor={3.8}>
+            <div className="training-dummy-hud enemy-hud">
+              <div className="training-dummy-bar enemy-hp-bar" style={{ '--hp-color': '#5aa9ff' }}>
+                <span style={{ width: `${hpRatio * 100}%`, background: '#5aa9ff' }} />
+                <div className="training-dummy-hp">{hp} / {SUMMON_SKELETON_MAX_HP}</div>
+              </div>
+            </div>
+          </Html>
+        </>
+      )}
     </group>
   )
 }
@@ -13252,7 +13346,8 @@ function App() {
   const [catActive, setCatActive] = useState(false)
   const [ownedMagicBook, setOwnedMagicBook] = useState(false)
   const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
-  const [summonedSkeletons, setSummonedSkeletons] = useState([])
+  const [summonSlots, setSummonSlots] = useState(() => Array(SUMMON_SKELETON_COUNT).fill(null))
+  const summonGroupPositionsRef = useRef(new Map())
   const summonCooldownRef = useRef(0)
   const [summonCooldownUntil, setSummonCooldownUntil] = useState(0)
   const [ownedMounts, setOwnedMounts] = useState([])
@@ -13609,7 +13704,8 @@ function App() {
     setCatActive(false)
     setOwnedMagicBook(false)
     setOwnedMagicSkull(false)
-    setSummonedSkeletons([])
+    setSummonSlots(Array(SUMMON_SKELETON_COUNT).fill(null))
+    summonGroupPositionsRef.current.clear()
     summonCooldownRef.current = 0
     setSummonCooldownUntil(0)
     setOwnedMounts([])
@@ -14870,8 +14966,13 @@ function App() {
     setOwnedMagicSkull(true)
   }
 
-  const handleSummonExpire = useCallback((skeletonId) => {
-    setSummonedSkeletons((current) => current.filter((s) => s.id !== skeletonId))
+  const handleSummonExpire = useCallback((index) => {
+    setSummonSlots((current) => {
+      if (!current[index]) return current
+      const next = current.slice()
+      next[index] = null
+      return next
+    })
   }, [])
 
   const summonSkeletons = useCallback(() => {
@@ -14886,19 +14987,20 @@ function App() {
     const outdoor = currentZone === ZONES.outside
     const spread = 0.6
     const distance = 1.5
+    // Remplit les slots du pool (squelettes déjà montés → pas de freeze)
     const next = Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => {
       const angle = baseYaw + (index - (SUMMON_SKELETON_COUNT - 1) / 2) * spread
       const sx = pos.x - Math.sin(angle) * distance
       const sz = pos.z - Math.cos(angle) * distance
       const sy = outdoor ? getTerrainHeight(sx, sz) : 0
       return {
-        id: `summon_${now}_${index}`,
         spawnPosition: [sx, sy, sz],
         expiresAt,
         outdoor,
+        token: `${now}_${index}`,
       }
     })
-    setSummonedSkeletons(next) // remplace les squelettes précédents
+    setSummonSlots(next)
     // Verrou : durée d'invocation + délai supplémentaire avant de réinvoquer
     summonCooldownRef.current = expiresAt + SUMMON_RECAST_EXTRA_MS
     setSummonCooldownUntil(summonCooldownRef.current)
@@ -15780,15 +15882,16 @@ function App() {
             projectilesRef={remoteProjectilesRef}
             combatTargetsRef={null}
           />
-          {summonedSkeletons.map((skeleton) => (
-            <Suspense key={skeleton.id} fallback={null}>
+          {/* Pool de squelettes invoqués : monté dès que le crâne est possédé
+              pour précharger modèle/animations et éviter tout freeze au sort. */}
+          {ownedMagicSkull && Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => (
+            <Suspense key={`summon_slot_${index}`} fallback={null}>
               <SummonedSkeleton
-                id={skeleton.id}
-                spawnPosition={skeleton.spawnPosition}
-                expiresAt={skeleton.expiresAt}
-                outdoor={skeleton.outdoor}
+                index={index}
+                slot={summonSlots[index]}
                 playerPositionRef={playerPositionRef}
                 combatTargetsRef={combatTargetsRef}
+                groupPositionsRef={summonGroupPositionsRef}
                 onExpire={handleSummonExpire}
               />
             </Suspense>
