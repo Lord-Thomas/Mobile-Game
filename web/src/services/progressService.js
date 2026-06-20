@@ -65,6 +65,7 @@ function mergeProgressRow(existingRow, progress) {
   const mobKillCount = Math.max(normalizeCount(existing.mobKillCount), normalizeCount(progress.mobKillCount))
   const friends = mergeFriends(existing.friends, progress.friends)
   const ownedMagicBook = Boolean(existing.ownedMagicBook || progress.ownedMagicBook || ownedWeapons.includes('magic_book'))
+  const magicSkullDiscovered = Boolean(existing.magicSkullDiscovered || progress.magicSkullDiscovered || ownedWeapons.includes('magic_skull'))
   const equippedWeapon = ownedWeapons.includes(progress.equippedWeapon) || (progress.equippedWeapon === 'magic_book' && ownedMagicBook)
     ? progress.equippedWeapon
     : null
@@ -91,6 +92,7 @@ function mergeProgressRow(existingRow, progress) {
     friends,
     ownedCat: Boolean(existing.ownedCat || progress.ownedCat),
     ownedMagicBook,
+    magicSkullDiscovered,
     equippedWeapon,
     editableObjects: mergeEditableObjects(existing.editableObjects, progress.editableObjects),
   }
@@ -190,6 +192,7 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       ownedCat: progress.ownedCat ?? false,
       catActive: progress.catActive ?? false,
       ownedMagicBook: progress.ownedMagicBook ?? false,
+      magicSkullDiscovered: progress.magicSkullDiscovered ?? progress.ownedWeapons?.includes?.('magic_skull') ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       ownedMounts: progress.ownedMounts ?? [],
       unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
@@ -224,6 +227,7 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       ownedCat: progress.ownedCat ?? false,
       catActive: progress.catActive ?? false,
       ownedMagicBook: progress.ownedMagicBook ?? false,
+      magicSkullDiscovered: progress.magicSkullDiscovered ?? progress.ownedWeapons?.includes?.('magic_skull') ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       ownedMounts: progress.ownedMounts ?? [],
       unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
@@ -262,6 +266,7 @@ export function fromProgressRow(row) {
     ownedCat: Boolean(row.world_settings?.ownedCat),
     catActive: Boolean(row.world_settings?.catActive),
     ownedMagicBook,
+    magicSkullDiscovered: Boolean(row.world_settings?.magicSkullDiscovered || ownedWeapons.includes('magic_skull')),
     ownedWeapons: ownedMagicBook ? mergeUnique(ownedWeapons, ['magic_book']) : ownedWeapons,
     ownedMounts,
     unlockedAchievements: normalizeStringList(row.world_settings?.unlockedAchievements),

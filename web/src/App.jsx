@@ -20,8 +20,8 @@ import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
-import { collidesWithMapObjectSolid, getOutdoorWalkableHeight } from './world/mapObjectCollision'
-import { MAP_MONSTER_SPAWNERS } from './world/mapObjects'
+import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
+import { MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -126,6 +126,7 @@ const PUNCH_COMBO_WINDOW = 2.0       // secondes max entre deux coups pour garde
 const PLAYER_PUNCH_RANGE = 1.15
 const PLAYER_PUNCH_FRONT_MIN = 0.15
 const PLAYER_PUNCH_LATERAL_RANGE = 0.62
+const MAGIC_SKULL_LEARN_INTERACTION_DISTANCE = 1.65
 const MUSHROOM_ENEMY_ID = 'mushroom_enemy_01'
 const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
 const MUSHROOM_ENEMY_COUNT = 4
@@ -305,6 +306,7 @@ const PLAYER_SIT_DOWN_DURATION = 1.05
 const PLAYER_STAND_UP_DURATION = 1.05
 const MOB_DEATH_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'mob_death')
 const HEAL_AURA_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'heal_aura')
+const INTERACTION_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'interaction')
 const PLAYER_SITTING_HEIGHT = 0.34
 const SEAT_INTERACTION_DISTANCE = 1.1
 const EMOTE_LONG_PRESS_MS = 420
@@ -491,6 +493,15 @@ const PLAYER_MODEL_URL = '/models/player/player.glb'
 const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png'
 const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
+const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
+const MAGIC_SKULL_DISCOVERY_POSITION = (() => {
+  if (!MAGIC_SKULL_TOWER_PLACEMENT) return null
+  const [x = 0, , z = 0] = MAGIC_SKULL_TOWER_PLACEMENT.position ?? []
+  const tower = MAP_OBJECT_CATALOG.skeleton_tower
+  const topY = getMapObjectBaseY(MAGIC_SKULL_TOWER_PLACEMENT)
+    + (tower?.targetHeightMeters ?? 7.2) * WORLD_UNITS_PER_METER * (MAGIC_SKULL_TOWER_PLACEMENT.scale ?? 1)
+  return [x, topY + 0.38, z]
+})()
 const CHARACTER_MATERIAL_COLOR_KEYS = {
   skin:          'skinColor',
   hair:          'hairColor',
@@ -5183,6 +5194,75 @@ function FloatingMagicSkull({ active, handBoneRef, playerGroupRef }) {
 
 // Pre-allocated geometries — created once, shared by all fireball instances.
 // Avoids per-cast GPU upload stutter.
+function MagicSkullDiscovery({ discovered, isNear }) {
+  const skullRef = useRef(null)
+
+  useFrame((state) => {
+    if (!skullRef.current || !MAGIC_SKULL_DISCOVERY_POSITION) return
+    skullRef.current.position.y = Math.sin(state.clock.elapsedTime * 2.2) * 0.055
+    skullRef.current.rotation.y = Math.PI + state.clock.elapsedTime * 0.45
+  })
+
+  if (!MAGIC_SKULL_DISCOVERY_POSITION) return null
+
+  const [x, y, z] = MAGIC_SKULL_DISCOVERY_POSITION
+
+  return (
+    <>
+      <group position={[x, y, z]} userData={{ debugCategory: 'interactions' }}>
+        <group ref={skullRef} scale={1.65}>
+          <Suspense fallback={null}>
+            <MagicSkullMesh />
+          </Suspense>
+        </group>
+        {!discovered && (
+          <RuntimeParticleEffect
+            preset={INTERACTION_PARTICLE_PRESET}
+            playing
+            loop
+            layer={OUTDOOR_LIGHT_LAYER}
+          />
+        )}
+        <pointLight color="#9f7aea" intensity={discovered ? 0.65 : isNear ? 2.5 : 1.35} distance={4.5} decay={2} />
+      </group>
+      {!discovered && (
+        <InteractionHalo
+          isNear={isNear}
+          color="#b69cff"
+          pulseColor="#e8ddff"
+          position={[x, y - 0.28, z]}
+          size={0.7}
+        />
+      )}
+    </>
+  )
+}
+
+function MagicSkullDiscoveryTrigger({ playerPositionRef, enabled, onNearChange }) {
+  const wasNearRef = useRef(false)
+
+  useFrame(() => {
+    if (!enabled || !MAGIC_SKULL_DISCOVERY_POSITION) {
+      if (wasNearRef.current) {
+        wasNearRef.current = false
+        onNearChange(false)
+      }
+      return
+    }
+
+    const p = playerPositionRef.current
+    const [x, y, z] = MAGIC_SKULL_DISCOVERY_POSITION
+    const distance = Math.hypot(p.x - x, p.y - y, p.z - z)
+    const near = distance < MAGIC_SKULL_LEARN_INTERACTION_DISTANCE
+    if (near !== wasNearRef.current) {
+      wasNearRef.current = near
+      onNearChange(near)
+    }
+  })
+
+  return null
+}
+
 const FIREBALL_GEO_CORE = new SphereGeometry(0.08, 16, 16)
 const FIREBALL_GEO_GLOW = new SphereGeometry(0.13, 18, 18)
 const FIREBALL_GEO_SHELL = new SphereGeometry(0.18, 32, 32)
@@ -6671,6 +6751,16 @@ function PlayerHealthOverlay({ hp }) {
 
 function AchievementToast({ toast }) {
   if (!toast) return null
+
+  if (toast.kind === 'info') {
+    return (
+      <div className="achievement-toast" role="status">
+        <span className="achievement-toast-kicker">{toast.kicker ?? 'Decouverte'}</span>
+        <strong>{toast.name}</strong>
+        {toast.description && <span>{toast.description}</span>}
+      </div>
+    )
+  }
 
   if (toast.kind === 'local') {
     return (
@@ -11901,6 +11991,7 @@ function EnvironmentMenu({
   ownedMagicBook,
   onBuyMagicBook,
   ownedMagicSkull,
+  magicSkullDiscovered = false,
   onBuyMagicSkull,
   showWeaponShop = true,
   mountItems = [],
@@ -12074,7 +12165,7 @@ function EnvironmentMenu({
                 type="button"
                 className="furniture-shop-card"
                 onClick={onBuyMagicSkull}
-                disabled={ownedMagicSkull || (!hasUnlimitedCoins && coins < MAGIC_SKULL_PRICE)}
+                disabled={ownedMagicSkull || (!magicSkullDiscovered && !hasUnlimitedCoins) || (!hasUnlimitedCoins && coins < MAGIC_SKULL_PRICE)}
               >
                 <div className="furniture-shop-preview">
                   {magicSkullShopItem?.thumbnail ? (
@@ -12093,7 +12184,11 @@ function EnvironmentMenu({
                 </div>
                 <span className="furniture-shop-name">{magicSkullShopItem?.name ?? 'Crâne Nécromancien'}</span>
                 <span className="furniture-shop-price">
-                  {ownedMagicSkull ? 'Possede' : `${MAGIC_SKULL_PRICE} pieces`}
+                  {ownedMagicSkull
+                    ? 'Possede'
+                    : !magicSkullDiscovered && !hasUnlimitedCoins
+                      ? 'A apprendre dans le monde'
+                      : `${MAGIC_SKULL_PRICE} pieces`}
                 </span>
               </button>
             </div>
@@ -13500,6 +13595,8 @@ function App() {
   const [catActive, setCatActive] = useState(false)
   const [ownedMagicBook, setOwnedMagicBook] = useState(false)
   const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
+  const [magicSkullDiscovered, setMagicSkullDiscovered] = useState(isAdminMode)
+  const [isNearMagicSkullDiscovery, setIsNearMagicSkullDiscovery] = useState(false)
   const [summonSlots, setSummonSlots] = useState(() => Array(SUMMON_SKELETON_COUNT).fill(null))
   const summonGroupPositionsRef = useRef(new Map())
   const summonCooldownRef = useRef(0)
@@ -13698,6 +13795,12 @@ function App() {
   }, [authUser?.id])
 
   useEffect(() => {
+    if (ownedMagicSkull && !magicSkullDiscovered) {
+      setMagicSkullDiscovered(true)
+    }
+  }, [ownedMagicSkull, magicSkullDiscovered])
+
+  useEffect(() => {
     if (!authUser?.id) return
     localStorage.setItem(`lab_friends_v1:${authUser.id}`, JSON.stringify(friends))
   }, [authUser?.id, friends])
@@ -13811,6 +13914,7 @@ function App() {
     catActive,
     ownedMagicBook,
     ownedMagicSkull,
+    magicSkullDiscovered,
     ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
     unlockedAchievements,
     mobKillCount,
@@ -13852,6 +13956,7 @@ function App() {
       catActive,
       ownedMagicBook,
       ownedMagicSkull,
+      magicSkullDiscovered,
       ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
       unlockedAchievements,
       mobKillCount,
@@ -13898,6 +14003,8 @@ function App() {
     setCatActive(false)
     setOwnedMagicBook(false)
     setOwnedMagicSkull(false)
+    setMagicSkullDiscovered(isAdminMode)
+    setIsNearMagicSkullDiscovery(false)
     setSummonSlots(Array(SUMMON_SKELETON_COUNT).fill(null))
     summonGroupPositionsRef.current.clear()
     summonCooldownRef.current = 0
@@ -14035,6 +14142,7 @@ function App() {
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
       setOwnedMagicBook(hasMagicBook)
       setOwnedMagicSkull(hasMagicSkull)
+      setMagicSkullDiscovered(Boolean(isAdminMode || parsed.magicSkullDiscovered || hasMagicSkull))
       const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
         ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
         : []
@@ -14248,7 +14356,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -14676,7 +14784,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -15176,11 +15284,26 @@ function App() {
     setOwnedMagicBook(true)
   }
 
+  const learnMagicSkull = useCallback(() => {
+    if (magicSkullDiscovered) return
+    if (currentZone !== ZONES.outside) return
+    setMagicSkullDiscovered(true)
+    setIsNearMagicSkullDiscovery(false)
+    showAchievementToast({
+      kind: 'info',
+      kicker: 'Pouvoir appris',
+      name: 'Crane Necromancien',
+      description: 'Il est maintenant disponible dans la boutique.',
+    })
+  }, [currentZone, magicSkullDiscovered, showAchievementToast])
+
   const buyMagicSkull = async () => {
     if (ownedMagicSkull) return
+    if (!magicSkullDiscovered && !isAdminMode) return
     if (!isAdminMode && coins < MAGIC_SKULL_PRICE) return
     const paid = isAdminMode ? true : await applyCoinDelta(-MAGIC_SKULL_PRICE)
     if (!paid) return
+    setMagicSkullDiscovered(true)
     setOwnedMagicSkull(true)
   }
 
@@ -15417,6 +15540,7 @@ function App() {
     setIsNearSkinStation(false)
     setIsNearEnvironmentStation(false)
     setIsNearCustomizationStation(false)
+    setIsNearMagicSkullDiscovery(false)
     setNearbySeat(null)
     setNearbyTv(null)
     setSeatedState(null)
@@ -15474,6 +15598,11 @@ function App() {
     const onKeyDown = (event) => {
       if (getKeyboardKey(event) !== 'e') return
       if (mode !== 'play') return
+      if (isNearMagicSkullDiscovery && !magicSkullDiscovered) {
+        event.preventDefault()
+        learnMagicSkull()
+        return
+      }
       if (isNearOutdoorDoor) {
         event.preventDefault()
         requestOutdoorTransition()
@@ -15492,7 +15621,7 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [mode, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive])
+  }, [mode, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
 
   const openCustomizationMode = () => {
     if (!canModifyWorld) return
@@ -15860,6 +15989,7 @@ function App() {
   const showInteriorHouseDetails = !isOutsideZone
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
     isNearOutdoorDoor ||
+    (currentZone === ZONES.outside && isNearMagicSkullDiscovery && !magicSkullDiscovered) ||
     isNearSkinStation ||
     (currentZone !== ZONES.outside && isNearEnvironmentStation) ||
     (canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation) ||
@@ -15975,6 +16105,10 @@ function App() {
               <OutdoorDoor />
               <OutdoorDoorStation isNear={isNearOutdoorDoor} currentZone={currentZone} />
               <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
+              <MagicSkullDiscovery
+                discovered={magicSkullDiscovered}
+                isNear={isNearMagicSkullDiscovery}
+              />
               <group visible={showInteriorHouseDetails}>
                 <EnvironmentStation isNear={isNearEnvironmentStation} />
                 <CustomizationStation isNear={isNearCustomizationStation} />
@@ -16200,6 +16334,11 @@ function App() {
             currentZone={currentZone}
             onNearChange={setIsNearOutdoorDoor}
           />
+          <MagicSkullDiscoveryTrigger
+            playerPositionRef={playerPositionRef}
+            enabled={currentZone === ZONES.outside && mode === 'play' && !magicSkullDiscovered}
+            onNearChange={setIsNearMagicSkullDiscovery}
+          />
           <SeatInteractionTrigger
             playerPositionRef={playerPositionRef}
             objects={placedEditableObjects}
@@ -16418,6 +16557,11 @@ function App() {
           {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
         </button>
       )}
+      {showCaptureUi && currentZone === ZONES.outside && isNearMagicSkullDiscovery && !magicSkullDiscovered && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
+        <button className="skin-open-btn custom-open-btn" type="button" onClick={learnMagicSkull}>
+          Apprendre
+        </button>
+      )}
       {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
           Personnaliser le ballon
@@ -16589,6 +16733,7 @@ function App() {
         ownedMagicBook={ownedMagicBook}
         onBuyMagicBook={buyMagicBook}
         ownedMagicSkull={ownedMagicSkull}
+        magicSkullDiscovered={magicSkullDiscovered}
         onBuyMagicSkull={buyMagicSkull}
         showWeaponShop={PUBLIC_BUILD_FLAGS.showWeaponShop}
         mountItems={MOUNT_SHOP_ITEMS}

@@ -300,6 +300,32 @@ export const BUILTIN_PARTICLE_PRESETS = [
     light: { enabled: true, color: '#b46cff', intensity: 3 },
   },
   {
+    id: 'interaction',
+    name: 'Interaction',
+    category: 'loop',
+    duration: 1.8,
+    loop: true,
+    emitters: [
+      {
+        shape: 'circle', mode: 'loop', count: 56, texture: 'star', blending: 'additive',
+        colorStart: '#e9ddff', colorEnd: '#8b5cf6', alphaStart: 0.95, alphaEnd: 0,
+        sizeStart: 0.12, sizeEnd: 0.03, sizeVariance: 0.45,
+        speed: 0.65, speedVariance: 0.35, spread: 0.12, direction: [0, 1, 0],
+        gravity: 0.18, turbulence: 0.35, rotationSpeed: 2.8,
+        lifetime: 1.45, lifetimeVariance: 0.35, radius: 0.42, offset: [0, 0.08, 0], delay: 0,
+      },
+      {
+        shape: 'point', mode: 'loop', count: 20, texture: 'soft_glow', blending: 'additive',
+        colorStart: '#d8f7ff', colorEnd: '#b07cff', alphaStart: 0.85, alphaEnd: 0,
+        sizeStart: 0.18, sizeEnd: 0.04, sizeVariance: 0.35,
+        speed: 0.9, speedVariance: 0.4, spread: 0.45, direction: [0, 1, 0],
+        gravity: 0.1, turbulence: 0.3, rotationSpeed: 0,
+        lifetime: 1.1, lifetimeVariance: 0.35, radius: 0.18, offset: [0, 0.25, 0], delay: 0,
+      },
+    ],
+    light: { enabled: true, color: '#9f7aea', intensity: 1.8 },
+  },
+  {
     id: 'mob_death',
     name: 'Mort de mob',
     category: 'death',
