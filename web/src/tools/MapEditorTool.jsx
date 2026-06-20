@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useThree } from '@react-three/fiber'
-import { MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
+import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import MapObjectPlaceables from '../world/MapObjectPlaceables'
 import { MAP_OBJECT_CATALOG, MAP_OBJECT_LIBRARY, normalizeMapObjectPlacement } from '../world/mapObjects'
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
@@ -10,6 +10,10 @@ import { styles } from './editorStyles'
 
 const MAP_GRID_SIZE = 0.25
 const MAP_EDIT_HALF_SIZE = OUTDOOR_HALF_SIZE - 2
+const TERRAIN_GRID_SPACING = 4
+const TERRAIN_GRID_SAMPLE_STEP = 2
+const TERRAIN_GRID_MAJOR_EVERY = 16
+const TERRAIN_GRID_Y_OFFSET = 0.055
 
 function snap(value, gridSize = MAP_GRID_SIZE) {
   return Math.round(value / gridSize) * gridSize
@@ -85,6 +89,70 @@ function toSavedPlacements(objects) {
       scale: placement.scale,
     }
   })
+}
+
+function createTerrainGridGeometry({ spacing, sampleStep, major = false }) {
+  const positions = []
+  const min = -OUTDOOR_HALF_SIZE
+  const max = OUTDOOR_HALF_SIZE
+  const lineCount = Math.floor((max - min) / spacing)
+
+  const pushSegment = (ax, az, bx, bz) => {
+    positions.push(
+      ax,
+      getTerrainHeight(ax, az) + TERRAIN_GRID_Y_OFFSET,
+      az,
+      bx,
+      getTerrainHeight(bx, bz) + TERRAIN_GRID_Y_OFFSET,
+      bz,
+    )
+  }
+
+  for (let lineIndex = 0; lineIndex <= lineCount; lineIndex += 1) {
+    const fixed = min + lineIndex * spacing
+    const isMajorLine = Math.abs(Math.round(fixed / TERRAIN_GRID_MAJOR_EVERY) * TERRAIN_GRID_MAJOR_EVERY - fixed) < 0.001
+
+    if (major !== isMajorLine) continue
+
+    for (let cursor = min; cursor < max; cursor += sampleStep) {
+      const next = Math.min(cursor + sampleStep, max)
+      pushSegment(fixed, cursor, fixed, next)
+      pushSegment(cursor, fixed, next, fixed)
+    }
+  }
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.computeBoundingSphere()
+  return geometry
+}
+
+function TerrainFollowingGrid() {
+  const minorGeometry = useMemo(() => createTerrainGridGeometry({
+    spacing: TERRAIN_GRID_SPACING,
+    sampleStep: TERRAIN_GRID_SAMPLE_STEP,
+  }), [])
+  const majorGeometry = useMemo(() => createTerrainGridGeometry({
+    spacing: TERRAIN_GRID_SPACING,
+    sampleStep: TERRAIN_GRID_SAMPLE_STEP,
+    major: true,
+  }), [])
+
+  useEffect(() => () => {
+    minorGeometry.dispose()
+    majorGeometry.dispose()
+  }, [majorGeometry, minorGeometry])
+
+  return (
+    <>
+      <lineSegments geometry={minorGeometry}>
+        <lineBasicMaterial color="#7aa88e" transparent opacity={0.105} depthWrite={false} />
+      </lineSegments>
+      <lineSegments geometry={majorGeometry}>
+        <lineBasicMaterial color="#d8f0df" transparent opacity={0.16} depthWrite={false} />
+      </lineSegments>
+    </>
+  )
 }
 
 export function MapEditorScene({
@@ -283,7 +351,7 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
-      <gridHelper args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 4, '#7aa88e', '#30403a']} position={[0, 0.09, 0]} />
+      <TerrainFollowingGrid />
       <MapObjectPlaceables
         objects={objects}
         selectedId={selectedId}
