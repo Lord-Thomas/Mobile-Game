@@ -9453,6 +9453,7 @@ function SmallMushroomEnemy({
           onHitPlayer?.({
             damage: cfg.attackDamage,
             sourcePosition: [enemyPosition.x, enemyPosition.y, enemyPosition.z],
+            sourceId: enemyId,
           })
         }
         leashTimerRef.current = Math.max(0, leashTimerRef.current - cfg.leashCombatBonus)
@@ -9737,8 +9738,8 @@ function SummonedSkeleton({
     groupPositionsRef?.current?.set(index, pos)
     const playerPosition = playerPositionRef?.current
 
-    // ── Cible : on focalise LA CIBLE DU JOUEUR si elle est valide et à portée,
-    //    sinon l'ennemi vivant le plus proche. ─────────────────────────────────
+    // ── Cible : UNIQUEMENT la cible du joueur (le dernier ennemi frappé). ──────
+    //    Pas de cible du joueur → les squelettes ne foncent pas, ils suivent.
     let target = null
     let targetDist = Infinity
     if (combatTargetsRef?.current) {
@@ -9753,18 +9754,8 @@ function SummonedSkeleton({
           }
         }
       }
-      if (!target) {
-        for (const [, candidate] of combatTargetsRef.current) {
-          if (!candidate?.position || candidate.disabled) continue
-          const d = Math.hypot(candidate.position.x - pos.x, candidate.position.z - pos.z)
-          if (d < targetDist) {
-            targetDist = d
-            target = candidate
-          }
-        }
-      }
     }
-    const hasEnemy = target && targetDist <= SUMMON_SKELETON_AGGRO_RANGE
+    const hasEnemy = Boolean(target)
 
     if (hasEnemy) {
       if (targetDist > SUMMON_SKELETON_ATTACK_RANGE) {
@@ -14795,7 +14786,9 @@ function App() {
     if (playerRegenIntervalRef.current) window.clearInterval(playerRegenIntervalRef.current)
   }, [])
 
-  const handlePlayerHit = useCallback(({ damage = MUSHROOM_ENEMY_ATTACK_DAMAGE } = {}) => {
+  const handlePlayerHit = useCallback(({ damage = MUSHROOM_ENEMY_ATTACK_DAMAGE, sourceId = null } = {}) => {
+    // Agression subie : les squelettes invoqués focalisent l'agresseur.
+    if (sourceId) playerTargetIdRef.current = sourceId
     if (playerDamageLockRef.current || playerHpRef.current <= 0) return false
     playerDamageLockRef.current = true
     window.setTimeout(() => {
