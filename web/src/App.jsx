@@ -16,8 +16,10 @@ import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generate
 import { TITLES, getTitleDefinition, getTitleRarity } from './gameProgress/titles'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
+import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
+import { collidesWithMapObjectSolid, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -3915,8 +3917,12 @@ function Player({
     } else {
       velocityYRef.current = 0
     }
+    const currentFootY = playerPosRef.current.y - PLAYER_HEIGHT
+    const outdoorGroundY = currentZone === ZONES.outside
+      ? getOutdoorWalkableHeight(nextX, nextZ, currentFootY)
+      : 0
     const floorY = currentZone === ZONES.outside
-      ? getTerrainHeight(nextX, nextZ) + PLAYER_HEIGHT
+      ? outdoorGroundY + PLAYER_HEIGHT
       : PLAYER_HEIGHT
     let nextY = onGroundRef.current ? floorY : playerPosRef.current.y + velocityYRef.current * delta
     const distanceToGround = Math.max(0, nextY - floorY)
@@ -3956,7 +3962,7 @@ function Player({
       planarVelocityRef.current.z = 0
     }
 
-    if (currentZone === ZONES.outside && collidesWithOutdoorObstacle(nextX, nextZ)) {
+    if (currentZone === ZONES.outside && collidesWithOutdoorObstacle(nextX, nextZ, nextY - PLAYER_HEIGHT)) {
       nextX = prevX
       nextZ = prevZ
       planarVelocityRef.current.x = 0
@@ -9196,8 +9202,8 @@ function getTwitchParentHost() {
   return window.location.hostname || 'localhost'
 }
 
-function collidesWithOutdoorObstacle(nextX, nextZ) {
-  return OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
+function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(nextX, nextZ)) {
+  const collidesWithAuthoredObstacle = OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
     if (collider.type === 'circle') {
       return Math.hypot(nextX - collider.x, nextZ - collider.z) <= collider.radius + PLAYER_CAPSULE_RADIUS
     }
@@ -9214,6 +9220,8 @@ function collidesWithOutdoorObstacle(nextX, nextZ) {
     const outsideZ = Math.max(Math.abs(localZ) - collider.hz, 0)
     return outsideX * outsideX + outsideZ * outsideZ <= PLAYER_CAPSULE_RADIUS * PLAYER_CAPSULE_RADIUS
   })
+
+  return collidesWithAuthoredObstacle || collidesWithMapObjectSolid(nextX, nextZ, footY, PLAYER_CAPSULE_RADIUS)
 }
 
 function getTwitchParentHosts() {
@@ -15108,6 +15116,7 @@ function App() {
           <PhysicsBounds />
           <GlassContainmentColliders />
           <OutdoorBounds includeHouseFootprint={false} />
+          <MapObjectPhysicsColliders />
           <Goal
             object={goalObject}
             mode={canModifyWorld ? mode : 'play'}

@@ -8,7 +8,7 @@ import { getTerrainHeight } from '../world/terrain/terrainGeometry'
 import { NumberField, Section, SelectField, SliderField } from './editorControls'
 import { styles } from './editorStyles'
 
-const MAP_GRID_SIZE = 0.5
+const MAP_GRID_SIZE = 0.25
 const MAP_EDIT_HALF_SIZE = OUTDOOR_HALF_SIZE - 2
 
 function snap(value, gridSize = MAP_GRID_SIZE) {
@@ -100,6 +100,7 @@ export function MapEditorScene({
 }) {
   const { camera, gl } = useThree()
   const dragIdRef = useRef(null)
+  const dragStartRef = useRef(null)
   const movingIdRef = useRef(movingId)
   const objectsRef = useRef(objects)
   const raycaster = useMemo(() => new Raycaster(), [])
@@ -131,8 +132,23 @@ export function MapEditorScene({
     onMove(id, [x, getTerrainHeight(x, z), z])
   }, [movingId, onMove])
 
+  const moveFromDragPoint = useCallback((point, id) => {
+    const dragStart = dragStartRef.current
+    if (!id || !dragStart || dragStart.id !== id) {
+      moveFromPoint(point, id)
+      return
+    }
+
+    const [originX, , originZ] = dragStart.origin
+    const [x, z] = clampMapPosition(
+      originX + point.x - dragStart.point.x,
+      originZ + point.z - dragStart.point.z,
+    )
+    onMove(id, [x, getTerrainHeight(x, z), z])
+  }, [moveFromPoint, onMove])
+
   const moveFromEvent = (event, id = movingId) => {
-    moveFromPoint(getGroundPointFromEvent(event), id)
+    moveFromDragPoint(getGroundPointFromEvent(event), id)
   }
 
   useEffect(() => {
@@ -152,6 +168,9 @@ export function MapEditorScene({
       const rect = canvas.getBoundingClientRect()
       const currentMovingId = movingIdRef.current
       let targetId = currentMovingId
+      let targetObject = targetId
+        ? objectsRef.current.find((object) => object.id === targetId)
+        : null
 
       if (!targetId) {
         const pickedObject =
@@ -160,15 +179,20 @@ export function MapEditorScene({
 
         if (!pickedObject) return
         targetId = pickedObject.id
+        targetObject = pickedObject
         onSelect(targetId)
         onBeginMove(targetId)
       }
 
       stopCanvasEvent(event)
       dragIdRef.current = targetId
+      dragStartRef.current = {
+        id: targetId,
+        point: groundPoint.clone(),
+        origin: targetObject?.position ?? [groundPoint.x, getTerrainHeight(groundPoint.x, groundPoint.z), groundPoint.z],
+      }
       canvas.setPointerCapture?.(event.pointerId)
       onStartDragging(targetId)
-      moveFromPoint(groundPoint, targetId)
     }
 
     const handlePointerMove = (event) => {
@@ -177,13 +201,14 @@ export function MapEditorScene({
       const groundPoint = getGroundPointFromClient(event.clientX, event.clientY)
       if (!groundPoint) return
       stopCanvasEvent(event)
-      moveFromPoint(groundPoint, targetId)
+      moveFromDragPoint(groundPoint, targetId)
     }
 
     const handlePointerUp = (event) => {
       if (!dragIdRef.current) return
       stopCanvasEvent(event)
       dragIdRef.current = null
+      dragStartRef.current = null
       canvas.releasePointerCapture?.(event.pointerId)
       onStopDragging()
     }
@@ -199,7 +224,7 @@ export function MapEditorScene({
       canvas.removeEventListener('pointerup', handlePointerUp, true)
       canvas.removeEventListener('pointercancel', handlePointerUp, true)
     }
-  }, [camera, getGroundPointFromClient, gl.domElement, moveFromPoint, onBeginMove, onSelect, onStartDragging, onStopDragging])
+  }, [camera, getGroundPointFromClient, gl.domElement, moveFromDragPoint, onBeginMove, onSelect, onStartDragging, onStopDragging])
 
   return (
     <group>
@@ -218,6 +243,11 @@ export function MapEditorScene({
             }
             event.stopPropagation()
             event.target?.setPointerCapture?.(event.pointerId)
+            dragStartRef.current = {
+              id: pickedObject.id,
+              point: groundPoint.clone(),
+              origin: pickedObject.position,
+            }
             onSelect(pickedObject.id)
             onBeginMove(pickedObject.id)
             onStartDragging(pickedObject.id)
@@ -226,7 +256,12 @@ export function MapEditorScene({
 
           event.stopPropagation()
           event.target?.setPointerCapture?.(event.pointerId)
-          moveFromPoint(groundPoint)
+          const movingObject = objects.find((object) => object.id === movingId)
+          dragStartRef.current = {
+            id: movingId,
+            point: groundPoint.clone(),
+            origin: movingObject?.position ?? [groundPoint.x, getTerrainHeight(groundPoint.x, groundPoint.z), groundPoint.z],
+          }
           onStartDragging(movingId)
         }}
         onPointerMove={(event) => {
@@ -237,6 +272,7 @@ export function MapEditorScene({
         onPointerUp={(event) => {
           event.stopPropagation()
           event.target?.releasePointerCapture?.(event.pointerId)
+          dragStartRef.current = null
           onStopDragging()
         }}
         onPointerMissed={() => {

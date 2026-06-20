@@ -3,12 +3,12 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "skeleton_tower_mqm9f6di",
     "objectId": "skeleton_tower",
     "position": [
-      -8,
-      -0.25944455499549907,
-      -32
+      -9.75,
+      -0.22838993600503285,
+      -24.25
     ],
     "rotationY": 0,
-    "scale": 1
+    "scale": 1.25
   },
   {
     "id": "skeleton_tower_mqmaanng",
