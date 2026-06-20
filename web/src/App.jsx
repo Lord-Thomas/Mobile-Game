@@ -245,6 +245,12 @@ const MOB_CONFIGS = {
 const MOB_SEPARATION_DISTANCE = 0.95 // distance min entre deux monstres
 const MOB_SEPARATION_STRENGTH = 4.0  // force de répulsion mutuelle
 
+// ── Aggro / table de menace ──────────────────────────────────────────────────────
+// Chaque ennemi mémorise la menace générée par ceux qui le frappent (joueur +
+// squelettes invoqués) et attaque la cible à la plus haute menace. La menace
+// décroît avec le temps pour que la cible puisse changer.
+const THREAT_DECAY_PER_SEC = 5
+
 // ── Aggro de groupe ────────────────────────────────────────────────────────────
 const GROUP_AGGRO_RADIUS = 5.5    // rayon dans lequel les alliés réagissent
 const GROUP_AGGRO_MAX_MOBS = 2    // max 2 mobs rejoignent le combat
@@ -274,7 +280,6 @@ const SUMMON_SKELETON_ATTACK_RANGE = 1.45       // portée d'attaque
 const SUMMON_SKELETON_MOVE_SPEED = 3.0          // vitesse de poursuite
 const SUMMON_SKELETON_AGGRO_RANGE = 16          // distance de détection d'un ennemi
 const SUMMON_SKELETON_FOLLOW_DISTANCE = 2.4     // distance de suivi du joueur au repos
-const SUMMON_ENEMY_RETALIATION_DPS = 13         // dégâts subis par seconde en mêlée
 const SUMMON_SKELETON_SEPARATION_DISTANCE = 1.0 // distance min entre deux squelettes
 const SUMMON_SKELETON_SEPARATION_STRENGTH = 5.0 // force de répulsion mutuelle
 const PLAYER_MAX_HP = 100
@@ -5686,7 +5691,7 @@ function RuntimeWarmupRig() {
   )
 }
 
-function FireballManager({ projectilesRef, combatTargetsRef }) {
+function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef = null }) {
   const [, setRenderTick] = useState(0)
   const impactsRef = useRef([])
   const hadVisualsRef = useRef(false)
@@ -5703,12 +5708,13 @@ function FireballManager({ projectilesRef, combatTargetsRef }) {
       const nz = p.z + p.dirZ * FIREBALL_SPEED * delta
       let hit = false
       if (combatTargetsRef?.current) {
-        for (const [, target] of combatTargetsRef.current) {
+        for (const [tid, target] of combatTargetsRef.current) {
           if (!target?.position || target.disabled) continue
           const dx = nx - target.position.x
           const dz = nz - target.position.z
           if (Math.hypot(dx, dz) < FIREBALL_COLLISION_RADIUS) {
-            target.takeDamage?.({ damage: FIREBALL_DAMAGE })
+            target.takeDamage?.({ damage: FIREBALL_DAMAGE, attackerId: 'player' })
+            if (playerTargetIdRef) playerTargetIdRef.current = tid
             hit = true
             impactsRef.current.push({
               id: `imp_${now}_${Math.random().toString(36).slice(2, 5)}`,
@@ -8798,6 +8804,7 @@ function SmallMushroomEnemy({
   onHitPlayer,
   config = MOB_CONFIGS.mushroom,
   mobGroupRef = null,
+  allyTargetsRef = null,
 }) {
   const cfg = config
   const sourceModel = useFBX(cfg.modelUrl)
@@ -8828,6 +8835,7 @@ function SmallMushroomEnemy({
   const wanderTargetRef = useRef(null)
   const nextWanderAtRef = useRef(0)
   const wanderSeedRef = useRef(spawnIndex * 37 + 11)
+  const threatRef = useRef(new Map())
   const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const respawnTimerRef = useRef(null)
   const hudTimerRef = useRef(null)
@@ -9002,6 +9010,7 @@ function SmallMushroomEnemy({
     stuckDeflectionRef.current = 1
     wanderTargetRef.current = null
     nextWanderAtRef.current = 0
+    threatRef.current.clear()
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
     currentPositionRef.current.z = spawnPosition[2]
@@ -9020,8 +9029,11 @@ function SmallMushroomEnemy({
     setDamageNumbers([])
   }, [spawnPosition])
 
-  const takeDamage = useCallback(({ damage = PLAYER_PUNCH_DAMAGE, direction = { x: 0, z: 1 } }) => {
+  const takeDamage = useCallback(({ damage = PLAYER_PUNCH_DAMAGE, direction = { x: 0, z: 1 }, attackerId = 'player' }) => {
     if (!active || passive || defeatedRef.current || evadingRef.current) return false
+
+    // Menace : celui qui frappe attire l'aggro
+    threatRef.current.set(attackerId, (threatRef.current.get(attackerId) ?? 0) + damage)
 
     recoilVelocityRef.current.x -= direction.x * 2.4
     recoilVelocityRef.current.z -= direction.z * 2.4
@@ -9182,6 +9194,31 @@ function SmallMushroomEnemy({
     recoil.z = MathUtils.clamp(recoil.z + velocity.z * delta, -0.28, 0.28)
     recoil.y = MathUtils.clamp(recoil.y + velocity.y * delta, 0, 0.18)
 
+    // ── Aggro réelle : cible = ennemi/joueur à la plus haute menace ───────────
+    // Décroît les menaces, élague les cibles invalides, choisit la plus haute.
+    // Sans menace (personne ne l'a frappé), la cible par défaut reste le joueur.
+    let aggroTarget = null
+    {
+      const pp = playerPositionRef?.current
+      if (pp && active && !passive && !defeatedRef.current) {
+        let best = null
+        let bestThreat = 0
+        for (const [aid, threat] of threatRef.current) {
+          const decayed = threat - THREAT_DECAY_PER_SEC * delta
+          if (decayed <= 0) { threatRef.current.delete(aid); continue }
+          threatRef.current.set(aid, decayed)
+          const ally = allyTargetsRef?.current?.get(aid)
+          if (!ally || ally.disabled) { threatRef.current.delete(aid); continue }
+          const dd = Math.hypot(ally.position.x - enemyPosition.x, ally.position.z - enemyPosition.z)
+          if (dd > cfg.loseInterestRange) continue
+          if (decayed > bestThreat) { bestThreat = decayed; best = ally }
+        }
+        aggroTarget = (best && !best.isPlayer)
+          ? { id: best.id, position: best.position, isPlayer: false, takeDamage: best.takeDamage }
+          : { id: 'player', position: pp, isPlayer: true, takeDamage: null }
+      }
+    }
+
     if (groupRef.current && !active) {
       groupRef.current.position.set(0, -500, 0)
     } else if (groupRef.current) {
@@ -9195,7 +9232,7 @@ function SmallMushroomEnemy({
       const lookTarget = stateRef.current === 'return'
         ? { x: spawnPosition[0], z: spawnPosition[2] }
         : stateRef.current === 'wander' ? wanderTargetRef.current
-          : shouldFacePlayer ? playerPosition : null
+          : shouldFacePlayer ? (aggroTarget?.position ?? playerPosition) : null
       if (lookTarget && !defeated) {
         const dx = lookTarget.x - enemyPosition.x
         const dz = lookTarget.z - enemyPosition.z
@@ -9222,6 +9259,12 @@ function SmallMushroomEnemy({
       playerPosition.x - enemyPosition.x,
       playerPosition.z - enemyPosition.z,
     )
+    // Cible de combat effective (aggro). Par défaut le joueur.
+    const aggroPosition = aggroTarget ? aggroTarget.position : playerPosition
+    const distanceToTarget = Math.hypot(
+      aggroPosition.x - enemyPosition.x,
+      aggroPosition.z - enemyPosition.z,
+    )
     const distanceToSpawn = Math.hypot(enemyPosition.x - spawnPosition[0], enemyPosition.z - spawnPosition[2])
     const canAct = !attackRef.current
 
@@ -9247,7 +9290,7 @@ function SmallMushroomEnemy({
 
     // ── Leash temporel ────────────────────────────────────────────────────────
     if (stateRef.current === 'chase' || stateRef.current === 'attack') {
-      const outOfZone = distanceToSpawn > cfg.leashRange || distanceToPlayer > cfg.loseInterestRange
+      const outOfZone = distanceToSpawn > cfg.leashRange || distanceToTarget > cfg.loseInterestRange
       if (outOfZone) {
         leashTimerRef.current += delta
       } else {
@@ -9266,7 +9309,7 @@ function SmallMushroomEnemy({
       if (leashTimerRef.current > 0) leashTimerRef.current = Math.max(0, leashTimerRef.current - delta)
     }
 
-    if (stateRef.current === 'attack' && canAct && distanceToPlayer > cfg.attackRange) {
+    if (stateRef.current === 'attack' && canAct && distanceToTarget > cfg.attackRange) {
       stateRef.current = 'chase'
     }
 
@@ -9310,9 +9353,9 @@ function SmallMushroomEnemy({
     }
 
     if (stateRef.current === 'chase' && canAct) {
-      if (distanceToPlayer > cfg.attackRange) {
-        if (distanceToPlayer - cfg.stopDistance > 0.001) {
-          moveMushroomEnemyToward(enemyPosition, playerPosition, cfg.chaseSpeed, delta, cfg.stopDistance, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
+      if (distanceToTarget > cfg.attackRange) {
+        if (distanceToTarget - cfg.stopDistance > 0.001) {
+          moveMushroomEnemyToward(enemyPosition, aggroPosition, cfg.chaseSpeed, delta, cfg.stopDistance, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
         }
         setMotion('walk')
       } else {
@@ -9345,7 +9388,7 @@ function SmallMushroomEnemy({
     if (
       stateRef.current === 'attack' &&
       !attackRef.current &&
-      distanceToPlayer <= cfg.attackRange &&
+      distanceToTarget <= cfg.attackRange &&
       state.clock.elapsedTime >= nextAttackAtRef.current
     ) {
       attackRef.current = {
@@ -9392,14 +9435,26 @@ function SmallMushroomEnemy({
     if (!attack.fired && state.clock.elapsedTime >= attack.contactAt) {
       attack.fired = true
       const currentDistance = Math.hypot(
-        playerPosition.x - enemyPosition.x,
-        playerPosition.z - enemyPosition.z,
+        aggroPosition.x - enemyPosition.x,
+        aggroPosition.z - enemyPosition.z,
       )
       if (currentDistance <= cfg.attackRange + 0.15) {
-        onHitPlayer?.({
-          damage: cfg.attackDamage,
-          sourcePosition: [enemyPosition.x, enemyPosition.y, enemyPosition.z],
-        })
+        if (aggroTarget && !aggroTarget.isPlayer) {
+          // Frappe un squelette invoqué (allié)
+          aggroTarget.takeDamage?.({
+            damage: cfg.attackDamage,
+            direction: {
+              x: (aggroPosition.x - enemyPosition.x) / (currentDistance || 1),
+              z: (aggroPosition.z - enemyPosition.z) / (currentDistance || 1),
+            },
+            attackerId: enemyId,
+          })
+        } else {
+          onHitPlayer?.({
+            damage: cfg.attackDamage,
+            sourcePosition: [enemyPosition.x, enemyPosition.y, enemyPosition.z],
+          })
+        }
         leashTimerRef.current = Math.max(0, leashTimerRef.current - cfg.leashCombatBonus)
       }
     }
@@ -9407,7 +9462,7 @@ function SmallMushroomEnemy({
     if (state.clock.elapsedTime >= attack.endsAt) {
       attackRef.current = null
       if (stateRef.current === 'attack') {
-        stateRef.current = distanceToPlayer > cfg.attackRange ? 'chase' : 'attack'
+        stateRef.current = distanceToTarget > cfg.attackRange ? 'chase' : 'attack'
       }
       setMotion(stateRef.current === 'chase' ? 'walk' : 'idle')
     }
@@ -9505,9 +9560,12 @@ function SummonedSkeleton({
   playerPositionRef,
   combatTargetsRef,
   groupPositionsRef,
+  allyTargetsRef = null,
+  playerTargetIdRef = null,
   onExpire,
 }) {
   const cfg = MOB_CONFIGS.skeleton
+  const allyId = `summon_${index}`
   const sourceModel = useFBX(cfg.modelUrl)
   const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
   const idle = useFBX('/models/player/player-idle.fbx')
@@ -9525,6 +9583,29 @@ function SummonedSkeleton({
   const stuckDeflectionRef = useRef(1)
   const lastPositionRef = useRef({ x: 0, z: 0 })
   const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
+
+  // Reçoit les dégâts des ennemis qui l'ont pris pour cible (aggro réelle).
+  const takeAllyDamage = useCallback(({ damage = 0 }) => {
+    if (expiredRef.current || !slot) return
+    hpRef.current = Math.max(0, hpRef.current - damage)
+    setHp(Math.ceil(hpRef.current))
+  }, [slot])
+
+  // Entrée partagée pour que les ennemis puissent le cibler/le frapper.
+  const allyEntryRef = useRef({
+    id: allyId,
+    isPlayer: false,
+    position: currentPositionRef.current,
+    disabled: true,
+    takeDamage: null,
+  })
+  allyEntryRef.current.takeDamage = takeAllyDamage
+
+  useEffect(() => {
+    if (!allyTargetsRef) return undefined
+    allyTargetsRef.current.set(allyId, allyEntryRef.current)
+    return () => { allyTargetsRef.current.delete(allyId) }
+  }, [allyTargetsRef, allyId])
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
@@ -9635,6 +9716,7 @@ function SummonedSkeleton({
 
     const active = Boolean(slot) && !expiredRef.current
     if (!active) {
+      allyEntryRef.current.disabled = true
       groupPositionsRef?.current?.delete(index)
       const g = groupRef.current
       if (g) g.position.set(0, -500, 0)
@@ -9643,26 +9725,42 @@ function SummonedSkeleton({
 
     const now = Date.now()
     if (now >= slot.expiresAt || hpRef.current <= 0) {
+      allyEntryRef.current.disabled = true
       expire()
       const g = groupRef.current
       if (g) g.position.set(0, -500, 0)
       return
     }
 
+    allyEntryRef.current.disabled = false
     const pos = currentPositionRef.current
     groupPositionsRef?.current?.set(index, pos)
     const playerPosition = playerPositionRef?.current
 
-    // ── Cible : ennemi vivant le plus proche dans le rayon d'aggro ────────────
+    // ── Cible : on focalise LA CIBLE DU JOUEUR si elle est valide et à portée,
+    //    sinon l'ennemi vivant le plus proche. ─────────────────────────────────
     let target = null
     let targetDist = Infinity
     if (combatTargetsRef?.current) {
-      for (const [, candidate] of combatTargetsRef.current) {
-        if (!candidate?.position || candidate.disabled) continue
-        const d = Math.hypot(candidate.position.x - pos.x, candidate.position.z - pos.z)
-        if (d < targetDist) {
-          targetDist = d
-          target = candidate
+      const preferredId = playerTargetIdRef?.current
+      if (preferredId) {
+        const preferred = combatTargetsRef.current.get(preferredId)
+        if (preferred?.position && !preferred.disabled) {
+          const d = Math.hypot(preferred.position.x - pos.x, preferred.position.z - pos.z)
+          if (d <= SUMMON_SKELETON_AGGRO_RANGE) {
+            target = preferred
+            targetDist = d
+          }
+        }
+      }
+      if (!target) {
+        for (const [, candidate] of combatTargetsRef.current) {
+          if (!candidate?.position || candidate.disabled) continue
+          const d = Math.hypot(candidate.position.x - pos.x, candidate.position.z - pos.z)
+          if (d < targetDist) {
+            targetDist = d
+            target = candidate
+          }
         }
       }
     }
@@ -9676,9 +9774,7 @@ function SummonedSkeleton({
         )
         setMotion('walk')
       } else {
-        // En mêlée : on frappe et on encaisse la riposte de l'ennemi
-        hpRef.current = Math.max(0, hpRef.current - SUMMON_ENEMY_RETALIATION_DPS * delta)
-        setHp(Math.ceil(hpRef.current))
+        // En mêlée : on frappe l'ennemi (qui peut riposter via l'aggro réelle)
         if (state.clock.elapsedTime >= nextAttackAtRef.current) {
           nextAttackAtRef.current = state.clock.elapsedTime + SUMMON_SKELETON_ATTACK_COOLDOWN
           const dx = target.position.x - pos.x
@@ -9687,6 +9783,7 @@ function SummonedSkeleton({
           target.takeDamage?.({
             damage: SUMMON_SKELETON_DAMAGE,
             direction: { x: dx / len, z: dz / len },
+            attackerId: allyId,
           })
           setMotion('punch')
           window.setTimeout(() => setMotion('idle'), 360)
@@ -13251,6 +13348,11 @@ function App() {
   const playerVelocityRef = useRef({ x: 0, z: 0 })
   const combatTargetsRef = useRef(new Map())
   const mobGroupRef = useRef(new Map())
+  // Cibles que les ennemis peuvent prendre pour cible via l'aggro : le joueur
+  // ('player') et les squelettes invoqués. Sert aussi à router les dégâts.
+  const allyTargetsRef = useRef(new Map())
+  // Cible courante du joueur (dernier ennemi frappé) : les squelettes la focalisent.
+  const playerTargetIdRef = useRef(null)
   const mushroomSpawnPositions = useMemo(() => (
     getMonsterSpawnerPositions('mushroom', MUSHROOM_ENEMY_COUNT, getMushroomEnemySpawnPositions(MUSHROOM_ENEMY_COUNT))
   ), [])
@@ -15171,8 +15273,24 @@ function App() {
   }, [])
 
   const handleCombatHit = useCallback((hit) => {
+    // Le joueur frappe : il devient la cible focalisée par les squelettes et
+    // génère de la menace ('player') sur l'ennemi touché.
+    playerTargetIdRef.current = hit.targetId
     const target = combatTargetsRef.current.get(hit.targetId)
-    target?.takeDamage?.(hit)
+    target?.takeDamage?.({ ...hit, attackerId: 'player' })
+  }, [])
+
+  // Le joueur est une cible d'aggro permanente (id 'player').
+  useEffect(() => {
+    const entry = {
+      id: 'player',
+      isPlayer: true,
+      position: playerPositionRef.current,
+      disabled: false,
+      takeDamage: null,
+    }
+    allyTargetsRef.current.set('player', entry)
+    return () => { allyTargetsRef.current.delete('player') }
   }, [])
 
   const transitionToZone = (nextZone) => {
@@ -15857,6 +15975,7 @@ function App() {
               onHitPlayer={handlePlayerHit}
               config={MOB_CONFIGS.mushroom}
               mobGroupRef={mobGroupRef}
+              allyTargetsRef={allyTargetsRef}
             />
           ))}
           {Array.from({ length: SKELETON_ENEMY_COUNT }, (_, index) => (
@@ -15872,11 +15991,13 @@ function App() {
               onHitPlayer={handlePlayerHit}
               config={MOB_CONFIGS.skeleton}
               mobGroupRef={mobGroupRef}
+              allyTargetsRef={allyTargetsRef}
             />
           ))}
           <FireballManager
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
+            playerTargetIdRef={playerTargetIdRef}
           />
           <FireballManager
             projectilesRef={remoteProjectilesRef}
@@ -15892,6 +16013,8 @@ function App() {
                 playerPositionRef={playerPositionRef}
                 combatTargetsRef={combatTargetsRef}
                 groupPositionsRef={summonGroupPositionsRef}
+                allyTargetsRef={allyTargetsRef}
+                playerTargetIdRef={playerTargetIdRef}
                 onExpire={handleSummonExpire}
               />
             </Suspense>
