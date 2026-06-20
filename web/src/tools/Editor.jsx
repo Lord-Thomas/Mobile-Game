@@ -34,7 +34,7 @@ function EditorStage({ children }) {
   return <group ref={groupRef}>{children}</group>
 }
 
-function EditorCamera({ controlsRef, mode }) {
+function EditorCamera({ controlsRef, mode, mapCameraView, mapFocus }) {
   const { camera } = useThree()
   const { config } = useTreeEditorStore()
   const cameraSignature = useMemo(() => JSON.stringify({
@@ -51,15 +51,21 @@ function EditorCamera({ controlsRef, mode }) {
 
   useEffect(() => {
     if (mode === 'map') {
-      camera.position.set(0, 96, 0.01)
-      camera.lookAt(0, 0, 0)
+      const target = mapFocus ?? [0, 0, 0]
+      if (mapCameraView === 'orbit') {
+        camera.position.set(target[0] + 34, target[1] + 28, target[2] + 34)
+        camera.lookAt(target[0], target[1] + 1.4, target[2])
+      } else {
+        camera.position.set(target[0], 96, target[2] + 0.01)
+        camera.lookAt(target[0], target[1], target[2])
+      }
       if (controlsRef.current) {
-        controlsRef.current.target.set(0, 0, 0)
-        controlsRef.current.minDistance = 12
+        controlsRef.current.target.set(target[0], mapCameraView === 'orbit' ? target[1] + 1.4 : target[1], target[2])
+        controlsRef.current.minDistance = mapCameraView === 'orbit' ? 4 : 12
         controlsRef.current.maxDistance = 190
-        controlsRef.current.enableRotate = false
+        controlsRef.current.enableRotate = mapCameraView === 'orbit'
         controlsRef.current.enablePan = true
-        controlsRef.current.screenSpacePanning = true
+        controlsRef.current.screenSpacePanning = mapCameraView !== 'orbit'
         controlsRef.current.update()
       }
       return
@@ -120,7 +126,7 @@ function EditorCamera({ controlsRef, mode }) {
       controlsRef.current.screenSpacePanning = false
       controlsRef.current.update()
     }
-  }, [camera, cameraSignature, config, controlsRef, mode])
+  }, [camera, cameraSignature, config, controlsRef, mapCameraView, mapFocus, mode])
 
   return null
 }
@@ -135,15 +141,24 @@ const MODES = [
 function useMapEditorState() {
   const [objects, setObjects] = useState(() => MAP_OBJECT_PLACEMENTS.map(normalizeMapObjectPlacement))
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
+  const [movingId, setMovingId] = useState(null)
+  const [moveOriginal, setMoveOriginal] = useState(null)
   const [draggingId, setDraggingId] = useState(null)
+  const [cameraView, setCameraView] = useState('top')
 
   return {
     objects,
     selectedId,
+    movingId,
+    moveOriginal,
     draggingId,
+    cameraView,
     setObjects,
     setSelectedId,
+    setMovingId,
+    setMoveOriginal,
     setDraggingId,
+    setCameraView,
   }
 }
 
@@ -152,6 +167,35 @@ export default function Editor({ initialMode = 'tree' }) {
   const controlsRef = useRef(null)
   const mapEditor = useMapEditorState()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
+  const selectedMapObject = mapEditor.objects.find((object) => object.id === mapEditor.selectedId) ?? null
+  const mapCameraFocus = selectedMapObject?.position ?? null
+
+  const beginMapMove = (id) => {
+    const object = mapEditor.objects.find((nextObject) => nextObject.id === id)
+    if (!object) return
+    mapEditor.setSelectedId(id)
+    mapEditor.setMovingId(id)
+    mapEditor.setDraggingId(null)
+    mapEditor.setMoveOriginal({ id, position: object.position })
+  }
+
+  const confirmMapMove = () => {
+    mapEditor.setMovingId(null)
+    mapEditor.setDraggingId(null)
+    mapEditor.setMoveOriginal(null)
+  }
+
+  const cancelMapMove = () => {
+    const original = mapEditor.moveOriginal
+    if (original) {
+      mapEditor.setObjects((current) => current.map((object) => (
+        object.id === original.id ? { ...object, position: original.position } : object
+      )))
+    }
+    mapEditor.setMovingId(null)
+    mapEditor.setDraggingId(null)
+    mapEditor.setMoveOriginal(null)
+  }
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
@@ -175,6 +219,7 @@ export default function Editor({ initialMode = 'tree' }) {
               <MapEditorScene
                 objects={mapEditor.objects}
                 selectedId={mapEditor.selectedId}
+                movingId={mapEditor.movingId}
                 draggingId={mapEditor.draggingId}
                 onSelect={mapEditor.setSelectedId}
                 onStartDragging={mapEditor.setDraggingId}
@@ -189,14 +234,19 @@ export default function Editor({ initialMode = 'tree' }) {
           </EditorStage>
         </Suspense>
         <EditorCameraLayers />
-        <EditorCamera controlsRef={controlsRef} mode={mode} />
+        <EditorCamera
+          controlsRef={controlsRef}
+          mode={mode}
+          mapCameraView={mapEditor.cameraView}
+          mapFocus={mapCameraFocus}
+        />
         <OrbitControls
           ref={controlsRef}
           target={[0, 8, 0]}
           minDistance={1.5}
           maxDistance={190}
-          enableRotate={mode !== 'map'}
-          screenSpacePanning={mode === 'map'}
+          enableRotate={mode !== 'map' || mapEditor.cameraView === 'orbit'}
+          screenSpacePanning={mode === 'map' && mapEditor.cameraView !== 'orbit'}
         />
       </Canvas>
       <div style={modeSwitchStyle}>
@@ -218,6 +268,8 @@ export default function Editor({ initialMode = 'tree' }) {
         <MapEditorPanel
           objects={mapEditor.objects}
           selectedId={mapEditor.selectedId}
+          movingId={mapEditor.movingId}
+          cameraView={mapEditor.cameraView}
           onObjectsChange={(nextObjects) => {
             mapEditor.setObjects(nextObjects)
             if (mapEditor.selectedId && !nextObjects.some((object) => object.id === mapEditor.selectedId)) {
@@ -225,6 +277,10 @@ export default function Editor({ initialMode = 'tree' }) {
             }
           }}
           onSelect={mapEditor.setSelectedId}
+          onBeginMove={beginMapMove}
+          onConfirmMove={confirmMapMove}
+          onCancelMove={cancelMapMove}
+          onCameraViewChange={mapEditor.setCameraView}
         />
       )}
     </div>

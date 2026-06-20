@@ -47,8 +47,17 @@ function toSavedPlacements(objects) {
   })
 }
 
-export function MapEditorScene({ objects, selectedId, draggingId, onSelect, onStartDragging, onStopDragging, onMove }) {
-  const moveFromPoint = (point, id = selectedId) => {
+export function MapEditorScene({
+  objects,
+  selectedId,
+  movingId,
+  draggingId,
+  onSelect,
+  onStartDragging,
+  onStopDragging,
+  onMove,
+}) {
+  const moveFromPoint = (point, id = movingId) => {
     if (!id) return
     const [x, z] = clampMapPosition(point.x, point.z)
     onMove(id, [x, getTerrainHeight(x, z), z])
@@ -60,8 +69,11 @@ export function MapEditorScene({ objects, selectedId, draggingId, onSelect, onSt
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.06, 0]}
         onPointerDown={(event) => {
+          if (!movingId) return
           if (event.button !== 0) return
+          event.stopPropagation()
           moveFromPoint(event.point)
+          onStartDragging(movingId)
         }}
         onPointerMove={(event) => {
           if (!draggingId) return
@@ -74,7 +86,7 @@ export function MapEditorScene({ objects, selectedId, draggingId, onSelect, onSt
         }}
         onPointerMissed={() => {
           onStopDragging()
-          onSelect(null)
+          if (!movingId) onSelect(null)
         }}
       >
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
@@ -86,6 +98,7 @@ export function MapEditorScene({ objects, selectedId, draggingId, onSelect, onSt
         selectedId={selectedId}
         onSelect={onSelect}
         onStartDragging={onStartDragging}
+        canStartDragging={(placement) => placement.id === movingId}
       />
     </group>
   )
@@ -94,8 +107,14 @@ export function MapEditorScene({ objects, selectedId, draggingId, onSelect, onSt
 export function MapEditorPanel({
   objects,
   selectedId,
+  movingId,
+  cameraView,
   onObjectsChange,
   onSelect,
+  onBeginMove,
+  onConfirmMove,
+  onCancelMove,
+  onCameraViewChange,
 }) {
   const [objectId, setObjectId] = useState(MAP_OBJECT_LIBRARY[0])
   const [saving, setSaving] = useState(false)
@@ -134,6 +153,7 @@ export function MapEditorPanel({
 
   const deleteSelected = () => {
     if (!selected) return
+    if (movingId === selected.id) onCancelMove()
     onObjectsChange(objects.filter((object) => object.id !== selected.id))
     onSelect(null)
   }
@@ -188,10 +208,22 @@ export function MapEditorPanel({
                 patchSelected({ position: [x, getTerrainHeight(x, z), z] })
               }} />
               <SliderField label="Rotation" value={selected.rotationY} min={-Math.PI} max={Math.PI} step={0.01} onChange={(rotationY) => patchSelected({ rotationY })} />
+              <div style={styles.actions}>
+                <button type="button" style={styles.secondaryButton} onClick={() => patchSelected({ rotationY: selected.rotationY - Math.PI / 4 })}>-45 deg</button>
+                <button type="button" style={styles.secondaryButton} onClick={() => patchSelected({ rotationY: selected.rotationY + Math.PI / 4 })}>+45 deg</button>
+              </div>
               <SliderField label="Echelle" value={selected.scale} min={0.35} max={2.5} step={0.05} onChange={(scale) => patchSelected({ scale })} />
             </div>
             <div style={styles.actions}>
-              <button type="button" style={styles.secondaryButton} onClick={duplicateSelected}>Dupliquer</button>
+              {movingId === selected.id ? (
+                <>
+                  <button type="button" style={styles.primaryButton} onClick={onConfirmMove}>Valider</button>
+                  <button type="button" style={styles.secondaryButton} onClick={onCancelMove}>Annuler</button>
+                </>
+              ) : (
+                <button type="button" style={styles.primaryButton} onClick={() => onBeginMove(selected.id)}>Deplacer</button>
+              )}
+              <button type="button" style={styles.secondaryButton} onClick={duplicateSelected} disabled={Boolean(movingId)}>Dupliquer</button>
               <button type="button" style={styles.dangerButton} onClick={deleteSelected}>Supprimer</button>
             </div>
           </>
@@ -200,11 +232,30 @@ export function MapEditorPanel({
         )}
       </Section>
 
-      <button type="button" style={{ ...styles.primaryButton, width: '100%', marginTop: 12 }} onClick={saveObjects} disabled={saving}>
+      <Section title="Camera">
+        <div style={styles.actions}>
+          <button
+            type="button"
+            style={cameraView === 'top' ? styles.primaryButton : styles.secondaryButton}
+            onClick={() => onCameraViewChange('top')}
+          >
+            Dessus
+          </button>
+          <button
+            type="button"
+            style={cameraView === 'orbit' ? styles.primaryButton : styles.secondaryButton}
+            onClick={() => onCameraViewChange('orbit')}
+          >
+            3D
+          </button>
+        </div>
+      </Section>
+
+      <button type="button" style={{ ...styles.primaryButton, width: '100%', marginTop: 12 }} onClick={saveObjects} disabled={saving || Boolean(movingId)}>
         {saving ? 'Sauvegarde...' : 'Sauvegarder la map'}
       </button>
       {message && <p style={styles.message}>{message}</p>}
-      <p style={styles.footer}>Vue du dessus: molette pour zoomer, clic droit ou glisser deux doigts pour se deplacer.</p>
+      <p style={styles.footer}>{movingId ? 'Clique ou glisse sur le sol, puis valide ou annule le deplacement.' : 'Camera dessus ou 3D: molette pour zoomer, clic droit pour se deplacer.'}</p>
     </aside>
   )
 }

@@ -88,6 +88,7 @@ export default function MapObjectPlaceables({
   selectedId = null,
   onSelect = null,
   onStartDragging = null,
+  canStartDragging = null,
 }) {
   return (
     <group userData={{ debugCategory: 'map-placeables' }}>
@@ -99,7 +100,9 @@ export default function MapObjectPlaceables({
           onPointerDown={onSelect ? (event) => {
             event.stopPropagation()
             onSelect(placement.id)
-            onStartDragging?.(placement.id)
+            if (!canStartDragging || canStartDragging(placement)) {
+              onStartDragging?.(placement.id)
+            }
           } : null}
         />
       ))}
