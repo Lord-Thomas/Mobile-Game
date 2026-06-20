@@ -194,9 +194,15 @@ export function MapEditorScene({
   //  - objects start their own drag on pointerdown and carry no move handler, so
   //    moves fall through to this plane.
   const { camera } = useThree()
+  const cameraRef = useRef(camera)
+  useEffect(() => {
+    cameraRef.current = camera
+    if (typeof window !== 'undefined') {
+      window.__cam = () => ({ type: camera.type, pos: [+camera.position.x.toFixed(1), +camera.position.y.toFixed(1), +camera.position.z.toFixed(1)], zoom: +camera.zoom.toFixed(2) })
+    }
+  }, [camera])
   const panRef = useRef(null)
   const isTopView = cameraView === 'top'
-  if (typeof window !== 'undefined') window.__mapCam = camera
 
   const moveToPoint = (id, point) => {
     if (!id) return
@@ -228,12 +234,14 @@ export function MapEditorScene({
           }
           // Otherwise drag-pan the camera (top view only).
           if (!panRef.current || !isTopView) return
+          const cam = cameraRef.current
+          if (!cam) return
           const dx = event.clientX - panRef.current.x
           const dy = event.clientY - panRef.current.y
           panRef.current = { x: event.clientX, y: event.clientY }
-          const worldPerPixel = 1 / camera.zoom
-          camera.position.x = MathUtils.clamp(camera.position.x - dx * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
-          camera.position.z = MathUtils.clamp(camera.position.z - dy * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
+          const worldPerPixel = 1 / cam.zoom
+          cam.position.x = MathUtils.clamp(cam.position.x - dx * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
+          cam.position.z = MathUtils.clamp(cam.position.z - dy * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
         }}
         onClick={(event) => {
           // Click-to-place once "Deplacer" was pressed in the panel.
