@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { OrthographicCamera } from '@react-three/drei'
+import { Html, OrthographicCamera } from '@react-three/drei'
 import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import MapObjectPlaceables from '../world/MapObjectPlaceables'
-import { MAP_OBJECT_CATALOG, MAP_OBJECT_LIBRARY, normalizeMapObjectPlacement } from '../world/mapObjects'
+import {
+  MAP_OBJECT_CATALOG,
+  MAP_OBJECT_LIBRARY,
+  MONSTER_SPAWNER_TYPE_IDS,
+  MONSTER_SPAWNER_TYPES,
+  normalizeMapObjectPlacement,
+  normalizeMonsterSpawner,
+} from '../world/mapObjects'
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { getTerrainHeight } from '../world/terrain/terrainGeometry'
@@ -51,6 +58,17 @@ function createPlacement(objectId, existingCount) {
   }, existingCount)
 }
 
+function createMonsterSpawner(monsterType, existingCount) {
+  const [x, z] = clampMapPosition(existingCount * 3, -4)
+
+  return normalizeMonsterSpawner({
+    id: `monster_spawner_${Date.now().toString(36)}`,
+    monsterType,
+    position: [x, getTerrainHeight(x, z), z],
+    diameter: 14,
+  }, existingCount)
+}
+
 function toSavedPlacements(objects) {
   return objects.map((object, index) => {
     const placement = normalizeMapObjectPlacement(object, index)
@@ -63,6 +81,92 @@ function toSavedPlacements(objects) {
       scale: placement.scale,
     }
   })
+}
+
+function toSavedSpawners(spawners) {
+  return spawners.map((spawner, index) => {
+    const normalized = normalizeMonsterSpawner(spawner, index)
+    const [x, , z] = normalized.position
+    return {
+      id: normalized.id,
+      monsterType: normalized.monsterType,
+      position: [x, getTerrainHeight(x, z), z],
+      diameter: normalized.diameter,
+    }
+  })
+}
+
+function getSpawnerColor(monsterType) {
+  return monsterType === 'skeleton' ? '#d4d0c2' : '#83d37b'
+}
+
+function MonsterSpawnerMarkers({
+  spawners,
+  selectedSpawnerId,
+  onSpawnerPointerDown,
+  onSpawnerPointerMove,
+  onSpawnerPointerUp,
+}) {
+  return (
+    <group userData={{ debugCategory: 'monster-spawners' }}>
+      {spawners.map((spawner) => {
+        const [x, savedY, z] = spawner.position
+        const y = Math.max(savedY, getTerrainHeight(x, z))
+        const radius = spawner.diameter * 0.5
+        const selected = spawner.id === selectedSpawnerId
+        const color = getSpawnerColor(spawner.monsterType)
+        const label = MONSTER_SPAWNER_TYPES[spawner.monsterType]?.name ?? spawner.monsterType
+
+        return (
+          <group key={spawner.id} position={[x, y + 0.12, z]}>
+            <mesh
+              rotation={[-Math.PI / 2, 0, 0]}
+              onPointerDown={(event) => {
+                onSpawnerPointerDown?.(spawner.id, event)
+              }}
+              onPointerMove={(event) => onSpawnerPointerMove?.(spawner.id, event)}
+              onPointerUp={(event) => onSpawnerPointerUp?.(spawner.id, event)}
+              onPointerCancel={(event) => onSpawnerPointerUp?.(spawner.id, event)}
+            >
+              <circleGeometry args={[radius, 72]} />
+              <meshBasicMaterial color={color} transparent opacity={selected ? 0.16 : 0.075} depthWrite={false} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]}>
+              <ringGeometry args={[Math.max(0.05, radius - 0.12), radius, 72]} />
+              <meshBasicMaterial color={selected ? '#ffd447' : color} transparent opacity={selected ? 0.9 : 0.45} depthWrite={false} />
+            </mesh>
+            <mesh
+              position={[0, 0.45, 0]}
+              onPointerDown={(event) => {
+                onSpawnerPointerDown?.(spawner.id, event)
+              }}
+              onPointerMove={(event) => onSpawnerPointerMove?.(spawner.id, event)}
+              onPointerUp={(event) => onSpawnerPointerUp?.(spawner.id, event)}
+              onPointerCancel={(event) => onSpawnerPointerUp?.(spawner.id, event)}
+            >
+              <sphereGeometry args={[selected ? 0.34 : 0.26, 18, 12]} />
+              <meshBasicMaterial color={selected ? '#ffd447' : color} transparent opacity={0.96} depthWrite={false} />
+            </mesh>
+            {selected && (
+              <Html position={[0, 1.05, 0]} center transform sprite distanceFactor={12}>
+                <div style={{
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                  color: '#0e1814',
+                  background: '#ffd447',
+                  font: '700 11px system-ui, sans-serif',
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.24)',
+                }}>
+                  {label} - {spawner.diameter.toFixed(0)}m
+                </div>
+              </Html>
+            )}
+          </group>
+        )
+      })}
+    </group>
+  )
 }
 
 function createTerrainGridGeometry({ spacing, sampleStep, major = false }) {
@@ -177,14 +281,18 @@ function MapEditorCamera({ active }) {
 
 export function MapEditorScene({
   objects,
+  spawners = [],
   selectedId,
+  selectedSpawnerId = null,
   movingId,
   draggingId,
   cameraView,
   onSelect,
+  onSelectSpawner,
   onStartDragging,
   onStopDragging,
   onMove,
+  onMoveSpawner,
 }) {
   // Ported from the in-game room editor (CustomizationCamera + EditableFloor):
   //  - a top-down ortho camera that never follows the selection,
@@ -197,6 +305,7 @@ export function MapEditorScene({
   const cameraRef = useRef(camera)
   useEffect(() => { cameraRef.current = camera }, [camera])
   const panRef = useRef(null)
+  const spawnerDragRef = useRef(null)
   const isTopView = cameraView === 'top'
 
   // Raycast the ground ourselves from clientX/clientY instead of trusting
@@ -225,6 +334,33 @@ export function MapEditorScene({
     onMove(id, [x, getTerrainHeight(x, z), z])
   }
 
+  const moveSpawnerToPoint = (id, point) => {
+    if (!id || !point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    onMoveSpawner?.(id, [x, getTerrainHeight(x, z), z])
+  }
+
+  const handleSpawnerPointerDown = (id, event) => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+    onSelectSpawner?.(id)
+    spawnerDragRef.current = id
+    event.target?.setPointerCapture?.(event.pointerId)
+  }
+
+  const handleSpawnerPointerMove = (id, event) => {
+    if (spawnerDragRef.current !== id) return
+    event.stopPropagation()
+    moveSpawnerToPoint(id, groundPointFromEvent(event))
+  }
+
+  const handleSpawnerPointerUp = (id, event) => {
+    if (spawnerDragRef.current !== id) return
+    event.stopPropagation()
+    spawnerDragRef.current = null
+    event.target?.releasePointerCapture?.(event.pointerId)
+  }
+
   return (
     <group>
       <MapEditorCamera active={isTopView} />
@@ -237,7 +373,9 @@ export function MapEditorScene({
           // camera pan tracked by screen-space deltas, like the in-game editor.
           if (event.button !== 0) return
           if (draggingId || movingId) return
+          if (spawnerDragRef.current) return
           onSelect(null)
+          onSelectSpawner?.(null)
           if (isTopView) panRef.current = { x: event.clientX, y: event.clientY }
         }}
         onPointerMove={(event) => {
@@ -245,6 +383,11 @@ export function MapEditorScene({
             // Active object drag: follow the cursor (deterministic ground point).
             event.stopPropagation()
             moveToPoint(draggingId, groundPointFromEvent(event))
+            return
+          }
+          if (spawnerDragRef.current) {
+            event.stopPropagation()
+            moveSpawnerToPoint(spawnerDragRef.current, groundPointFromEvent(event))
             return
           }
           // Otherwise drag-pan the camera (top view only).
@@ -266,20 +409,32 @@ export function MapEditorScene({
         }}
         onPointerUp={(event) => {
           panRef.current = null
+          spawnerDragRef.current = null
           if (!draggingId) return
           event.stopPropagation()
           onStopDragging()
         }}
         onPointerMissed={() => {
           panRef.current = null
+          spawnerDragRef.current = null
           if (draggingId) onStopDragging()
-          else if (!movingId) onSelect(null)
+          else if (!movingId) {
+            onSelect(null)
+            onSelectSpawner?.(null)
+          }
         }}
       >
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
       <TerrainFollowingGrid />
+      <MonsterSpawnerMarkers
+        spawners={spawners}
+        selectedSpawnerId={selectedSpawnerId}
+        onSpawnerPointerDown={handleSpawnerPointerDown}
+        onSpawnerPointerMove={handleSpawnerPointerMove}
+        onSpawnerPointerUp={handleSpawnerPointerUp}
+      />
       <MapObjectPlaceables
         objects={objects}
         selectedId={selectedId}
@@ -292,23 +447,33 @@ export function MapEditorScene({
 
 export function MapEditorPanel({
   objects,
+  spawners = [],
   selectedId,
+  selectedSpawnerId = null,
   movingId,
   cameraView,
   onObjectsChange,
+  onSpawnersChange,
   onSelect,
+  onSelectSpawner,
   onBeginMove,
   onConfirmMove,
   onCancelMove,
   onCameraViewChange,
 }) {
   const [objectId, setObjectId] = useState(MAP_OBJECT_LIBRARY[0])
+  const [spawnerType, setSpawnerType] = useState(MONSTER_SPAWNER_TYPE_IDS[0])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const selected = objects.find((object) => object.id === selectedId) ?? null
+  const selectedSpawner = spawners.find((spawner) => spawner.id === selectedSpawnerId) ?? null
   const options = useMemo(() => MAP_OBJECT_LIBRARY.map((id) => ({
     value: id,
     label: MAP_OBJECT_CATALOG[id]?.name ?? id,
+  })), [])
+  const spawnerTypeOptions = useMemo(() => MONSTER_SPAWNER_TYPE_IDS.map((id) => ({
+    value: id,
+    label: MONSTER_SPAWNER_TYPES[id]?.name ?? id,
   })), [])
 
   const patchSelected = (patch) => {
@@ -318,11 +483,25 @@ export function MapEditorPanel({
     )))
   }
 
+  const patchSelectedSpawner = (patch) => {
+    if (!selectedSpawner) return
+    onSpawnersChange(spawners.map((spawner) => (
+      spawner.id === selectedSpawner.id ? normalizeMonsterSpawner({ ...spawner, ...patch }) : spawner
+    )))
+  }
+
   const addObject = () => {
     const next = createPlacement(objectId, objects.length)
     onObjectsChange([...objects, next])
     onSelect(next.id)
     setMessage('Objet ajoute et selectionne. Clique sur "Deplacer" pour le poser ailleurs, puis valide.')
+  }
+
+  const addSpawner = () => {
+    const next = createMonsterSpawner(spawnerType, spawners.length)
+    onSpawnersChange([...spawners, next])
+    onSelectSpawner(next.id)
+    setMessage('Spawner ajoute. Ajuste son type, son diametre et sa position.')
   }
 
   const duplicateSelected = () => {
@@ -344,6 +523,12 @@ export function MapEditorPanel({
     onSelect(null)
   }
 
+  const deleteSelectedSpawner = () => {
+    if (!selectedSpawner) return
+    onSpawnersChange(spawners.filter((spawner) => spawner.id !== selectedSpawner.id))
+    onSelectSpawner(null)
+  }
+
   const saveObjects = async () => {
     setSaving(true)
     setMessage('')
@@ -351,7 +536,10 @@ export function MapEditorPanel({
       const response = await fetch('/dev/save-map-objects', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ placements: toSavedPlacements(objects) }),
+        body: JSON.stringify({
+          placements: toSavedPlacements(objects),
+          spawners: toSavedSpawners(spawners),
+        }),
       })
       if (!response.ok) throw new Error(await response.text())
       setMessage('Map sauvegardee dans src/world/mapObjects.generated.js')
@@ -376,6 +564,45 @@ export function MapEditorPanel({
         <button type="button" style={styles.primaryButton} onClick={addObject}>
           Ajouter
         </button>
+      </Section>
+
+      <Section title="Spawners monstres">
+        <SelectField label="Type" value={spawnerType} options={spawnerTypeOptions} onChange={setSpawnerType} />
+        <button type="button" style={styles.primaryButton} onClick={addSpawner}>
+          Ajouter spawner
+        </button>
+        {spawners.length ? (
+          <div style={styles.libraryList}>
+            {spawners.map((spawner, index) => {
+              const isSelected = spawner.id === selectedSpawnerId
+              const typeLabel = MONSTER_SPAWNER_TYPES[spawner.monsterType]?.name ?? spawner.monsterType
+
+              return (
+                <button
+                  key={spawner.id}
+                  type="button"
+                  onClick={() => onSelectSpawner(spawner.id)}
+                  style={{
+                    ...styles.libraryItem,
+                    width: '100%',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    background: isSelected ? 'rgba(255, 212, 71, 0.16)' : 'rgba(26, 32, 36, 0.72)',
+                    border: `1px solid ${isSelected ? '#ffd447' : 'rgba(223, 229, 233, 0.12)'}`,
+                    color: '#eef4f2',
+                  }}
+                >
+                  <strong>Spawner {typeLabel} #{index + 1}</strong>
+                  <span style={{ color: '#9fb3ac', fontSize: 11 }}>
+                    diam. {spawner.diameter.toFixed(0)} / x {spawner.position[0].toFixed(1)} / z {spawner.position[2].toFixed(1)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <div style={styles.libraryEmpty}>Aucun spawner place.</div>
+        )}
       </Section>
 
       <Section title="Objets places">
@@ -415,7 +642,40 @@ export function MapEditorPanel({
       </Section>
 
       <Section title="Selection">
-        {selected ? (
+        {selectedSpawner ? (
+          <>
+            <div style={styles.subcard}>
+              <strong>{MONSTER_SPAWNER_TYPES[selectedSpawner.monsterType]?.name ?? selectedSpawner.monsterType}</strong>
+              <SelectField
+                label="Monstre"
+                value={selectedSpawner.monsterType}
+                options={spawnerTypeOptions}
+                onChange={(monsterType) => patchSelectedSpawner({ monsterType })}
+              />
+              <NumberField label="X" value={selectedSpawner.position[0]} step={0.5} onChange={(value) => {
+                const [, , z] = selectedSpawner.position
+                const [x, nextZ] = clampMapPosition(value, z)
+                patchSelectedSpawner({ position: [x, getTerrainHeight(x, nextZ), nextZ] })
+              }} />
+              <NumberField label="Z" value={selectedSpawner.position[2]} step={0.5} onChange={(value) => {
+                const [currentX] = selectedSpawner.position
+                const [x, z] = clampMapPosition(currentX, value)
+                patchSelectedSpawner({ position: [x, getTerrainHeight(x, z), z] })
+              }} />
+              <SliderField
+                label="Diametre"
+                value={selectedSpawner.diameter}
+                min={2}
+                max={80}
+                step={1}
+                onChange={(diameter) => patchSelectedSpawner({ diameter })}
+              />
+            </div>
+            <div style={styles.actions}>
+              <button type="button" style={styles.dangerButton} onClick={deleteSelectedSpawner}>Supprimer</button>
+            </div>
+          </>
+        ) : selected ? (
           <>
             <div style={styles.subcard}>
               <strong>{MAP_OBJECT_CATALOG[selected.objectId]?.name ?? selected.objectId}</strong>
@@ -450,7 +710,7 @@ export function MapEditorPanel({
             </div>
           </>
         ) : (
-          <div style={styles.libraryEmpty}>Selectionne une tour ou ajoute un objet.</div>
+          <div style={styles.libraryEmpty}>Selectionne une tour, un spawner, ou ajoute un element.</div>
         )}
       </Section>
 

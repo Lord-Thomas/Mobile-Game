@@ -11,7 +11,12 @@ import { estimateTreeHeight } from '../world/trees/proceduralTreeConfig'
 import { getTerrainHeight } from '../world/terrain/terrainGeometry'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { useTreeEditorStore } from './treeEditorStore'
-import { MAP_OBJECT_PLACEMENTS, normalizeMapObjectPlacement } from '../world/mapObjects'
+import {
+  MAP_MONSTER_SPAWNERS,
+  MAP_OBJECT_PLACEMENTS,
+  normalizeMapObjectPlacement,
+  normalizeMonsterSpawner,
+} from '../world/mapObjects'
 
 // The whole outdoor world (terrain, houses, lights) lives on OUTDOOR_LIGHT_LAYER.
 // The editor camera must enable that layer or nothing renders, and the preview
@@ -148,7 +153,9 @@ const MODES = [
 
 function useMapEditorState() {
   const [objects, setObjects] = useState(() => MAP_OBJECT_PLACEMENTS.map(normalizeMapObjectPlacement))
+  const [spawners, setSpawners] = useState(() => MAP_MONSTER_SPAWNERS.map(normalizeMonsterSpawner))
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
+  const [selectedSpawnerId, setSelectedSpawnerId] = useState(null)
   const [movingId, setMovingId] = useState(null)
   const [moveOriginal, setMoveOriginal] = useState(null)
   const [draggingId, setDraggingId] = useState(null)
@@ -156,13 +163,17 @@ function useMapEditorState() {
 
   return {
     objects,
+    spawners,
     selectedId,
+    selectedSpawnerId,
     movingId,
     moveOriginal,
     draggingId,
     cameraView,
     setObjects,
+    setSpawners,
     setSelectedId,
+    setSelectedSpawnerId,
     setMovingId,
     setMoveOriginal,
     setDraggingId,
@@ -176,10 +187,25 @@ export default function Editor({ initialMode = 'tree' }) {
   const mapEditor = useMapEditorState()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
 
+  const selectMapObject = (id) => {
+    mapEditor.setSelectedId(id)
+    if (id) mapEditor.setSelectedSpawnerId(null)
+  }
+
+  const selectMapSpawner = (id) => {
+    mapEditor.setSelectedSpawnerId(id)
+    if (id) {
+      mapEditor.setSelectedId(null)
+      mapEditor.setMovingId(null)
+      mapEditor.setDraggingId(null)
+      mapEditor.setMoveOriginal(null)
+    }
+  }
+
   const beginMapMove = (id) => {
     const object = mapEditor.objects.find((nextObject) => nextObject.id === id)
     if (!object) return
-    mapEditor.setSelectedId(id)
+    selectMapObject(id)
     mapEditor.setMovingId(id)
     mapEditor.setDraggingId(null)
     mapEditor.setMoveOriginal({ id, position: object.position })
@@ -229,16 +255,24 @@ export default function Editor({ initialMode = 'tree' }) {
             {mode === 'map' && (
               <MapEditorScene
                 objects={mapEditor.objects}
+                spawners={mapEditor.spawners}
                 selectedId={mapEditor.selectedId}
+                selectedSpawnerId={mapEditor.selectedSpawnerId}
                 movingId={mapEditor.movingId}
                 draggingId={mapEditor.draggingId}
                 cameraView={mapEditor.cameraView}
-                onSelect={mapEditor.setSelectedId}
+                onSelect={selectMapObject}
+                onSelectSpawner={selectMapSpawner}
                 onStartDragging={mapEditor.setDraggingId}
                 onStopDragging={() => mapEditor.setDraggingId(null)}
                 onMove={(id, position) => {
                   mapEditor.setObjects((current) => current.map((object) => (
                     object.id === id ? { ...object, position } : object
+                  )))
+                }}
+                onMoveSpawner={(id, position) => {
+                  mapEditor.setSpawners((current) => current.map((spawner) => (
+                    spawner.id === id ? { ...spawner, position } : spawner
                   )))
                 }}
               />
@@ -290,7 +324,9 @@ export default function Editor({ initialMode = 'tree' }) {
       {mode === 'map' && (
         <MapEditorPanel
           objects={mapEditor.objects}
+          spawners={mapEditor.spawners}
           selectedId={mapEditor.selectedId}
+          selectedSpawnerId={mapEditor.selectedSpawnerId}
           movingId={mapEditor.movingId}
           cameraView={mapEditor.cameraView}
           onObjectsChange={(nextObjects) => {
@@ -299,7 +335,9 @@ export default function Editor({ initialMode = 'tree' }) {
               mapEditor.setSelectedId(nextObjects[0]?.id ?? null)
             }
           }}
-          onSelect={mapEditor.setSelectedId}
+          onSpawnersChange={mapEditor.setSpawners}
+          onSelect={selectMapObject}
+          onSelectSpawner={selectMapSpawner}
           onBeginMove={beginMapMove}
           onConfirmMove={confirmMapMove}
           onCancelMove={cancelMapMove}

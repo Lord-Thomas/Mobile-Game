@@ -38,6 +38,7 @@ function saveThumbnailPlugin() {
           try {
             const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
             const placements = Array.isArray(payload.placements) ? payload.placements : []
+            const spawners = Array.isArray(payload.spawners) ? payload.spawners : []
             const sanitizedPlacements = placements.map((placement, index) => {
               const objectId = placement.objectId === 'skeleton_tower' ? 'skeleton_tower' : null
               const position = Array.isArray(placement.position) ? placement.position : [0, 0, 0]
@@ -59,7 +60,35 @@ function saveThumbnailPlugin() {
                 scale: Number.isFinite(Number(placement.scale)) ? Math.max(0.2, Number(placement.scale)) : 1,
               }
             })
-            const source = `export const MAP_OBJECT_PLACEMENTS = ${JSON.stringify(sanitizedPlacements, null, 2)}\n`
+            const sanitizedSpawners = spawners.map((spawner, index) => {
+              const monsterType = spawner.monsterType === 'skeleton' || spawner.monsterType === 'mushroom'
+                ? spawner.monsterType
+                : null
+              const position = Array.isArray(spawner.position) ? spawner.position : [0, 0, 0]
+              const id = typeof spawner.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(spawner.id)
+                ? spawner.id
+                : `monster_spawner_${index + 1}`
+
+              if (!monsterType) throw new Error(`Unknown monster spawner type at index ${index}`)
+
+              return {
+                id,
+                monsterType,
+                position: [
+                  Number.isFinite(Number(position[0])) ? Number(position[0]) : 0,
+                  Number.isFinite(Number(position[1])) ? Number(position[1]) : 0,
+                  Number.isFinite(Number(position[2])) ? Number(position[2]) : 0,
+                ],
+                diameter: Number.isFinite(Number(spawner.diameter))
+                  ? Math.min(80, Math.max(2, Number(spawner.diameter)))
+                  : 12,
+              }
+            })
+            const source = [
+              `export const MAP_OBJECT_PLACEMENTS = ${JSON.stringify(sanitizedPlacements, null, 2)}`,
+              `export const MAP_MONSTER_SPAWNERS = ${JSON.stringify(sanitizedSpawners, null, 2)}`,
+              '',
+            ].join('\n\n')
             await writeFile(join(process.cwd(), 'src', 'world', 'mapObjects.generated.js'), source)
             res.statusCode = 200
             res.end('ok')

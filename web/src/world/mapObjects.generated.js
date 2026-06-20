@@ -22,3 +22,27 @@ export const MAP_OBJECT_PLACEMENTS = [
     "scale": 1.7
   }
 ]
+
+export const MAP_MONSTER_SPAWNERS = [
+  {
+    "id": "monster_spawner_mqmjxq7z",
+    "monsterType": "skeleton",
+    "position": [
+      59.75,
+      1.88790650530804,
+      149.25
+    ],
+    "diameter": 27
+  },
+  {
+    "id": "monster_spawner_mqmkiauj",
+    "monsterType": "skeleton",
+    "position": [
+      -20.75,
+      -0.12152340366122948,
+      1.5
+    ],
+    "diameter": 14
+  }
+]
+

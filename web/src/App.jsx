@@ -20,6 +20,7 @@ import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getOutdoorWalkableHeight } from './world/mapObjectCollision'
+import { MAP_MONSTER_SPAWNERS } from './world/mapObjects'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -156,11 +157,19 @@ const MUSHROOM_ENEMY_ATTACK_RANGE = 1.2
 const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
 const MUSHROOM_ENEMY_ATTACK_DURATION = 0.82
 const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
+const SKELETON_ENEMY_ID = 'skeleton_enemy_01'
+const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'
+const SKELETON_ENEMY_TEXTURE_URL = '/models/enemies/skeleton/skeleton.fbm'
+const SKELETON_ENEMY_COUNT = 5
+const SKELETON_ENEMY_MAX_HP = 150
+const SKELETON_ENEMY_REWARD_COINS = 15
+const SKELETON_ENEMY_ATTACK_DAMAGE = 25
 
 // ── Config système ─────────────────────────────────────────────────────────────
 // Ajouter un nouveau type de mob = créer une nouvelle entrée ici.
 const MOB_CONFIGS = {
   mushroom: {
+    modelFormat: 'fbx',
     modelUrl: MUSHROOM_ENEMY_MODEL_URL,
     maxHp: MUSHROOM_ENEMY_MAX_HP,
     rewardCoins: MUSHROOM_ENEMY_REWARD_COINS,
@@ -191,6 +200,44 @@ const MOB_CONFIGS = {
     attackContactDelay: MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY,
     modelTargetHeight: 1.15,
     targetRadius: 0.48,
+    targetHeight: 1.2,
+    hudHeight: 1.55,
+  },
+  skeleton: {
+    modelFormat: 'fbx',
+    modelUrl: SKELETON_ENEMY_MODEL_URL,
+    textureUrl: SKELETON_ENEMY_TEXTURE_URL,
+    maxHp: SKELETON_ENEMY_MAX_HP,
+    rewardCoins: SKELETON_ENEMY_REWARD_COINS,
+    respawnMs: MUSHROOM_ENEMY_RESPAWN_MS,
+    respawnPlayerSafeRange: MUSHROOM_ENEMY_RESPAWN_PLAYER_SAFE_RANGE,
+    visibilityRange: MUSHROOM_ENEMY_VISIBILITY_RANGE,
+    viewConeDegrees: MUSHROOM_ENEMY_VIEW_CONE_DEGREES,
+    closeAlertRange: MUSHROOM_ENEMY_CLOSE_ALERT_RANGE,
+    closeAlertSeconds: MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS,
+    loseInterestRange: MUSHROOM_ENEMY_LOSE_INTEREST_RANGE,
+    leashRange: MUSHROOM_ENEMY_LEASH_RANGE,
+    leashTime: MUSHROOM_ENEMY_LEASH_TIME,
+    leashCombatBonus: MUSHROOM_ENEMY_LEASH_COMBAT_BONUS,
+    stopDistance: 1.05,
+    moveSpeed: MUSHROOM_ENEMY_MOVE_SPEED,
+    chaseSpeed: 2.35,
+    returnSpeed: MUSHROOM_ENEMY_RETURN_SPEED,
+    spawnYaw: Math.PI * 0.26,
+    wanderRadius: MUSHROOM_ENEMY_WANDER_RADIUS,
+    wanderSpeed: MUSHROOM_ENEMY_WANDER_SPEED,
+    wanderMinWait: MUSHROOM_ENEMY_WANDER_MIN_WAIT,
+    wanderMaxWait: MUSHROOM_ENEMY_WANDER_MAX_WAIT,
+    wanderReachedDistance: MUSHROOM_ENEMY_WANDER_TARGET_REACHED_DISTANCE,
+    attackDamage: SKELETON_ENEMY_ATTACK_DAMAGE,
+    attackRange: 1.35,
+    attackCooldown: MUSHROOM_ENEMY_ATTACK_COOLDOWN,
+    attackDuration: MUSHROOM_ENEMY_ATTACK_DURATION,
+    attackContactDelay: MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY,
+    modelTargetHeight: 0.85,
+    targetRadius: 0.48,
+    targetHeight: 0.85,
+    hudHeight: 1.1,
   },
 }
 
@@ -8424,6 +8471,60 @@ function getMushroomEnemySpawnPositions(count = MUSHROOM_ENEMY_COUNT) {
   return selected.map(({ x, z }) => [x, getTerrainHeight(x, z), z])
 }
 
+function getRandomEnemySpawnPositions(count, blockedPositions = []) {
+  const selected = []
+  const candidates = getMushroomEnemySpawnCandidates()
+    .map((candidate) => ({ ...candidate, roll: Math.random() }))
+    .sort((a, b) => a.roll - b.roll)
+
+  for (const candidate of candidates) {
+    if (selected.length >= count) break
+    const blocked = [...blockedPositions, ...selected]
+    const hasSpacing = blocked.every((spawn) => {
+      const sx = Array.isArray(spawn) ? spawn[0] : spawn.x
+      const sz = Array.isArray(spawn) ? spawn[2] : spawn.z
+      return Math.hypot(sx - candidate.x, sz - candidate.z) >= MUSHROOM_ENEMY_MIN_SPAWN_SPACING
+    })
+    if (hasSpacing) selected.push(candidate)
+  }
+
+  if (selected.length < count) {
+    for (const candidate of candidates) {
+      if (selected.length >= count) break
+      const alreadySelected = selected.some((spawn) => Math.hypot(spawn.x - candidate.x, spawn.z - candidate.z) < 0.1)
+      if (!alreadySelected) selected.push(candidate)
+    }
+  }
+
+  if (selected.length === 0) return getMushroomEnemySpawnPositions(count)
+  return selected.map(({ x, z }) => [x, getTerrainHeight(x, z), z])
+}
+
+function getMonsterSpawnerPositions(monsterType, count, fallbackPositions = []) {
+  const spawners = MAP_MONSTER_SPAWNERS.filter((spawner) => spawner.monsterType === monsterType)
+  if (spawners.length === 0) return fallbackPositions
+
+  return Array.from({ length: count }, (_, index) => {
+    const spawner = spawners[index % spawners.length]
+    const [centerX, , centerZ] = spawner.position
+    const radius = Math.max(0.5, spawner.diameter * 0.5)
+    const angle = Math.random() * Math.PI * 2
+    const distance = Math.sqrt(Math.random()) * radius
+    const x = centerX + Math.sin(angle) * distance
+    const z = centerZ + Math.cos(angle) * distance
+    const [safeX, safeZ] = clampMapPositionForSpawn(x, z)
+
+    return [safeX, getTerrainHeight(safeX, safeZ), safeZ]
+  })
+}
+
+function clampMapPositionForSpawn(x, z) {
+  return [
+    MathUtils.clamp(x, -OUTDOOR_HALF_SIZE + 2, OUTDOOR_HALF_SIZE - 2),
+    MathUtils.clamp(z, -OUTDOOR_HALF_SIZE + 2, OUTDOOR_HALF_SIZE - 2),
+  ]
+}
+
 function getMushroomEnemySpawnPosition(spawnIndex = 0) {
   const positions = getMushroomEnemySpawnPositions(Math.max(MUSHROOM_ENEMY_COUNT, spawnIndex + 1))
   const selected = positions[spawnIndex] ?? positions[0]
@@ -8593,6 +8694,8 @@ function SmallMushroomEnemy({
 }) {
   const cfg = config
   const sourceModel = useFBX(cfg.modelUrl)
+  const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
+  const sourceAnimations = sourceModel.animations ?? []
   const idle = useFBX('/models/player/player-idle.fbx')
   const walk = useFBX('/models/player/player-walk.fbx')
   const punch = useFBX('/models/player/player-punch.fbx')
@@ -8634,19 +8737,23 @@ function SmallMushroomEnemy({
   const targetRef = useRef({
     id: enemyId,
     position: { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] },
-    radius: 0.48,
-    height: 1.2,
+    radius: cfg.targetRadius ?? 0.48,
+    height: cfg.targetHeight ?? 1.2,
     disabled: true,
     takeDamage: null,
   })
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
+    if (cfg.textureUrl) {
+      forcedTexture.colorSpace = SRGBColorSpace
+      forcedTexture.needsUpdate = true
+    }
     source.updateWorldMatrix(true, true)
     const box = new Box3().setFromObject(source)
     const size = box.getSize(new Vector3())
     const center = box.getCenter(new Vector3())
-    const targetHeight = 1.15 * WORLD_UNITS_PER_METER
+    const targetHeight = (cfg.modelTargetHeight ?? 1.15) * WORLD_UNITS_PER_METER
     const scale = targetHeight / Math.max(size.y, 0.001)
 
     source.traverse((child) => {
@@ -8654,6 +8761,39 @@ function SmallMushroomEnemy({
         child.castShadow = true
         child.receiveShadow = true
         child.frustumCulled = false
+        if (cfg.textureUrl && forcedTexture) {
+          const materials = Array.isArray(child.material) ? child.material : [child.material]
+          const patchedMaterials = materials.map((material) => {
+            if (!material) return material
+            const nextMaterial = material.clone()
+            nextMaterial.map = forcedTexture
+            nextMaterial.alphaMap = null
+            nextMaterial.transparent = false
+            nextMaterial.opacity = 1
+            nextMaterial.depthWrite = true
+            nextMaterial.side = DoubleSide
+            nextMaterial.color?.set('#ffffff')
+            nextMaterial.needsUpdate = true
+            return nextMaterial
+          })
+          child.material = Array.isArray(child.material) ? patchedMaterials : patchedMaterials[0]
+        }
+        if (cfg.materialColor) {
+          const materials = Array.isArray(child.material) ? child.material : [child.material]
+          const patchedMaterials = materials.map((material) => {
+            if (!material) return material
+            const nextMaterial = material.clone()
+            nextMaterial.map = null
+            nextMaterial.alphaMap = null
+            nextMaterial.transparent = false
+            nextMaterial.opacity = 1
+            nextMaterial.depthWrite = true
+            nextMaterial.side = DoubleSide
+            nextMaterial.color?.set(cfg.materialColor)
+            return nextMaterial
+          })
+          child.material = Array.isArray(child.material) ? patchedMaterials : patchedMaterials[0]
+        }
       }
     })
 
@@ -8662,15 +8802,23 @@ function SmallMushroomEnemy({
       offset: [-center.x, -box.min.y, -center.z],
       scale,
     }
-  }, [sourceModel])
+  }, [cfg.materialColor, cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, sourceModel])
 
   const enemyHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
+  const modelIdleAnimation = useMemo(() => (
+    sourceAnimations.reduce((best, clip) => (
+      !best || clip.duration > best.duration ? clip : best
+    ), null)
+  ), [sourceAnimations])
 
   const animationClips = useMemo(() => {
+    const idleSource = cfg.useModelIdleAnimation ? modelIdleAnimation : idle.animations[0]
+    const walkSource = cfg.useModelAnimationForAllMotions ? modelIdleAnimation : walk.animations[0]
+    const punchSource = cfg.useModelAnimationForAllMotions ? modelIdleAnimation : punch.animations[0]
     return [
-      { source: idle.animations[0], name: 'idle' },
-      { source: walk.animations[0], name: 'walk' },
-      { source: punch.animations[0], name: 'punch' },
+      { source: idleSource, name: 'idle' },
+      { source: walkSource, name: 'walk' },
+      { source: punchSource, name: 'punch' },
     ]
       .filter(({ source }) => source)
       .map(({ source, name }) => {
@@ -8680,7 +8828,15 @@ function SmallMushroomEnemy({
         lockHipsPlanarPosition(clip)
         return clip
       })
-  }, [enemyHipsRestHeight, idle.animations, punch.animations, walk.animations])
+  }, [
+    cfg.useModelAnimationForAllMotions,
+    cfg.useModelIdleAnimation,
+    enemyHipsRestHeight,
+    idle.animations,
+    modelIdleAnimation,
+    punch.animations,
+    walk.animations,
+  ])
 
   const { actions, mixer } = useAnimations(animationClips, model.object)
   const currentActionRef = useRef(null)
@@ -8776,7 +8932,7 @@ function SmallMushroomEnemy({
         id,
         value: damage,
         x: (Math.random() - 0.5) * 0.34,
-        y: 1.18 + Math.random() * 0.18,
+        y: (cfg.targetHeight ?? 1.2) * 0.98 + Math.random() * 0.18,
         z: (Math.random() - 0.5) * 0.22,
         duration: 680,
       },
@@ -9130,10 +9286,14 @@ function SmallMushroomEnemy({
   targetRef.current.position.y = currentPositionRef.current.y
   targetRef.current.position.z = currentPositionRef.current.z
   targetRef.current.id = enemyId
+  targetRef.current.radius = cfg.targetRadius ?? 0.48
+  targetRef.current.height = cfg.targetHeight ?? 1.2
   targetRef.current.disabled = passive || !active || defeated
   targetRef.current.takeDamage = takeDamage
 
   const hpRatio = MathUtils.clamp(hp / cfg.maxHp, 0, 1)
+  const bodyHeight = cfg.targetHeight ?? 1.2
+  const hudHeight = cfg.hudHeight ?? 1.55
 
   return (
     <group ref={groupRef} position={active ? spawnPosition : [0, -500, 0]} rotation={[0, cfg.spawnYaw, 0]}>
@@ -9157,13 +9317,13 @@ function SmallMushroomEnemy({
             </>
           )}
           {hitFlash && !isEvading && (
-            <mesh position={[0, 0.78, 0.02]}>
+            <mesh position={[0, bodyHeight * 0.65, 0.02]}>
               <sphereGeometry args={[0.24, 18, 12]} />
               <meshBasicMaterial color="#ff4f57" transparent opacity={0.34} depthWrite={false} />
             </mesh>
           )}
           {hudVisible && !isEvading && (
-            <Html position={[0, 1.55, 0]} center transform sprite distanceFactor={5.2}>
+            <Html position={[0, hudHeight, 0]} center transform sprite distanceFactor={5.2}>
               <div className="training-dummy-hud enemy-hud">
                 <div className="training-dummy-bar enemy-hp-bar">
                   <span style={{ width: `${hpRatio * 100}%` }} />
@@ -12637,6 +12797,16 @@ function App() {
   const playerVelocityRef = useRef({ x: 0, z: 0 })
   const combatTargetsRef = useRef(new Map())
   const mobGroupRef = useRef(new Map())
+  const mushroomSpawnPositions = useMemo(() => (
+    getMonsterSpawnerPositions('mushroom', MUSHROOM_ENEMY_COUNT, getMushroomEnemySpawnPositions(MUSHROOM_ENEMY_COUNT))
+  ), [])
+  const skeletonSpawnPositions = useMemo(() => (
+    getMonsterSpawnerPositions(
+      'skeleton',
+      SKELETON_ENEMY_COUNT,
+      getRandomEnemySpawnPositions(SKELETON_ENEMY_COUNT, mushroomSpawnPositions),
+    )
+  ), [mushroomSpawnPositions])
   const catPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const catGroupRef = useRef(null)
   const catNetworkStateRef = useRef(null)
@@ -15150,12 +15320,28 @@ function App() {
               key={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
               enemyId={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
               spawnIndex={index}
+              spawnPositionOverride={mushroomSpawnPositions[index]}
               active={currentZone === ZONES.outside}
               playerPositionRef={playerPositionRef}
               registerCombatTarget={registerCombatTarget}
               onDefeated={handleSmallEnemyDefeated}
               onHitPlayer={handlePlayerHit}
               config={MOB_CONFIGS.mushroom}
+              mobGroupRef={mobGroupRef}
+            />
+          ))}
+          {Array.from({ length: SKELETON_ENEMY_COUNT }, (_, index) => (
+            <SmallMushroomEnemy
+              key={`${SKELETON_ENEMY_ID}_${index + 1}`}
+              enemyId={`${SKELETON_ENEMY_ID}_${index + 1}`}
+              spawnIndex={MUSHROOM_ENEMY_COUNT + index}
+              spawnPositionOverride={skeletonSpawnPositions[index]}
+              active={currentZone === ZONES.outside}
+              playerPositionRef={playerPositionRef}
+              registerCombatTarget={registerCombatTarget}
+              onDefeated={handleSmallEnemyDefeated}
+              onHitPlayer={handlePlayerHit}
+              config={MOB_CONFIGS.skeleton}
               mobGroupRef={mobGroupRef}
             />
           ))}
@@ -16001,6 +16187,8 @@ useGLTF.preload('/models/horse.glb')
 useGLTF.preload('/models/cat.glb')
 useGLTF.preload(MAGIC_BOOK_MODEL_URL)
 useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
+useFBX.preload(SKELETON_ENEMY_MODEL_URL)
+useTexture.preload(SKELETON_ENEMY_TEXTURE_URL)
 useGLTF.preload(PLAYER_MODEL_URL)
 useFBX.preload('/models/player/player-idle.fbx')
 useFBX.preload('/models/player/player-walk.fbx')
