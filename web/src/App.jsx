@@ -321,7 +321,7 @@ function loadPerformanceSettings() {
 const CAMERA_SETTINGS = {
   interior: { distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, minY: 0.35, maxY: 4.7 },
   secondRoom: { distance: CAMERA_DISTANCE, height: CAMERA_HEIGHT, minY: 0.35, maxY: 4.7 },
-  outside: { distance: 6.5, height: 2.2, minY: 0.55, maxY: 14 },
+  outside: { distance: 6.5, height: 2.2, minY: 0.55, maxY: 28 },
 }
 const EDGE_TRIGGER_PX = 14
 const CAMERA_DRAG_SENSITIVITY = 0.007
@@ -1971,7 +1971,7 @@ const DRAGON_RIDE_GROUND_SPEED = PLAYER_MAX_RUN_SPEED * 1.6
 const DRAGON_RIDE_FLY_SPEED = PLAYER_MAX_RUN_SPEED * 3
 const DRAGON_RIDE_TURN_SPEED = 2.2
 const DRAGON_RIDE_CLIMB_SPEED = 4.5
-const DRAGON_RIDE_MAX_ALTITUDE = 16
+const DRAGON_RIDE_MAX_ALTITUDE = 32
 const DRAGON_RIDE_RIDER_HEIGHT = 1.0
 const DRAGON_RIDE_CAMERA_HORIZONTAL_DAMPING = 9
 const DRAGON_RIDE_CAMERA_VERTICAL_DAMPING = 5
