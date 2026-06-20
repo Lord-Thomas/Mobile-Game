@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { OrthographicCamera } from '@react-three/drei'
-import { BufferGeometry, Float32BufferAttribute, MathUtils } from 'three'
+import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import MapObjectPlaceables from '../world/MapObjectPlaceables'
 import { MAP_OBJECT_CATALOG, MAP_OBJECT_LIBRARY, normalizeMapObjectPlacement } from '../world/mapObjects'
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
@@ -193,19 +193,34 @@ export function MapEditorScene({
   //    when you drag empty ground,
   //  - objects start their own drag on pointerdown and carry no move handler, so
   //    moves fall through to this plane.
-  const { camera } = useThree()
+  const { camera, gl } = useThree()
   const cameraRef = useRef(camera)
-  useEffect(() => {
-    cameraRef.current = camera
-    if (typeof window !== 'undefined') {
-      window.__cam = () => ({ type: camera.type, pos: [+camera.position.x.toFixed(1), +camera.position.y.toFixed(1), +camera.position.z.toFixed(1)], zoom: +camera.zoom.toFixed(2) })
-    }
-  }, [camera])
+  useEffect(() => { cameraRef.current = camera }, [camera])
   const panRef = useRef(null)
   const isTopView = cameraView === 'top'
 
+  // Raycast the ground ourselves from clientX/clientY instead of trusting
+  // event.point. R3F derives event.point from event.offsetX/offsetY, which can
+  // momentarily be 0 (when a move event targets an overlay element), sending the
+  // object to the top-left corner. clientX/clientY are always correct viewport
+  // coordinates, so this is stable.
+  const raycaster = useMemo(() => new Raycaster(), [])
+  const groundPlane = useMemo(() => new Plane(new Vector3(0, 1, 0), 0), [])
+  const ndc = useMemo(() => new Vector2(), [])
+  const hitPoint = useMemo(() => new Vector3(), [])
+
+  const groundPointFromEvent = (event) => {
+    const rect = gl.domElement.getBoundingClientRect()
+    ndc.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    )
+    raycaster.setFromCamera(ndc, camera)
+    return raycaster.ray.intersectPlane(groundPlane, hitPoint)
+  }
+
   const moveToPoint = (id, point) => {
-    if (!id) return
+    if (!id || !point) return
     const [x, z] = clampMapPosition(point.x, point.z)
     onMove(id, [x, getTerrainHeight(x, z), z])
   }
@@ -227,9 +242,9 @@ export function MapEditorScene({
         }}
         onPointerMove={(event) => {
           if (draggingId) {
-            // Active object drag: follow the cursor.
+            // Active object drag: follow the cursor (deterministic ground point).
             event.stopPropagation()
-            moveToPoint(draggingId, event.point)
+            moveToPoint(draggingId, groundPointFromEvent(event))
             return
           }
           // Otherwise drag-pan the camera (top view only).
@@ -247,7 +262,7 @@ export function MapEditorScene({
           // Click-to-place once "Deplacer" was pressed in the panel.
           if (!movingId || draggingId) return
           event.stopPropagation()
-          moveToPoint(movingId, event.point)
+          moveToPoint(movingId, groundPointFromEvent(event))
         }}
         onPointerUp={(event) => {
           panRef.current = null

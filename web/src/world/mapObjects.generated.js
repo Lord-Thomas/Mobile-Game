@@ -1,24 +1,24 @@
 export const MAP_OBJECT_PLACEMENTS = [
   {
-    "id": "skeleton_tower_mqm9f6di",
+    "id": "skeleton_tower_mqmdmv0g",
     "objectId": "skeleton_tower",
     "position": [
-      -18.25,
-      -0.07861950368783013,
-      -11
+      54.25,
+      1.8613745929571144,
+      149.75
     ],
-    "rotationY": 0,
-    "scale": 1.55
+    "rotationY": 3.141592653589793,
+    "scale": 1.7
   },
   {
-    "id": "skeleton_tower_mqmaanng",
+    "id": "skeleton_tower_mqmdq8uf",
     "objectId": "skeleton_tower",
     "position": [
-      175.5,
-      3.4469005646480735,
-      -18.5
+      65.5,
+      1.765915223018648,
+      147.25
     ],
-    "rotationY": 0,
-    "scale": 1
+    "rotationY": 3.9269908169872414,
+    "scale": 1.7
   }
 ]
