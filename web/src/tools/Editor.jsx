@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { ACESFilmicToneMapping, MathUtils, SRGBColorSpace } from 'three'
+import { ACESFilmicToneMapping, MathUtils, MOUSE, SRGBColorSpace } from 'three'
 import OutdoorNeighborhood from '../world/OutdoorNeighborhood'
 import { TreeDevScene, TreeDevPanel } from './TreeDevTool'
 import { HouseDevPanel, HouseDevScene } from './HouseDevTool'
@@ -16,11 +16,19 @@ import { MAP_OBJECT_PLACEMENTS, normalizeMapObjectPlacement } from '../world/map
 // The whole outdoor world (terrain, houses, lights) lives on OUTDOOR_LIGHT_LAYER.
 // The editor camera must enable that layer or nothing renders, and the preview
 // subjects must join it or the outdoor lights ignore them.
+//
+// EditorStage forces every descendant onto OUTDOOR_LIGHT_LAYER via layers.set(),
+// which also DISABLES layer 0. R3F's picking raycaster only tests layer 0 by
+// default, so without this the map editor's objects (and ground plane) are
+// invisible to pointer raycasts and can never be selected or dragged. Enabling
+// the layer on the raycaster too is what lets clicking/dragging work, mirroring
+// the in-game room editor whose objects simply stay on layer 0.
 function EditorCameraLayers() {
-  const { camera } = useThree()
+  const { camera, raycaster } = useThree()
   useEffect(() => {
     camera.layers.enable(OUTDOOR_LIGHT_LAYER)
-  }, [camera])
+    raycaster.layers.enable(OUTDOOR_LIGHT_LAYER)
+  }, [camera, raycaster])
   return null
 }
 
@@ -34,7 +42,7 @@ function EditorStage({ children }) {
   return <group ref={groupRef}>{children}</group>
 }
 
-function EditorCamera({ controlsRef, mode, mapCameraView, mapFocus }) {
+function EditorCamera({ controlsRef, mode, mapCameraView }) {
   const { camera } = useThree()
   const { config } = useTreeEditorStore()
   const cameraSignature = useMemo(() => JSON.stringify({
@@ -51,22 +59,22 @@ function EditorCamera({ controlsRef, mode, mapCameraView, mapFocus }) {
 
   useEffect(() => {
     if (mode === 'map') {
-      const target = mapFocus ?? [0, 0, 0]
+      // Top view is fully owned by MapEditorCamera (in-game-style ortho cam that
+      // never follows the selection); leave it alone here. Only the optional 3D
+      // view uses OrbitControls, and it stays centered on the origin rather than
+      // chasing the selected object.
       if (mapCameraView === 'orbit') {
-        camera.position.set(target[0] + 34, target[1] + 28, target[2] + 34)
-        camera.lookAt(target[0], target[1] + 1.4, target[2])
-      } else {
-        camera.position.set(target[0], 96, target[2] + 0.01)
-        camera.lookAt(target[0], target[1], target[2])
-      }
-      if (controlsRef.current) {
-        controlsRef.current.target.set(target[0], mapCameraView === 'orbit' ? target[1] + 1.4 : target[1], target[2])
-        controlsRef.current.minDistance = mapCameraView === 'orbit' ? 4 : 12
-        controlsRef.current.maxDistance = 190
-        controlsRef.current.enableRotate = mapCameraView === 'orbit'
-        controlsRef.current.enablePan = true
-        controlsRef.current.screenSpacePanning = mapCameraView !== 'orbit'
-        controlsRef.current.update()
+        camera.position.set(40, 30, 40)
+        camera.lookAt(0, 1.4, 0)
+        if (controlsRef.current) {
+          controlsRef.current.target.set(0, 1.4, 0)
+          controlsRef.current.minDistance = 4
+          controlsRef.current.maxDistance = 320
+          controlsRef.current.enableRotate = true
+          controlsRef.current.enablePan = true
+          controlsRef.current.screenSpacePanning = false
+          controlsRef.current.update()
+        }
       }
       return
     }
@@ -126,7 +134,7 @@ function EditorCamera({ controlsRef, mode, mapCameraView, mapFocus }) {
       controlsRef.current.screenSpacePanning = false
       controlsRef.current.update()
     }
-  }, [camera, cameraSignature, config, controlsRef, mapCameraView, mapFocus, mode])
+  }, [camera, cameraSignature, config, controlsRef, mapCameraView, mode])
 
   return null
 }
@@ -167,8 +175,6 @@ export default function Editor({ initialMode = 'tree' }) {
   const controlsRef = useRef(null)
   const mapEditor = useMapEditorState()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
-  const selectedMapObject = mapEditor.objects.find((object) => object.id === mapEditor.selectedId) ?? null
-  const mapCameraFocus = selectedMapObject?.position ?? null
 
   const beginMapMove = (id) => {
     const object = mapEditor.objects.find((nextObject) => nextObject.id === id)
@@ -226,8 +232,8 @@ export default function Editor({ initialMode = 'tree' }) {
                 selectedId={mapEditor.selectedId}
                 movingId={mapEditor.movingId}
                 draggingId={mapEditor.draggingId}
+                cameraView={mapEditor.cameraView}
                 onSelect={mapEditor.setSelectedId}
-                onBeginMove={beginMapMove}
                 onStartDragging={mapEditor.setDraggingId}
                 onStopDragging={() => mapEditor.setDraggingId(null)}
                 onMove={(id, position) => {
@@ -244,16 +250,26 @@ export default function Editor({ initialMode = 'tree' }) {
           controlsRef={controlsRef}
           mode={mode}
           mapCameraView={mapEditor.cameraView}
-          mapFocus={mapCameraFocus}
         />
         <OrbitControls
           ref={controlsRef}
           target={[0, 8, 0]}
           minDistance={1.5}
-          maxDistance={190}
+          maxDistance={320}
           enableRotate={mode !== 'map' || mapEditor.cameraView === 'orbit'}
-          screenSpacePanning={mode === 'map' && mapEditor.cameraView !== 'orbit'}
-          enabled={!(mode === 'map' && Boolean(mapEditor.draggingId))}
+          screenSpacePanning={false}
+          // Map TOP view is driven entirely by MapEditorCamera + ground panning
+          // (like the in-game room editor), so OrbitControls is off there. The
+          // optional 3D view uses it, minus an active object drag.
+          enabled={mode === 'map'
+            ? (mapEditor.cameraView === 'orbit' && !mapEditor.draggingId)
+            : true}
+          // In the map's 3D view the LEFT button stays free for object dragging;
+          // the camera rotates with the RIGHT button. Other modes keep the
+          // default left-drag orbit.
+          mouseButtons={mode === 'map'
+            ? { LEFT: undefined, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }
+            : { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN }}
         />
       </Canvas>
       <div style={modeSwitchStyle}>

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useThree } from '@react-three/fiber'
-import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
+import { OrthographicCamera } from '@react-three/drei'
+import { BufferGeometry, Float32BufferAttribute, MathUtils } from 'three'
 import MapObjectPlaceables from '../world/MapObjectPlaceables'
 import { MAP_OBJECT_CATALOG, MAP_OBJECT_LIBRARY, normalizeMapObjectPlacement } from '../world/mapObjects'
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
+import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { getTerrainHeight } from '../world/terrain/terrainGeometry'
 import { NumberField, Section, SelectField, SliderField } from './editorControls'
 import { styles } from './editorStyles'
@@ -15,6 +17,17 @@ const TERRAIN_GRID_SAMPLE_STEP = 2
 const TERRAIN_GRID_MAJOR_EVERY = 16
 const TERRAIN_GRID_Y_OFFSET = 0.055
 
+// Top-down orthographic camera for the map editor, ported from the in-game room
+// editor's CustomizationCamera: a fixed top-down ortho view that NEVER follows
+// the selection. Panning is done by dragging the empty ground (see the floor in
+// MapEditorScene) and zooming with the wheel — exactly like the in-game editor.
+const MAP_ZOOM_DEFAULT = 16
+const MAP_ZOOM_MIN = 2.6
+const MAP_ZOOM_MAX = 130
+const MAP_CAMERA_HEIGHT = 140
+const MAP_CAMERA_FAR = 600
+const MAP_PAN_BOUND = OUTDOOR_HALF_SIZE
+
 function snap(value, gridSize = MAP_GRID_SIZE) {
   return Math.round(value / gridSize) * gridSize
 }
@@ -24,45 +37,6 @@ function clampMapPosition(x, z) {
     MathUtils.clamp(snap(x), -MAP_EDIT_HALF_SIZE, MAP_EDIT_HALF_SIZE),
     MathUtils.clamp(snap(z), -MAP_EDIT_HALF_SIZE, MAP_EDIT_HALF_SIZE),
   ]
-}
-
-function getMapObjectPickRadius(object) {
-  const catalogItem = MAP_OBJECT_CATALOG[object.objectId]
-  return Math.max(3.5, (catalogItem?.hitRadius ?? catalogItem?.selectionRadius ?? 1.5) * (object.scale ?? 1) + 1.4)
-}
-
-function pickObjectAtPoint(objects, point) {
-  return objects
-    .map((object) => {
-      const [x, , z] = object.position
-      return {
-        object,
-        distance: Math.hypot(point.x - x, point.z - z),
-        radius: getMapObjectPickRadius(object),
-      }
-    })
-    .filter(({ distance, radius }) => distance <= radius)
-    .sort((left, right) => left.distance - right.distance)[0]?.object ?? null
-}
-
-function pickObjectAtScreen(objects, clientX, clientY, camera, rect) {
-  const screenPoint = new Vector3()
-
-  return objects
-    .map((object) => {
-      const [x, y, z] = object.position
-      const catalogItem = MAP_OBJECT_CATALOG[object.objectId]
-      const objectHeight = (catalogItem?.targetHeightMeters ?? 3) * 1.38 * (object.scale ?? 1)
-      screenPoint.set(x, y + objectHeight * 0.5, z).project(camera)
-      const screenX = rect.left + (screenPoint.x + 1) * rect.width * 0.5
-      const screenY = rect.top + (1 - screenPoint.y) * rect.height * 0.5
-      return {
-        object,
-        distance: Math.hypot(clientX - screenX, clientY - screenY),
-      }
-    })
-    .filter(({ distance }) => distance <= 120)
-    .sort((left, right) => left.distance - right.distance)[0]?.object ?? null
 }
 
 function createPlacement(objectId, existingCount) {
@@ -155,197 +129,128 @@ function TerrainFollowingGrid() {
   )
 }
 
+function MapEditorCamera({ active }) {
+  const { gl } = useThree()
+  const camRef = useRef()
+  const zoomRef = useRef(MAP_ZOOM_DEFAULT)
+
+  // Place the camera once when the top view becomes active. After that the pan
+  // handler on the floor mutates position imperatively, so we must NOT pass a
+  // position prop (R3F would re-apply it on every render and reset the pan).
+  useEffect(() => {
+    const cam = camRef.current
+    if (!active || !cam) return
+    cam.position.set(0, MAP_CAMERA_HEIGHT, 0)
+    cam.rotation.set(-Math.PI / 2, 0, 0)
+    cam.layers.enable(OUTDOOR_LIGHT_LAYER)
+    cam.zoom = MAP_ZOOM_DEFAULT
+    zoomRef.current = MAP_ZOOM_DEFAULT
+    cam.updateProjectionMatrix()
+  }, [active])
+
+  useEffect(() => {
+    if (!active) return undefined
+    const canvas = gl.domElement
+    const onWheel = (event) => {
+      event.preventDefault()
+      zoomRef.current = MathUtils.clamp(
+        zoomRef.current * (event.deltaY < 0 ? 1.12 : 0.89),
+        MAP_ZOOM_MIN,
+        MAP_ZOOM_MAX,
+      )
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
+  }, [active, gl])
+
+  useFrame(() => {
+    const cam = camRef.current
+    if (!cam || !active) return
+    if (Math.abs(cam.zoom - zoomRef.current) > 0.01) {
+      cam.zoom = MathUtils.lerp(cam.zoom, zoomRef.current, 0.2)
+      cam.updateProjectionMatrix()
+    }
+  })
+
+  return <OrthographicCamera ref={camRef} makeDefault={active} near={0.1} far={MAP_CAMERA_FAR} />
+}
+
 export function MapEditorScene({
   objects,
   selectedId,
   movingId,
   draggingId,
+  cameraView,
   onSelect,
-  onBeginMove,
   onStartDragging,
   onStopDragging,
   onMove,
 }) {
-  const { camera, gl } = useThree()
-  const dragIdRef = useRef(null)
-  const dragStartRef = useRef(null)
-  const movingIdRef = useRef(movingId)
-  const objectsRef = useRef(objects)
-  const raycaster = useMemo(() => new Raycaster(), [])
-  const pointer = useMemo(() => new Vector2(), [])
-  const groundPlane = useMemo(() => new Plane(new Vector3(0, 1, 0), 0), [])
-  const pointerGroundPoint = useMemo(() => new Vector3(), [])
+  // Ported from the in-game room editor (CustomizationCamera + EditableFloor):
+  //  - a top-down ortho camera that never follows the selection,
+  //  - one big invisible ground plane that, while an object is grabbed, makes it
+  //    follow the cursor (absolute, grid-snapped), and otherwise pans the camera
+  //    when you drag empty ground,
+  //  - objects start their own drag on pointerdown and carry no move handler, so
+  //    moves fall through to this plane.
+  const { camera } = useThree()
+  const panRef = useRef(null)
+  const isTopView = cameraView === 'top'
+  if (typeof window !== 'undefined') window.__mapCam = camera
 
-  useEffect(() => { movingIdRef.current = movingId }, [movingId])
-  useEffect(() => { objectsRef.current = objects }, [objects])
-
-  const getGroundPointFromClient = useCallback((clientX, clientY) => {
-    const rect = gl.domElement.getBoundingClientRect()
-    pointer.set(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -(((clientY - rect.top) / rect.height) * 2 - 1),
-    )
-    raycaster.setFromCamera(pointer, camera)
-    return raycaster.ray.intersectPlane(groundPlane, pointerGroundPoint) ?? null
-  }, [camera, gl.domElement, groundPlane, pointer, pointerGroundPoint, raycaster])
-
-  const getGroundPointFromEvent = (event) => {
-    if (!event.ray) return event.point
-    return event.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), 0), new Vector3()) ?? event.point
-  }
-
-  const moveFromPoint = useCallback((point, id = movingId) => {
+  const moveToPoint = (id, point) => {
     if (!id) return
     const [x, z] = clampMapPosition(point.x, point.z)
     onMove(id, [x, getTerrainHeight(x, z), z])
-  }, [movingId, onMove])
-
-  const moveFromDragPoint = useCallback((point, id) => {
-    const dragStart = dragStartRef.current
-    if (!id || !dragStart || dragStart.id !== id) {
-      moveFromPoint(point, id)
-      return
-    }
-
-    const [originX, , originZ] = dragStart.origin
-    const [x, z] = clampMapPosition(
-      originX + point.x - dragStart.point.x,
-      originZ + point.z - dragStart.point.z,
-    )
-    onMove(id, [x, getTerrainHeight(x, z), z])
-  }, [moveFromPoint, onMove])
-
-  const moveFromEvent = (event, id = movingId) => {
-    moveFromDragPoint(getGroundPointFromEvent(event), id)
   }
-
-  useEffect(() => {
-    const canvas = gl.domElement
-
-    const stopCanvasEvent = (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation?.()
-    }
-
-    const handlePointerDown = (event) => {
-      if (event.button !== 0) return
-      const groundPoint = getGroundPointFromClient(event.clientX, event.clientY)
-      if (!groundPoint) return
-
-      const rect = canvas.getBoundingClientRect()
-      const currentMovingId = movingIdRef.current
-      let targetId = currentMovingId
-      let targetObject = targetId
-        ? objectsRef.current.find((object) => object.id === targetId)
-        : null
-
-      if (!targetId) {
-        const pickedObject =
-          pickObjectAtPoint(objectsRef.current, groundPoint) ??
-          pickObjectAtScreen(objectsRef.current, event.clientX, event.clientY, camera, rect)
-
-        if (!pickedObject) return
-        targetId = pickedObject.id
-        targetObject = pickedObject
-        onSelect(targetId)
-        onBeginMove(targetId)
-      }
-
-      stopCanvasEvent(event)
-      dragIdRef.current = targetId
-      dragStartRef.current = {
-        id: targetId,
-        point: groundPoint.clone(),
-        origin: targetObject?.position ?? [groundPoint.x, getTerrainHeight(groundPoint.x, groundPoint.z), groundPoint.z],
-      }
-      canvas.setPointerCapture?.(event.pointerId)
-      onStartDragging(targetId)
-    }
-
-    const handlePointerMove = (event) => {
-      const targetId = dragIdRef.current
-      if (!targetId) return
-      const groundPoint = getGroundPointFromClient(event.clientX, event.clientY)
-      if (!groundPoint) return
-      stopCanvasEvent(event)
-      moveFromDragPoint(groundPoint, targetId)
-    }
-
-    const handlePointerUp = (event) => {
-      if (!dragIdRef.current) return
-      stopCanvasEvent(event)
-      dragIdRef.current = null
-      dragStartRef.current = null
-      canvas.releasePointerCapture?.(event.pointerId)
-      onStopDragging()
-    }
-
-    canvas.addEventListener('pointerdown', handlePointerDown, true)
-    canvas.addEventListener('pointermove', handlePointerMove, true)
-    canvas.addEventListener('pointerup', handlePointerUp, true)
-    canvas.addEventListener('pointercancel', handlePointerUp, true)
-
-    return () => {
-      canvas.removeEventListener('pointerdown', handlePointerDown, true)
-      canvas.removeEventListener('pointermove', handlePointerMove, true)
-      canvas.removeEventListener('pointerup', handlePointerUp, true)
-      canvas.removeEventListener('pointercancel', handlePointerUp, true)
-    }
-  }, [camera, getGroundPointFromClient, gl.domElement, moveFromDragPoint, onBeginMove, onSelect, onStartDragging, onStopDragging])
 
   return (
     <group>
+      <MapEditorCamera active={isTopView} />
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.06, 0]}
         onPointerDown={(event) => {
+          // Object presses stopPropagation before reaching the floor, so a press
+          // here is on empty ground: clear the selection and (top view) begin a
+          // camera pan tracked by screen-space deltas, like the in-game editor.
           if (event.button !== 0) return
-          const groundPoint = getGroundPointFromEvent(event)
-
-          if (!movingId) {
-            const pickedObject = pickObjectAtPoint(objects, groundPoint)
-            if (!pickedObject) {
-              onSelect(null)
-              return
-            }
-            event.stopPropagation()
-            event.target?.setPointerCapture?.(event.pointerId)
-            dragStartRef.current = {
-              id: pickedObject.id,
-              point: groundPoint.clone(),
-              origin: pickedObject.position,
-            }
-            onSelect(pickedObject.id)
-            onBeginMove(pickedObject.id)
-            onStartDragging(pickedObject.id)
-            return
-          }
-
-          event.stopPropagation()
-          event.target?.setPointerCapture?.(event.pointerId)
-          const movingObject = objects.find((object) => object.id === movingId)
-          dragStartRef.current = {
-            id: movingId,
-            point: groundPoint.clone(),
-            origin: movingObject?.position ?? [groundPoint.x, getTerrainHeight(groundPoint.x, groundPoint.z), groundPoint.z],
-          }
-          onStartDragging(movingId)
+          if (draggingId || movingId) return
+          onSelect(null)
+          if (isTopView) panRef.current = { x: event.clientX, y: event.clientY }
         }}
         onPointerMove={(event) => {
-          if (!draggingId) return
+          if (draggingId) {
+            // Active object drag: follow the cursor.
+            event.stopPropagation()
+            moveToPoint(draggingId, event.point)
+            return
+          }
+          // Otherwise drag-pan the camera (top view only).
+          if (!panRef.current || !isTopView) return
+          const dx = event.clientX - panRef.current.x
+          const dy = event.clientY - panRef.current.y
+          panRef.current = { x: event.clientX, y: event.clientY }
+          const worldPerPixel = 1 / camera.zoom
+          camera.position.x = MathUtils.clamp(camera.position.x - dx * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
+          camera.position.z = MathUtils.clamp(camera.position.z - dy * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
+        }}
+        onClick={(event) => {
+          // Click-to-place once "Deplacer" was pressed in the panel.
+          if (!movingId || draggingId) return
           event.stopPropagation()
-          moveFromEvent(event, draggingId)
+          moveToPoint(movingId, event.point)
         }}
         onPointerUp={(event) => {
+          panRef.current = null
+          if (!draggingId) return
           event.stopPropagation()
-          event.target?.releasePointerCapture?.(event.pointerId)
-          dragStartRef.current = null
           onStopDragging()
         }}
         onPointerMissed={() => {
-          onStopDragging()
-          if (!movingId) onSelect(null)
+          panRef.current = null
+          if (draggingId) onStopDragging()
+          else if (!movingId) onSelect(null)
         }}
       >
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
@@ -356,18 +261,7 @@ export function MapEditorScene({
         objects={objects}
         selectedId={selectedId}
         onSelect={onSelect}
-        onBeginMove={onBeginMove}
         onStartDragging={onStartDragging}
-        canStartDragging={(placement) => placement.id === movingId}
-        canBeginMove={(placement) => !movingId || placement.id === movingId}
-        onDragPointerMove={(id, event) => {
-          if (id !== draggingId) return
-          event.stopPropagation()
-          moveFromEvent(event, id)
-        }}
-        onDragPointerUp={(id) => {
-          if (id === draggingId) onStopDragging()
-        }}
       />
     </group>
   )
@@ -560,7 +454,7 @@ export function MapEditorPanel({
         {saving ? 'Sauvegarde...' : 'Sauvegarder la map'}
       </button>
       {message && <p style={styles.message}>{message}</p>}
-      <p style={styles.footer}>{movingId ? 'Clique ou glisse sur le sol, puis valide ou annule le deplacement.' : 'Camera dessus ou 3D: molette pour zoomer, clic droit pour se deplacer.'}</p>
+      <p style={styles.footer}>{movingId ? 'Clique ou glisse sur le sol, puis valide ou annule le deplacement.' : 'Glisse un objet pour le deplacer. Glisse le sol vide pour bouger la camera, molette pour zoomer.'}</p>
     </aside>
   )
 }
