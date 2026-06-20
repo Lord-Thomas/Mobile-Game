@@ -12,6 +12,16 @@ function mergeUnique(left = [], right = []) {
   return Array.from(new Set([...left, ...right]))
 }
 
+function normalizeStringList(values) {
+  return Array.isArray(values)
+    ? Array.from(new Set(values.filter((value) => typeof value === 'string')))
+    : []
+}
+
+function normalizeCount(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+}
+
 function mergeEditableObjects(existingObjects = [], currentObjects = []) {
   const byId = new Map()
   existingObjects.forEach((object) => {
@@ -51,6 +61,8 @@ function mergeProgressRow(existingRow, progress) {
   const existing = fromProgressRow(existingRow)
   const ownedWeapons = mergeUnique(existing.ownedWeapons, progress.ownedWeapons)
   const ownedMounts = mergeUnique(existing.ownedMounts, progress.ownedMounts)
+  const unlockedAchievements = mergeUnique(existing.unlockedAchievements, progress.unlockedAchievements)
+  const mobKillCount = Math.max(normalizeCount(existing.mobKillCount), normalizeCount(progress.mobKillCount))
   const friends = mergeFriends(existing.friends, progress.friends)
   const ownedMagicBook = Boolean(existing.ownedMagicBook || progress.ownedMagicBook || ownedWeapons.includes('magic_book'))
   const equippedWeapon = ownedWeapons.includes(progress.equippedWeapon) || (progress.equippedWeapon === 'magic_book' && ownedMagicBook)
@@ -74,6 +86,8 @@ function mergeProgressRow(existingRow, progress) {
       : progress.selectedWallSkinId,
     ownedWeapons,
     ownedMounts,
+    unlockedAchievements,
+    mobKillCount,
     friends,
     ownedCat: Boolean(existing.ownedCat || progress.ownedCat),
     ownedMagicBook,
@@ -178,6 +192,8 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       ownedMagicBook: progress.ownedMagicBook ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       ownedMounts: progress.ownedMounts ?? [],
+      unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
+      mobKillCount: normalizeCount(progress.mobKillCount),
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
@@ -210,6 +226,8 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       ownedMagicBook: progress.ownedMagicBook ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       ownedMounts: progress.ownedMounts ?? [],
+      unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
+      mobKillCount: normalizeCount(progress.mobKillCount),
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
@@ -246,6 +264,8 @@ export function fromProgressRow(row) {
     ownedMagicBook,
     ownedWeapons: ownedMagicBook ? mergeUnique(ownedWeapons, ['magic_book']) : ownedWeapons,
     ownedMounts,
+    unlockedAchievements: normalizeStringList(row.world_settings?.unlockedAchievements),
+    mobKillCount: normalizeCount(row.world_settings?.mobKillCount),
     equippedWeapon: typeof row.world_settings?.equippedWeapon === 'string' ? row.world_settings.equippedWeapon : null,
     equippedTitleId: row.equipped_title_id ?? null,
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],
