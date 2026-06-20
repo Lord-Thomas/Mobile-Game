@@ -8,6 +8,8 @@ export const MAP_OBJECT_CATALOG = {
     targetHeightMeters: 7.2,
     colliderRadius: 1.35,
     selectionRadius: 1.55,
+    hitRadius: 1.9,
+    hitHeightMeters: 7.4,
     defaultScale: 1,
     thumbnailLabel: 'Tour',
   },

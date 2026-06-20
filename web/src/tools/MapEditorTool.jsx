@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
-import { MathUtils } from 'three'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useThree } from '@react-three/fiber'
+import { MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import MapObjectPlaceables from '../world/MapObjectPlaceables'
 import { MAP_OBJECT_CATALOG, MAP_OBJECT_LIBRARY, normalizeMapObjectPlacement } from '../world/mapObjects'
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
@@ -19,6 +20,45 @@ function clampMapPosition(x, z) {
     MathUtils.clamp(snap(x), -MAP_EDIT_HALF_SIZE, MAP_EDIT_HALF_SIZE),
     MathUtils.clamp(snap(z), -MAP_EDIT_HALF_SIZE, MAP_EDIT_HALF_SIZE),
   ]
+}
+
+function getMapObjectPickRadius(object) {
+  const catalogItem = MAP_OBJECT_CATALOG[object.objectId]
+  return Math.max(3.5, (catalogItem?.hitRadius ?? catalogItem?.selectionRadius ?? 1.5) * (object.scale ?? 1) + 1.4)
+}
+
+function pickObjectAtPoint(objects, point) {
+  return objects
+    .map((object) => {
+      const [x, , z] = object.position
+      return {
+        object,
+        distance: Math.hypot(point.x - x, point.z - z),
+        radius: getMapObjectPickRadius(object),
+      }
+    })
+    .filter(({ distance, radius }) => distance <= radius)
+    .sort((left, right) => left.distance - right.distance)[0]?.object ?? null
+}
+
+function pickObjectAtScreen(objects, clientX, clientY, camera, rect) {
+  const screenPoint = new Vector3()
+
+  return objects
+    .map((object) => {
+      const [x, y, z] = object.position
+      const catalogItem = MAP_OBJECT_CATALOG[object.objectId]
+      const objectHeight = (catalogItem?.targetHeightMeters ?? 3) * 1.38 * (object.scale ?? 1)
+      screenPoint.set(x, y + objectHeight * 0.5, z).project(camera)
+      const screenX = rect.left + (screenPoint.x + 1) * rect.width * 0.5
+      const screenY = rect.top + (1 - screenPoint.y) * rect.height * 0.5
+      return {
+        object,
+        distance: Math.hypot(clientX - screenX, clientY - screenY),
+      }
+    })
+    .filter(({ distance }) => distance <= 120)
+    .sort((left, right) => left.distance - right.distance)[0]?.object ?? null
 }
 
 function createPlacement(objectId, existingCount) {
@@ -53,15 +93,113 @@ export function MapEditorScene({
   movingId,
   draggingId,
   onSelect,
+  onBeginMove,
   onStartDragging,
   onStopDragging,
   onMove,
 }) {
-  const moveFromPoint = (point, id = movingId) => {
+  const { camera, gl } = useThree()
+  const dragIdRef = useRef(null)
+  const movingIdRef = useRef(movingId)
+  const objectsRef = useRef(objects)
+  const raycaster = useMemo(() => new Raycaster(), [])
+  const pointer = useMemo(() => new Vector2(), [])
+  const groundPlane = useMemo(() => new Plane(new Vector3(0, 1, 0), 0), [])
+  const pointerGroundPoint = useMemo(() => new Vector3(), [])
+
+  useEffect(() => { movingIdRef.current = movingId }, [movingId])
+  useEffect(() => { objectsRef.current = objects }, [objects])
+
+  const getGroundPointFromClient = useCallback((clientX, clientY) => {
+    const rect = gl.domElement.getBoundingClientRect()
+    pointer.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -(((clientY - rect.top) / rect.height) * 2 - 1),
+    )
+    raycaster.setFromCamera(pointer, camera)
+    return raycaster.ray.intersectPlane(groundPlane, pointerGroundPoint) ?? null
+  }, [camera, gl.domElement, groundPlane, pointer, pointerGroundPoint, raycaster])
+
+  const getGroundPointFromEvent = (event) => {
+    if (!event.ray) return event.point
+    return event.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), 0), new Vector3()) ?? event.point
+  }
+
+  const moveFromPoint = useCallback((point, id = movingId) => {
     if (!id) return
     const [x, z] = clampMapPosition(point.x, point.z)
     onMove(id, [x, getTerrainHeight(x, z), z])
+  }, [movingId, onMove])
+
+  const moveFromEvent = (event, id = movingId) => {
+    moveFromPoint(getGroundPointFromEvent(event), id)
   }
+
+  useEffect(() => {
+    const canvas = gl.domElement
+
+    const stopCanvasEvent = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation?.()
+    }
+
+    const handlePointerDown = (event) => {
+      if (event.button !== 0) return
+      const groundPoint = getGroundPointFromClient(event.clientX, event.clientY)
+      if (!groundPoint) return
+
+      const rect = canvas.getBoundingClientRect()
+      const currentMovingId = movingIdRef.current
+      let targetId = currentMovingId
+
+      if (!targetId) {
+        const pickedObject =
+          pickObjectAtPoint(objectsRef.current, groundPoint) ??
+          pickObjectAtScreen(objectsRef.current, event.clientX, event.clientY, camera, rect)
+
+        if (!pickedObject) return
+        targetId = pickedObject.id
+        onSelect(targetId)
+        onBeginMove(targetId)
+      }
+
+      stopCanvasEvent(event)
+      dragIdRef.current = targetId
+      canvas.setPointerCapture?.(event.pointerId)
+      onStartDragging(targetId)
+      moveFromPoint(groundPoint, targetId)
+    }
+
+    const handlePointerMove = (event) => {
+      const targetId = dragIdRef.current
+      if (!targetId) return
+      const groundPoint = getGroundPointFromClient(event.clientX, event.clientY)
+      if (!groundPoint) return
+      stopCanvasEvent(event)
+      moveFromPoint(groundPoint, targetId)
+    }
+
+    const handlePointerUp = (event) => {
+      if (!dragIdRef.current) return
+      stopCanvasEvent(event)
+      dragIdRef.current = null
+      canvas.releasePointerCapture?.(event.pointerId)
+      onStopDragging()
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown, true)
+    canvas.addEventListener('pointermove', handlePointerMove, true)
+    canvas.addEventListener('pointerup', handlePointerUp, true)
+    canvas.addEventListener('pointercancel', handlePointerUp, true)
+
+    return () => {
+      canvas.removeEventListener('pointerdown', handlePointerDown, true)
+      canvas.removeEventListener('pointermove', handlePointerMove, true)
+      canvas.removeEventListener('pointerup', handlePointerUp, true)
+      canvas.removeEventListener('pointercancel', handlePointerUp, true)
+    }
+  }, [camera, getGroundPointFromClient, gl.domElement, moveFromPoint, onBeginMove, onSelect, onStartDragging, onStopDragging])
 
   return (
     <group>
@@ -69,19 +207,36 @@ export function MapEditorScene({
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.06, 0]}
         onPointerDown={(event) => {
-          if (!movingId) return
           if (event.button !== 0) return
+          const groundPoint = getGroundPointFromEvent(event)
+
+          if (!movingId) {
+            const pickedObject = pickObjectAtPoint(objects, groundPoint)
+            if (!pickedObject) {
+              onSelect(null)
+              return
+            }
+            event.stopPropagation()
+            event.target?.setPointerCapture?.(event.pointerId)
+            onSelect(pickedObject.id)
+            onBeginMove(pickedObject.id)
+            onStartDragging(pickedObject.id)
+            return
+          }
+
           event.stopPropagation()
-          moveFromPoint(event.point)
+          event.target?.setPointerCapture?.(event.pointerId)
+          moveFromPoint(groundPoint)
           onStartDragging(movingId)
         }}
         onPointerMove={(event) => {
           if (!draggingId) return
           event.stopPropagation()
-          moveFromPoint(event.point, draggingId)
+          moveFromEvent(event, draggingId)
         }}
         onPointerUp={(event) => {
           event.stopPropagation()
+          event.target?.releasePointerCapture?.(event.pointerId)
           onStopDragging()
         }}
         onPointerMissed={() => {
@@ -97,8 +252,18 @@ export function MapEditorScene({
         objects={objects}
         selectedId={selectedId}
         onSelect={onSelect}
+        onBeginMove={onBeginMove}
         onStartDragging={onStartDragging}
         canStartDragging={(placement) => placement.id === movingId}
+        canBeginMove={(placement) => !movingId || placement.id === movingId}
+        onDragPointerMove={(id, event) => {
+          if (id !== draggingId) return
+          event.stopPropagation()
+          moveFromEvent(event, id)
+        }}
+        onDragPointerUp={(id) => {
+          if (id === draggingId) onStopDragging()
+        }}
       />
     </group>
   )
@@ -136,7 +301,7 @@ export function MapEditorPanel({
     const next = createPlacement(objectId, objects.length)
     onObjectsChange([...objects, next])
     onSelect(next.id)
-    setMessage('Objet ajoute. Glisse-le ou clique sur la map pour le placer.')
+    setMessage('Objet ajoute et selectionne. Clique sur "Deplacer" pour le poser ailleurs, puis valide.')
   }
 
   const duplicateSelected = () => {
@@ -190,6 +355,42 @@ export function MapEditorPanel({
         <button type="button" style={styles.primaryButton} onClick={addObject}>
           Ajouter
         </button>
+      </Section>
+
+      <Section title="Objets places">
+        {objects.length ? (
+          <div style={styles.libraryList}>
+            {objects.map((object, index) => {
+              const isSelected = object.id === selectedId
+              const isMoving = object.id === movingId
+              const catalogItem = MAP_OBJECT_CATALOG[object.objectId]
+
+              return (
+                <button
+                  key={object.id}
+                  type="button"
+                  onClick={() => onSelect(object.id)}
+                  style={{
+                    ...styles.libraryItem,
+                    width: '100%',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    background: isSelected ? 'rgba(159, 224, 188, 0.16)' : 'rgba(26, 32, 36, 0.72)',
+                    border: `1px solid ${isSelected ? '#9fe0bc' : 'rgba(223, 229, 233, 0.12)'}`,
+                    color: '#eef4f2',
+                  }}
+                >
+                  <strong>{catalogItem?.name ?? object.objectId} #{index + 1}</strong>
+                  <span style={{ color: isMoving ? '#ffd447' : '#9fb3ac', fontSize: 11 }}>
+                    {isMoving ? 'Deplacement en cours' : `x ${object.position[0].toFixed(1)} / z ${object.position[2].toFixed(1)}`}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <div style={styles.libraryEmpty}>Aucun objet place.</div>
+        )}
       </Section>
 
       <Section title="Selection">

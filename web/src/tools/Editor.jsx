@@ -210,7 +210,12 @@ export default function Editor({ initialMode = 'tree' }) {
         }}
       >
         <Suspense fallback={null}>
-          <OutdoorNeighborhood lightingActive={true} playerPositionRef={noPlayerRef} showAuthoredTrees={false} />
+          <OutdoorNeighborhood
+            lightingActive={true}
+            playerPositionRef={noPlayerRef}
+            showAuthoredTrees={false}
+            showMapObjects={mode !== 'map'}
+          />
           <EditorStage>
             {mode === 'tree' && <TreeDevScene />}
             {mode === 'house' && <HouseDevScene />}
@@ -222,6 +227,7 @@ export default function Editor({ initialMode = 'tree' }) {
                 movingId={mapEditor.movingId}
                 draggingId={mapEditor.draggingId}
                 onSelect={mapEditor.setSelectedId}
+                onBeginMove={beginMapMove}
                 onStartDragging={mapEditor.setDraggingId}
                 onStopDragging={() => mapEditor.setDraggingId(null)}
                 onMove={(id, position) => {
@@ -247,6 +253,7 @@ export default function Editor({ initialMode = 'tree' }) {
           maxDistance={190}
           enableRotate={mode !== 'map' || mapEditor.cameraView === 'orbit'}
           screenSpacePanning={mode === 'map' && mapEditor.cameraView !== 'orbit'}
+          enabled={!(mode === 'map' && Boolean(mapEditor.draggingId))}
         />
       </Canvas>
       <div style={modeSwitchStyle}>
