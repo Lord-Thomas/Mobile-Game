@@ -7,13 +7,15 @@ import { createTerrainGeometry } from './terrain/terrainGeometry'
 // or when switching to customization mode.
 let cachedFullTerrain = null
 
-function OutdoorGround() {
-  const terrain = useMemo(() => {
-    if (!cachedFullTerrain) {
-      cachedFullTerrain = createTerrainGeometry()
-    }
-    return cachedFullTerrain
-  }, [])
+function getCachedFullTerrain() {
+  if (!cachedFullTerrain) {
+    cachedFullTerrain = createTerrainGeometry()
+  }
+  return cachedFullTerrain
+}
+
+function OutdoorGround({ biomeAreas }) {
+  const terrain = useMemo(() => getCachedFullTerrain(), [])
 
   // DO NOT dispose the cached geometries on unmount,
   // as they are reused across mounts.
@@ -21,7 +23,7 @@ function OutdoorGround() {
   return (
     <group userData={{ debugCategory: 'terrain' }}>
       <mesh geometry={terrain.geometry} receiveShadow>
-        <NaturalTerrainMaterial />
+        <NaturalTerrainMaterial biomeAreas={biomeAreas} />
       </mesh>
     </group>
   )

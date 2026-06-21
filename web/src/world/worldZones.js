@@ -2,6 +2,7 @@ import { OUTDOOR_HALF_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from './outdoorData'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening } from './house/houseLayout'
 import { roadLayout } from './roads/roadLayout'
 import { createRoadCurve } from './roads/roadGeometry'
+import { getBiomeInfluence } from './biomeAreas'
 
 export const WORLD_ZONES = {
   HOUSE: 'HOUSE',
@@ -124,6 +125,8 @@ export function getZoneDensity(type, x, z) {
   const zone = getZoneAt(x, z)
   const roadDistance = getDistanceToRoad(x, z)
   const pathDistance = getDistanceToPath(x, z)
+  const graveyardInfluence = getBiomeInfluence('graveyard', x, z, null)
+  const livingCoverMultiplier = Math.pow(1 - graveyardInfluence, 3.5)
 
   if (type === 'lawn_blade') {
     if ([WORLD_ZONES.HOUSE, WORLD_ZONES.ROAD, WORLD_ZONES.PATH, WORLD_ZONES.NO_SPAWN].includes(zone)) return 0
@@ -139,13 +142,13 @@ export function getZoneDensity(type, x, z) {
       : zone === WORLD_ZONES.PLOT_FLAT_AREA
         ? 0.3
         : 0.14
-    return base * Math.max(plotCore, plotFeather * 0.65) * pathFade * roadFade
+    return base * Math.max(plotCore, plotFeather * 0.65) * pathFade * roadFade * livingCoverMultiplier
   }
 
   if (type === 'tall_grass') {
-    if (zone === WORLD_ZONES.FOREST_EDGE) return 0.78
-    if (zone === WORLD_ZONES.WILD_GRASS) return 0.42 * smoothstep(ROAD_WIDTH * 0.5 + 1.8, ROAD_WIDTH * 0.5 + 4.5, roadDistance)
-    if (zone === WORLD_ZONES.PLOT_FLAT_AREA) return 0.12
+    if (zone === WORLD_ZONES.FOREST_EDGE) return 0.78 * livingCoverMultiplier
+    if (zone === WORLD_ZONES.WILD_GRASS) return 0.42 * smoothstep(ROAD_WIDTH * 0.5 + 1.8, ROAD_WIDTH * 0.5 + 4.5, roadDistance) * livingCoverMultiplier
+    if (zone === WORLD_ZONES.PLOT_FLAT_AREA) return 0.12 * livingCoverMultiplier
     return 0
   }
 

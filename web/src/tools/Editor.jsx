@@ -17,6 +17,10 @@ import {
   normalizeMapObjectPlacement,
   normalizeMonsterSpawner,
 } from '../world/mapObjects'
+import {
+  MAP_BIOME_AREAS,
+  normalizeBiomeArea,
+} from '../world/biomeAreas'
 
 // The whole outdoor world (terrain, houses, lights) lives on OUTDOOR_LIGHT_LAYER.
 // The editor camera must enable that layer or nothing renders, and the preview
@@ -154,8 +158,10 @@ const MODES = [
 function useMapEditorState() {
   const [objects, setObjects] = useState(() => MAP_OBJECT_PLACEMENTS.map(normalizeMapObjectPlacement))
   const [spawners, setSpawners] = useState(() => MAP_MONSTER_SPAWNERS.map(normalizeMonsterSpawner))
+  const [biomes, setBiomes] = useState(() => MAP_BIOME_AREAS.map(normalizeBiomeArea))
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
   const [selectedSpawnerId, setSelectedSpawnerId] = useState(null)
+  const [selectedBiomeId, setSelectedBiomeId] = useState(null)
   const [movingId, setMovingId] = useState(null)
   const [moveOriginal, setMoveOriginal] = useState(null)
   const [draggingId, setDraggingId] = useState(null)
@@ -164,16 +170,20 @@ function useMapEditorState() {
   return {
     objects,
     spawners,
+    biomes,
     selectedId,
     selectedSpawnerId,
+    selectedBiomeId,
     movingId,
     moveOriginal,
     draggingId,
     cameraView,
     setObjects,
     setSpawners,
+    setBiomes,
     setSelectedId,
     setSelectedSpawnerId,
+    setSelectedBiomeId,
     setMovingId,
     setMoveOriginal,
     setDraggingId,
@@ -189,13 +199,28 @@ export default function Editor({ initialMode = 'tree' }) {
 
   const selectMapObject = (id) => {
     mapEditor.setSelectedId(id)
-    if (id) mapEditor.setSelectedSpawnerId(null)
+    if (id) {
+      mapEditor.setSelectedSpawnerId(null)
+      mapEditor.setSelectedBiomeId(null)
+    }
   }
 
   const selectMapSpawner = (id) => {
     mapEditor.setSelectedSpawnerId(id)
     if (id) {
       mapEditor.setSelectedId(null)
+      mapEditor.setSelectedBiomeId(null)
+      mapEditor.setMovingId(null)
+      mapEditor.setDraggingId(null)
+      mapEditor.setMoveOriginal(null)
+    }
+  }
+
+  const selectMapBiome = (id) => {
+    mapEditor.setSelectedBiomeId(id)
+    if (id) {
+      mapEditor.setSelectedId(null)
+      mapEditor.setSelectedSpawnerId(null)
       mapEditor.setMovingId(null)
       mapEditor.setDraggingId(null)
       mapEditor.setMoveOriginal(null)
@@ -247,6 +272,7 @@ export default function Editor({ initialMode = 'tree' }) {
             playerPositionRef={noPlayerRef}
             showAuthoredTrees={false}
             showMapObjects={mode !== 'map'}
+            biomeAreas={mapEditor.biomes}
           />
           <EditorStage>
             {mode === 'tree' && <TreeDevScene />}
@@ -256,13 +282,16 @@ export default function Editor({ initialMode = 'tree' }) {
               <MapEditorScene
                 objects={mapEditor.objects}
                 spawners={mapEditor.spawners}
+                biomes={mapEditor.biomes}
                 selectedId={mapEditor.selectedId}
                 selectedSpawnerId={mapEditor.selectedSpawnerId}
+                selectedBiomeId={mapEditor.selectedBiomeId}
                 movingId={mapEditor.movingId}
                 draggingId={mapEditor.draggingId}
                 cameraView={mapEditor.cameraView}
                 onSelect={selectMapObject}
                 onSelectSpawner={selectMapSpawner}
+                onSelectBiome={selectMapBiome}
                 onStartDragging={mapEditor.setDraggingId}
                 onStopDragging={() => mapEditor.setDraggingId(null)}
                 onMove={(id, position) => {
@@ -273,6 +302,11 @@ export default function Editor({ initialMode = 'tree' }) {
                 onMoveSpawner={(id, position) => {
                   mapEditor.setSpawners((current) => current.map((spawner) => (
                     spawner.id === id ? { ...spawner, position } : spawner
+                  )))
+                }}
+                onMoveBiome={(id, center) => {
+                  mapEditor.setBiomes((current) => current.map((area) => (
+                    area.id === id ? normalizeBiomeArea({ ...area, center }) : area
                   )))
                 }}
               />
@@ -325,8 +359,10 @@ export default function Editor({ initialMode = 'tree' }) {
         <MapEditorPanel
           objects={mapEditor.objects}
           spawners={mapEditor.spawners}
+          biomes={mapEditor.biomes}
           selectedId={mapEditor.selectedId}
           selectedSpawnerId={mapEditor.selectedSpawnerId}
+          selectedBiomeId={mapEditor.selectedBiomeId}
           movingId={mapEditor.movingId}
           cameraView={mapEditor.cameraView}
           onObjectsChange={(nextObjects) => {
@@ -336,8 +372,10 @@ export default function Editor({ initialMode = 'tree' }) {
             }
           }}
           onSpawnersChange={mapEditor.setSpawners}
+          onBiomesChange={mapEditor.setBiomes}
           onSelect={selectMapObject}
           onSelectSpawner={selectMapSpawner}
+          onSelectBiome={selectMapBiome}
           onBeginMove={beginMapMove}
           onConfirmMove={confirmMapMove}
           onCancelMove={cancelMapMove}

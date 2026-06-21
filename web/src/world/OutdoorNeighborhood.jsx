@@ -1,5 +1,7 @@
 import React from 'react'
 import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { Color, MathUtils } from 'three'
 import OutdoorGround from './OutdoorGround'
 import PlayerPlot from './PlayerPlot'
 import Road from './Road'
@@ -8,14 +10,30 @@ import CloudSky from './CloudSky'
 import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import MapObjectPlaceables from './MapObjectPlaceables'
+import BiomeAmbientEffects from './BiomeAmbientEffects'
+import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './biomeAreas'
 import { AUTHORED_TREES, DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from './lightingLayers'
 
 const OUTDOOR_SUN_DIRECTION = [0.42, 0.9, 0.18]
+const BASE_SUN_COLOR = new Color('#fffaf0')
+const BASE_SKY_LIGHT_COLOR = new Color('#ffffff')
+const BASE_GROUND_LIGHT_COLOR = new Color('#a8d87b')
+const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
+const GRAVEYARD_SUN_COLOR = new Color(GRAVEYARD_ATMOSPHERE.sun)
+const GRAVEYARD_SKY_LIGHT_COLOR = new Color(GRAVEYARD_ATMOSPHERE.sky)
+const GRAVEYARD_GROUND_LIGHT_COLOR = new Color(GRAVEYARD_ATMOSPHERE.ground)
 
-function OutdoorSun({ castShadows, intensity }) {
+function getGraveyardAtmosphereInfluence(playerPositionRef, viewerOutside, active, biomeAreas) {
+  const position = playerPositionRef?.current
+  if (!active || !viewerOutside || !position) return 0
+  return getBiomeInfluence('graveyard', position.x, position.z, 'fogIntensity', biomeAreas)
+}
+
+function OutdoorSun({ castShadows, intensity, active, viewerOutside, playerPositionRef, biomeAreas }) {
   const lightRef = useRef()
   const targetRef = useRef()
+  const influenceRef = useRef(0)
 
   useEffect(() => {
     if (!lightRef.current || !targetRef.current) return
@@ -23,6 +41,16 @@ function OutdoorSun({ castShadows, intensity }) {
     lightRef.current.target = targetRef.current
     lightRef.current.target.updateMatrixWorld()
   }, [])
+
+  useFrame((_, delta) => {
+    const light = lightRef.current
+    if (!light) return
+    const targetInfluence = getGraveyardAtmosphereInfluence(playerPositionRef, viewerOutside, active, biomeAreas)
+    influenceRef.current = MathUtils.lerp(influenceRef.current, targetInfluence, 1 - Math.exp(-delta * 0.9))
+    const influence = influenceRef.current
+    light.intensity = intensity * (1 - influence * 0.38)
+    light.color.copy(BASE_SUN_COLOR).lerp(GRAVEYARD_SUN_COLOR, influence)
+  })
 
   return (
     <>
@@ -47,8 +75,16 @@ function OutdoorSun({ castShadows, intensity }) {
   )
 }
 
-export function OutdoorLighting({ active, showSky, castShadows, viewerOutside = true }) {
+export function OutdoorLighting({
+  active,
+  showSky,
+  castShadows,
+  viewerOutside = true,
+  playerPositionRef,
+  biomeAreas = MAP_BIOME_AREAS,
+}) {
   const hemiRef = useRef()
+  const hemiInfluenceRef = useRef(0)
   const sunIntensity = active ? (viewerOutside ? 4.25 : 3.9) : 0
   const hemiIntensity = active ? (viewerOutside ? 2.65 : 2.25) : 0
 
@@ -56,11 +92,37 @@ export function OutdoorLighting({ active, showSky, castShadows, viewerOutside = 
     hemiRef.current?.layers.set(OUTDOOR_LIGHT_LAYER)
   }, [])
 
+  useFrame((_, delta) => {
+    const hemi = hemiRef.current
+    if (!hemi) return
+    const targetInfluence = getGraveyardAtmosphereInfluence(playerPositionRef, viewerOutside, active, biomeAreas)
+    hemiInfluenceRef.current = MathUtils.lerp(hemiInfluenceRef.current, targetInfluence, 1 - Math.exp(-delta * 0.9))
+    const influence = hemiInfluenceRef.current
+    hemi.intensity = hemiIntensity * (1 - influence * 0.28)
+    hemi.color.copy(BASE_SKY_LIGHT_COLOR).lerp(GRAVEYARD_SKY_LIGHT_COLOR, influence)
+    hemi.groundColor.copy(BASE_GROUND_LIGHT_COLOR).lerp(GRAVEYARD_GROUND_LIGHT_COLOR, influence)
+  })
+
   return (
     <>
-      {showSky && active && <CloudSky sunDirection={OUTDOOR_SUN_DIRECTION} />}
+      {showSky && active && (
+        <CloudSky
+          sunDirection={OUTDOOR_SUN_DIRECTION}
+          playerPositionRef={playerPositionRef}
+          viewerOutside={viewerOutside}
+          active={active}
+          biomeAreas={biomeAreas}
+        />
+      )}
       <hemisphereLight ref={hemiRef} args={['#ffffff', '#a8d87b', hemiIntensity]} />
-      <OutdoorSun castShadows={castShadows && active} intensity={sunIntensity} />
+      <OutdoorSun
+        castShadows={castShadows && active}
+        intensity={sunIntensity}
+        active={active}
+        viewerOutside={viewerOutside}
+        playerPositionRef={playerPositionRef}
+        biomeAreas={biomeAreas}
+      />
     </>
   )
 }
@@ -76,11 +138,13 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showRoad = true,
   showNeighborHouses = true,
   showMapObjects = true,
+  showBiomeEffects = true,
   showSky = true,
   castShadows = true,
   viewerOutside = true,
   showPlayerPlot = false,
   debugStats = false,
+  biomeAreas,
 }) {
   const groupRef = useRef()
 
@@ -92,14 +156,22 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
 
   return (
     <group ref={groupRef} userData={{ debugCategory: 'outdoor' }}>
-      <OutdoorLighting active={lightingActive} showSky={showSky} castShadows={castShadows} viewerOutside={viewerOutside} />
-      {showTerrain && <OutdoorGround />}
+      <OutdoorLighting
+        active={lightingActive}
+        showSky={showSky}
+        castShadows={castShadows}
+        viewerOutside={viewerOutside}
+        playerPositionRef={playerPositionRef}
+        biomeAreas={biomeAreas}
+      />
+      {showTerrain && <OutdoorGround biomeAreas={biomeAreas} />}
       {showPlayerPlot && <PlayerPlot />}
       {showRoad && <Road />}
       {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />
       ))}
       {showMapObjects && <MapObjectPlaceables />}
+      {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
       {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} playerPositionRef={playerPositionRef} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}
       {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} debugStats={debugStats} />}

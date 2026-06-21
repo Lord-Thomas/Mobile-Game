@@ -11,10 +11,15 @@ import {
   normalizeMapObjectPlacement,
   normalizeMonsterSpawner,
 } from '../world/mapObjects'
+import {
+  BIOME_TYPES,
+  BIOME_TYPE_IDS,
+  normalizeBiomeArea,
+} from '../world/biomeAreas'
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { getTerrainHeight } from '../world/terrain/terrainGeometry'
-import { NumberField, Section, SelectField, SliderField } from './editorControls'
+import { ColorField, NumberField, Section, SelectField, SliderField } from './editorControls'
 import { styles } from './editorStyles'
 
 const MAP_GRID_SIZE = 0.25
@@ -78,6 +83,19 @@ function createMonsterSpawner(monsterType, existingCount) {
   }, existingCount)
 }
 
+function createBiomeArea(biome, existingCount) {
+  return normalizeBiomeArea({
+    id: `${biome}_${Date.now().toString(36)}`,
+    biome,
+    center: [54.25 + existingCount * 4, 148.75],
+    radius: 34,
+    feather: 11,
+    groundIntensity: 1,
+    fogIntensity: 0.62,
+    particleIntensity: 0.78,
+  }, existingCount)
+}
+
 function toSavedPlacements(objects) {
   return objects.map((object, index) => {
     const placement = normalizeMapObjectPlacement(object, index)
@@ -101,6 +119,23 @@ function toSavedSpawners(spawners) {
       monsterType: normalized.monsterType,
       position: [x, getTerrainHeight(x, z), z],
       diameter: normalized.diameter,
+    }
+  })
+}
+
+function toSavedBiomes(biomes) {
+  return biomes.map((area, index) => {
+    const normalized = normalizeBiomeArea(area, index)
+    return {
+      id: normalized.id,
+      biome: normalized.biome,
+      center: normalized.center,
+      radius: normalized.radius,
+      feather: normalized.feather,
+      groundIntensity: normalized.groundIntensity,
+      fogIntensity: normalized.fogIntensity,
+      particleIntensity: normalized.particleIntensity,
+      groundColors: normalized.groundColors,
     }
   })
 }
@@ -168,6 +203,76 @@ function MonsterSpawnerMarkers({
                   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.24)',
                 }}>
                   {label} - {spawner.diameter.toFixed(0)}m
+                </div>
+              </Html>
+            )}
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
+function BiomeAreaMarkers({
+  biomes,
+  selectedBiomeId,
+  onBiomePointerDown,
+  onBiomePointerMove,
+  onBiomePointerUp,
+}) {
+  return (
+    <group userData={{ debugCategory: 'biome-areas' }}>
+      {biomes.map((area) => {
+        const [x, z] = area.center
+        const y = getTerrainHeight(x, z)
+        const selected = area.id === selectedBiomeId
+        const color = BIOME_TYPES[area.biome]?.color ?? '#83d8c4'
+        const label = BIOME_TYPES[area.biome]?.name ?? area.biome
+
+        return (
+          <group key={area.id} position={[x, y + 0.1, z]}>
+            <mesh
+              rotation={[-Math.PI / 2, 0, 0]}
+              onPointerDown={(event) => onBiomePointerDown?.(area.id, event)}
+              onPointerMove={(event) => onBiomePointerMove?.(area.id, event)}
+              onPointerUp={(event) => onBiomePointerUp?.(area.id, event)}
+              onPointerCancel={(event) => onBiomePointerUp?.(area.id, event)}
+            >
+              <circleGeometry args={[area.radius, 96]} />
+              <meshBasicMaterial color={color} transparent opacity={selected ? 0.16 : 0.07} depthWrite={false} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.018, 0]}>
+              <ringGeometry args={[Math.max(0.05, area.radius - 0.18), area.radius, 96]} />
+              <meshBasicMaterial color={selected ? '#ffd447' : color} transparent opacity={selected ? 0.95 : 0.38} depthWrite={false} />
+            </mesh>
+            {area.feather > 0.5 && (
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+                <ringGeometry args={[Math.max(0.05, area.radius - area.feather), Math.max(0.08, area.radius - area.feather + 0.08), 96]} />
+                <meshBasicMaterial color={selected ? '#ffffff' : color} transparent opacity={selected ? 0.75 : 0.26} depthWrite={false} />
+              </mesh>
+            )}
+            <mesh
+              position={[0, 0.45, 0]}
+              onPointerDown={(event) => onBiomePointerDown?.(area.id, event)}
+              onPointerMove={(event) => onBiomePointerMove?.(area.id, event)}
+              onPointerUp={(event) => onBiomePointerUp?.(area.id, event)}
+              onPointerCancel={(event) => onBiomePointerUp?.(area.id, event)}
+            >
+              <sphereGeometry args={[selected ? 0.34 : 0.25, 18, 12]} />
+              <meshBasicMaterial color={selected ? '#ffd447' : color} transparent opacity={0.96} depthWrite={false} />
+            </mesh>
+            {selected && (
+              <Html position={[0, 1.05, 0]} center transform sprite distanceFactor={12}>
+                <div style={{
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                  color: '#0e1814',
+                  background: '#ffd447',
+                  font: '700 11px system-ui, sans-serif',
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.24)',
+                }}>
+                  {label} - {area.radius.toFixed(0)}m
                 </div>
               </Html>
             )}
@@ -291,17 +396,21 @@ function MapEditorCamera({ active }) {
 export function MapEditorScene({
   objects,
   spawners = [],
+  biomes = [],
   selectedId,
   selectedSpawnerId = null,
+  selectedBiomeId = null,
   movingId,
   draggingId,
   cameraView,
   onSelect,
   onSelectSpawner,
+  onSelectBiome,
   onStartDragging,
   onStopDragging,
   onMove,
   onMoveSpawner,
+  onMoveBiome,
 }) {
   // Ported from the in-game room editor (CustomizationCamera + EditableFloor):
   //  - a top-down ortho camera that never follows the selection,
@@ -315,6 +424,7 @@ export function MapEditorScene({
   useEffect(() => { cameraRef.current = camera }, [camera])
   const panRef = useRef(null)
   const spawnerDragRef = useRef(null)
+  const biomeDragRef = useRef(null)
   const isTopView = cameraView === 'top'
 
   // Raycast the ground ourselves from clientX/clientY instead of trusting
@@ -350,6 +460,12 @@ export function MapEditorScene({
     onMoveSpawner?.(id, [x, getTerrainHeight(x, z), z])
   }
 
+  const moveBiomeToPoint = (id, point) => {
+    if (!id || !point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    onMoveBiome?.(id, [x, z])
+  }
+
   const handleSpawnerPointerDown = (id, event) => {
     if (event.button !== 0) return
     event.stopPropagation()
@@ -371,6 +487,27 @@ export function MapEditorScene({
     event.target?.releasePointerCapture?.(event.pointerId)
   }
 
+  const handleBiomePointerDown = (id, event) => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+    onSelectBiome?.(id)
+    biomeDragRef.current = id
+    event.target?.setPointerCapture?.(event.pointerId)
+  }
+
+  const handleBiomePointerMove = (id, event) => {
+    if (biomeDragRef.current !== id) return
+    event.stopPropagation()
+    moveBiomeToPoint(id, groundPointFromEvent(event))
+  }
+
+  const handleBiomePointerUp = (id, event) => {
+    if (biomeDragRef.current !== id) return
+    event.stopPropagation()
+    biomeDragRef.current = null
+    event.target?.releasePointerCapture?.(event.pointerId)
+  }
+
   return (
     <group>
       <MapEditorCamera active={isTopView} />
@@ -384,8 +521,10 @@ export function MapEditorScene({
           if (event.button !== 0) return
           if (draggingId || movingId) return
           if (spawnerDragRef.current) return
+          if (biomeDragRef.current) return
           onSelect(null)
           onSelectSpawner?.(null)
+          onSelectBiome?.(null)
           if (isTopView) panRef.current = { x: event.clientX, y: event.clientY }
         }}
         onPointerMove={(event) => {
@@ -398,6 +537,11 @@ export function MapEditorScene({
           if (spawnerDragRef.current) {
             event.stopPropagation()
             moveSpawnerToPoint(spawnerDragRef.current, groundPointFromEvent(event))
+            return
+          }
+          if (biomeDragRef.current) {
+            event.stopPropagation()
+            moveBiomeToPoint(biomeDragRef.current, groundPointFromEvent(event))
             return
           }
           // Otherwise drag-pan the camera (top view only).
@@ -420,6 +564,7 @@ export function MapEditorScene({
         onPointerUp={(event) => {
           panRef.current = null
           spawnerDragRef.current = null
+          biomeDragRef.current = null
           if (!draggingId) return
           event.stopPropagation()
           onStopDragging()
@@ -427,10 +572,12 @@ export function MapEditorScene({
         onPointerMissed={() => {
           panRef.current = null
           spawnerDragRef.current = null
+          biomeDragRef.current = null
           if (draggingId) onStopDragging()
           else if (!movingId) {
             onSelect(null)
             onSelectSpawner?.(null)
+            onSelectBiome?.(null)
           }
         }}
       >
@@ -445,6 +592,13 @@ export function MapEditorScene({
         onSpawnerPointerMove={handleSpawnerPointerMove}
         onSpawnerPointerUp={handleSpawnerPointerUp}
       />
+      <BiomeAreaMarkers
+        biomes={biomes}
+        selectedBiomeId={selectedBiomeId}
+        onBiomePointerDown={handleBiomePointerDown}
+        onBiomePointerMove={handleBiomePointerMove}
+        onBiomePointerUp={handleBiomePointerUp}
+      />
       <MapObjectPlaceables
         objects={objects}
         selectedId={selectedId}
@@ -458,14 +612,18 @@ export function MapEditorScene({
 export function MapEditorPanel({
   objects,
   spawners = [],
+  biomes = [],
   selectedId,
   selectedSpawnerId = null,
+  selectedBiomeId = null,
   movingId,
   cameraView,
   onObjectsChange,
   onSpawnersChange,
+  onBiomesChange,
   onSelect,
   onSelectSpawner,
+  onSelectBiome,
   onBeginMove,
   onConfirmMove,
   onCancelMove,
@@ -473,10 +631,12 @@ export function MapEditorPanel({
 }) {
   const [objectId, setObjectId] = useState(MAP_OBJECT_LIBRARY[0])
   const [spawnerType, setSpawnerType] = useState(MONSTER_SPAWNER_TYPE_IDS[0])
+  const [biomeType, setBiomeType] = useState(BIOME_TYPE_IDS[0])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const selected = objects.find((object) => object.id === selectedId) ?? null
   const selectedSpawner = spawners.find((spawner) => spawner.id === selectedSpawnerId) ?? null
+  const selectedBiome = biomes.find((area) => area.id === selectedBiomeId) ?? null
   const options = useMemo(() => MAP_OBJECT_LIBRARY.map((id) => ({
     value: id,
     label: MAP_OBJECT_CATALOG[id]?.name ?? id,
@@ -484,6 +644,10 @@ export function MapEditorPanel({
   const spawnerTypeOptions = useMemo(() => MONSTER_SPAWNER_TYPE_IDS.map((id) => ({
     value: id,
     label: MONSTER_SPAWNER_TYPES[id]?.name ?? id,
+  })), [])
+  const biomeTypeOptions = useMemo(() => BIOME_TYPE_IDS.map((id) => ({
+    value: id,
+    label: BIOME_TYPES[id]?.name ?? id,
   })), [])
 
   const patchSelected = (patch) => {
@@ -500,6 +664,13 @@ export function MapEditorPanel({
     )))
   }
 
+  const patchSelectedBiome = (patch) => {
+    if (!selectedBiome) return
+    onBiomesChange(biomes.map((area) => (
+      area.id === selectedBiome.id ? normalizeBiomeArea({ ...area, ...patch }) : area
+    )))
+  }
+
   const addObject = () => {
     const next = createPlacement(objectId, objects.length)
     onObjectsChange([...objects, next])
@@ -512,6 +683,13 @@ export function MapEditorPanel({
     onSpawnersChange([...spawners, next])
     onSelectSpawner(next.id)
     setMessage('Spawner ajoute. Ajuste son type, son diametre et sa position.')
+  }
+
+  const addBiome = () => {
+    const next = createBiomeArea(biomeType, biomes.length)
+    onBiomesChange([...biomes, next])
+    onSelectBiome(next.id)
+    setMessage('Biome ajoute. Glisse son marqueur ou ajuste son centre et ses intensites.')
   }
 
   const duplicateSelected = () => {
@@ -540,6 +718,12 @@ export function MapEditorPanel({
     onSelectSpawner(null)
   }
 
+  const deleteSelectedBiome = () => {
+    if (!selectedBiome) return
+    onBiomesChange(biomes.filter((area) => area.id !== selectedBiome.id))
+    onSelectBiome(null)
+  }
+
   const saveObjects = async () => {
     setSaving(true)
     setMessage('')
@@ -550,10 +734,11 @@ export function MapEditorPanel({
         body: JSON.stringify({
           placements: toSavedPlacements(objects),
           spawners: toSavedSpawners(spawners),
+          biomes: toSavedBiomes(biomes),
         }),
       })
       if (!response.ok) throw new Error(await response.text())
-      setMessage('Map sauvegardee dans src/world/mapObjects.generated.js')
+      setMessage('Map et biomes sauvegardes.')
     } catch (error) {
       setMessage(`Sauvegarde impossible: ${error.message}`)
     } finally {
@@ -566,7 +751,7 @@ export function MapEditorPanel({
       <div style={styles.header}>
         <div>
           <strong style={styles.title}>Edition map</strong>
-          <span style={styles.subtitle}>{objects.length} objet(s) places</span>
+          <span style={styles.subtitle}>{objects.length} objet(s), {spawners.length} spawner(s), {biomes.length} biome(s)</span>
         </div>
       </div>
 
@@ -616,6 +801,45 @@ export function MapEditorPanel({
         )}
       </Section>
 
+      <Section title="Biomes">
+        <SelectField label="Biome" value={biomeType} options={biomeTypeOptions} onChange={setBiomeType} />
+        <button type="button" style={styles.primaryButton} onClick={addBiome}>
+          Ajouter biome
+        </button>
+        {biomes.length ? (
+          <div style={styles.libraryList}>
+            {biomes.map((area, index) => {
+              const isSelected = area.id === selectedBiomeId
+              const typeLabel = BIOME_TYPES[area.biome]?.name ?? area.biome
+
+              return (
+                <button
+                  key={area.id}
+                  type="button"
+                  onClick={() => onSelectBiome(area.id)}
+                  style={{
+                    ...styles.libraryItem,
+                    width: '100%',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    background: isSelected ? 'rgba(131, 216, 196, 0.16)' : 'rgba(26, 32, 36, 0.72)',
+                    border: `1px solid ${isSelected ? '#83d8c4' : 'rgba(223, 229, 233, 0.12)'}`,
+                    color: '#eef4f2',
+                  }}
+                >
+                  <strong>{typeLabel} #{index + 1}</strong>
+                  <span style={{ color: '#9fb3ac', fontSize: 11 }}>
+                    rayon {area.radius.toFixed(0)} / x {area.center[0].toFixed(1)} / z {area.center[1].toFixed(1)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <div style={styles.libraryEmpty}>Aucun biome place.</div>
+        )}
+      </Section>
+
       <Section title="Objets places">
         {objects.length ? (
           <div style={styles.libraryList}>
@@ -653,7 +877,97 @@ export function MapEditorPanel({
       </Section>
 
       <Section title="Selection">
-        {selectedSpawner ? (
+        {selectedBiome ? (
+          <>
+            <div style={styles.subcard}>
+              <strong>{BIOME_TYPES[selectedBiome.biome]?.name ?? selectedBiome.biome}</strong>
+              <SelectField
+                label="Biome"
+                value={selectedBiome.biome}
+                options={biomeTypeOptions}
+                onChange={(biome) => patchSelectedBiome({ biome })}
+              />
+              <NumberField label="X" value={selectedBiome.center[0]} step={0.5} onChange={(value) => {
+                const [, currentZ] = selectedBiome.center
+                const [x, z] = clampMapPosition(value, currentZ)
+                patchSelectedBiome({ center: [x, z] })
+              }} />
+              <NumberField label="Z" value={selectedBiome.center[1]} step={0.5} onChange={(value) => {
+                const [currentX] = selectedBiome.center
+                const [x, z] = clampMapPosition(currentX, value)
+                patchSelectedBiome({ center: [x, z] })
+              }} />
+              <SliderField
+                label="Rayon"
+                value={selectedBiome.radius}
+                min={2}
+                max={140}
+                step={1}
+                onChange={(radius) => patchSelectedBiome({ radius })}
+              />
+              <SliderField
+                label="Transition"
+                value={selectedBiome.feather}
+                min={0.5}
+                max={80}
+                step={0.5}
+                onChange={(feather) => patchSelectedBiome({ feather })}
+              />
+              <SliderField
+                label="Sol mort"
+                value={selectedBiome.groundIntensity}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={(groundIntensity) => patchSelectedBiome({ groundIntensity })}
+              />
+              <ColorField
+                label="Terre sombre"
+                value={selectedBiome.groundColors.darkSoil}
+                onChange={(darkSoil) => patchSelectedBiome({ groundColors: { ...selectedBiome.groundColors, darkSoil } })}
+              />
+              <ColorField
+                label="Terre seche"
+                value={selectedBiome.groundColors.dryClay}
+                onChange={(dryClay) => patchSelectedBiome({ groundColors: { ...selectedBiome.groundColors, dryClay } })}
+              />
+              <ColorField
+                label="Cendre"
+                value={selectedBiome.groundColors.ash}
+                onChange={(ash) => patchSelectedBiome({ groundColors: { ...selectedBiome.groundColors, ash } })}
+              />
+              <ColorField
+                label="Poussiere os"
+                value={selectedBiome.groundColors.boneDust}
+                onChange={(boneDust) => patchSelectedBiome({ groundColors: { ...selectedBiome.groundColors, boneDust } })}
+              />
+              <ColorField
+                label="Ombre froide"
+                value={selectedBiome.groundColors.coldShadow}
+                onChange={(coldShadow) => patchSelectedBiome({ groundColors: { ...selectedBiome.groundColors, coldShadow } })}
+              />
+              <SliderField
+                label="Brume"
+                value={selectedBiome.fogIntensity}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={(fogIntensity) => patchSelectedBiome({ fogIntensity })}
+              />
+              <SliderField
+                label="Particules"
+                value={selectedBiome.particleIntensity}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={(particleIntensity) => patchSelectedBiome({ particleIntensity })}
+              />
+            </div>
+            <div style={styles.actions}>
+              <button type="button" style={styles.dangerButton} onClick={deleteSelectedBiome}>Supprimer</button>
+            </div>
+          </>
+        ) : selectedSpawner ? (
           <>
             <div style={styles.subcard}>
               <strong>{MONSTER_SPAWNER_TYPES[selectedSpawner.monsterType]?.name ?? selectedSpawner.monsterType}</strong>
@@ -742,7 +1056,7 @@ export function MapEditorPanel({
             </div>
           </>
         ) : (
-          <div style={styles.libraryEmpty}>Selectionne une tour, un spawner, ou ajoute un element.</div>
+          <div style={styles.libraryEmpty}>Selectionne une tour, un spawner, un biome, ou ajoute un element.</div>
         )}
       </Section>
 

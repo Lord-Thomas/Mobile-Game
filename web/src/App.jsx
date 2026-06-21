@@ -26,6 +26,7 @@ import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
+import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -1551,17 +1552,54 @@ function HouseOpeningReveals({ walls }) {
   )
 }
 
-function SceneAtmosphere({ currentZone, mode }) {
+const BASE_SCENE_BACKGROUND = new Color('#ecfdff')
+const BASE_SCENE_FOG = new Color('#fbffff')
+const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
+const GRAVEYARD_SCENE_BACKGROUND = new Color(GRAVEYARD_ATMOSPHERE.background)
+const GRAVEYARD_SCENE_FOG = new Color(GRAVEYARD_ATMOSPHERE.fog)
+
+function SceneAtmosphere({
+  currentZone,
+  mode,
+  playerPositionRef,
+  biomeAreas = MAP_BIOME_AREAS,
+}) {
   const isOutside = currentZone === ZONES.outside
   const backgroundColor = '#ecfdff'
   const fogColor = '#fbffff'
   const fogNear = isOutside ? 180 : mode === 'customize' ? 130 : 120
   const fogFar = isOutside ? 520 : mode === 'customize' ? 360 : 340
+  const backgroundRef = useRef()
+  const fogRef = useRef()
+  const influenceRef = useRef(0)
+
+  useFrame((_, delta) => {
+    const position = playerPositionRef?.current
+    const targetInfluence = isOutside && position
+      ? getBiomeInfluence('graveyard', position.x, position.z, 'fogIntensity', biomeAreas)
+      : 0
+    influenceRef.current = MathUtils.lerp(
+      influenceRef.current,
+      targetInfluence,
+      1 - Math.exp(-delta * 0.85),
+    )
+    const influence = influenceRef.current
+
+    if (backgroundRef.current) {
+      backgroundRef.current.copy(BASE_SCENE_BACKGROUND).lerp(GRAVEYARD_SCENE_BACKGROUND, influence)
+    }
+
+    if (fogRef.current) {
+      fogRef.current.color.copy(BASE_SCENE_FOG).lerp(GRAVEYARD_SCENE_FOG, influence)
+      fogRef.current.near = MathUtils.lerp(fogNear, GRAVEYARD_ATMOSPHERE.fogNear, influence)
+      fogRef.current.far = MathUtils.lerp(fogFar, GRAVEYARD_ATMOSPHERE.fogFar, influence)
+    }
+  })
 
   return (
     <>
-      <color attach="background" args={[backgroundColor]} />
-      <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
+      <color ref={backgroundRef} attach="background" args={[backgroundColor]} />
+      <fog ref={fogRef} attach="fog" args={[fogColor, fogNear, fogFar]} />
     </>
   )
 }
@@ -15952,7 +15990,7 @@ function App() {
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
-        <SceneAtmosphere currentZone={currentZone} mode={mode} />
+        <SceneAtmosphere currentZone={currentZone} mode={mode} playerPositionRef={playerPositionRef} />
         <MultiplayerBridge
           channelRef={multiplayerChannelRef}
           role={multiplayerRole}

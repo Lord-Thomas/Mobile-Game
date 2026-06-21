@@ -1,6 +1,14 @@
 import { useTexture } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { RepeatWrapping, SRGBColorSpace, Vector2 } from 'three'
+import { RepeatWrapping, SRGBColorSpace, Vector2, Vector4 } from 'three'
+import {
+  BIOME_SHADER_MAX_AREAS,
+  GRAVEYARD_SHADER_AREAS,
+  GRAVEYARD_SHADER_GROUND_INTENSITIES,
+  MAP_BIOME_AREAS,
+  getBiomeGroundColorUniforms,
+  getBiomeShaderAreas,
+} from './biomeAreas'
 import { createRoadCurve } from './roads/roadGeometry'
 import { roadLayout } from './roads/roadLayout'
 
@@ -10,6 +18,14 @@ const roadShaderPoints = Array.from({ length: ROAD_SHADER_SAMPLES }, (_, i) => {
   const pt = _roadCurve.getPointAt(i / (ROAD_SHADER_SAMPLES - 1))
   return new Vector2(pt.x, pt.z)
 })
+const graveyardShaderAreas = Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+  GRAVEYARD_SHADER_AREAS[index] ?? new Vector4(0, 0, 0, 1)
+))
+const graveyardGroundIntensities = Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+  GRAVEYARD_SHADER_GROUND_INTENSITIES[index] ?? 0
+))
+const graveyardGroundIntensityUniforms = Float32Array.from(graveyardGroundIntensities)
+const graveyardGroundColorUniforms = getBiomeGroundColorUniforms('graveyard')
 
 const SURFACE_TEXTURES = [
   '/textures/outdoor/grass-patchy-basecolor-512.jpg',
@@ -25,9 +41,34 @@ function configureTexture(texture, colorSpace = null) {
   texture.needsUpdate = true
 }
 
-function NaturalTerrainMaterial() {
+function NaturalTerrainMaterial({ biomeAreas = MAP_BIOME_AREAS }) {
   const materialRef = useRef()
   const [grassMap, dirtMap, grassNormalMap, dirtNormalMap] = useTexture(SURFACE_TEXTURES)
+  const shaderBiomeData = useMemo(() => {
+    if (biomeAreas === MAP_BIOME_AREAS) {
+      return {
+        areas: graveyardShaderAreas,
+        groundIntensities: graveyardGroundIntensityUniforms,
+        groundColors: graveyardGroundColorUniforms,
+        count: Math.min(GRAVEYARD_SHADER_AREAS.length, BIOME_SHADER_MAX_AREAS),
+      }
+    }
+
+    const areas = getBiomeShaderAreas('graveyard', biomeAreas)
+    const graveyardAreas = biomeAreas
+      .filter((area) => area.biome === 'graveyard')
+      .slice(0, BIOME_SHADER_MAX_AREAS)
+    return {
+      areas: Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+        areas[index] ?? new Vector4(0, 0, 0, 1)
+      )),
+      groundIntensities: Float32Array.from(Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+        graveyardAreas[index]?.groundIntensity ?? 0
+      ))),
+      groundColors: getBiomeGroundColorUniforms('graveyard', biomeAreas),
+      count: Math.min(areas.length, BIOME_SHADER_MAX_AREAS),
+    }
+  }, [biomeAreas])
 
   useMemo(() => {
     configureTexture(grassMap, SRGBColorSpace)
@@ -42,6 +83,14 @@ function NaturalTerrainMaterial() {
     shader.uniforms.uGrassNormalMap = { value: grassNormalMap }
     shader.uniforms.uDirtNormalMap = { value: dirtNormalMap }
     shader.uniforms.uRoadPoints = { value: roadShaderPoints }
+    shader.uniforms.uGraveyardAreas = { value: shaderBiomeData.areas }
+    shader.uniforms.uGraveyardGroundIntensities = { value: shaderBiomeData.groundIntensities }
+    shader.uniforms.uGraveyardDarkSoil = { value: shaderBiomeData.groundColors.darkSoil }
+    shader.uniforms.uGraveyardDryClay = { value: shaderBiomeData.groundColors.dryClay }
+    shader.uniforms.uGraveyardAsh = { value: shaderBiomeData.groundColors.ash }
+    shader.uniforms.uGraveyardBoneDust = { value: shaderBiomeData.groundColors.boneDust }
+    shader.uniforms.uGraveyardColdShadow = { value: shaderBiomeData.groundColors.coldShadow }
+    shader.uniforms.uGraveyardAreaCount = { value: shaderBiomeData.count }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -109,6 +158,14 @@ function NaturalTerrainMaterial() {
       }
 
       uniform vec2 uRoadPoints[20];
+      uniform vec4 uGraveyardAreas[${BIOME_SHADER_MAX_AREAS}];
+      uniform float uGraveyardGroundIntensities[${BIOME_SHADER_MAX_AREAS}];
+      uniform vec3 uGraveyardDarkSoil;
+      uniform vec3 uGraveyardDryClay;
+      uniform vec3 uGraveyardAsh;
+      uniform vec3 uGraveyardBoneDust;
+      uniform vec3 uGraveyardColdShadow;
+      uniform int uGraveyardAreaCount;
 
       float naturalRoadDistance(vec2 p) {
         float minDist = 1e6;
@@ -143,6 +200,22 @@ function NaturalTerrainMaterial() {
         dirt += detailNoise * 0.045;
         return clamp(dirt, 0.0, 1.0);
       }
+
+      float naturalBiomeAreaInfluence(vec2 worldPosition, vec4 area) {
+        float distanceToCenter = distance(worldPosition, area.xy);
+        float innerRadius = max(0.0, area.z - area.w);
+        return 1.0 - smoothstep(innerRadius, area.z, distanceToCenter);
+      }
+
+      float naturalGraveyardInfluence(vec2 worldPosition) {
+        float influence = 0.0;
+        for (int i = 0; i < ${BIOME_SHADER_MAX_AREAS}; i++) {
+          if (i >= uGraveyardAreaCount) break;
+          influence = max(influence, naturalBiomeAreaInfluence(worldPosition, uGraveyardAreas[i]) * uGraveyardGroundIntensities[i]);
+        }
+        float mottledEdge = naturalNoise(worldPosition * 0.42 + vec2(8.1, -3.7)) * 0.16 - 0.05;
+        return clamp(influence + mottledEdge * influence * (1.0 - influence), 0.0, 1.0);
+      }
       `,
     )
 
@@ -173,6 +246,18 @@ function NaturalTerrainMaterial() {
       );
 
       vec3 naturalColor = mix(grassGraded, dirtGraded, naturalDirt);
+      float naturalGraveyard = naturalGraveyardInfluence(naturalUv);
+      naturalDirt = max(naturalDirt, naturalGraveyard * 0.74);
+      naturalColor = mix(grassGraded, dirtGraded, naturalDirt);
+      float graveNoise = naturalNoise(naturalUv * 0.76 + vec2(2.7, 9.2));
+      float graveFine = naturalNoise(naturalUv * 2.85 + vec2(-5.8, 1.9));
+      float boneDust = smoothstep(0.82, 0.98, graveFine) * smoothstep(0.18, 0.75, graveNoise);
+      float coldPocket = smoothstep(0.08, 0.24, graveNoise) * (1.0 - smoothstep(0.24, 0.48, graveNoise));
+      vec3 graveColor = mix(uGraveyardDarkSoil, uGraveyardDryClay, smoothstep(0.18, 0.68, graveNoise));
+      graveColor = mix(graveColor, uGraveyardAsh, smoothstep(0.54, 0.94, graveNoise) * 0.52);
+      graveColor = mix(graveColor, uGraveyardBoneDust, boneDust * 0.38);
+      graveColor = mix(graveColor, uGraveyardColdShadow, coldPocket * 0.3);
+      naturalColor = mix(naturalColor, graveColor, naturalGraveyard * 0.94);
       diffuseColor *= vec4(naturalColor, 1.0);
       `,
     )
@@ -183,6 +268,7 @@ function NaturalTerrainMaterial() {
       #ifdef USE_NORMALMAP_TANGENTSPACE
         vec2 naturalNormalUv = vNaturalWorldPosition.xz;
         float naturalNormalDirt = naturalSurfaceDirtWeight(naturalNormalUv);
+        naturalNormalDirt = max(naturalNormalDirt, naturalGraveyardInfluence(naturalNormalUv) * 0.86);
         vec3 naturalGrassNormal = naturalNormalSample(uGrassNormalMap, naturalNormalUv * 0.155);
         vec3 naturalDirtNormal = naturalNormalSample(uDirtNormalMap, naturalNormalUv * 0.18);
         vec3 mapN = normalize(mix(naturalGrassNormal, naturalDirtNormal, naturalNormalDirt));
@@ -193,12 +279,12 @@ function NaturalTerrainMaterial() {
     )
 
     materialRef.current.userData.shader = shader
-  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap])
+  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap, shaderBiomeData])
 
   useEffect(() => {
     const material = materialRef.current
     if (material) material.needsUpdate = true
-  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap])
+  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap, shaderBiomeData])
 
   return (
     <meshStandardMaterial

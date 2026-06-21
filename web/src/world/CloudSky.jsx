@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BackSide, Color, Vector3 } from 'three'
+import { BackSide, Color, MathUtils, Vector3 } from 'three'
+import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './biomeAreas'
 
 const SKY_VERTEX_SHADER = `
 varying vec3 vWorldDirection;
@@ -19,6 +20,8 @@ uniform vec3 uZenithColor;
 uniform vec3 uCloudBaseColor;
 uniform vec3 uCloudWarmColor;
 uniform vec3 uCloudShadeColor;
+uniform float uCloudCoverageBoost;
+uniform float uDesaturation;
 varying vec3 vWorldDirection;
 
 float hash(vec2 p) {
@@ -71,8 +74,8 @@ void main() {
   vec2 skyUv = direction.xz / max(direction.y + 0.38, 0.16);
   vec2 windA = vec2(uTime * 0.006, -uTime * 0.0025);
   vec2 windB = vec2(-uTime * 0.003, uTime * 0.004);
-  float upperClouds = cloudLayer(skyUv + vec2(8.0, -2.0), altitude, 0.72, 0.51, 0.21, windA);
-  float lowClouds = cloudLayer(skyUv + vec2(-3.5, 6.0), altitude, 1.05, 0.60, 0.18, windB) * 0.56;
+  float upperClouds = cloudLayer(skyUv + vec2(8.0, -2.0), altitude, 0.72, 0.51 - uCloudCoverageBoost, 0.21, windA);
+  float lowClouds = cloudLayer(skyUv + vec2(-3.5, 6.0), altitude, 1.05, 0.60 - uCloudCoverageBoost * 0.72, 0.18, windB) * 0.56;
   float cloudDensity = clamp(upperClouds + lowClouds, 0.0, 1.0);
 
   float sunDot = clamp(dot(direction, normalize(uSunDirection)), 0.0, 1.0);
@@ -88,6 +91,8 @@ void main() {
   vec3 color = mix(skyColor, cloudColor, cloudMask * 0.66);
   color += vec3(1.0, 0.82, 0.48) * sunGlow * smoothstep(0.05, 0.5, altitude);
   color = mix(color, uHorizonColor, horizon * 0.22);
+  float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+  color = mix(color, vec3(luminance), uDesaturation);
   color *= 1.12;
 
   gl_FragColor = vec4(color, 1.0);
@@ -95,25 +100,67 @@ void main() {
 `
 
 const DEFAULT_SUN_DIRECTION = [0.62, 0.74, 0.2]
+const BASE_SKY_COLORS = {
+  horizon: new Color('#d7edf6'),
+  zenith: new Color('#8fc5e8'),
+  cloudBase: new Color('#fff8e9'),
+  cloudWarm: new Color('#ffe9b8'),
+  cloudShade: new Color('#bfd2d8'),
+}
+const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
+const GRAVEYARD_SKY_COLORS = {
+  horizon: new Color(GRAVEYARD_ATMOSPHERE.horizon),
+  zenith: new Color(GRAVEYARD_ATMOSPHERE.zenith),
+  cloudBase: new Color(GRAVEYARD_ATMOSPHERE.cloudBase),
+  cloudWarm: new Color(GRAVEYARD_ATMOSPHERE.cloudWarm),
+  cloudShade: new Color(GRAVEYARD_ATMOSPHERE.cloudShade),
+}
 
-function CloudSky({ sunDirection = DEFAULT_SUN_DIRECTION }) {
+function CloudSky({
+  sunDirection = DEFAULT_SUN_DIRECTION,
+  playerPositionRef = null,
+  viewerOutside = true,
+  active = true,
+  biomeAreas = MAP_BIOME_AREAS,
+}) {
   const skyRef = useRef()
   const materialRef = useRef()
+  const influenceRef = useRef(0)
   const uniforms = useMemo(() => ({
     uTime: { value: 0 },
     uSunDirection: { value: new Vector3(...sunDirection).normalize() },
-    uHorizonColor: { value: new Color('#d7edf6') },
-    uZenithColor: { value: new Color('#8fc5e8') },
-    uCloudBaseColor: { value: new Color('#fff8e9') },
-    uCloudWarmColor: { value: new Color('#ffe9b8') },
-    uCloudShadeColor: { value: new Color('#bfd2d8') },
+    uHorizonColor: { value: BASE_SKY_COLORS.horizon.clone() },
+    uZenithColor: { value: BASE_SKY_COLORS.zenith.clone() },
+    uCloudBaseColor: { value: BASE_SKY_COLORS.cloudBase.clone() },
+    uCloudWarmColor: { value: BASE_SKY_COLORS.cloudWarm.clone() },
+    uCloudShadeColor: { value: BASE_SKY_COLORS.cloudShade.clone() },
+    uCloudCoverageBoost: { value: 0 },
+    uDesaturation: { value: 0 },
   }), [sunDirection])
 
-  useFrame(({ clock, camera }) => {
+  useFrame(({ clock, camera }, delta) => {
     if (!materialRef.current) return
     skyRef.current?.position.copy(camera.position)
-    materialRef.current.uniforms.uTime.value = clock.elapsedTime
-    materialRef.current.uniforms.uSunDirection.value.set(...sunDirection).normalize()
+    const position = playerPositionRef?.current
+    const targetInfluence = active && viewerOutside && position
+      ? getBiomeInfluence('graveyard', position.x, position.z, 'fogIntensity', biomeAreas)
+      : 0
+    influenceRef.current = MathUtils.lerp(
+      influenceRef.current,
+      targetInfluence,
+      1 - Math.exp(-delta * 0.75),
+    )
+    const influence = influenceRef.current
+    const shaderUniforms = materialRef.current.uniforms
+    shaderUniforms.uTime.value = clock.elapsedTime
+    shaderUniforms.uSunDirection.value.set(...sunDirection).normalize()
+    shaderUniforms.uHorizonColor.value.copy(BASE_SKY_COLORS.horizon).lerp(GRAVEYARD_SKY_COLORS.horizon, influence)
+    shaderUniforms.uZenithColor.value.copy(BASE_SKY_COLORS.zenith).lerp(GRAVEYARD_SKY_COLORS.zenith, influence)
+    shaderUniforms.uCloudBaseColor.value.copy(BASE_SKY_COLORS.cloudBase).lerp(GRAVEYARD_SKY_COLORS.cloudBase, influence)
+    shaderUniforms.uCloudWarmColor.value.copy(BASE_SKY_COLORS.cloudWarm).lerp(GRAVEYARD_SKY_COLORS.cloudWarm, influence)
+    shaderUniforms.uCloudShadeColor.value.copy(BASE_SKY_COLORS.cloudShade).lerp(GRAVEYARD_SKY_COLORS.cloudShade, influence)
+    shaderUniforms.uCloudCoverageBoost.value = GRAVEYARD_ATMOSPHERE.cloudCoverageBoost * influence
+    shaderUniforms.uDesaturation.value = GRAVEYARD_ATMOSPHERE.desaturation * influence
   })
 
   return (

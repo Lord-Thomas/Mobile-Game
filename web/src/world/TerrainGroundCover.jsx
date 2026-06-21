@@ -3,6 +3,7 @@ import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, Frustum, InstancedBufferAttribute, MathUtils, Matrix4, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
 import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
+import { getBiomeInfluence } from './biomeAreas'
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
 
@@ -180,8 +181,11 @@ function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
     const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
+    const graveyardInfluence = getBiomeInfluence('graveyard', x, z, null)
+    if (graveyardInfluence > 0.28) continue
+    const livingCoverMultiplier = Math.pow(1 - graveyardInfluence, 3.5)
     const gameplayDensity = Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9)
-    const visualDensity = getVisualGrassDensity(x, z)
+    const visualDensity = getVisualGrassDensity(x, z) * livingCoverMultiplier
     const density = Math.min(1, Math.max(gameplayDensity, visualDensity) * GRASS_DENSITY_MULTIPLIER)
     if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
   }

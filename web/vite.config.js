@@ -39,6 +39,7 @@ function saveThumbnailPlugin() {
             const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
             const placements = Array.isArray(payload.placements) ? payload.placements : []
             const spawners = Array.isArray(payload.spawners) ? payload.spawners : []
+            const biomes = Array.isArray(payload.biomes) ? payload.biomes : []
             const sanitizedPlacements = placements.map((placement, index) => {
               const objectId = placement.objectId === 'skeleton_tower' ? 'skeleton_tower' : null
               const position = Array.isArray(placement.position) ? placement.position : [0, 0, 0]
@@ -84,12 +85,67 @@ function saveThumbnailPlugin() {
                   : 12,
               }
             })
+            const sanitizedBiomes = biomes.map((area, index) => {
+              const biome = area.biome === 'graveyard' ? 'graveyard' : null
+              const center = Array.isArray(area.center) ? area.center : [0, 0]
+              const id = typeof area.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(area.id)
+                ? area.id
+                : `${biome ?? 'biome'}_${index + 1}`
+
+              if (!biome) throw new Error(`Unknown biome at index ${index}`)
+
+              return {
+                id,
+                biome,
+                center: [
+                  Number.isFinite(Number(center[0])) ? Number(center[0]) : 0,
+                  Number.isFinite(Number(center[1])) ? Number(center[1]) : 0,
+                ],
+                radius: Number.isFinite(Number(area.radius))
+                  ? Math.min(140, Math.max(2, Number(area.radius)))
+                  : 24,
+                feather: Number.isFinite(Number(area.feather))
+                  ? Math.min(80, Math.max(0.5, Number(area.feather)))
+                  : 8,
+                groundIntensity: Number.isFinite(Number(area.groundIntensity))
+                  ? Math.min(1, Math.max(0, Number(area.groundIntensity)))
+                  : 1,
+                fogIntensity: Number.isFinite(Number(area.fogIntensity))
+                  ? Math.min(1, Math.max(0, Number(area.fogIntensity)))
+                  : 0.5,
+                particleIntensity: Number.isFinite(Number(area.particleIntensity))
+                  ? Math.min(1, Math.max(0, Number(area.particleIntensity)))
+                  : 0.65,
+                groundColors: {
+                  darkSoil: typeof area.groundColors?.darkSoil === 'string' && /^#[0-9a-fA-F]{6}$/.test(area.groundColors.darkSoil)
+                    ? area.groundColors.darkSoil
+                    : '#2e261f',
+                  dryClay: typeof area.groundColors?.dryClay === 'string' && /^#[0-9a-fA-F]{6}$/.test(area.groundColors.dryClay)
+                    ? area.groundColors.dryClay
+                    : '#595046',
+                  ash: typeof area.groundColors?.ash === 'string' && /^#[0-9a-fA-F]{6}$/.test(area.groundColors.ash)
+                    ? area.groundColors.ash
+                    : '#7a7d73',
+                  boneDust: typeof area.groundColors?.boneDust === 'string' && /^#[0-9a-fA-F]{6}$/.test(area.groundColors.boneDust)
+                    ? area.groundColors.boneDust
+                    : '#9e9780',
+                  coldShadow: typeof area.groundColors?.coldShadow === 'string' && /^#[0-9a-fA-F]{6}$/.test(area.groundColors.coldShadow)
+                    ? area.groundColors.coldShadow
+                    : '#293331',
+                },
+              }
+            })
             const source = [
               `export const MAP_OBJECT_PLACEMENTS = ${JSON.stringify(sanitizedPlacements, null, 2)}`,
               `export const MAP_MONSTER_SPAWNERS = ${JSON.stringify(sanitizedSpawners, null, 2)}`,
               '',
             ].join('\n\n')
             await writeFile(join(process.cwd(), 'src', 'world', 'mapObjects.generated.js'), source)
+            const biomeSource = [
+              `export const MAP_BIOME_AREAS = ${JSON.stringify(sanitizedBiomes, null, 2)}`,
+              '',
+            ].join('\n')
+            await writeFile(join(process.cwd(), 'src', 'world', 'biomeAreas.generated.js'), biomeSource)
             res.statusCode = 200
             res.end('ok')
           } catch (err) {

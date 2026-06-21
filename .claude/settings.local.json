@@ -75,7 +75,8 @@
       "Bash(awk '{print $5,$9}')",
       "Bash(node -e \"console.log\\('three KTX2Loader path ok'\\)\")",
       "Bash(xargs du -ch)",
-      "Bash(awk -F: '$1>=1176 && $1<=1260')"
+      "Bash(awk -F: '$1>=1176 && $1<=1260')",
+      "Bash(awk '{print $9}')"
     ]
   }
 }
