@@ -11,8 +11,19 @@ const params = new URLSearchParams(window.location.search)
 // ?editor opens the dev editor; optional value picks the mode (?editor=tree|house|particles).
 // ?treeeditor is kept as a legacy alias.
 const isEditor = params.has('editor') || params.has('treeeditor')
+// ?tool=thumbnail opens the thumbnail capture tool. Routed here (not inside App)
+// so App() never has an early return before its hooks — see Rules of Hooks.
+const isThumbnailTool = params.get('tool') === 'thumbnail'
 
-if (isEditor) {
+if (isThumbnailTool) {
+  import('./tools/ThumbnailTool.jsx').then(({ default: ThumbnailTool }) => {
+    createRoot(document.getElementById('root')).render(
+      <StrictMode>
+        <ThumbnailTool />
+      </StrictMode>
+    )
+  })
+} else if (isEditor) {
   const initialMode = params.get('editor') || (params.has('treeeditor') ? 'tree' : '')
   import('./tools/Editor.jsx').then(({ default: Editor }) => {
     createRoot(document.getElementById('root')).render(

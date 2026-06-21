@@ -4,7 +4,7 @@ import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useR
 import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
@@ -108,7 +108,6 @@ function hasSavedGuestSession(userId) {
 const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
 const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
-const ThumbnailTool = lazy(() => import('./tools/ThumbnailTool.jsx'))
 const SOFA_WIDTH_METERS = 1.5
 const PLAYER_KICK_DURATION = 1.15
 const PLAYER_KICK_CONTACT_DELAY = 0.43
@@ -13243,23 +13242,6 @@ function FreeCameraController({ active, touchRef }) {
 function App() {
   const [isGameChatOpen, setIsGameChatOpen] = useState(false)
   const viewportOrientation = useMobileViewportSync(isGameChatOpen)
-  const isThumbnailTool = useMemo(() => {
-    try {
-      const params = new URLSearchParams(window.location.search)
-      return params.get('tool') === 'thumbnail'
-    } catch {
-      return false
-    }
-  }, [])
-
-  if (isThumbnailTool) {
-    return (
-      <Suspense fallback={null}>
-        <ThumbnailTool />
-      </Suspense>
-    )
-  }
-
   const isAdminMode = useMemo(() => {
     try {
       const params = new URLSearchParams(window.location.search)

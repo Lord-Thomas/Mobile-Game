@@ -44,7 +44,12 @@
       "Bash(grep -n \"function MultiplayerSync\\\\|function NetworkSync\\\\|function PlayerStateSync\\\\|channelRef,\\\\|localPlayerStateRef={\" src/App.jsx)",
       "Bash(awk 'NR>=6420 && NR<=6486 && /function /{print NR\": \"$0}' src/App.jsx)",
       "Bash(awk 'NR>=6760 && NR<=6790 && /function /{print NR\": \"$0}' src/App.jsx)",
-      "Bash(xargs du -h)"
+      "Bash(xargs du -h)",
+      "Bash(grep -oE \"[a-z-]+/[a-z-]+$|no-[a-z-]+$\")",
+      "Bash(grep -nE \"^\\\\s+return \\\\\\(|^\\\\s+return$|^\\\\s+return null\" src/App.jsx)",
+      "Bash(awk -F: '$1>13243 && $1<13360')",
+      "Bash(grep -E \"\\\\.jsx$|\\\\.js$|rules-of-hooks\")",
+      "Bash(awk '/\\\\.jsx$|\\\\.js$/{f=$0} /rules-of-hooks/{c[f]++} END{for\\(x in c\\) print c[x]\"\\\\t\"x}')"
     ]
   }
 }
