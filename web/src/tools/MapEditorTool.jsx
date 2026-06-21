@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera } from '@react-three/drei'
 import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
@@ -473,6 +473,32 @@ export function MapEditorScene({
   const [brushPreviewPoint, setBrushPreviewPoint] = useState(null)
   const isTopView = cameraView === 'top'
 
+  // Object dragging is imperative: we mutate the dragged group's position every
+  // pointermove (no React state change, so nothing re-renders) and commit the
+  // final position to state once on release. This keeps dragging smooth no
+  // matter how many objects / spawners / biomes are on the map.
+  const placeableRefs = useRef(new Map())
+  const dragCommitRef = useRef(null)
+  const registerPlaceable = useCallback((id, object3D) => {
+    if (object3D) placeableRefs.current.set(id, object3D)
+    else placeableRefs.current.delete(id)
+  }, [])
+
+  const dragObjectToPoint = (id, point) => {
+    if (!id || !point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    const object = objects.find((candidate) => candidate.id === id)
+    const position = getTerrainAnchoredPosition(x, z, getPlacementHeightOffset(object))
+    const group = placeableRefs.current.get(id)
+    if (group) group.position.set(position[0], position[1], position[2])
+    dragCommitRef.current = position
+  }
+
+  const commitDraggedObject = () => {
+    if (draggingId && dragCommitRef.current) onMove(draggingId, dragCommitRef.current)
+    dragCommitRef.current = null
+  }
+
   // Raycast the ground ourselves from clientX/clientY instead of trusting
   // event.point. R3F derives event.point from event.offsetX/offsetY, which can
   // momentarily be 0 (when a move event targets an overlay element), sending the
@@ -614,9 +640,9 @@ export function MapEditorScene({
             }
           }
           if (draggingId) {
-            // Active object drag: follow the cursor (deterministic ground point).
+            // Active object drag: move the group imperatively (no re-render).
             event.stopPropagation()
-            moveToPoint(draggingId, groundPointFromEvent(event))
+            dragObjectToPoint(draggingId, groundPointFromEvent(event))
             return
           }
           if (spawnerDragRef.current) {
@@ -659,6 +685,7 @@ export function MapEditorScene({
           biomeDragRef.current = null
           if (!draggingId) return
           event.stopPropagation()
+          commitDraggedObject()
           onStopDragging()
         }}
         onPointerMissed={() => {
@@ -667,7 +694,10 @@ export function MapEditorScene({
           biomeDragRef.current = null
           brushPaintingRef.current = false
           lastBrushPointRef.current = null
-          if (draggingId) onStopDragging()
+          if (draggingId) {
+            commitDraggedObject()
+            onStopDragging()
+          }
           else if (!movingId) {
             onSelect(null)
             onSelectSpawner?.(null)
@@ -700,6 +730,7 @@ export function MapEditorScene({
         selectedId={selectedId}
         onSelect={onSelect}
         onStartDragging={onStartDragging}
+        registerRef={registerPlaceable}
       />
     </group>
   )

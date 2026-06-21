@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useEffect, useMemo, useRef } from 'react'
 import { Html, useGLTF } from '@react-three/drei'
 import { Box3, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -129,13 +129,24 @@ export function MapObjectInstance({
   onPointerDown = null,
   onPointerMove = null,
   onPointerUp = null,
+  onRegister = null,
 }) {
   const [x, savedY, z] = placement.position ?? [0, 0, 0]
   const terrainY = getTerrainHeight(x, z)
   const y = Number.isFinite(savedY) ? savedY : terrainY
+  const groupRef = useRef()
+
+  // Expose the group so the editor can drag it imperatively (mutating
+  // group.position) without a React re-render per pointermove.
+  useEffect(() => {
+    if (!onRegister) return undefined
+    onRegister(placement.id, groupRef.current)
+    return () => onRegister(placement.id, null)
+  }, [onRegister, placement.id])
 
   return (
     <group
+      ref={groupRef}
       position={[x, y, z]}
       rotation={[0, placement.rotationY ?? 0, 0]}
       scale={placement.scale ?? 1}
@@ -165,6 +176,7 @@ export default function MapObjectPlaceables({
   selectedId = null,
   onSelect = null,
   onStartDragging = null,
+  registerRef = null,
 }) {
   return (
     <group userData={{ debugCategory: 'map-placeables' }}>
@@ -173,6 +185,7 @@ export default function MapObjectPlaceables({
           key={placement.id}
           placement={placement}
           selected={selectedId === placement.id}
+          onRegister={registerRef}
           // Press = select + start dragging, just like the in-game
           // EditableObject. Crucially no pointer capture and no move/up
           // handler here, so pointer-move events fall through to the ground
