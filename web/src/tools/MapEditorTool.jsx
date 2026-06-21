@@ -4,10 +4,10 @@ import { Html, OrthographicCamera } from '@react-three/drei'
 import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import MapObjectPlaceables from '../world/MapObjectPlaceables'
 import {
-  MAP_OBJECT_CATALOG,
-  MAP_OBJECT_LIBRARY,
   MONSTER_SPAWNER_TYPE_IDS,
   MONSTER_SPAWNER_TYPES,
+  getMapObjectCatalogItem,
+  getMapObjectLibrary,
   normalizeMapObjectPlacement,
   normalizeMonsterSpawner,
 } from '../world/mapObjects'
@@ -52,6 +52,10 @@ function clampMapPosition(x, z) {
   ]
 }
 
+function createEditorId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}`
+}
+
 function getPlacementHeightOffset(placement) {
   const [x = 0, y = getTerrainHeight(x, 0), z = 0] = placement?.position ?? []
   return y - getTerrainHeight(x, z)
@@ -65,11 +69,11 @@ function createPlacement(objectId, existingCount) {
   const [x, z] = clampMapPosition(existingCount * 2, 0)
 
   return normalizeMapObjectPlacement({
-    id: `${objectId}_${Date.now().toString(36)}`,
+    id: createEditorId(objectId),
     objectId,
     position: [x, getTerrainHeight(x, z), z],
     rotationY: 0,
-    scale: MAP_OBJECT_CATALOG[objectId]?.defaultScale ?? 1,
+    scale: getMapObjectCatalogItem(objectId)?.defaultScale ?? 1,
   }, existingCount)
 }
 
@@ -77,7 +81,7 @@ function createMonsterSpawner(monsterType, existingCount) {
   const [x, z] = clampMapPosition(existingCount * 3, -4)
 
   return normalizeMonsterSpawner({
-    id: `monster_spawner_${Date.now().toString(36)}`,
+    id: createEditorId('monster_spawner'),
     monsterType,
     position: [x, getTerrainHeight(x, z), z],
     diameter: 14,
@@ -86,7 +90,7 @@ function createMonsterSpawner(monsterType, existingCount) {
 
 function createBiomeArea(biome, existingCount) {
   return normalizeBiomeArea({
-    id: `${biome}_${Date.now().toString(36)}`,
+    id: createEditorId(biome),
     biome,
     center: [54.25 + existingCount * 4, 148.75],
     radius: 34,
@@ -289,40 +293,6 @@ function BiomeAreaMarkers({
   )
 }
 
-function BiomePaintStampMarkers({ biomes }) {
-  const paintedAreas = biomes.filter((area) => area.source === 'paint')
-  if (!paintedAreas.length) return null
-
-  return (
-    <group userData={{ debugCategory: 'biome-paint-stamps' }}>
-      {paintedAreas.map((area) => {
-        const [x, z] = area.center
-        const y = getTerrainHeight(x, z)
-        const color = BIOME_TYPES[area.biome]?.color ?? '#83d8c4'
-
-        return (
-          <group key={area.id} position={[x, y + 0.135, z]}>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18} raycast={() => null}>
-              <circleGeometry args={[area.radius, 56]} />
-              <meshBasicMaterial
-                color={color}
-                transparent
-                opacity={0.055 + area.groundIntensity * 0.055}
-                depthWrite={false}
-                depthTest={false}
-              />
-            </mesh>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} renderOrder={19} raycast={() => null}>
-              <ringGeometry args={[Math.max(0.08, area.radius - 0.08), area.radius, 56]} />
-              <meshBasicMaterial color={color} transparent opacity={0.24} depthWrite={false} depthTest={false} />
-            </mesh>
-          </group>
-        )
-      })}
-    </group>
-  )
-}
-
 function BiomeBrushPreview({ brush, point }) {
   if (!brush?.active || !point) return null
 
@@ -482,6 +452,7 @@ export function MapEditorScene({
   onMoveSpawner,
   onMoveBiome,
   biomeBrush,
+  onBeginBiomePaintStroke,
   onPaintBiome,
 }) {
   // Ported from the in-game room editor (CustomizationCamera + EditableFloor):
@@ -622,6 +593,7 @@ export function MapEditorScene({
             onSelectBiome?.(null)
             brushPaintingRef.current = true
             lastBrushPointRef.current = null
+            onBeginBiomePaintStroke?.()
             paintBiomeAtPoint(groundPointFromEvent(event), true)
             event.target?.setPointerCapture?.(event.pointerId)
             return
@@ -706,7 +678,6 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
-      <BiomePaintStampMarkers biomes={biomes} />
       <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
       <TerrainFollowingGrid />
       <MonsterSpawnerMarkers
@@ -755,8 +726,9 @@ export function MapEditorPanel({
   onCameraViewChange,
   biomeBrush,
   onBiomeBrushChange,
+  onPushBiomeUndoSnapshot,
 }) {
-  const [objectId, setObjectId] = useState(MAP_OBJECT_LIBRARY[0])
+  const [objectId, setObjectId] = useState(getMapObjectLibrary()[0])
   const [spawnerType, setSpawnerType] = useState(MONSTER_SPAWNER_TYPE_IDS[0])
   const [biomeType, setBiomeType] = useState(BIOME_TYPE_IDS[0])
   const [saving, setSaving] = useState(false)
@@ -766,10 +738,13 @@ export function MapEditorPanel({
   const selectedBiome = biomes.find((area) => area.id === selectedBiomeId) ?? null
   const editableBiomes = useMemo(() => biomes.filter((area) => area.source !== 'paint'), [biomes])
   const paintedBiomeCount = biomes.length - editableBiomes.length
-  const options = useMemo(() => MAP_OBJECT_LIBRARY.map((id) => ({
+  const options = getMapObjectLibrary().map((id) => ({
     value: id,
-    label: MAP_OBJECT_CATALOG[id]?.name ?? id,
-  })), [])
+    label: getMapObjectCatalogItem(id)?.name ?? id,
+  }))
+  const selectedObjectId = options.some((option) => option.value === objectId)
+    ? objectId
+    : options[0]?.value ?? 'skeleton_tower'
   const spawnerTypeOptions = useMemo(() => MONSTER_SPAWNER_TYPE_IDS.map((id) => ({
     value: id,
     label: MONSTER_SPAWNER_TYPES[id]?.name ?? id,
@@ -812,7 +787,7 @@ export function MapEditorPanel({
   }
 
   const addObject = () => {
-    const next = createPlacement(objectId, objects.length)
+    const next = createPlacement(selectedObjectId, objects.length)
     onObjectsChange([...objects, next])
     onSelect(next.id)
     setMessage('Objet ajoute et selectionne. Clique sur "Deplacer" pour le poser ailleurs, puis valide.')
@@ -838,7 +813,7 @@ export function MapEditorPanel({
     const heightOffset = getPlacementHeightOffset(selected)
     const next = normalizeMapObjectPlacement({
       ...selected,
-      id: `${selected.objectId}_${Date.now().toString(36)}`,
+      id: createEditorId(selected.objectId),
       position: getTerrainAnchoredPosition(x + 2, z + 2, heightOffset),
     }, objects.length)
     onObjectsChange([...objects, next])
@@ -865,6 +840,7 @@ export function MapEditorPanel({
   }
 
   const clearPaintedBiomes = () => {
+    onPushBiomeUndoSnapshot?.()
     onBiomesChange(biomes.filter((area) => area.source !== 'paint'))
     setMessage('Peinture biome effacee.')
   }
@@ -901,7 +877,7 @@ export function MapEditorPanel({
       </div>
 
       <Section title="Bibliotheque">
-        <SelectField label="Objet" value={objectId} options={options} onChange={setObjectId} />
+        <SelectField label="Objet" value={selectedObjectId} options={options} onChange={setObjectId} />
         <button type="button" style={styles.primaryButton} onClick={addObject}>
           Ajouter
         </button>
@@ -1050,7 +1026,7 @@ export function MapEditorPanel({
             {objects.map((object, index) => {
               const isSelected = object.id === selectedId
               const isMoving = object.id === movingId
-              const catalogItem = MAP_OBJECT_CATALOG[object.objectId]
+              const catalogItem = getMapObjectCatalogItem(object.objectId)
 
               return (
                 <button
@@ -1207,7 +1183,7 @@ export function MapEditorPanel({
         ) : selected ? (
           <>
             <div style={styles.subcard}>
-              <strong>{MAP_OBJECT_CATALOG[selected.objectId]?.name ?? selected.objectId}</strong>
+              <strong>{getMapObjectCatalogItem(selected.objectId)?.name ?? selected.objectId}</strong>
               <NumberField label="X" value={selected.position[0]} step={0.5} onChange={(value) => {
                 const [, , z] = selected.position
                 const heightOffset = getPlacementHeightOffset(selected)

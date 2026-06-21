@@ -7,6 +7,7 @@ import {
   deleteTreeFromLibrary,
   getTreeEditorState,
   loadTreeFromLibrary,
+  saveTreeLibraryToGame,
   setTreeEditorConfig,
   setTreeEditorState,
   useTreeEditorStore,
@@ -108,6 +109,7 @@ export function TreeDevScene() {
 
 export function TreeDevPanel() {
   const { config, library, panelOpen } = useTreeEditorStore()
+  const [treeName, setTreeName] = useState('')
   const [message, setMessage] = useState('')
   const exportJson = useMemo(() => JSON.stringify(config, null, 2), [config])
 
@@ -140,9 +142,15 @@ export function TreeDevPanel() {
     showMessage('Arbre remis a zero')
   }
 
-  const addToLibrary = () => {
-    const item = addCurrentTreeToLibrary()
-    showMessage(`${item.name} ajoute`)
+  const addToLibrary = async () => {
+    try {
+      const item = addCurrentTreeToLibrary(treeName)
+      await saveTreeLibraryToGame()
+      setTreeName('')
+      showMessage(`${item.name} sauvegarde`)
+    } catch (error) {
+      showMessage(`Sauvegarde impossible: ${error.message}`)
+    }
   }
 
   const loadFromLibrary = (id) => {
@@ -150,9 +158,14 @@ export function TreeDevPanel() {
     if (item) showMessage(`${item.name} charge`)
   }
 
-  const removeFromLibrary = (id) => {
+  const removeFromLibrary = async (id) => {
     deleteTreeFromLibrary(id)
-    showMessage('Arbre supprime')
+    try {
+      await saveTreeLibraryToGame()
+      showMessage('Arbre supprime')
+    } catch (error) {
+      showMessage(`Sauvegarde impossible: ${error.message}`)
+    }
   }
 
   if (!panelOpen) {
@@ -272,7 +285,17 @@ export function TreeDevPanel() {
       </Section>
 
       <Section title="Bibliotheque">
-        <button type="button" onClick={addToLibrary} style={styles.primaryButton}>Ajouter a la bibliotheque</button>
+        <label style={styles.blockField}>
+          <span style={styles.label}>Nom</span>
+          <input
+            type="text"
+            value={treeName}
+            onChange={(event) => setTreeName(event.target.value)}
+            placeholder={`${config.preset} ${config.seed}`}
+            style={styles.textInput}
+          />
+        </label>
+        <button type="button" onClick={addToLibrary} style={styles.primaryButton}>Sauvegarder arbre</button>
         <div style={styles.libraryList}>
           {library.length === 0 && <span style={styles.libraryEmpty}>Aucun arbre ajoute</span>}
           {library.map((item) => (
@@ -388,6 +411,12 @@ const styles = {
     color: '#b9c8c3',
   },
   select: {
+    ...controlBase,
+    width: '100%',
+    borderRadius: 6,
+    padding: '7px 8px',
+  },
+  textInput: {
     ...controlBase,
     width: '100%',
     borderRadius: 6,

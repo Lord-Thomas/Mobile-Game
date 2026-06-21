@@ -10,7 +10,7 @@ export const BIOME_TYPES = {
 }
 
 export const BIOME_TYPE_IDS = Object.keys(BIOME_TYPES)
-export const BIOME_SHADER_MAX_AREAS = 64
+export const BIOME_SHADER_MAX_AREAS = 128
 const DEFAULT_GRAVEYARD_GROUND_COLORS = {
   darkSoil: '#2e261f',
   dryClay: '#595046',

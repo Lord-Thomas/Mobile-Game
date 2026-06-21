@@ -6,6 +6,8 @@ import { normalizeParticlePreset } from '../effects/particlePresets'
 import { MAP_BIOME_AREAS } from './biomeAreas'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
+const PAINTED_FOG_MAX_AREAS = 180
+
 function seededRandom(seed) {
   return Math.abs(Math.sin(seed * 12.9898) * 43758.5453) % 1
 }
@@ -262,6 +264,121 @@ function GraveyardFogPlanes({ area }) {
   )
 }
 
+function samplePaintedFogAreas(areas) {
+  if (areas.length <= PAINTED_FOG_MAX_AREAS) return areas
+
+  const step = areas.length / PAINTED_FOG_MAX_AREAS
+  return Array.from({ length: PAINTED_FOG_MAX_AREAS }, (_, index) => (
+    areas[Math.floor(index * step)]
+  ))
+}
+
+function makePaintedFogPatches(areas) {
+  return samplePaintedFogAreas(areas).flatMap((area, areaIndex) => {
+    const [centerX, centerZ] = area.center
+    const seedBase = areaIndex * 997 + area.id.length * 37
+    const angle = seededRandom(seedBase + 3) * Math.PI * 2
+    const distance = seededRandom(seedBase + 7) * area.radius * 0.32
+    const x = centerX + Math.cos(angle) * distance
+    const z = centerZ + Math.sin(angle) * distance
+    const y = getTerrainHeight(x, z)
+    const opacity = area.fogIntensity
+
+    return [
+      {
+        id: `${area.id}_paint_fog_ground`,
+        type: 'ground',
+        x,
+        z,
+        y: y + 0.26 + seededRandom(seedBase + 11) * 0.28,
+        scale: [
+          area.radius * (1.45 + seededRandom(seedBase + 13) * 0.65),
+          area.radius * (0.82 + seededRandom(seedBase + 17) * 0.5),
+          1,
+        ],
+        rotation: seededRandom(seedBase + 19) * Math.PI * 2,
+        phase: seededRandom(seedBase + 23) * Math.PI * 2,
+        driftX: (seededRandom(seedBase + 29) - 0.5) * 0.018,
+        driftZ: (seededRandom(seedBase + 31) - 0.5) * 0.018,
+        opacity: (0.13 + seededRandom(seedBase + 37) * 0.12) * opacity,
+      },
+      {
+        id: `${area.id}_paint_fog_billboard`,
+        type: 'billboard',
+        x,
+        z,
+        y: y + 0.9 + seededRandom(seedBase + 41) * 1.1,
+        scale: [
+          area.radius * (0.95 + seededRandom(seedBase + 43) * 0.62),
+          area.radius * (0.65 + seededRandom(seedBase + 47) * 0.44),
+          1,
+        ],
+        rotation: 0,
+        phase: seededRandom(seedBase + 53) * Math.PI * 2,
+        driftX: (seededRandom(seedBase + 59) - 0.5) * 0.014,
+        driftZ: (seededRandom(seedBase + 61) - 0.5) * 0.014,
+        opacity: (0.08 + seededRandom(seedBase + 67) * 0.08) * opacity,
+      },
+    ]
+  })
+}
+
+function GraveyardPaintedFog({ areas }) {
+  const groupRef = useRef()
+  const patches = useMemo(() => makePaintedFogPatches(areas), [areas])
+  const fogTexture = useMemo(() => createFogSheetTexture(), [])
+
+  useFrame((state) => {
+    const group = groupRef.current
+    if (!group) return
+    const time = state.clock.elapsedTime
+    group.children.forEach((child, index) => {
+      const patch = patches[index]
+      if (!patch) return
+      const pulse = 0.78 + Math.sin(time * 0.16 + patch.phase) * 0.22
+      child.position.x = patch.x + Math.sin(time * 0.08 + patch.phase) * patch.driftX * 20
+      child.position.z = patch.z + Math.cos(time * 0.07 + patch.phase) * patch.driftZ * 20
+      child.material.opacity = Math.min(0.56, patch.opacity * pulse)
+      if (patch.type === 'ground') {
+        child.rotation.z = patch.rotation + time * 0.01
+      } else {
+        child.lookAt(state.camera.position)
+        child.rotation.z += Math.sin(time * 0.14 + patch.phase) * 0.055
+      }
+    })
+  })
+
+  if (!patches.length) return null
+
+  return (
+    <group ref={groupRef} userData={{ debugCategory: 'graveyard-painted-fog' }}>
+      {patches.map((patch) => (
+        <mesh
+          key={patch.id}
+          position={[patch.x, patch.y, patch.z]}
+          rotation={patch.type === 'ground' ? [-Math.PI / 2, 0, patch.rotation] : [0, patch.rotation, 0]}
+          scale={patch.scale}
+          renderOrder={11}
+        >
+          <planeGeometry args={[1, 1]} />
+          <meshBasicMaterial
+            map={fogTexture}
+            color={patch.type === 'ground' ? '#b8c4b8' : '#a9c5bd'}
+            transparent
+            opacity={patch.opacity}
+            alphaTest={0.015}
+            depthTest
+            depthWrite={false}
+            fog={false}
+            blending={NormalBlending}
+            side={DoubleSide}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
 function GraveyardAmbience({ area }) {
   const preset = useMemo(() => makeWispPreset(area), [area])
   const clusters = useMemo(() => makeWispClusters(area), [area])
@@ -290,12 +407,18 @@ function GraveyardAmbience({ area }) {
 
 export default function BiomeAmbientEffects({ areas = MAP_BIOME_AREAS }) {
   const graveyardAreas = areas.filter((area) => area.biome === 'graveyard' && area.ambient !== false)
+  const paintedFogAreas = areas.filter((area) => (
+    area.biome === 'graveyard'
+    && area.source === 'paint'
+    && area.fogIntensity > 0.01
+  ))
 
   return (
     <group userData={{ debugCategory: 'biome-ambient-effects' }}>
       {graveyardAreas.map((area) => (
         <GraveyardAmbience key={area.id} area={area} />
       ))}
+      <GraveyardPaintedFog areas={paintedFogAreas} />
     </group>
   )
 }

@@ -85,16 +85,26 @@ function makeLibraryConfig(config) {
   }
 }
 
-export function addCurrentTreeToLibrary() {
+export function addCurrentTreeToLibrary(name = '') {
+  const cleanName = String(name).trim()
   const item = {
     id: `tree-${Date.now()}`,
-    name: `${state.config.preset} ${state.config.seed}`,
+    name: cleanName || `${state.config.preset} ${state.config.seed}`,
     config: makeLibraryConfig(state.config),
   }
   const library = [...state.library, item]
   setTreeEditorState({ library })
   persistLibrary(library)
   return item
+}
+
+export async function saveTreeLibraryToGame() {
+  const response = await fetch('/dev/save-tree-library', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ trees: state.library }),
+  })
+  if (!response.ok) throw new Error(await response.text())
 }
 
 export function loadTreeFromLibrary(id) {

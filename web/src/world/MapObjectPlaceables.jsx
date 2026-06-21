@@ -2,15 +2,15 @@ import { Suspense, useMemo } from 'react'
 import { Html, useGLTF } from '@react-three/drei'
 import { Box3, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './mapObjects'
+import ProceduralTree from './trees/ProceduralTree'
+import { MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, getMapObjectCatalogItem } from './mapObjects'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
 
-function MapObjectModel({ objectId }) {
-  const catalogItem = MAP_OBJECT_CATALOG[objectId]
+function MapObjectGltfModel({ catalogItem }) {
   const gltf = useGLTF(catalogItem.modelUrl)
   const model = useMemo(() => {
     const object = clone(gltf.scene)
@@ -43,10 +43,31 @@ function MapObjectModel({ objectId }) {
   )
 }
 
+function MapObjectTreeModel({ catalogItem }) {
+  return (
+    <ProceduralTree
+      animated={false}
+      config={{
+        ...catalogItem.treeConfig,
+        position: { x: 0, y: catalogItem.treeConfig.position?.y ?? 0, z: 0 },
+        rotationY: 0,
+        snapToGround: false,
+      }}
+    />
+  )
+}
+
+function MapObjectModel({ objectId }) {
+  const catalogItem = getMapObjectCatalogItem(objectId)
+  if (catalogItem?.type === 'tree') return <MapObjectTreeModel catalogItem={catalogItem} />
+  return <MapObjectGltfModel catalogItem={catalogItem} />
+}
+
 function MapObjectSelection({ placement, color = '#9fe0bc' }) {
-  const catalogItem = MAP_OBJECT_CATALOG[placement.objectId]
+  const catalogItem = getMapObjectCatalogItem(placement.objectId)
   const radius = catalogItem?.selectionRadius ?? 1.4
-  const height = (catalogItem?.targetHeightMeters ?? 3) * WORLD_UNITS_PER_METER
+  const height = catalogItem?.heightWorldUnits
+    ?? (catalogItem?.targetHeightMeters ?? 3) * WORLD_UNITS_PER_METER
   const label = catalogItem?.name ?? placement.objectId
 
   return (
@@ -81,9 +102,10 @@ function MapObjectSelection({ placement, color = '#9fe0bc' }) {
 }
 
 function MapObjectHitTarget({ placement, onPointerDown, onPointerMove, onPointerUp }) {
-  const catalogItem = MAP_OBJECT_CATALOG[placement.objectId]
+  const catalogItem = getMapObjectCatalogItem(placement.objectId)
   const radius = catalogItem?.hitRadius ?? catalogItem?.selectionRadius ?? 1.5
-  const height = (catalogItem?.hitHeightMeters ?? catalogItem?.targetHeightMeters ?? 3) * WORLD_UNITS_PER_METER
+  const height = catalogItem?.hitHeightWorldUnits
+    ?? (catalogItem?.hitHeightMeters ?? catalogItem?.targetHeightMeters ?? 3) * WORLD_UNITS_PER_METER
 
   return (
     <mesh

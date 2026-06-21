@@ -2,8 +2,10 @@ import {
   MAP_MONSTER_SPAWNERS as generatedMonsterSpawners,
   MAP_OBJECT_PLACEMENTS as generatedPlacements,
 } from './mapObjects.generated'
+import { estimateTreeHeight } from './trees/proceduralTreeConfig'
+import { getTreeMapObjectEntries, getTreeMapObjectLibrary } from './trees/treeLibrary'
 
-export const MAP_OBJECT_CATALOG = {
+const BASE_MAP_OBJECT_CATALOG = {
   skeleton_tower: {
     id: 'skeleton_tower',
     name: 'Skeleton tower',
@@ -18,7 +20,44 @@ export const MAP_OBJECT_CATALOG = {
   },
 }
 
-export const MAP_OBJECT_LIBRARY = ['skeleton_tower']
+function createTreeMapObjectCatalog() {
+  return getTreeMapObjectEntries().reduce((catalog, { objectId, tree }) => {
+    const heightWorldUnits = estimateTreeHeight(tree.config)
+    catalog[objectId] = {
+      id: objectId,
+      type: 'tree',
+      name: `Arbre - ${tree.name}`,
+      treeId: tree.id,
+      treeConfig: tree.config,
+      heightWorldUnits,
+      colliderRadius: Math.max(0.65, heightWorldUnits * 0.11),
+      selectionRadius: Math.max(0.8, heightWorldUnits * 0.13),
+      hitRadius: Math.max(0.9, heightWorldUnits * 0.16),
+      hitHeightWorldUnits: Math.max(2.2, heightWorldUnits),
+      defaultScale: 1,
+      thumbnailLabel: 'Arbre',
+    }
+    return catalog
+  }, {})
+}
+
+export function getMapObjectCatalog() {
+  return {
+    ...BASE_MAP_OBJECT_CATALOG,
+    ...createTreeMapObjectCatalog(),
+  }
+}
+
+export function getMapObjectCatalogItem(objectId) {
+  return getMapObjectCatalog()[objectId] ?? null
+}
+
+export function getMapObjectLibrary() {
+  return ['skeleton_tower', ...getTreeMapObjectLibrary()]
+}
+
+export const MAP_OBJECT_CATALOG = getMapObjectCatalog()
+export const MAP_OBJECT_LIBRARY = getMapObjectLibrary()
 
 export const MONSTER_SPAWNER_TYPES = {
   mushroom: {
@@ -52,8 +91,8 @@ function clampNumber(value, min, max) {
 }
 
 export function normalizeMapObjectPlacement(placement, index = 0) {
-  const objectId = MAP_OBJECT_CATALOG[placement?.objectId]?.id ?? 'skeleton_tower'
-  const catalogItem = MAP_OBJECT_CATALOG[objectId]
+  const objectId = getMapObjectCatalogItem(placement?.objectId)?.id ?? 'skeleton_tower'
+  const catalogItem = getMapObjectCatalogItem(objectId)
 
   return {
     id: typeof placement?.id === 'string' && placement.id.trim()

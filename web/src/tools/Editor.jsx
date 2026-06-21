@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { ACESFilmicToneMapping, MathUtils, MOUSE, SRGBColorSpace } from 'three'
@@ -155,7 +155,7 @@ const MODES = [
   { id: 'map', label: 'Map' },
 ]
 
-const MAX_BIOME_PAINT_STAMPS = 64
+const MAX_BIOME_UNDO_STEPS = 80
 
 function createInitialBiomeBrush() {
   const area = normalizeBiomeArea({
@@ -225,8 +225,53 @@ export default function Editor({ initialMode = 'tree' }) {
   const noPlayerRef = useRef({ x: 9999, y: 0, z: 9999 })
   const controlsRef = useRef(null)
   const paintStampCounterRef = useRef(0)
+  const biomeUndoStackRef = useRef([])
   const mapEditor = useMapEditorState()
+  useTreeEditorStore()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
+
+  const pushBiomeUndoSnapshot = useCallback(() => {
+    biomeUndoStackRef.current.push(mapEditor.biomes.map((area) => normalizeBiomeArea({
+      ...area,
+      center: [...area.center],
+      groundColors: { ...area.groundColors },
+    })))
+    if (biomeUndoStackRef.current.length > MAX_BIOME_UNDO_STEPS) {
+      biomeUndoStackRef.current.shift()
+    }
+  }, [mapEditor.biomes])
+
+  const undoLastBiomeEdit = useCallback(() => {
+    const previous = biomeUndoStackRef.current.pop()
+    if (!previous) return
+    mapEditor.setBiomes(previous.map(normalizeBiomeArea))
+    mapEditor.setSelectedBiomeId((selectedBiomeId) => (
+      selectedBiomeId && previous.some((area) => area.id === selectedBiomeId)
+        ? selectedBiomeId
+        : null
+    ))
+  }, [mapEditor])
+
+  useEffect(() => {
+    if (mode !== 'map') return undefined
+
+    const handleKeyDown = (event) => {
+      const target = event.target
+      const tagName = target?.tagName
+      const editingText = target?.isContentEditable
+        || tagName === 'INPUT'
+        || tagName === 'TEXTAREA'
+        || tagName === 'SELECT'
+      if (editingText) return
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
+
+      event.preventDefault()
+      undoLastBiomeEdit()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [mode, undoLastBiomeEdit])
 
   const selectMapObject = (id) => {
     mapEditor.setSelectedId(id)
@@ -312,10 +357,7 @@ export default function Editor({ initialMode = 'tree' }) {
         source: 'paint',
         ambient: false,
       }, current.length)
-      const next = [...current, stamp]
-      const authoredAreas = next.filter((area) => area.source !== 'paint')
-      const paintAreas = next.filter((area) => area.source === 'paint').slice(-MAX_BIOME_PAINT_STAMPS)
-      return [...authoredAreas, ...paintAreas]
+      return [...current, stamp]
     })
   }
 
@@ -375,6 +417,7 @@ export default function Editor({ initialMode = 'tree' }) {
                   )))
                 }}
                 biomeBrush={mapEditor.biomeBrush}
+                onBeginBiomePaintStroke={pushBiomeUndoSnapshot}
                 onPaintBiome={paintMapBiomeAt}
               />
             )}
@@ -449,6 +492,7 @@ export default function Editor({ initialMode = 'tree' }) {
           onCancelMove={cancelMapMove}
           onCameraViewChange={mapEditor.setCameraView}
           onBiomeBrushChange={mapEditor.setBiomeBrush}
+          onPushBiomeUndoSnapshot={pushBiomeUndoSnapshot}
         />
       )}
     </div>

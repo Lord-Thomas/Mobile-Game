@@ -1,4 +1,8 @@
-export const GAME_TREE_LIBRARY = {
+import { SAVED_TREE_LIBRARY } from './treeLibrary.generated'
+
+const TREE_LIBRARY_STORAGE_KEY = 'lab_tree_library_v1'
+
+const BUILTIN_TREE_LIBRARY = {
   ashMedium: {
     id: 'ashMedium',
     name: 'Ash medium',
@@ -157,8 +161,68 @@ export const GAME_TREE_LIBRARY = {
   },
 }
 
+export const GAME_TREE_LIBRARY = {
+  ...BUILTIN_TREE_LIBRARY,
+  ...SAVED_TREE_LIBRARY,
+}
+
+function getStoredTreeLibrary() {
+  if (typeof window === 'undefined') return {}
+
+  try {
+    const raw = window.localStorage.getItem(TREE_LIBRARY_STORAGE_KEY)
+    const entries = raw ? JSON.parse(raw) : []
+    if (!Array.isArray(entries)) return {}
+
+    return entries.reduce((accumulator, item) => {
+      if (!item?.id || !item?.config) return accumulator
+      accumulator[item.id] = item
+      return accumulator
+    }, {})
+  } catch {
+    return {}
+  }
+}
+
+export function getRuntimeTreeLibrary() {
+  return {
+    ...GAME_TREE_LIBRARY,
+    ...getStoredTreeLibrary(),
+  }
+}
+
+export function getTreeMapObjectId(treeId) {
+  const safeId = String(treeId ?? 'tree')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `tree_${safeId || 'tree'}`
+}
+
+export function getTreeIdFromMapObjectId(objectId) {
+  return typeof objectId === 'string' && objectId.startsWith('tree_')
+    ? objectId.slice(5)
+    : null
+}
+
+export function getTreeMapObjectLibrary() {
+  return Object.values(getRuntimeTreeLibrary()).map((tree) => getTreeMapObjectId(tree.id))
+}
+
+export function getTreeMapObjectEntries() {
+  return Object.values(getRuntimeTreeLibrary()).map((tree) => ({
+    objectId: getTreeMapObjectId(tree.id),
+    tree,
+  }))
+}
+
+export function getTreeForMapObjectId(objectId) {
+  const treeId = getTreeIdFromMapObjectId(objectId)
+  return treeId ? getRuntimeTreeLibrary()[treeId] ?? null : null
+}
+
 export function getLibraryTreeConfig(variantId, placement) {
-  const variant = GAME_TREE_LIBRARY[variantId] ?? GAME_TREE_LIBRARY.ashMedium
+  const library = getRuntimeTreeLibrary()
+  const variant = library[variantId] ?? library.ashMedium
   return {
     ...variant.config,
     position: {

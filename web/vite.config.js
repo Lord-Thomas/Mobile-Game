@@ -8,6 +8,41 @@ function saveThumbnailPlugin() {
   return {
     name: 'dev-save-assets',
     configureServer(server) {
+      server.middlewares.use('/dev/save-tree-library', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        const chunks = []
+        req.on('data', (chunk) => chunks.push(chunk))
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+            const trees = Array.isArray(payload.trees) ? payload.trees : []
+            const sanitizedTrees = trees.reduce((accumulator, tree, index) => {
+              const fallbackId = `tree-${index + 1}`
+              const id = typeof tree.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(tree.id)
+                ? tree.id
+                : fallbackId
+              const name = typeof tree.name === 'string' && tree.name.trim()
+                ? tree.name.trim().slice(0, 80)
+                : `Arbre ${index + 1}`
+              const config = tree.config && typeof tree.config === 'object' ? tree.config : {}
+
+              accumulator[id] = { id, name, config }
+              return accumulator
+            }, {})
+            const source = [
+              `export const SAVED_TREE_LIBRARY = ${JSON.stringify(sanitizedTrees, null, 2)}`,
+              '',
+            ].join('\n')
+            await writeFile(join(process.cwd(), 'src', 'world', 'trees', 'treeLibrary.generated.js'), source)
+            res.statusCode = 200
+            res.end('ok')
+          } catch (err) {
+            res.statusCode = 500
+            res.end(err.message)
+          }
+        })
+      })
+
       server.middlewares.use('/dev/save-thumbnail', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         const chunks = []
@@ -41,7 +76,9 @@ function saveThumbnailPlugin() {
             const spawners = Array.isArray(payload.spawners) ? payload.spawners : []
             const biomes = Array.isArray(payload.biomes) ? payload.biomes : []
             const sanitizedPlacements = placements.map((placement, index) => {
-              const objectId = placement.objectId === 'skeleton_tower' ? 'skeleton_tower' : null
+              const objectId = placement.objectId === 'skeleton_tower' || /^tree_[a-zA-Z0-9_-]+$/.test(placement.objectId)
+                ? placement.objectId
+                : null
               const position = Array.isArray(placement.position) ? placement.position : [0, 0, 0]
               const id = typeof placement.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(placement.id)
                 ? placement.id
