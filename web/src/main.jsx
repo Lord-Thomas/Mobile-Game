@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/react'
 import { ColorManagement } from 'three'
 import './index.css'
 import App from './App.jsx'
+import ErrorBoundary from './ui/ErrorBoundary.jsx'
 
 ColorManagement.enabled = true
 
@@ -19,7 +20,9 @@ if (isThumbnailTool) {
   import('./tools/ThumbnailTool.jsx').then(({ default: ThumbnailTool }) => {
     createRoot(document.getElementById('root')).render(
       <StrictMode>
-        <ThumbnailTool />
+        <ErrorBoundary>
+          <ThumbnailTool />
+        </ErrorBoundary>
       </StrictMode>
     )
   })
@@ -28,15 +31,19 @@ if (isThumbnailTool) {
   import('./tools/Editor.jsx').then(({ default: Editor }) => {
     createRoot(document.getElementById('root')).render(
       <StrictMode>
-        <Editor initialMode={initialMode || 'tree'} />
+        <ErrorBoundary>
+          <Editor initialMode={initialMode || 'tree'} />
+        </ErrorBoundary>
       </StrictMode>
     )
   })
 } else {
   createRoot(document.getElementById('root')).render(
     <StrictMode>
-      <App />
-      <Analytics />
+      <ErrorBoundary>
+        <App />
+        <Analytics />
+      </ErrorBoundary>
     </StrictMode>,
   )
 }

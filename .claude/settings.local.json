@@ -55,7 +55,12 @@
       "Bash(awk -F: '$1>9088 && $1<9851')",
       "Bash(awk -F: '$1>8900 && $1<9900')",
       "Bash(awk -F: '$1>8700 && $1<9640')",
-      "Bash(awk -F: '$1>=8863 && $1<9631')"
+      "Bash(awk -F: '$1>=8863 && $1<9631')",
+      "Bash(grep -E \"no-unused-vars$\" /tmp/lint2.txt)",
+      "Bash(sed -E 's/^[[:space:]]+//; s/[[:space:]]{2,}/ /g')",
+      "Bash(grep -cE \"no-empty$\" /tmp/lint2.txt)",
+      "Bash(grep -cE \"exhaustive-deps$\" /tmp/lint2.txt)",
+      "Bash(grep -E \"exhaustive-deps$\" /tmp/lint2.txt)"
     ]
   }
 }
