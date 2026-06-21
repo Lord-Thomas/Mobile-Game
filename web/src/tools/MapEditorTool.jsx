@@ -323,6 +323,33 @@ function BiomeBrushPreview({ brush, point }) {
   )
 }
 
+function TerrainBrushPreview({ brush, point }) {
+  if (!brush?.active || !point) return null
+
+  const [x, z] = point
+  const y = getTerrainHeight(x, z)
+  const colors = {
+    add: '#9fe0bc',
+    dig: '#ff9c82',
+    flatten: '#8ad4ff',
+    reset: '#ffeb8a',
+  }
+  const color = colors[brush.op] || '#ffffff'
+
+  return (
+    <group position={[x, y + 0.17, z]} userData={{ debugCategory: 'terrain-brush-preview' }}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={24}>
+        <circleGeometry args={[brush.radius, 96]} />
+        <meshBasicMaterial color={color} transparent opacity={0.075} depthWrite={false} depthTest={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={25}>
+        <ringGeometry args={[Math.max(0.08, brush.radius - 0.14), brush.radius, 96]} />
+        <meshBasicMaterial color={color} transparent opacity={0.92} depthWrite={false} depthTest={false} />
+      </mesh>
+    </group>
+  )
+}
+
 function createTerrainGridGeometry({ spacing, sampleStep, major = false }) {
   const positions = []
   const min = -OUTDOOR_HALF_SIZE
@@ -461,6 +488,11 @@ export function MapEditorScene({
   biomeBrush,
   onBeginBiomePaintStroke,
   onPaintBiome,
+  terrainVersion = 0,
+  terrainBrush,
+  onBeginTerrainPaintStroke,
+  onPaintTerrain,
+  onTerrainPaintStrokeEnd,
 }) {
   // Ported from the in-game room editor (CustomizationCamera + EditableFloor):
   //  - a top-down ortho camera that never follows the selection,
@@ -477,8 +509,23 @@ export function MapEditorScene({
   const biomeDragRef = useRef(null)
   const brushPaintingRef = useRef(false)
   const lastBrushPointRef = useRef(null)
+  const terrainPaintingRef = useRef(false)
+  const lastTerrainBrushPointRef = useRef(null)
+  const targetHeightRef = useRef(0)
   const [brushPreviewPoint, setBrushPreviewPoint] = useState(null)
   const isTopView = cameraView === 'top'
+
+  const paintTerrainAtPoint = (point, force = false) => {
+    if (!terrainBrush?.active || !isTopView || !point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    const last = lastTerrainBrushPointRef.current
+    const spacing = Math.max(0.12, terrainBrush.radius * 0.12)
+    if (!force && last && Math.hypot(x - last[0], z - last[1]) < spacing) return
+
+    lastTerrainBrushPointRef.current = [x, z]
+    setBrushPreviewPoint([x, z])
+    onPaintTerrain?.([x, z], terrainBrush, targetHeightRef.current)
+  }
 
   // Object dragging is imperative: we mutate the dragged group's position every
   // pointermove (no React state change, so nothing re-renders) and commit the
@@ -633,6 +680,20 @@ export function MapEditorScene({
           if (draggingId || movingId) return
           if (spawnerDragRef.current) return
           if (biomeDragRef.current) return
+          if (terrainBrush?.active && isTopView) {
+            event.stopPropagation()
+            onSelect(null)
+            onSelectSpawner?.(null)
+            onSelectBiome?.(null)
+            const pt = groundPointFromEvent(event)
+            targetHeightRef.current = pt ? getTerrainHeight(pt.x, pt.z) : 0
+            terrainPaintingRef.current = true
+            lastTerrainBrushPointRef.current = null
+            onBeginTerrainPaintStroke?.()
+            paintTerrainAtPoint(pt, true)
+            event.target?.setPointerCapture?.(event.pointerId)
+            return
+          }
           if (biomeBrush?.active && isTopView) {
             event.stopPropagation()
             onSelect(null)
@@ -651,6 +712,15 @@ export function MapEditorScene({
           if (isTopView) panRef.current = { x: event.clientX, y: event.clientY }
         }}
         onPointerMove={(event) => {
+          if (terrainBrush?.active && isTopView && !draggingId && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
+            const point = groundPointFromEvent(event)
+            setBrushPreviewPoint(point ? [point.x, point.z] : null)
+            if (terrainPaintingRef.current) {
+              event.stopPropagation()
+              paintTerrainAtPoint(point)
+              return
+            }
+          }
           if (biomeBrush?.active && isTopView && !draggingId && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
             const point = groundPointFromEvent(event)
             previewBrushAtPoint(point)
@@ -695,6 +765,14 @@ export function MapEditorScene({
           moveToPoint(movingId, groundPointFromEvent(event))
         }}
         onPointerUp={(event) => {
+          if (terrainPaintingRef.current) {
+            terrainPaintingRef.current = false
+            lastTerrainBrushPointRef.current = null
+            event.target?.releasePointerCapture?.(event.pointerId)
+            event.stopPropagation()
+            onTerrainPaintStrokeEnd?.()
+            return
+          }
           if (brushPaintingRef.current) {
             brushPaintingRef.current = false
             lastBrushPointRef.current = null
@@ -716,6 +794,8 @@ export function MapEditorScene({
           biomeDragRef.current = null
           brushPaintingRef.current = false
           lastBrushPointRef.current = null
+          terrainPaintingRef.current = false
+          lastTerrainBrushPointRef.current = null
           if (draggingId) {
             commitDraggedObject()
             onStopDragging()
@@ -730,7 +810,11 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
-      <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
+      {biomeBrush?.active ? (
+        <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
+      ) : terrainBrush?.active ? (
+        <TerrainBrushPreview brush={terrainBrush} point={brushPreviewPoint} />
+      ) : null}
       <TerrainFollowingGrid />
       <MonsterSpawnerMarkers
         spawners={spawners}

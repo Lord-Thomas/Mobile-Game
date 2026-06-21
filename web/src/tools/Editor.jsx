@@ -8,7 +8,7 @@ import { HouseDevPanel, HouseDevScene } from './HouseDevTool'
 import { ParticleDevScene, ParticleDevPanel } from './ParticleDevTool'
 import { MapEditorPanel, MapEditorScene } from './MapEditorTool'
 import { estimateTreeHeight } from '../world/trees/proceduralTreeConfig'
-import { getTerrainHeight } from '../world/terrain/terrainGeometry'
+import { getTerrainHeight, terrainModifications, updateCachedVisualGeometryHeights, MODIFICATION_GRID_SPACING } from '../world/terrain/terrainGeometry'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { useTreeEditorStore } from './treeEditorStore'
 import {
@@ -189,6 +189,12 @@ function useMapEditorState() {
   const [spawners, setSpawners] = useState(() => MAP_MONSTER_SPAWNERS.map(normalizeMonsterSpawner))
   const [biomes, setBiomes] = useState(() => MAP_BIOME_AREAS.map(normalizeBiomeArea))
   const [biomeBrush, setBiomeBrush] = useState(createInitialBiomeBrush)
+  const [terrainBrush, setTerrainBrush] = useState({
+    active: false,
+    op: 'add',
+    radius: 6,
+    strength: 0.15,
+  })
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
   const [selectedSpawnerId, setSelectedSpawnerId] = useState(null)
   const [selectedBiomeId, setSelectedBiomeId] = useState(null)
@@ -202,6 +208,7 @@ function useMapEditorState() {
     spawners,
     biomes,
     biomeBrush,
+    terrainBrush,
     selectedId,
     selectedSpawnerId,
     selectedBiomeId,
@@ -213,6 +220,7 @@ function useMapEditorState() {
     setSpawners,
     setBiomes,
     setBiomeBrush,
+    setTerrainBrush,
     setSelectedId,
     setSelectedSpawnerId,
     setSelectedBiomeId,
@@ -229,6 +237,8 @@ export default function Editor({ initialMode = 'tree' }) {
   const mapViewFocusRef = useRef([0, 0])
   const paintStampCounterRef = useRef(0)
   const biomeUndoStackRef = useRef([])
+  const terrainUndoStackRef = useRef([])
+  const [terrainVersion, setTerrainVersion] = useState(0)
   const mapEditor = useMapEditorState()
   useTreeEditorStore()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
@@ -255,6 +265,74 @@ export default function Editor({ initialMode = 'tree' }) {
     ))
   }, [mapEditor])
 
+  const pushTerrainUndoSnapshot = useCallback(() => {
+    terrainUndoStackRef.current.push({ ...terrainModifications })
+    if (terrainUndoStackRef.current.length > MAX_BIOME_UNDO_STEPS) {
+      terrainUndoStackRef.current.shift()
+    }
+  }, [])
+
+  const undoLastTerrainEdit = useCallback(() => {
+    const previous = terrainUndoStackRef.current.pop()
+    if (!previous) return
+    for (const key of Object.keys(terrainModifications)) {
+      delete terrainModifications[key]
+    }
+    Object.assign(terrainModifications, previous)
+    updateCachedVisualGeometryHeights()
+    setTerrainVersion((v) => v + 1)
+  }, [])
+
+  const paintTerrainAt = useCallback((center, brush, targetHeight) => {
+    if (!brush || !Array.isArray(center)) return
+    const [x, z] = center
+
+    const spacing = MODIFICATION_GRID_SPACING
+    const radius = brush.radius
+    const strength = brush.strength
+    const op = brush.op
+
+    const gMinX = Math.floor((x - radius) / spacing)
+    const gMaxX = Math.ceil((x + radius) / spacing)
+    const gMinZ = Math.floor((z - radius) / spacing)
+    const gMaxZ = Math.ceil((z + radius) / spacing)
+
+    for (let gz = gMinZ; gz <= gMaxZ; gz++) {
+      for (let gx = gMinX; gx <= gMaxX; gx++) {
+        const wx = gx * spacing
+        const wz = gz * spacing
+        const dist = Math.hypot(wx - x, wz - z)
+
+        if (dist < radius) {
+          const t = dist / radius
+          const falloff = 1 - t * t * (3 - 2 * t)
+
+          const key = `${gx}_${gz}`
+          const currentOffset = terrainModifications[key] || 0
+
+          if (op === 'add') {
+            terrainModifications[key] = currentOffset + strength * falloff * 0.5
+          } else if (op === 'dig') {
+            terrainModifications[key] = currentOffset - strength * falloff * 0.5
+          } else if (op === 'flatten') {
+            const baseHeight = getTerrainHeight(wx, wz, true)
+            const currentHeight = baseHeight + currentOffset
+            const target = targetHeight
+            const newHeight = currentHeight + (target - currentHeight) * strength * falloff
+            terrainModifications[key] = newHeight - baseHeight
+          } else if (op === 'reset') {
+            terrainModifications[key] = currentOffset * (1 - strength * falloff)
+            if (Math.abs(terrainModifications[key]) < 0.001) {
+              delete terrainModifications[key]
+            }
+          }
+        }
+      }
+    }
+
+    updateCachedVisualGeometryHeights()
+  }, [])
+
   useEffect(() => {
     if (mode !== 'map') return undefined
 
@@ -269,12 +347,16 @@ export default function Editor({ initialMode = 'tree' }) {
       if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
 
       event.preventDefault()
-      undoLastBiomeEdit()
+      if (mapEditor.terrainBrush.active) {
+        undoLastTerrainEdit()
+      } else {
+        undoLastBiomeEdit()
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, undoLastBiomeEdit])
+  }, [mode, undoLastBiomeEdit, undoLastTerrainEdit, mapEditor.terrainBrush.active])
 
   const selectMapObject = (id) => {
     mapEditor.setSelectedId(id)
@@ -423,6 +505,11 @@ export default function Editor({ initialMode = 'tree' }) {
                 biomeBrush={mapEditor.biomeBrush}
                 onBeginBiomePaintStroke={pushBiomeUndoSnapshot}
                 onPaintBiome={paintMapBiomeAt}
+                terrainVersion={terrainVersion}
+                terrainBrush={mapEditor.terrainBrush}
+                onBeginTerrainPaintStroke={pushTerrainUndoSnapshot}
+                onPaintTerrain={paintTerrainAt}
+                onTerrainPaintStrokeEnd={() => setTerrainVersion((v) => v + 1)}
               />
             )}
           </EditorStage>
@@ -506,6 +593,8 @@ export default function Editor({ initialMode = 'tree' }) {
           onCameraViewChange={mapEditor.setCameraView}
           onBiomeBrushChange={mapEditor.setBiomeBrush}
           onPushBiomeUndoSnapshot={pushBiomeUndoSnapshot}
+          terrainBrush={mapEditor.terrainBrush}
+          onTerrainBrushChange={mapEditor.setTerrainBrush}
         />
       )}
     </div>

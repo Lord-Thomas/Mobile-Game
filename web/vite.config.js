@@ -75,6 +75,18 @@ function saveThumbnailPlugin() {
             const placements = Array.isArray(payload.placements) ? payload.placements : []
             const spawners = Array.isArray(payload.spawners) ? payload.spawners : []
             const biomes = Array.isArray(payload.biomes) ? payload.biomes : []
+            const terrainModifications = payload.terrainModifications && typeof payload.terrainModifications === 'object'
+              ? payload.terrainModifications
+              : {}
+            const sanitizedTerrainModifications = {}
+            for (const key of Object.keys(terrainModifications)) {
+              if (/^-?\d+_-?\d+$/.test(key)) {
+                const val = Number(terrainModifications[key])
+                if (Number.isFinite(val)) {
+                  sanitizedTerrainModifications[key] = val
+                }
+              }
+            }
             const sanitizedPlacements = placements.map((placement, index) => {
               const objectId = placement.objectId === 'skeleton_tower' || /^tree_[a-zA-Z0-9_-]+$/.test(placement.objectId)
                 ? placement.objectId
@@ -185,6 +197,13 @@ function saveThumbnailPlugin() {
               '',
             ].join('\n')
             await writeFile(join(process.cwd(), 'src', 'world', 'biomeAreas.generated.js'), biomeSource)
+
+            const terrainSource = [
+              `export const MAP_TERRAIN_MODIFICATIONS = ${JSON.stringify(sanitizedTerrainModifications, null, 2)}`,
+              '',
+            ].join('\n')
+            await writeFile(join(process.cwd(), 'src', 'world', 'terrain', 'terrainModifications.generated.js'), terrainSource)
+
             res.statusCode = 200
             res.end('ok')
           } catch (err) {

@@ -1,0 +1,1 @@
+export const MAP_TERRAIN_MODIFICATIONS = {}

@@ -3,6 +3,31 @@ import { getRoomBounds, houseLayout } from '../house/houseLayout'
 import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
+import { MAP_TERRAIN_MODIFICATIONS } from './terrainModifications.generated'
+
+export const MODIFICATION_GRID_SPACING = 1.0
+export const terrainModifications = { ...MAP_TERRAIN_MODIFICATIONS }
+
+export function getTerrainModificationOffset(x, z) {
+  const spacing = MODIFICATION_GRID_SPACING
+  const xFloor = Math.floor(x / spacing)
+  const zFloor = Math.floor(z / spacing)
+  const xCeil = xFloor + 1
+  const zCeil = zFloor + 1
+
+  const tx = (x / spacing) - xFloor
+  const tz = (z / spacing) - zFloor
+
+  const h00 = terrainModifications[`${xFloor}_${zFloor}`] || 0
+  const h10 = terrainModifications[`${xCeil}_${zFloor}`] || 0
+  const h01 = terrainModifications[`${xFloor}_${zCeil}`] || 0
+  const h11 = terrainModifications[`${xCeil}_${zCeil}`] || 0
+
+  const h0 = h00 * (1 - tx) + h10 * tx
+  const h1 = h01 * (1 - tx) + h11 * tx
+
+  return h0 * (1 - tz) + h1 * tz
+}
 
 export const TERRAIN_COLLIDER_SEGMENTS = 192
 export const TERRAIN_VISUAL_SEGMENTS = 256
@@ -224,7 +249,7 @@ function getNeighborHousePadHeightAt(x, z) {
   return { mask: strongestMask, targetHeight }
 }
 
-export function getTerrainHeight(x, z) {
+export function getTerrainHeight(x, z, ignoreModifications = false) {
   let height = naturalHeight(x, z)
 
   const roadDistance = distanceToPolylineSamples(x, z, roadSamples)
@@ -256,6 +281,12 @@ export function getTerrainHeight(x, z) {
 
   const neighborPad = getNeighborHousePadHeightAt(x, z)
   height = mix(height, neighborPad.targetHeight, neighborPad.mask * (1 - roadMask))
+
+  if (!ignoreModifications) {
+    const modOffset = getTerrainModificationOffset(x, z)
+    // Damp/prevent modification under the house bounds to avoid floor clipping
+    height += modOffset * (1 - houseCutMask)
+  }
 
   return height
 }
@@ -316,4 +347,39 @@ export function createTerrainGeometry({
     vertices: new Float32Array(positions),
     indices: new Uint32Array(indices),
   }
+}
+
+let cachedVisualGeometry = null
+
+export function getCachedVisualGeometry() {
+  if (!cachedVisualGeometry) {
+    cachedVisualGeometry = createTerrainGeometry()
+  }
+  return cachedVisualGeometry
+}
+
+export function updateCachedVisualGeometryHeights() {
+  const terrain = cachedVisualGeometry
+  if (!terrain) return
+
+  const positions = terrain.geometry.attributes.position.array
+  const segments = terrain.segments
+  const size = terrain.size
+  const halfSize = size * 0.5
+  const step = size / segments
+
+  let vertexIndex = 0
+  for (let zIndex = 0; zIndex <= segments; zIndex += 1) {
+    const z = -halfSize + zIndex * step
+    for (let xIndex = 0; xIndex <= segments; xIndex += 1) {
+      const x = -halfSize + xIndex * step
+      const y = getTerrainHeight(x, z)
+      positions[vertexIndex * 3 + 1] = y // Update Y component
+      terrain.heights[vertexIndex] = y // Keep heights array in sync
+      vertexIndex += 1
+    }
+  }
+
+  terrain.geometry.attributes.position.needsUpdate = true
+  terrain.geometry.computeVertexNormals()
 }
