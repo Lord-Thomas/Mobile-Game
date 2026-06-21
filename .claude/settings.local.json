@@ -60,7 +60,11 @@
       "Bash(sed -E 's/^[[:space:]]+//; s/[[:space:]]{2,}/ /g')",
       "Bash(grep -cE \"no-empty$\" /tmp/lint2.txt)",
       "Bash(grep -cE \"exhaustive-deps$\" /tmp/lint2.txt)",
-      "Bash(grep -E \"exhaustive-deps$\" /tmp/lint2.txt)"
+      "Bash(grep -E \"exhaustive-deps$\" /tmp/lint2.txt)",
+      "Bash(git rm *)",
+      "Bash(node scripts/texture-inventory.cjs)",
+      "Bash(node scripts/texture-downscale.cjs)",
+      "Bash(awk '{print $1}')"
     ]
   }
 }
