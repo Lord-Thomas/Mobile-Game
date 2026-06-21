@@ -9,6 +9,7 @@ import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
+import { useGameTexture } from './game/ktx2'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
@@ -1174,9 +1175,9 @@ function useKeyboardInput() {
 }
 
 function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false }) {
-  const floorColorMap = useTexture(floorTexturePath)
-  const wallColorMap = useTexture(wallTexturePath)
-  const ceilingColorMap = useTexture(ceilingTexturePath)
+  const floorColorMap = useGameTexture(floorTexturePath)
+  const wallColorMap = useGameTexture(wallTexturePath)
+  const ceilingColorMap = useGameTexture(ceilingTexturePath)
   const exteriorWallTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   floorColorMap.wrapS = RepeatWrapping
   floorColorMap.wrapT = RepeatWrapping
@@ -1851,7 +1852,7 @@ function GlassContainmentColliders() {
 function Ball({ ballRef, skinTexturePath, spawnPosition = [0, 3.2, 0], linearDamping = 0.35, angularDamping = 0.4 }) {
   const { gl } = useThree()
   const ballSkin = useGLTF('/models/ball/ballon.glb')
-  const skinTexture = useTexture(skinTexturePath)
+  const skinTexture = useGameTexture(skinTexturePath)
   skinTexture.colorSpace = SRGBColorSpace
   skinTexture.anisotropy = getCappedAnisotropy(gl)
   const visual = useMemo(() => {

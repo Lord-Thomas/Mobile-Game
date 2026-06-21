@@ -73,7 +73,9 @@
       "Bash(cp node_modules/three/examples/jsm/libs/basis/basis_transcoder.js public/basis/)",
       "Bash(cp node_modules/three/examples/jsm/libs/basis/basis_transcoder.wasm public/basis/)",
       "Bash(awk '{print $5,$9}')",
-      "Bash(node -e \"console.log\\('three KTX2Loader path ok'\\)\")"
+      "Bash(node -e \"console.log\\('three KTX2Loader path ok'\\)\")",
+      "Bash(xargs du -ch)",
+      "Bash(awk -F: '$1>=1176 && $1<=1260')"
     ]
   }
 }
