@@ -358,7 +358,7 @@ export function getCachedVisualGeometry() {
   return cachedVisualGeometry
 }
 
-export function updateCachedVisualGeometryHeights() {
+export function updateCachedVisualGeometryHeights(bounds = null) {
   const terrain = cachedVisualGeometry
   if (!terrain) return
 
@@ -367,16 +367,28 @@ export function updateCachedVisualGeometryHeights() {
   const size = terrain.size
   const halfSize = size * 0.5
   const step = size / segments
+  const minXIndex = bounds
+    ? Math.max(0, Math.floor((bounds.minX + halfSize) / step) - 2)
+    : 0
+  const maxXIndex = bounds
+    ? Math.min(segments, Math.ceil((bounds.maxX + halfSize) / step) + 2)
+    : segments
+  const minZIndex = bounds
+    ? Math.max(0, Math.floor((bounds.minZ + halfSize) / step) - 2)
+    : 0
+  const maxZIndex = bounds
+    ? Math.min(segments, Math.ceil((bounds.maxZ + halfSize) / step) + 2)
+    : segments
 
-  let vertexIndex = 0
-  for (let zIndex = 0; zIndex <= segments; zIndex += 1) {
+  for (let zIndex = minZIndex; zIndex <= maxZIndex; zIndex += 1) {
     const z = -halfSize + zIndex * step
-    for (let xIndex = 0; xIndex <= segments; xIndex += 1) {
+    for (let xIndex = minXIndex; xIndex <= maxXIndex; xIndex += 1) {
       const x = -halfSize + xIndex * step
       const y = getTerrainHeight(x, z)
+      const vertexIndex = zIndex * (segments + 1) + xIndex
       positions[vertexIndex * 3 + 1] = y // Update Y component
       terrain.heights[vertexIndex] = y // Keep heights array in sync
-      vertexIndex += 1
+      terrain.vertices[vertexIndex * 3 + 1] = y
     }
   }
 

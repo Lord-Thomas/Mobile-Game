@@ -238,6 +238,8 @@ export default function Editor({ initialMode = 'tree' }) {
   const paintStampCounterRef = useRef(0)
   const biomeUndoStackRef = useRef([])
   const terrainUndoStackRef = useRef([])
+  const terrainUpdateFrameRef = useRef(null)
+  const terrainUpdateBoundsRef = useRef(null)
   const [terrainVersion, setTerrainVersion] = useState(0)
   const mapEditor = useMapEditorState()
   useTreeEditorStore()
@@ -275,12 +277,64 @@ export default function Editor({ initialMode = 'tree' }) {
   const undoLastTerrainEdit = useCallback(() => {
     const previous = terrainUndoStackRef.current.pop()
     if (!previous) return
+    if (terrainUpdateFrameRef.current !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(terrainUpdateFrameRef.current)
+    }
+    terrainUpdateFrameRef.current = null
+    terrainUpdateBoundsRef.current = null
     for (const key of Object.keys(terrainModifications)) {
       delete terrainModifications[key]
     }
     Object.assign(terrainModifications, previous)
     updateCachedVisualGeometryHeights()
     setTerrainVersion((v) => v + 1)
+  }, [])
+
+  const mergeTerrainUpdateBounds = useCallback((bounds) => {
+    const current = terrainUpdateBoundsRef.current
+    terrainUpdateBoundsRef.current = current
+      ? {
+        minX: Math.min(current.minX, bounds.minX),
+        maxX: Math.max(current.maxX, bounds.maxX),
+        minZ: Math.min(current.minZ, bounds.minZ),
+        maxZ: Math.max(current.maxZ, bounds.maxZ),
+      }
+      : bounds
+  }, [])
+
+  const flushTerrainVisualUpdate = useCallback(() => {
+    if (terrainUpdateFrameRef.current !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(terrainUpdateFrameRef.current)
+    }
+    terrainUpdateFrameRef.current = null
+    const bounds = terrainUpdateBoundsRef.current
+    terrainUpdateBoundsRef.current = null
+    if (!bounds) return
+    updateCachedVisualGeometryHeights(bounds)
+  }, [])
+
+  const scheduleTerrainVisualUpdate = useCallback((bounds) => {
+    mergeTerrainUpdateBounds(bounds)
+    if (terrainUpdateFrameRef.current !== null) return
+
+    const runUpdate = () => {
+      terrainUpdateFrameRef.current = null
+      const nextBounds = terrainUpdateBoundsRef.current
+      terrainUpdateBoundsRef.current = null
+      updateCachedVisualGeometryHeights(nextBounds)
+    }
+
+    if (typeof requestAnimationFrame === 'function') {
+      terrainUpdateFrameRef.current = requestAnimationFrame(runUpdate)
+    } else {
+      runUpdate()
+    }
+  }, [mergeTerrainUpdateBounds])
+
+  useEffect(() => () => {
+    if (terrainUpdateFrameRef.current !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(terrainUpdateFrameRef.current)
+    }
   }, [])
 
   const paintTerrainAt = useCallback((center, brush, targetHeight) => {
@@ -330,8 +384,13 @@ export default function Editor({ initialMode = 'tree' }) {
       }
     }
 
-    updateCachedVisualGeometryHeights()
-  }, [])
+    scheduleTerrainVisualUpdate({
+      minX: x - radius - spacing * 2,
+      maxX: x + radius + spacing * 2,
+      minZ: z - radius - spacing * 2,
+      maxZ: z + radius + spacing * 2,
+    })
+  }, [scheduleTerrainVisualUpdate])
 
   useEffect(() => {
     if (mode !== 'map') return undefined
@@ -509,7 +568,10 @@ export default function Editor({ initialMode = 'tree' }) {
                 terrainBrush={mapEditor.terrainBrush}
                 onBeginTerrainPaintStroke={pushTerrainUndoSnapshot}
                 onPaintTerrain={paintTerrainAt}
-                onTerrainPaintStrokeEnd={() => setTerrainVersion((v) => v + 1)}
+                onTerrainPaintStrokeEnd={() => {
+                  flushTerrainVisualUpdate()
+                  setTerrainVersion((v) => v + 1)
+                }}
               />
             )}
           </EditorStage>

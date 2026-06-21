@@ -514,9 +514,10 @@ export function MapEditorScene({
   const targetHeightRef = useRef(0)
   const [brushPreviewPoint, setBrushPreviewPoint] = useState(null)
   const isTopView = cameraView === 'top'
+  const editorBrushActive = Boolean(biomeBrush?.active || terrainBrush?.active)
 
   const paintTerrainAtPoint = (point, force = false) => {
-    if (!terrainBrush?.active || !isTopView || !point) return
+    if (!terrainBrush?.active || !point) return
     const [x, z] = clampMapPosition(point.x, point.z)
     const last = lastTerrainBrushPointRef.current
     const spacing = Math.max(0.12, terrainBrush.radius * 0.12)
@@ -680,7 +681,7 @@ export function MapEditorScene({
           if (draggingId || movingId) return
           if (spawnerDragRef.current) return
           if (biomeDragRef.current) return
-          if (terrainBrush?.active && isTopView) {
+          if (terrainBrush?.active) {
             event.stopPropagation()
             onSelect(null)
             onSelectSpawner?.(null)
@@ -712,9 +713,9 @@ export function MapEditorScene({
           if (isTopView) panRef.current = { x: event.clientX, y: event.clientY }
         }}
         onPointerMove={(event) => {
-          if (terrainBrush?.active && isTopView && !draggingId && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
+          if (terrainBrush?.active && !draggingId && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
             const point = groundPointFromEvent(event)
-            setBrushPreviewPoint(point ? [point.x, point.z] : null)
+            setBrushPreviewPoint(point ? clampMapPosition(point.x, point.z) : null)
             if (terrainPaintingRef.current) {
               event.stopPropagation()
               paintTerrainAtPoint(point)
@@ -819,9 +820,9 @@ export function MapEditorScene({
       <MonsterSpawnerMarkers
         spawners={spawners}
         selectedSpawnerId={selectedSpawnerId}
-        onSpawnerPointerDown={handleSpawnerPointerDown}
-        onSpawnerPointerMove={handleSpawnerPointerMove}
-        onSpawnerPointerUp={handleSpawnerPointerUp}
+        onSpawnerPointerDown={editorBrushActive ? null : handleSpawnerPointerDown}
+        onSpawnerPointerMove={editorBrushActive ? null : handleSpawnerPointerMove}
+        onSpawnerPointerUp={editorBrushActive ? null : handleSpawnerPointerUp}
       />
       <BiomeAreaMarkers
         biomes={biomes}
@@ -829,13 +830,13 @@ export function MapEditorScene({
         onBiomePointerDown={handleBiomePointerDown}
         onBiomePointerMove={handleBiomePointerMove}
         onBiomePointerUp={handleBiomePointerUp}
-        interactive={!biomeBrush?.active}
+        interactive={!editorBrushActive}
       />
       <MapObjectPlaceables
         objects={objects}
         selectedId={selectedId}
-        onSelect={onSelect}
-        onStartDragging={handleStartObjectDrag}
+        onSelect={editorBrushActive ? null : onSelect}
+        onStartDragging={editorBrushActive ? null : handleStartObjectDrag}
         registerRef={registerPlaceable}
       />
     </group>

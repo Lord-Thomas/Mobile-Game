@@ -4,7 +4,7 @@ export const MAP_OBJECT_PLACEMENTS = [
     "objectId": "skeleton_tower",
     "position": [
       45.75,
-      0.9573496681149376,
+      1.4004956500083714,
       146.5
     ],
     "rotationY": 3.141592653589793,
@@ -150,7 +150,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "skeleton",
     "position": [
       41.5,
-      1.4394259531907114,
+      1.4508430014056295,
       147
     ],
     "diameter": 53
@@ -160,7 +160,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "skeleton",
     "position": [
       112.5,
-      4.2374088865088435,
+      9.328871438596675,
       166.25
     ],
     "diameter": 80
@@ -170,7 +170,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "skeleton",
     "position": [
       159.5,
-      3.143240313012112,
+      3.290132675056341,
       124.5
     ],
     "diameter": 46
