@@ -51,7 +51,7 @@ function EditorStage({ children }) {
   return <group ref={groupRef}>{children}</group>
 }
 
-function EditorCamera({ controlsRef, mode, mapCameraView }) {
+function EditorCamera({ controlsRef, mode, mapCameraView, mapFocusRef }) {
   const { camera } = useThree()
   const { config } = useTreeEditorStore()
   const cameraSignature = useMemo(() => JSON.stringify({
@@ -73,10 +73,12 @@ function EditorCamera({ controlsRef, mode, mapCameraView }) {
       // view uses OrbitControls, and it stays centered on the origin rather than
       // chasing the selected object.
       if (mapCameraView === 'orbit') {
-        camera.position.set(40, 30, 40)
-        camera.lookAt(0, 1.4, 0)
+        // Enter 3D over the same map spot the top view was centered on.
+        const [fx, fz] = mapFocusRef?.current ?? [0, 0]
+        camera.position.set(fx + 40, 30, fz + 40)
+        camera.lookAt(fx, 1.4, fz)
         if (controlsRef.current) {
-          controlsRef.current.target.set(0, 1.4, 0)
+          controlsRef.current.target.set(fx, 1.4, fz)
           controlsRef.current.minDistance = 4
           controlsRef.current.maxDistance = 320
           controlsRef.current.enableRotate = true
@@ -143,7 +145,7 @@ function EditorCamera({ controlsRef, mode, mapCameraView }) {
       controlsRef.current.screenSpacePanning = false
       controlsRef.current.update()
     }
-  }, [camera, cameraSignature, config, controlsRef, mapCameraView, mode])
+  }, [camera, cameraSignature, config, controlsRef, mapCameraView, mapFocusRef, mode])
 
   return null
 }
@@ -224,6 +226,7 @@ function useMapEditorState() {
 export default function Editor({ initialMode = 'tree' }) {
   const noPlayerRef = useRef({ x: 9999, y: 0, z: 9999 })
   const controlsRef = useRef(null)
+  const mapViewFocusRef = useRef([0, 0])
   const paintStampCounterRef = useRef(0)
   const biomeUndoStackRef = useRef([])
   const mapEditor = useMapEditorState()
@@ -396,6 +399,7 @@ export default function Editor({ initialMode = 'tree' }) {
                 movingId={mapEditor.movingId}
                 draggingId={mapEditor.draggingId}
                 cameraView={mapEditor.cameraView}
+                focusRef={mapViewFocusRef}
                 onSelect={selectMapObject}
                 onSelectSpawner={selectMapSpawner}
                 onSelectBiome={selectMapBiome}
@@ -428,6 +432,7 @@ export default function Editor({ initialMode = 'tree' }) {
           controlsRef={controlsRef}
           mode={mode}
           mapCameraView={mapEditor.cameraView}
+          mapFocusRef={mapViewFocusRef}
         />
         <OrbitControls
           ref={controlsRef}
@@ -448,6 +453,14 @@ export default function Editor({ initialMode = 'tree' }) {
           mouseButtons={mode === 'map'
             ? { LEFT: undefined, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }
             : { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN }}
+          onChange={() => {
+            // Keep the shared focus in sync while orbiting in 3D, so switching
+            // back to the top view returns to the same map spot.
+            const controls = controlsRef.current
+            if (mode === 'map' && mapEditor.cameraView === 'orbit' && controls) {
+              mapViewFocusRef.current = [controls.target.x, controls.target.z]
+            }
+          }}
         />
       </Canvas>
       <div style={modeSwitchStyle}>

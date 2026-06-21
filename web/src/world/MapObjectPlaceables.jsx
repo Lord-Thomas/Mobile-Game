@@ -44,17 +44,18 @@ function MapObjectGltfModel({ catalogItem }) {
 }
 
 function MapObjectTreeModel({ catalogItem }) {
-  return (
-    <ProceduralTree
-      animated={false}
-      config={{
-        ...catalogItem.treeConfig,
-        position: { x: 0, y: catalogItem.treeConfig.position?.y ?? 0, z: 0 },
-        rotationY: 0,
-        snapToGround: false,
-      }}
-    />
-  )
+  // Memoize the config object: ProceduralTree rebuilds its whole geometry when
+  // the config reference changes, so a fresh literal each render would rebuild
+  // the tree on every re-render (every editor action). Keyed on the catalog
+  // entry, which is stable, the tree is built once.
+  const config = useMemo(() => ({
+    ...catalogItem.treeConfig,
+    position: { x: 0, y: catalogItem.treeConfig.position?.y ?? 0, z: 0 },
+    rotationY: 0,
+    snapToGround: false,
+  }), [catalogItem])
+
+  return <ProceduralTree animated={false} config={config} />
 }
 
 function MapObjectModel({ objectId }) {

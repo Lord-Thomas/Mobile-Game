@@ -387,24 +387,30 @@ function TerrainFollowingGrid() {
   )
 }
 
-function MapEditorCamera({ active }) {
+function MapEditorCamera({ active, focusRef }) {
   const { gl } = useThree()
   const camRef = useRef()
   const zoomRef = useRef(MAP_ZOOM_DEFAULT)
+  const initedRef = useRef(false)
 
-  // Place the camera once when the top view becomes active. After that the pan
-  // handler on the floor mutates position imperatively, so we must NOT pass a
-  // position prop (R3F would re-apply it on every render and reset the pan).
+  // When the top view becomes active, restore the camera over the shared focus
+  // point (so switching views keeps you where you were on the map) and keep the
+  // previous zoom. After that the pan handler mutates position imperatively, so
+  // we must NOT pass a position prop (R3F would reset the pan on every render).
   useEffect(() => {
     const cam = camRef.current
     if (!active || !cam) return
-    cam.position.set(0, MAP_CAMERA_HEIGHT, 0)
+    const [fx, fz] = focusRef?.current ?? [0, 0]
+    cam.position.set(fx, MAP_CAMERA_HEIGHT, fz)
     cam.rotation.set(-Math.PI / 2, 0, 0)
     cam.layers.enable(OUTDOOR_LIGHT_LAYER)
-    cam.zoom = MAP_ZOOM_DEFAULT
-    zoomRef.current = MAP_ZOOM_DEFAULT
+    if (!initedRef.current) {
+      zoomRef.current = MAP_ZOOM_DEFAULT
+      initedRef.current = true
+    }
+    cam.zoom = zoomRef.current
     cam.updateProjectionMatrix()
-  }, [active])
+  }, [active, focusRef])
 
   useEffect(() => {
     if (!active) return undefined
@@ -443,6 +449,7 @@ export function MapEditorScene({
   movingId,
   draggingId,
   cameraView,
+  focusRef,
   onSelect,
   onSelectSpawner,
   onSelectBiome,
@@ -600,7 +607,7 @@ export function MapEditorScene({
 
   return (
     <group>
-      <MapEditorCamera active={isTopView} />
+      <MapEditorCamera active={isTopView} focusRef={focusRef} />
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.06, 0]}
@@ -665,6 +672,7 @@ export function MapEditorScene({
           const worldPerPixel = 1 / cam.zoom
           cam.position.x = MathUtils.clamp(cam.position.x - dx * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
           cam.position.z = MathUtils.clamp(cam.position.z - dy * worldPerPixel, -MAP_PAN_BOUND, MAP_PAN_BOUND)
+          if (focusRef) focusRef.current = [cam.position.x, cam.position.z]
         }}
         onClick={(event) => {
           // Click-to-place once "Deplacer" was pressed in the panel.
