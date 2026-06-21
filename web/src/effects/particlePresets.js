@@ -375,7 +375,10 @@ export const BUILTIN_PARTICLE_PRESETS = [
         lifetime: 1.8, lifetimeVariance: 0.3, radius: 0.35, offset: [0, 0.2, 0], delay: 0,
       },
     ],
-    light: { enabled: true, color: '#5cff96', intensity: 1.6 },
+    // Lumière désactivée : sa pointLight s'allumait pile sur le joueur et forçait
+    // Three.js à recompiler les matériaux custom de l'avatar (shaders de teinte
+    // patchés) à chaque soin = freeze. Les particules additives suffisent au halo.
+    light: { enabled: false, color: '#5cff96', intensity: 1.6 },
   },
   {
     id: 'campfire',
