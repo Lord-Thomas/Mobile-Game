@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, Fog as ThreeFog, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -1564,14 +1564,25 @@ function SceneAtmosphere({
   playerPositionRef,
   biomeAreas = MAP_BIOME_AREAS,
 }) {
+  const { scene } = useThree()
   const isOutside = currentZone === ZONES.outside
   const backgroundColor = '#ecfdff'
   const fogColor = '#fbffff'
   const fogNear = isOutside ? 180 : mode === 'customize' ? 130 : 120
   const fogFar = isOutside ? 520 : mode === 'customize' ? 360 : 340
   const backgroundRef = useRef()
-  const fogRef = useRef()
+  const linearFog = useMemo(() => new ThreeFog(fogColor, fogNear, fogFar), [])
+  const graveyardFog = useMemo(() => new FogExp2(GRAVEYARD_ATMOSPHERE.fog, 0.001), [])
   const influenceRef = useRef(0)
+
+  useEffect(() => {
+    scene.fog = linearFog
+    return () => {
+      if (scene.fog === linearFog || scene.fog === graveyardFog) {
+        scene.fog = null
+      }
+    }
+  }, [graveyardFog, linearFog, scene])
 
   useFrame((_, delta) => {
     const position = playerPositionRef?.current
@@ -1584,22 +1595,29 @@ function SceneAtmosphere({
       1 - Math.exp(-delta * 0.85),
     )
     const influence = influenceRef.current
+    const fogInfluence = influence
 
     if (backgroundRef.current) {
-      backgroundRef.current.copy(BASE_SCENE_BACKGROUND).lerp(GRAVEYARD_SCENE_BACKGROUND, influence)
+      backgroundRef.current.copy(BASE_SCENE_BACKGROUND).lerp(GRAVEYARD_SCENE_BACKGROUND, fogInfluence)
     }
 
-    if (fogRef.current) {
-      fogRef.current.color.copy(BASE_SCENE_FOG).lerp(GRAVEYARD_SCENE_FOG, influence)
-      fogRef.current.near = MathUtils.lerp(fogNear, GRAVEYARD_ATMOSPHERE.fogNear, influence)
-      fogRef.current.far = MathUtils.lerp(fogFar, GRAVEYARD_ATMOSPHERE.fogFar, influence)
+    linearFog.color.copy(BASE_SCENE_FOG)
+    linearFog.near = fogNear
+    linearFog.far = fogFar
+
+    graveyardFog.color.copy(BASE_SCENE_FOG).lerp(GRAVEYARD_SCENE_FOG, fogInfluence)
+    graveyardFog.density = MathUtils.lerp(0.0008, GRAVEYARD_ATMOSPHERE.fogDensity, fogInfluence)
+
+    if (fogInfluence > 0.035) {
+      scene.fog = graveyardFog
+    } else {
+      scene.fog = linearFog
     }
   })
 
   return (
     <>
       <color ref={backgroundRef} attach="background" args={[backgroundColor]} />
-      <fog ref={fogRef} attach="fog" args={[fogColor, fogNear, fogFar]} />
     </>
   )
 }

@@ -17,9 +17,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "id": "monster_spawner_mqmjxq7z",
     "monsterType": "skeleton",
     "position": [
-      57.75,
-      2.002809808628892,
-      150.75
+      58.25,
+      1.892498591161225,
+      149.5
     ],
     "diameter": 27
   }

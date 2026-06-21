@@ -3,8 +3,8 @@ export const MAP_BIOME_AREAS = [
     "id": "graveyard_tower",
     "biome": "graveyard",
     "center": [
-      57.75,
-      151.5
+      57.5,
+      155.5
     ],
     "radius": 26,
     "feather": 10,
@@ -12,10 +12,10 @@ export const MAP_BIOME_AREAS = [
     "fogIntensity": 0.64,
     "particleIntensity": 0.36,
     "groundColors": {
-      "darkSoil": "#b36929",
-      "dryClay": "#dda564",
+      "darkSoil": "#231306",
+      "dryClay": "#3c3125",
       "ash": "#2c2e29",
-      "boneDust": "#5e5a50",
+      "boneDust": "#7a7566",
       "coldShadow": "#121716"
     }
   }

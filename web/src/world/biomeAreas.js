@@ -23,9 +23,10 @@ export const BIOME_VISUALS = {
   graveyard: {
     atmosphere: {
       background: '#d7e2e1',
-      fog: '#b9c7c4',
-      fogNear: 62,
-      fogFar: 260,
+      fog: '#aebfbb',
+      fogNear: 18,
+      fogFar: 145,
+      fogDensity: 0.045,
       sun: '#cfd9cf',
       sky: '#bdced3',
       ground: '#7b8278',
