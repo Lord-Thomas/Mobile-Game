@@ -498,12 +498,26 @@ export function MapEditorScene({
     const position = getTerrainAnchoredPosition(x, z, getPlacementHeightOffset(object))
     const group = placeableRefs.current.get(id)
     if (group) group.position.set(position[0], position[1], position[2])
-    dragCommitRef.current = position
+    // Key the pending position by id so it can never be applied to the wrong
+    // object (e.g. if a release lands on an overlay and skips the floor's
+    // pointerup, leaving this set when the next object is selected).
+    dragCommitRef.current = { id, position }
   }
 
   const commitDraggedObject = () => {
-    if (draggingId && dragCommitRef.current) onMove(draggingId, dragCommitRef.current)
+    const pending = dragCommitRef.current
+    if (pending && draggingId === pending.id) onMove(pending.id, pending.position)
     dragCommitRef.current = null
+  }
+
+  const handleStartObjectDrag = (id) => {
+    // If a previous drag never committed (pointer released over the label/HTML
+    // overlay, so the floor never received pointerup), commit it now before
+    // starting a new drag — otherwise its pending position leaks onto this one.
+    const pending = dragCommitRef.current
+    if (pending && pending.id !== id) onMove(pending.id, pending.position)
+    dragCommitRef.current = null
+    onStartDragging?.(id)
   }
 
   // Raycast the ground ourselves from clientX/clientY instead of trusting
@@ -737,7 +751,7 @@ export function MapEditorScene({
         objects={objects}
         selectedId={selectedId}
         onSelect={onSelect}
-        onStartDragging={onStartDragging}
+        onStartDragging={handleStartObjectDrag}
         registerRef={registerPlaceable}
       />
     </group>
