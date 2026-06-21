@@ -18,7 +18,7 @@ import {
 } from '../world/biomeAreas'
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
-import { getTerrainHeight } from '../world/terrain/terrainGeometry'
+import { getTerrainHeight, terrainModifications } from '../world/terrain/terrainGeometry'
 import { ColorField, NumberField, Section, SelectField, SliderField } from './editorControls'
 import { styles } from './editorStyles'
 
@@ -815,7 +815,7 @@ export function MapEditorScene({
       ) : terrainBrush?.active ? (
         <TerrainBrushPreview brush={terrainBrush} point={brushPreviewPoint} />
       ) : null}
-      <TerrainFollowingGrid />
+      <TerrainFollowingGrid key={terrainVersion} />
       <MonsterSpawnerMarkers
         spawners={spawners}
         selectedSpawnerId={selectedSpawnerId}
@@ -864,6 +864,8 @@ export function MapEditorPanel({
   biomeBrush,
   onBiomeBrushChange,
   onPushBiomeUndoSnapshot,
+  terrainBrush,
+  onTerrainBrushChange,
 }) {
   const [objectId, setObjectId] = useState(getMapObjectLibrary()[0])
   const [spawnerType, setSpawnerType] = useState(MONSTER_SPAWNER_TYPE_IDS[0])
@@ -914,12 +916,22 @@ export function MapEditorPanel({
 
   const patchBiomeBrush = (patch) => {
     if (!biomeBrush) return
+    if (patch.active) onTerrainBrushChange?.({ ...terrainBrush, active: false })
     onBiomeBrushChange?.({
       ...biomeBrush,
       ...patch,
       feather: patch.radius !== undefined
         ? Math.min(biomeBrush.feather, Math.max(0.5, patch.radius - 0.1))
         : patch.feather ?? biomeBrush.feather,
+    })
+  }
+
+  const patchTerrainBrush = (patch) => {
+    if (!terrainBrush) return
+    if (patch.active) onBiomeBrushChange?.({ ...biomeBrush, active: false })
+    onTerrainBrushChange?.({
+      ...terrainBrush,
+      ...patch,
     })
   }
 
@@ -993,10 +1005,11 @@ export function MapEditorPanel({
           placements: toSavedPlacements(objects),
           spawners: toSavedSpawners(spawners),
           biomes: toSavedBiomes(biomes),
+          terrainModifications,
         }),
       })
       if (!response.ok) throw new Error(await response.text())
-      setMessage('Map et biomes sauvegardes.')
+      setMessage('Map, biomes et terrain sauvegardes.')
     } catch (error) {
       setMessage(`Sauvegarde impossible: ${error.message}`)
     } finally {
@@ -1056,6 +1069,49 @@ export function MapEditorPanel({
           </div>
         ) : (
           <div style={styles.libraryEmpty}>Aucun spawner place.</div>
+        )}
+      </Section>
+
+      <Section title="Terraformation">
+        {terrainBrush && (
+          <div style={styles.subcard}>
+            <div style={styles.actions}>
+              <button
+                type="button"
+                style={terrainBrush.active ? styles.primaryButton : styles.secondaryButton}
+                onClick={() => patchTerrainBrush({ active: !terrainBrush.active })}
+              >
+                {terrainBrush.active ? 'Pinceau actif' : 'Activer'}
+              </button>
+            </div>
+            <SelectField
+              label="Outil"
+              value={terrainBrush.op}
+              options={[
+                { value: 'add', label: 'Ajouter' },
+                { value: 'dig', label: 'Creuser' },
+                { value: 'flatten', label: 'Aplanir' },
+                { value: 'reset', label: 'Restaurer' },
+              ]}
+              onChange={(op) => patchTerrainBrush({ op })}
+            />
+            <SliderField
+              label="Rayon"
+              value={terrainBrush.radius}
+              min={1}
+              max={24}
+              step={0.5}
+              onChange={(radius) => patchTerrainBrush({ radius })}
+            />
+            <SliderField
+              label="Force"
+              value={terrainBrush.strength}
+              min={0.01}
+              max={0.75}
+              step={0.01}
+              onChange={(strength) => patchTerrainBrush({ strength })}
+            />
+          </div>
         )}
       </Section>
 
