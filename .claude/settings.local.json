@@ -43,7 +43,8 @@
       "Bash(sed -n '1980,2118p' src/App.jsx)",
       "Bash(grep -n \"function MultiplayerSync\\\\|function NetworkSync\\\\|function PlayerStateSync\\\\|channelRef,\\\\|localPlayerStateRef={\" src/App.jsx)",
       "Bash(awk 'NR>=6420 && NR<=6486 && /function /{print NR\": \"$0}' src/App.jsx)",
-      "Bash(awk 'NR>=6760 && NR<=6790 && /function /{print NR\": \"$0}' src/App.jsx)"
+      "Bash(awk 'NR>=6760 && NR<=6790 && /function /{print NR\": \"$0}' src/App.jsx)",
+      "Bash(xargs du -h)"
     ]
   }
 }
