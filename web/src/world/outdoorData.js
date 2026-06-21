@@ -285,11 +285,4 @@ function createNeighborHouseColliders(house) {
 export const OUTDOOR_PLAYER_COLLIDERS = [
   ...createHouseWallColliders(houseLayout.walls),
   ...NEIGHBOR_HOUSES.flatMap((house) => createNeighborHouseColliders(house)),
-  ...AUTHORED_TREES.map(({ id, config, colliderRadius }) => ({
-    type: 'circle',
-    id,
-    x: config.position.x,
-    z: config.position.z,
-    radius: colliderRadius,
-  })),
 ]

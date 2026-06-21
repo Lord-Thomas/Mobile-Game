@@ -1,9 +1,21 @@
-import {
-  MAP_MONSTER_SPAWNERS as generatedMonsterSpawners,
-  MAP_OBJECT_PLACEMENTS as generatedPlacements,
-} from './mapObjects.generated'
+import * as generatedMapObjects from './mapObjects.generated'
+import { AUTHORED_TREES } from './outdoorData'
+import { getTerrainHeight } from './terrain/terrainGeometry'
 import { estimateTreeHeight } from './trees/proceduralTreeConfig'
-import { getTreeMapObjectEntries, getTreeMapObjectLibrary } from './trees/treeLibrary'
+import {
+  getRuntimeTreeLibrary,
+  getTreeMapObjectEntries,
+  getTreeMapObjectId,
+  getTreeMapObjectLibrary,
+} from './trees/treeLibrary'
+
+const generatedPlacements = Array.isArray(generatedMapObjects.MAP_OBJECT_PLACEMENTS)
+  ? generatedMapObjects.MAP_OBJECT_PLACEMENTS
+  : []
+const generatedMonsterSpawners = Array.isArray(generatedMapObjects.MAP_MONSTER_SPAWNERS)
+  ? generatedMapObjects.MAP_MONSTER_SPAWNERS
+  : []
+const generatedHasAuthoringState = generatedMapObjects.MAP_OBJECTS_ARE_AUTHORING_STATE === true
 
 const BASE_MAP_OBJECT_CATALOG = {
   skeleton_tower: {
@@ -115,7 +127,36 @@ export function normalizeMapObjectPlacement(placement, index = 0) {
   }
 }
 
-export const MAP_OBJECT_PLACEMENTS = generatedPlacements.map(normalizeMapObjectPlacement)
+function createAuthoredTreeMapObjectPlacements() {
+  const treeLibrary = getRuntimeTreeLibrary()
+
+  return AUTHORED_TREES.map((tree) => {
+    const variant = treeLibrary[tree.variantId]
+    const baseScale = Math.max(0.001, variant?.config?.scale ?? tree.config.scale ?? 1)
+    const x = tree.config.position.x
+    const z = tree.config.position.z
+
+    return {
+      id: tree.id,
+      objectId: getTreeMapObjectId(tree.variantId),
+      position: [x, getTerrainHeight(x, z), z],
+      rotationY: tree.config.rotationY ?? 0,
+      scale: (tree.config.scale ?? baseScale) / baseScale,
+    }
+  })
+}
+
+function getInitialMapObjectPlacements() {
+  if (generatedHasAuthoringState) return generatedPlacements
+
+  const generatedIds = new Set(generatedPlacements.map((placement) => placement?.id))
+  const authoredTreePlacements = createAuthoredTreeMapObjectPlacements()
+    .filter((placement) => !generatedIds.has(placement.id))
+
+  return [...authoredTreePlacements, ...generatedPlacements]
+}
+
+export const MAP_OBJECT_PLACEMENTS = getInitialMapObjectPlacements().map(normalizeMapObjectPlacement)
 
 export function normalizeMonsterSpawner(spawner, index = 0) {
   const monsterType = MONSTER_SPAWNER_TYPES[spawner?.monsterType]?.id ?? 'mushroom'

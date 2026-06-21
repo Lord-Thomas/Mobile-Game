@@ -187,6 +187,8 @@ function saveThumbnailPlugin() {
               }
             })
             const source = [
+              'export const MAP_OBJECTS_ARE_AUTHORING_STATE = true',
+              '',
               `export const MAP_OBJECT_PLACEMENTS = ${JSON.stringify(sanitizedPlacements, null, 2)}`,
               `export const MAP_MONSTER_SPAWNERS = ${JSON.stringify(sanitizedSpawners, null, 2)}`,
               '',

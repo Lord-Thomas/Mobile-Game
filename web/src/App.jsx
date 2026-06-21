@@ -23,7 +23,7 @@ import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
-import { AUTHORED_TREES, NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
+import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
@@ -473,6 +473,12 @@ const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png
 const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
+const EDITABLE_TREE_PLACEMENTS = MAP_OBJECT_PLACEMENTS
+  .map((placement) => ({
+    placement,
+    catalogItem: MAP_OBJECT_CATALOG[placement.objectId],
+  }))
+  .filter(({ catalogItem }) => catalogItem?.type === 'tree')
 const SKELETON_TOWER_CAMERA_ENTER_LOCAL_RADIUS = 2.22
 const SKELETON_TOWER_CAMERA_LOCAL_RADIUS = 2.03
 const SKELETON_TOWER_CAMERA_DISTANCE = 2.75
@@ -487,6 +493,22 @@ const MAGIC_SKULL_DISCOVERY_POSITION = (() => {
     + (tower?.targetHeightMeters ?? 7.2) * WORLD_UNITS_PER_METER * (MAGIC_SKULL_TOWER_PLACEMENT.scale ?? 1)
   return [x, topY + 0.38, z]
 })()
+
+function getEditableTreePosition(treeEntry) {
+  const [x = 0, , z = 0] = treeEntry.placement.position ?? []
+  return { x, z }
+}
+
+function getEditableTreeCollisionRadius(treeEntry) {
+  return Math.max(0.25, (treeEntry.catalogItem.colliderRadius ?? 0.5) * (treeEntry.placement.scale ?? 1))
+}
+
+function getEditableTreeAreaPriority(treeEntry) {
+  const id = treeEntry.placement.id ?? ''
+  if (id.includes('dense_forest') || id.includes('southwest_forest')) return 1
+  if (id.includes('forest_edge')) return 0
+  return null
+}
 
 function getSkeletonTowerHeightWorld() {
   const scale = MAGIC_SKULL_TOWER_PLACEMENT?.scale ?? 1
@@ -4166,10 +4188,9 @@ function Player({
       if (treeSegLen2 > 0.001) {
         const treeSegLen = Math.sqrt(treeSegLen2)
         let minSafeT = 1.0
-        for (const tree of AUTHORED_TREES) {
-          const tx = tree.config.position.x
-          const tz = tree.config.position.z
-          const r = (tree.colliderRadius ?? 0.5) + 0.3
+        for (const treeEntry of EDITABLE_TREE_PLACEMENTS) {
+          const { x: tx, z: tz } = getEditableTreePosition(treeEntry)
+          const r = getEditableTreeCollisionRadius(treeEntry) + 0.3
           const ftX = tx - focusX
           const ftZ = tz - focusZ
           const tParam = (ftX * treeSegX + ftZ * treeSegZ) / treeSegLen2
@@ -8579,8 +8600,8 @@ function getDistanceToNearestHouse(x, z) {
 }
 
 function getNearbyTreeCount(x, z, radius = MUSHROOM_ENEMY_SPAWN_TREE_RADIUS) {
-  return AUTHORED_TREES.reduce((count, tree) => {
-    const treePosition = tree.config.position
+  return EDITABLE_TREE_PLACEMENTS.reduce((count, treeEntry) => {
+    const treePosition = getEditableTreePosition(treeEntry)
     return count + (Math.hypot(treePosition.x - x, treePosition.z - z) <= radius ? 1 : 0)
   }, 0)
 }
@@ -8590,6 +8611,10 @@ function isMushroomEnemySpawnCandidateValid(x, z) {
   if (!insideWorld) return false
   if (getNearbyTreeCount(x, z) < MUSHROOM_ENEMY_MIN_TREES_NEAR_SPAWN) return false
   if (getDistanceToNearestHouse(x, z) < MUSHROOM_ENEMY_HOUSE_CLEARANCE) return false
+  if (EDITABLE_TREE_PLACEMENTS.some((treeEntry) => {
+    const position = getEditableTreePosition(treeEntry)
+    return Math.hypot(x - position.x, z - position.z) <= getEditableTreeCollisionRadius(treeEntry) + MUSHROOM_ENEMY_SPAWN_CLEARANCE
+  })) return false
 
   return !OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
     if (collider.type === 'circle') {
@@ -8607,10 +8632,12 @@ function isMushroomEnemySpawnCandidateValid(x, z) {
 }
 
 function getMushroomEnemySpawnCandidates() {
-  const forestTrees = AUTHORED_TREES.filter((tree) => {
-    const area = tree.placement?.area
-    return area === 'dense_forest' || area === 'forest_edge'
-  })
+  const forestTrees = EDITABLE_TREE_PLACEMENTS
+    .map((treeEntry) => ({
+      ...treeEntry,
+      areaPriority: getEditableTreeAreaPriority(treeEntry),
+    }))
+    .filter((treeEntry) => treeEntry.areaPriority !== null)
   const offsets = [
     [0, 0],
     [1.8, 0],
@@ -8625,11 +8652,11 @@ function getMushroomEnemySpawnCandidates() {
     [-2.45, -0.75],
   ]
   const candidates = forestTrees.flatMap((tree) => {
-    const position = tree.config.position
+    const position = getEditableTreePosition(tree)
     return offsets.map(([offsetX, offsetZ]) => ({
       x: position.x + offsetX,
       z: position.z + offsetZ,
-      areaPriority: tree.placement?.area === 'dense_forest' ? 1 : 0,
+      areaPriority: tree.areaPriority,
     }))
   })
 
@@ -10016,6 +10043,13 @@ function getTwitchParentHost() {
   return window.location.hostname || 'localhost'
 }
 
+function collidesWithEditableTree(nextX, nextZ) {
+  return EDITABLE_TREE_PLACEMENTS.some((treeEntry) => {
+    const { x, z } = getEditableTreePosition(treeEntry)
+    return Math.hypot(nextX - x, nextZ - z) <= getEditableTreeCollisionRadius(treeEntry) + PLAYER_CAPSULE_RADIUS
+  })
+}
+
 function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(nextX, nextZ)) {
   const collidesWithAuthoredObstacle = OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
     if (collider.type === 'circle') {
@@ -10035,7 +10069,11 @@ function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(next
     return outsideX * outsideX + outsideZ * outsideZ <= PLAYER_CAPSULE_RADIUS * PLAYER_CAPSULE_RADIUS
   })
 
-  return collidesWithAuthoredObstacle || collidesWithMapObjectSolid(nextX, nextZ, footY, PLAYER_CAPSULE_RADIUS)
+  return (
+    collidesWithAuthoredObstacle ||
+    collidesWithEditableTree(nextX, nextZ) ||
+    collidesWithMapObjectSolid(nextX, nextZ, footY, PLAYER_CAPSULE_RADIUS)
+  )
 }
 
 function getTwitchParentHosts() {

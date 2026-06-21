@@ -12,7 +12,7 @@ import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import MapObjectPlaceables from './MapObjectPlaceables'
 import BiomeAmbientEffects from './BiomeAmbientEffects'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './biomeAreas'
-import { AUTHORED_TREES, DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
+import { DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from './lightingLayers'
 
 const OUTDOOR_SUN_DIRECTION = [0.42, 0.9, 0.18]
@@ -131,7 +131,6 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   lightingActive = true,
   playerPositionRef,
   ballRef,
-  showAuthoredTrees = true,
   showGrass = true,
   showTrees = true,
   showTerrain = true,
@@ -172,7 +171,6 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       ))}
       {showMapObjects && <MapObjectPlaceables />}
       {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
-      {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} playerPositionRef={playerPositionRef} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}
       {showGrass && (
         <TerrainGroundCover
