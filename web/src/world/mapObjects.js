@@ -41,11 +41,21 @@ function createTreeMapObjectCatalog() {
   }, {})
 }
 
+// Built once and cached. Rebuilding it (which re-estimates every tree's height
+// and returns fresh object references) used to run on every getMapObjectCatalogItem
+// call — i.e. several times per object per render — which both wasted work and
+// defeated downstream memoization (a fresh catalogItem ref forced the procedural
+// tree geometry to be regenerated on every re-render). The catalog is static at
+// runtime, so cache it.
+let catalogCache = null
 export function getMapObjectCatalog() {
-  return {
-    ...BASE_MAP_OBJECT_CATALOG,
-    ...createTreeMapObjectCatalog(),
+  if (!catalogCache) {
+    catalogCache = {
+      ...BASE_MAP_OBJECT_CATALOG,
+      ...createTreeMapObjectCatalog(),
+    }
   }
+  return catalogCache
 }
 
 export function getMapObjectCatalogItem(objectId) {
