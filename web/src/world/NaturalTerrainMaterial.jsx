@@ -41,6 +41,18 @@ function configureTexture(texture, colorSpace = null) {
   texture.needsUpdate = true
 }
 
+function applyBiomeUniformsToShader(shader, shaderBiomeData) {
+  if (!shader?.uniforms) return
+  shader.uniforms.uGraveyardAreas.value = shaderBiomeData.areas
+  shader.uniforms.uGraveyardGroundIntensities.value = shaderBiomeData.groundIntensities
+  shader.uniforms.uGraveyardDarkSoil.value = shaderBiomeData.groundColors.darkSoil
+  shader.uniforms.uGraveyardDryClay.value = shaderBiomeData.groundColors.dryClay
+  shader.uniforms.uGraveyardAsh.value = shaderBiomeData.groundColors.ash
+  shader.uniforms.uGraveyardBoneDust.value = shaderBiomeData.groundColors.boneDust
+  shader.uniforms.uGraveyardColdShadow.value = shaderBiomeData.groundColors.coldShadow
+  shader.uniforms.uGraveyardAreaCount.value = shaderBiomeData.count
+}
+
 function NaturalTerrainMaterial({ biomeAreas = MAP_BIOME_AREAS }) {
   const materialRef = useRef()
   const [grassMap, dirtMap, grassNormalMap, dirtNormalMap] = useTexture(SURFACE_TEXTURES)
@@ -283,8 +295,14 @@ function NaturalTerrainMaterial({ biomeAreas = MAP_BIOME_AREAS }) {
 
   useEffect(() => {
     const material = materialRef.current
+    const shader = material?.userData?.shader
+    applyBiomeUniformsToShader(shader, shaderBiomeData)
+  }, [shaderBiomeData])
+
+  useEffect(() => {
+    const material = materialRef.current
     if (material) material.needsUpdate = true
-  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap, shaderBiomeData])
+  }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap])
 
   return (
     <meshStandardMaterial

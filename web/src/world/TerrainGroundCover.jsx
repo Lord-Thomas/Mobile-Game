@@ -1,9 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, Frustum, InstancedBufferAttribute, MathUtils, Matrix4, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3 } from 'three'
+import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, Frustum, InstancedBufferAttribute, MathUtils, Matrix4, MeshBasicMaterial, Object3D, Sphere, SRGBColorSpace, Vector3, Vector4 } from 'three'
 import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
-import { getBiomeInfluence } from './biomeAreas'
+import {
+  BIOME_SHADER_MAX_AREAS,
+  GRAVEYARD_SHADER_AREAS,
+  GRAVEYARD_SHADER_GROUND_INTENSITIES,
+  MAP_BIOME_AREAS,
+  getBiomeInfluence,
+  getBiomeShaderAreas,
+} from './biomeAreas'
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
 
@@ -73,6 +80,37 @@ const grassWindSettings = {
 const grassInteractionSettings = {
   radius: 0.85,
   strength: 0.82,
+}
+const grassGraveyardShaderAreas = Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+  GRAVEYARD_SHADER_AREAS[index] ?? new Vector4(0, 0, 0, 1)
+))
+const grassGraveyardGroundIntensities = Float32Array.from(Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+  GRAVEYARD_SHADER_GROUND_INTENSITIES[index] ?? 0
+)))
+
+function getGrassBiomeShaderData(biomeAreas = MAP_BIOME_AREAS) {
+  if (biomeAreas === MAP_BIOME_AREAS) {
+    return {
+      areas: grassGraveyardShaderAreas,
+      groundIntensities: grassGraveyardGroundIntensities,
+      count: Math.min(GRAVEYARD_SHADER_AREAS.length, BIOME_SHADER_MAX_AREAS),
+    }
+  }
+
+  const areas = getBiomeShaderAreas('graveyard', biomeAreas)
+  const graveyardAreas = biomeAreas
+    .filter((area) => area.biome === 'graveyard')
+    .slice(0, BIOME_SHADER_MAX_AREAS)
+
+  return {
+    areas: Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+      areas[index] ?? new Vector4(0, 0, 0, 1)
+    )),
+    groundIntensities: Float32Array.from(Array.from({ length: BIOME_SHADER_MAX_AREAS }, (_, index) => (
+      graveyardAreas[index]?.groundIntensity ?? 0
+    ))),
+    count: Math.min(areas.length, BIOME_SHADER_MAX_AREAS),
+  }
 }
 
 function softenGrassNormals(geometry, upStrength = 0.65) {
@@ -311,8 +349,9 @@ function continueGrassChunkBuild(job, deadline) {
   return true
 }
 
-function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
+function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBiomeData = () => getGrassBiomeShaderData()) {
   return (shader) => {
+    const biomeData = getBiomeData()
     shader.uniforms.uTime = { value: 0 }
     shader.uniforms.uPlayerPosition = { value: new Vector3(9999, 0, 9999) }
     shader.uniforms.uBallPosition = { value: new Vector3(9999, 0, 9999) }
@@ -335,6 +374,9 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
       value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
     }
     shader.uniforms.uCameraForward = { value: new Vector3(0, 0, -1) }
+    shader.uniforms.uGraveyardAreas = { value: biomeData.areas }
+    shader.uniforms.uGraveyardGroundIntensities = { value: biomeData.groundIntensities }
+    shader.uniforms.uGraveyardAreaCount = { value: biomeData.count }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -361,10 +403,28 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
       uniform float uBallInteractionRadius;
       uniform vec3 uWindDirection;
       uniform vec3 uCameraForward;
+      uniform vec4 uGraveyardAreas[${BIOME_SHADER_MAX_AREAS}];
+      uniform float uGraveyardGroundIntensities[${BIOME_SHADER_MAX_AREAS}];
+      uniform int uGraveyardAreaCount;
       attribute float instanceSpawnTime;
 
       float grassHash(vec2 value) {
         return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      float grassBiomeAreaInfluence(vec2 worldPosition, vec4 area) {
+        float distanceToCenter = distance(worldPosition, area.xy);
+        float innerRadius = max(0.0, area.z - area.w);
+        return 1.0 - smoothstep(innerRadius, area.z, distanceToCenter);
+      }
+
+      float grassGraveyardInfluence(vec2 worldPosition) {
+        float influence = 0.0;
+        for (int i = 0; i < ${BIOME_SHADER_MAX_AREAS}; i++) {
+          if (i >= uGraveyardAreaCount) break;
+          influence = max(influence, grassBiomeAreaInfluence(worldPosition, uGraveyardAreas[i]) * uGraveyardGroundIntensities[i]);
+        }
+        return clamp(influence, 0.0, 1.0);
       }
       `,
     )
@@ -390,6 +450,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
       #else
         vec3 grassOrigin = vec3(0.0);
       #endif
+      float graveyardGrassCull = smoothstep(0.18, 0.42, grassGraveyardInfluence(grassOrigin.xz));
 
       float travel = dot(grassOrigin.xz, uWindDirection.xz) * uWindScale;
       float cross = dot(grassOrigin.xz, vec2(-uWindDirection.z, uWindDirection.x)) * 0.06;
@@ -447,6 +508,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
       transformed.y *= mix(1.0, heightScale, clusterT);
 
       float keep = step(grassHash(grassOrigin.xz), keepProbability);
+      keep *= 1.0 - graveyardGrassCull;
 
       // Newly streamed local chunks grow in progressively instead of appearing at once.
       float spawnTime = instanceSpawnTime;
@@ -491,9 +553,11 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false) {
   }
 }
 
-function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false }) {
+function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false, biomeAreas = MAP_BIOME_AREAS }) {
   const rocks = useMemo(() => createRockCover(), [])
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
+  const grassBiomeData = useMemo(() => getGrassBiomeShaderData(biomeAreas), [biomeAreas])
+  const grassBiomeDataRef = useRef(grassBiomeData)
   const ref = useRef()
   const activeGrassCenterRef = useRef(null)
   const activeGrassTargetKeysRef = useRef(new Set())
@@ -528,6 +592,16 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     maxMs: 0,
     lastMs: 0,
   })
+
+  useEffect(() => {
+    grassBiomeDataRef.current = grassBiomeData
+    ;[shaderRef.current, globalShaderRef.current].forEach((shader) => {
+      if (!shader) return
+      shader.uniforms.uGraveyardAreas.value = grassBiomeData.areas
+      shader.uniforms.uGraveyardGroundIntensities.value = grassBiomeData.groundIntensities
+      shader.uniforms.uGraveyardAreaCount.value = grassBiomeData.count
+    })
+  }, [grassBiomeData])
 
   const baseTexture = useTexture(GRASS_TEXTURE)
   const grassTexture = useMemo(() => {
@@ -576,7 +650,8 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     // eslint-disable-next-line react-hooks/refs
     mat.onBeforeCompile = buildGrassHandleBeforeCompile((shader) => {
       shaderRef.current = shader
-    })
+    // eslint-disable-next-line react-hooks/refs
+    }, false, () => grassBiomeDataRef.current)
     return mat
   }, [grassTexture])
   useEffect(() => () => grassMaterial.dispose(), [grassMaterial])
@@ -594,7 +669,8 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     // eslint-disable-next-line react-hooks/refs
     mat.onBeforeCompile = buildGrassHandleBeforeCompile((shader) => {
       globalShaderRef.current = shader
-    }, true)
+    // eslint-disable-next-line react-hooks/refs
+    }, true, () => grassBiomeDataRef.current)
     return mat
   }, [grassTexture])
   useEffect(() => () => globalGrassMaterial.dispose(), [globalGrassMaterial])

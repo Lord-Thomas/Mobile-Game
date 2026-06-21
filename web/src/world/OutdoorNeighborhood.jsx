@@ -174,7 +174,15 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
       {showTrees && showAuthoredTrees && <InstancedTreeBatch trees={AUTHORED_TREES} playerPositionRef={playerPositionRef} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}
-      {showGrass && <TerrainGroundCover playerPositionRef={playerPositionRef} ballRef={ballRef} active={lightingActive} debugStats={debugStats} />}
+      {showGrass && (
+        <TerrainGroundCover
+          playerPositionRef={playerPositionRef}
+          ballRef={ballRef}
+          active={lightingActive}
+          debugStats={debugStats}
+          biomeAreas={biomeAreas}
+        />
+      )}
     </group>
   )
 })

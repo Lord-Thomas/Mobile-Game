@@ -289,6 +289,40 @@ function BiomeAreaMarkers({
   )
 }
 
+function BiomePaintStampMarkers({ biomes }) {
+  const paintedAreas = biomes.filter((area) => area.source === 'paint')
+  if (!paintedAreas.length) return null
+
+  return (
+    <group userData={{ debugCategory: 'biome-paint-stamps' }}>
+      {paintedAreas.map((area) => {
+        const [x, z] = area.center
+        const y = getTerrainHeight(x, z)
+        const color = BIOME_TYPES[area.biome]?.color ?? '#83d8c4'
+
+        return (
+          <group key={area.id} position={[x, y + 0.135, z]}>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={18} raycast={() => null}>
+              <circleGeometry args={[area.radius, 56]} />
+              <meshBasicMaterial
+                color={color}
+                transparent
+                opacity={0.055 + area.groundIntensity * 0.055}
+                depthWrite={false}
+                depthTest={false}
+              />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} renderOrder={19} raycast={() => null}>
+              <ringGeometry args={[Math.max(0.08, area.radius - 0.08), area.radius, 56]} />
+              <meshBasicMaterial color={color} transparent opacity={0.24} depthWrite={false} depthTest={false} />
+            </mesh>
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
 function BiomeBrushPreview({ brush, point }) {
   if (!brush?.active || !point) return null
 
@@ -672,6 +706,7 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
+      <BiomePaintStampMarkers biomes={biomes} />
       <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
       <TerrainFollowingGrid />
       <MonsterSpawnerMarkers
