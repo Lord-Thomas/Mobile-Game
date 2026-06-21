@@ -7,6 +7,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
+import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
+import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
@@ -31,10 +33,6 @@ import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
-const GOAL_Z = -3.42
-const BALL_RADIUS = 0.138
-const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
-const PLAYER_CAPSULE_RADIUS = 0.22
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
 const PLAYER_GROUNDED_DROP_TO_FALL = 0.85
 const PLAYER_LEDGE_FALL_INITIAL_VELOCITY = -0.35
@@ -109,25 +107,6 @@ const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
 const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const SOFA_WIDTH_METERS = 1.5
-const PLAYER_KICK_DURATION = 1.15
-const PLAYER_KICK_CONTACT_DELAY = 0.43
-const PLAYER_KICK_CONTACT_WINDOW = 0.16
-const PLAYER_KICK_RANGE = 1.05
-const PLAYER_KICK_FRONT_MIN = 0.08
-const PLAYER_KICK_LATERAL_RANGE = 0.55
-const PLAYER_KICK_FOOT_FORWARD_OFFSET = 0.46
-const PLAYER_KICK_FOOT_SIDE_OFFSET = 0.1
-const PLAYER_KICK_FOOT_CONTACT_RADIUS = 0.28
-const PLAYER_PUNCH_DURATION = 0.82
-const PLAYER_PUNCH_CONTACT_DELAY = 0.28
-const PLAYER_PUNCH_CONTACT_WINDOW = 0.14
-const PLAYER_PUNCH_DAMAGE = 10
-const PLAYER_PUNCH_COMBO_STEP = 5    // +dégâts par coup enchaîné
-const PLAYER_PUNCH_DAMAGE_MAX = 30   // plafond des dégâts de combo
-const PUNCH_COMBO_WINDOW = 2.0       // secondes max entre deux coups pour garder le combo
-const PLAYER_PUNCH_RANGE = 1.15
-const PLAYER_PUNCH_FRONT_MIN = 0.15
-const PLAYER_PUNCH_LATERAL_RANGE = 0.62
 const MAGIC_SKULL_LEARN_INTERACTION_DISTANCE = 1.65
 const MUSHROOM_ENEMY_ID = 'mushroom_enemy_01'
 const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
@@ -1004,109 +983,6 @@ function clampCameraInPlayableVolume(x, y, z, currentZone = ZONES.interior) {
   const clampedY = MathUtils.clamp(y, settings.minY, settings.maxY)
   const clampedZ = MathUtils.clamp(z, limits.minZ, zMax)
   return { x: clampedX, y: clampedY, z: clampedZ }
-}
-
-function intersectsAabbSphere(px, py, pz, radius, cx, cy, cz, hx, hy, hz) {
-  const dx = Math.max(Math.abs(px - cx) - hx, 0)
-  const dy = Math.max(Math.abs(py - cy) - hy, 0)
-  const dz = Math.max(Math.abs(pz - cz) - hz, 0)
-  return dx * dx + dy * dy + dz * dz <= radius * radius
-}
-
-function collidesWithGoalFrame(nextX, nextY, nextZ, goalObject) {
-  const goalX = goalObject?.position?.[0] ?? 0
-  const goalZ = goalObject?.position?.[2] ?? GOAL_Z
-  const goalRotationY = goalObject?.rotationY ?? 0
-  const dx = nextX - goalX
-  const dz = nextZ - goalZ
-  const cos = Math.cos(goalRotationY)
-  const sin = Math.sin(goalRotationY)
-  const localX = dx * cos - dz * sin
-  const localZ = dx * sin + dz * cos
-  const r = PLAYER_CAPSULE_RADIUS
-  const hitLeftPost = intersectsAabbSphere(localX, nextY, localZ, r, -1.5, 1, 0, 0.11, 1, 0.11)
-  const hitRightPost = intersectsAabbSphere(localX, nextY, localZ, r, 1.5, 1, 0, 0.11, 1, 0.11)
-  const hitCrossbar = intersectsAabbSphere(localX, nextY, localZ, r, 0, 2, 0, 1.58, 0.11, 0.11)
-  // Keep only frame collision for player to avoid "phantom blocks" inside the goal volume.
-  return hitLeftPost || hitRightPost || hitCrossbar
-}
-
-function getKickContact({ playerX, playerZ, yaw, ballX, ballZ }) {
-  const forwardX = Math.sin(yaw)
-  const forwardZ = Math.cos(yaw)
-  const rightX = Math.cos(yaw)
-  const rightZ = -Math.sin(yaw)
-  const dx = ballX - playerX
-  const dz = ballZ - playerZ
-  const forwardDistance = dx * forwardX + dz * forwardZ
-  const lateralDistance = dx * rightX + dz * rightZ
-  const footX =
-    playerX +
-    forwardX * PLAYER_KICK_FOOT_FORWARD_OFFSET +
-    rightX * PLAYER_KICK_FOOT_SIDE_OFFSET
-  const footZ =
-    playerZ +
-    forwardZ * PLAYER_KICK_FOOT_FORWARD_OFFSET +
-    rightZ * PLAYER_KICK_FOOT_SIDE_OFFSET
-  const distanceToFoot = Math.hypot(ballX - footX, ballZ - footZ)
-
-  return {
-    forwardX,
-    forwardZ,
-    isInKickArc:
-      forwardDistance > PLAYER_KICK_FRONT_MIN &&
-      forwardDistance < PLAYER_KICK_RANGE &&
-      Math.abs(lateralDistance) < PLAYER_KICK_LATERAL_RANGE,
-    isTouchingFoot: distanceToFoot < PLAYER_KICK_FOOT_CONTACT_RADIUS + BALL_RADIUS,
-  }
-}
-
-function getPunchContact({ playerX, playerZ, yaw, targetX, targetZ, targetRadius = 0.45 }) {
-  const forwardX = Math.sin(yaw)
-  const forwardZ = Math.cos(yaw)
-  const rightX = Math.cos(yaw)
-  const rightZ = -Math.sin(yaw)
-  const dx = targetX - playerX
-  const dz = targetZ - playerZ
-  const forwardDistance = dx * forwardX + dz * forwardZ
-  const lateralDistance = dx * rightX + dz * rightZ
-
-  return {
-    forwardX,
-    forwardZ,
-    forwardDistance,
-    lateralDistance,
-    isInPunchArc:
-      forwardDistance > PLAYER_PUNCH_FRONT_MIN &&
-      forwardDistance < PLAYER_PUNCH_RANGE + targetRadius &&
-      Math.abs(lateralDistance) < PLAYER_PUNCH_LATERAL_RANGE + targetRadius,
-  }
-}
-
-function getNearestPunchTarget({ targets, playerX, playerZ, yaw }) {
-  let nearest = null
-  let nearestDistance = Infinity
-
-  targets?.forEach((target) => {
-    if (!target || target.disabled) return
-    const position = target.position
-    if (!position) return
-
-    const contact = getPunchContact({
-      playerX,
-      playerZ,
-      yaw,
-      targetX: position.x,
-      targetZ: position.z,
-      targetRadius: target.radius,
-    })
-
-    if (!contact.isInPunchArc || contact.forwardDistance >= nearestDistance) return
-    nearestDistance = contact.forwardDistance
-    nearest = { target, contact }
-  })
-
-  return nearest
 }
 
 function useCombatActionsAvailability(actionsRef) {
@@ -9497,7 +9373,7 @@ function SmallMushroomEnemy({
         stateRef.current = 'return'
         attackRef.current = null
         closeAlertTimerRef.current = 0
-        setMotionIfChanged('walk')
+        setMotion('walk')
       }
     } else {
       if (leashTimerRef.current > 0) leashTimerRef.current = Math.max(0, leashTimerRef.current - delta)
@@ -9531,7 +9407,7 @@ function SmallMushroomEnemy({
       if (!wanderTarget || tooFarFromSpawn) {
         stateRef.current = 'return'
         wanderTargetRef.current = null
-        setMotionIfChanged('walk')
+        setMotion('walk')
       } else {
         const distanceToTarget = moveMushroomEnemyToward(enemyPosition, wanderTarget, cfg.wanderSpeed, delta, 0, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
         if (distanceToTarget <= cfg.wanderReachedDistance) {
@@ -9551,7 +9427,7 @@ function SmallMushroomEnemy({
         if (distanceToTarget - cfg.stopDistance > 0.001) {
           moveMushroomEnemyToward(enemyPosition, aggroPosition, cfg.chaseSpeed, delta, cfg.stopDistance, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
         }
-        setMotionIfChanged('walk')
+        setMotion('walk')
       } else {
         stateRef.current = 'attack'
         setMotion('idle')
@@ -9575,7 +9451,7 @@ function SmallMushroomEnemy({
         setMotion('idle')
       } else {
         moveMushroomEnemyToward(enemyPosition, { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] }, cfg.returnSpeed, delta, 0, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
-        setMotionIfChanged('walk')
+        setMotion('walk')
       }
     }
 
