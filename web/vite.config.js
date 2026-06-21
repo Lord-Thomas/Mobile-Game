@@ -133,6 +133,8 @@ function saveThumbnailPlugin() {
                     ? area.groundColors.coldShadow
                     : '#293331',
                 },
+                source: area.source === 'paint' ? 'paint' : 'authored',
+                ambient: area.ambient === false ? false : true,
               }
             })
             const source = [

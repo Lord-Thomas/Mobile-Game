@@ -155,10 +155,38 @@ const MODES = [
   { id: 'map', label: 'Map' },
 ]
 
+const MAX_BIOME_PAINT_STAMPS = 64
+
+function createInitialBiomeBrush() {
+  const area = normalizeBiomeArea({
+    biome: 'graveyard',
+    radius: 8,
+    feather: 4,
+    groundIntensity: 1,
+    fogIntensity: 0.72,
+    particleIntensity: 0,
+    source: 'paint',
+    ambient: false,
+  })
+
+  return {
+    active: false,
+    mode: 'paint',
+    biome: area.biome,
+    radius: area.radius,
+    feather: area.feather,
+    groundIntensity: area.groundIntensity,
+    fogIntensity: area.fogIntensity,
+    particleIntensity: area.particleIntensity,
+    groundColors: area.groundColors,
+  }
+}
+
 function useMapEditorState() {
   const [objects, setObjects] = useState(() => MAP_OBJECT_PLACEMENTS.map(normalizeMapObjectPlacement))
   const [spawners, setSpawners] = useState(() => MAP_MONSTER_SPAWNERS.map(normalizeMonsterSpawner))
   const [biomes, setBiomes] = useState(() => MAP_BIOME_AREAS.map(normalizeBiomeArea))
+  const [biomeBrush, setBiomeBrush] = useState(createInitialBiomeBrush)
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
   const [selectedSpawnerId, setSelectedSpawnerId] = useState(null)
   const [selectedBiomeId, setSelectedBiomeId] = useState(null)
@@ -171,6 +199,7 @@ function useMapEditorState() {
     objects,
     spawners,
     biomes,
+    biomeBrush,
     selectedId,
     selectedSpawnerId,
     selectedBiomeId,
@@ -181,6 +210,7 @@ function useMapEditorState() {
     setObjects,
     setSpawners,
     setBiomes,
+    setBiomeBrush,
     setSelectedId,
     setSelectedSpawnerId,
     setSelectedBiomeId,
@@ -194,6 +224,7 @@ function useMapEditorState() {
 export default function Editor({ initialMode = 'tree' }) {
   const noPlayerRef = useRef({ x: 9999, y: 0, z: 9999 })
   const controlsRef = useRef(null)
+  const paintStampCounterRef = useRef(0)
   const mapEditor = useMapEditorState()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
 
@@ -254,6 +285,40 @@ export default function Editor({ initialMode = 'tree' }) {
     mapEditor.setMoveOriginal(null)
   }
 
+  const paintMapBiomeAt = (center, brush) => {
+    if (!brush || !Array.isArray(center)) return
+    const [x = 0, z = 0] = center
+
+    mapEditor.setBiomes((current) => {
+      if (brush.mode === 'erase') {
+        return current.filter((area) => {
+          if (area.source !== 'paint') return true
+          const [areaX, areaZ] = area.center
+          return Math.hypot(areaX - x, areaZ - z) > brush.radius + area.radius * 0.35
+        })
+      }
+
+      paintStampCounterRef.current += 1
+      const stamp = normalizeBiomeArea({
+        id: `${brush.biome}_paint_${Date.now().toString(36)}_${paintStampCounterRef.current}`,
+        biome: brush.biome,
+        center: [x, z],
+        radius: MathUtils.clamp(brush.radius, 2, 36),
+        feather: MathUtils.clamp(brush.feather, 0.5, Math.max(0.5, brush.radius - 0.1)),
+        groundIntensity: MathUtils.clamp(brush.groundIntensity, 0, 1),
+        fogIntensity: MathUtils.clamp(brush.fogIntensity, 0, 1),
+        particleIntensity: MathUtils.clamp(brush.particleIntensity ?? 0, 0, 1),
+        groundColors: brush.groundColors,
+        source: 'paint',
+        ambient: false,
+      }, current.length)
+      const next = [...current, stamp]
+      const authoredAreas = next.filter((area) => area.source !== 'paint')
+      const paintAreas = next.filter((area) => area.source === 'paint').slice(-MAX_BIOME_PAINT_STAMPS)
+      return [...authoredAreas, ...paintAreas]
+    })
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
       <Canvas
@@ -309,6 +374,8 @@ export default function Editor({ initialMode = 'tree' }) {
                     area.id === id ? normalizeBiomeArea({ ...area, center }) : area
                   )))
                 }}
+                biomeBrush={mapEditor.biomeBrush}
+                onPaintBiome={paintMapBiomeAt}
               />
             )}
           </EditorStage>
@@ -365,6 +432,7 @@ export default function Editor({ initialMode = 'tree' }) {
           selectedBiomeId={mapEditor.selectedBiomeId}
           movingId={mapEditor.movingId}
           cameraView={mapEditor.cameraView}
+          biomeBrush={mapEditor.biomeBrush}
           onObjectsChange={(nextObjects) => {
             mapEditor.setObjects(nextObjects)
             if (mapEditor.selectedId && !nextObjects.some((object) => object.id === mapEditor.selectedId)) {
@@ -380,6 +448,7 @@ export default function Editor({ initialMode = 'tree' }) {
           onConfirmMove={confirmMapMove}
           onCancelMove={cancelMapMove}
           onCameraViewChange={mapEditor.setCameraView}
+          onBiomeBrushChange={mapEditor.setBiomeBrush}
         />
       )}
     </div>

@@ -289,7 +289,7 @@ function GraveyardAmbience({ area }) {
 }
 
 export default function BiomeAmbientEffects({ areas = MAP_BIOME_AREAS }) {
-  const graveyardAreas = areas.filter((area) => area.biome === 'graveyard')
+  const graveyardAreas = areas.filter((area) => area.biome === 'graveyard' && area.ambient !== false)
 
   return (
     <group userData={{ debugCategory: 'biome-ambient-effects' }}>

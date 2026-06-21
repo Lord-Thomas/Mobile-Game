@@ -39,6 +39,7 @@ const MAP_ZOOM_MAX = 130
 const MAP_CAMERA_HEIGHT = 140
 const MAP_CAMERA_FAR = 600
 const MAP_PAN_BOUND = OUTDOOR_HALF_SIZE
+const BIOME_BRUSH_PAINT_SPACING = 0.42
 
 function snap(value, gridSize = MAP_GRID_SIZE) {
   return Math.round(value / gridSize) * gridSize
@@ -93,6 +94,8 @@ function createBiomeArea(biome, existingCount) {
     groundIntensity: 1,
     fogIntensity: 0.62,
     particleIntensity: 0.78,
+    source: 'authored',
+    ambient: true,
   }, existingCount)
 }
 
@@ -136,6 +139,8 @@ function toSavedBiomes(biomes) {
       fogIntensity: normalized.fogIntensity,
       particleIntensity: normalized.particleIntensity,
       groundColors: normalized.groundColors,
+      source: normalized.source,
+      ambient: normalized.ambient,
     }
   })
 }
@@ -219,24 +224,28 @@ function BiomeAreaMarkers({
   onBiomePointerDown,
   onBiomePointerMove,
   onBiomePointerUp,
+  interactive = true,
 }) {
   return (
     <group userData={{ debugCategory: 'biome-areas' }}>
-      {biomes.map((area) => {
+      {biomes.filter((area) => area.source !== 'paint').map((area) => {
         const [x, z] = area.center
         const y = getTerrainHeight(x, z)
         const selected = area.id === selectedBiomeId
         const color = BIOME_TYPES[area.biome]?.color ?? '#83d8c4'
         const label = BIOME_TYPES[area.biome]?.name ?? area.biome
+        const pointerHandlers = interactive ? {
+          onPointerDown: (event) => onBiomePointerDown?.(area.id, event),
+          onPointerMove: (event) => onBiomePointerMove?.(area.id, event),
+          onPointerUp: (event) => onBiomePointerUp?.(area.id, event),
+          onPointerCancel: (event) => onBiomePointerUp?.(area.id, event),
+        } : {}
 
         return (
           <group key={area.id} position={[x, y + 0.1, z]}>
             <mesh
               rotation={[-Math.PI / 2, 0, 0]}
-              onPointerDown={(event) => onBiomePointerDown?.(area.id, event)}
-              onPointerMove={(event) => onBiomePointerMove?.(area.id, event)}
-              onPointerUp={(event) => onBiomePointerUp?.(area.id, event)}
-              onPointerCancel={(event) => onBiomePointerUp?.(area.id, event)}
+              {...pointerHandlers}
             >
               <circleGeometry args={[area.radius, 96]} />
               <meshBasicMaterial color={color} transparent opacity={selected ? 0.16 : 0.07} depthWrite={false} />
@@ -253,10 +262,7 @@ function BiomeAreaMarkers({
             )}
             <mesh
               position={[0, 0.45, 0]}
-              onPointerDown={(event) => onBiomePointerDown?.(area.id, event)}
-              onPointerMove={(event) => onBiomePointerMove?.(area.id, event)}
-              onPointerUp={(event) => onBiomePointerUp?.(area.id, event)}
-              onPointerCancel={(event) => onBiomePointerUp?.(area.id, event)}
+              {...pointerHandlers}
             >
               <sphereGeometry args={[selected ? 0.34 : 0.25, 18, 12]} />
               <meshBasicMaterial color={selected ? '#ffd447' : color} transparent opacity={0.96} depthWrite={false} />
@@ -279,6 +285,36 @@ function BiomeAreaMarkers({
           </group>
         )
       })}
+    </group>
+  )
+}
+
+function BiomeBrushPreview({ brush, point }) {
+  if (!brush?.active || !point) return null
+
+  const [x, z] = point
+  const y = getTerrainHeight(x, z)
+  const color = brush.mode === 'erase'
+    ? '#ff9c82'
+    : BIOME_TYPES[brush.biome]?.color ?? '#83d8c4'
+  const innerRadius = Math.max(0.08, brush.radius - brush.feather)
+
+  return (
+    <group position={[x, y + 0.17, z]} userData={{ debugCategory: 'biome-brush-preview' }}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={24}>
+        <circleGeometry args={[brush.radius, 96]} />
+        <meshBasicMaterial color={color} transparent opacity={0.075} depthWrite={false} depthTest={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={25}>
+        <ringGeometry args={[Math.max(0.08, brush.radius - 0.14), brush.radius, 96]} />
+        <meshBasicMaterial color={color} transparent opacity={0.92} depthWrite={false} depthTest={false} />
+      </mesh>
+      {brush.feather > 0.2 && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.024, 0]} renderOrder={26}>
+          <ringGeometry args={[innerRadius, innerRadius + 0.09, 96]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.45} depthWrite={false} depthTest={false} />
+        </mesh>
+      )}
     </group>
   )
 }
@@ -411,6 +447,8 @@ export function MapEditorScene({
   onMove,
   onMoveSpawner,
   onMoveBiome,
+  biomeBrush,
+  onPaintBiome,
 }) {
   // Ported from the in-game room editor (CustomizationCamera + EditableFloor):
   //  - a top-down ortho camera that never follows the selection,
@@ -425,6 +463,9 @@ export function MapEditorScene({
   const panRef = useRef(null)
   const spawnerDragRef = useRef(null)
   const biomeDragRef = useRef(null)
+  const brushPaintingRef = useRef(false)
+  const lastBrushPointRef = useRef(null)
+  const [brushPreviewPoint, setBrushPreviewPoint] = useState(null)
   const isTopView = cameraView === 'top'
 
   // Raycast the ground ourselves from clientX/clientY instead of trusting
@@ -464,6 +505,24 @@ export function MapEditorScene({
     if (!id || !point) return
     const [x, z] = clampMapPosition(point.x, point.z)
     onMoveBiome?.(id, [x, z])
+  }
+
+  const previewBrushAtPoint = (point) => {
+    if (!biomeBrush?.active || !isTopView || !point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    setBrushPreviewPoint([x, z])
+  }
+
+  const paintBiomeAtPoint = (point, force = false) => {
+    if (!biomeBrush?.active || !isTopView || !point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    const last = lastBrushPointRef.current
+    const spacing = Math.max(0.7, biomeBrush.radius * BIOME_BRUSH_PAINT_SPACING)
+    if (!force && last && Math.hypot(x - last[0], z - last[1]) < spacing) return
+
+    lastBrushPointRef.current = [x, z]
+    setBrushPreviewPoint([x, z])
+    onPaintBiome?.([x, z], biomeBrush)
   }
 
   const handleSpawnerPointerDown = (id, event) => {
@@ -522,12 +581,32 @@ export function MapEditorScene({
           if (draggingId || movingId) return
           if (spawnerDragRef.current) return
           if (biomeDragRef.current) return
+          if (biomeBrush?.active && isTopView) {
+            event.stopPropagation()
+            onSelect(null)
+            onSelectSpawner?.(null)
+            onSelectBiome?.(null)
+            brushPaintingRef.current = true
+            lastBrushPointRef.current = null
+            paintBiomeAtPoint(groundPointFromEvent(event), true)
+            event.target?.setPointerCapture?.(event.pointerId)
+            return
+          }
           onSelect(null)
           onSelectSpawner?.(null)
           onSelectBiome?.(null)
           if (isTopView) panRef.current = { x: event.clientX, y: event.clientY }
         }}
         onPointerMove={(event) => {
+          if (biomeBrush?.active && isTopView && !draggingId && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
+            const point = groundPointFromEvent(event)
+            previewBrushAtPoint(point)
+            if (brushPaintingRef.current) {
+              event.stopPropagation()
+              paintBiomeAtPoint(point)
+              return
+            }
+          }
           if (draggingId) {
             // Active object drag: follow the cursor (deterministic ground point).
             event.stopPropagation()
@@ -562,6 +641,13 @@ export function MapEditorScene({
           moveToPoint(movingId, groundPointFromEvent(event))
         }}
         onPointerUp={(event) => {
+          if (brushPaintingRef.current) {
+            brushPaintingRef.current = false
+            lastBrushPointRef.current = null
+            event.target?.releasePointerCapture?.(event.pointerId)
+            event.stopPropagation()
+            return
+          }
           panRef.current = null
           spawnerDragRef.current = null
           biomeDragRef.current = null
@@ -573,6 +659,8 @@ export function MapEditorScene({
           panRef.current = null
           spawnerDragRef.current = null
           biomeDragRef.current = null
+          brushPaintingRef.current = false
+          lastBrushPointRef.current = null
           if (draggingId) onStopDragging()
           else if (!movingId) {
             onSelect(null)
@@ -584,6 +672,7 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
+      <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
       <TerrainFollowingGrid />
       <MonsterSpawnerMarkers
         spawners={spawners}
@@ -598,6 +687,7 @@ export function MapEditorScene({
         onBiomePointerDown={handleBiomePointerDown}
         onBiomePointerMove={handleBiomePointerMove}
         onBiomePointerUp={handleBiomePointerUp}
+        interactive={!biomeBrush?.active}
       />
       <MapObjectPlaceables
         objects={objects}
@@ -628,6 +718,8 @@ export function MapEditorPanel({
   onConfirmMove,
   onCancelMove,
   onCameraViewChange,
+  biomeBrush,
+  onBiomeBrushChange,
 }) {
   const [objectId, setObjectId] = useState(MAP_OBJECT_LIBRARY[0])
   const [spawnerType, setSpawnerType] = useState(MONSTER_SPAWNER_TYPE_IDS[0])
@@ -637,6 +729,8 @@ export function MapEditorPanel({
   const selected = objects.find((object) => object.id === selectedId) ?? null
   const selectedSpawner = spawners.find((spawner) => spawner.id === selectedSpawnerId) ?? null
   const selectedBiome = biomes.find((area) => area.id === selectedBiomeId) ?? null
+  const editableBiomes = useMemo(() => biomes.filter((area) => area.source !== 'paint'), [biomes])
+  const paintedBiomeCount = biomes.length - editableBiomes.length
   const options = useMemo(() => MAP_OBJECT_LIBRARY.map((id) => ({
     value: id,
     label: MAP_OBJECT_CATALOG[id]?.name ?? id,
@@ -669,6 +763,17 @@ export function MapEditorPanel({
     onBiomesChange(biomes.map((area) => (
       area.id === selectedBiome.id ? normalizeBiomeArea({ ...area, ...patch }) : area
     )))
+  }
+
+  const patchBiomeBrush = (patch) => {
+    if (!biomeBrush) return
+    onBiomeBrushChange?.({
+      ...biomeBrush,
+      ...patch,
+      feather: patch.radius !== undefined
+        ? Math.min(biomeBrush.feather, Math.max(0.5, patch.radius - 0.1))
+        : patch.feather ?? biomeBrush.feather,
+    })
   }
 
   const addObject = () => {
@@ -722,6 +827,11 @@ export function MapEditorPanel({
     if (!selectedBiome) return
     onBiomesChange(biomes.filter((area) => area.id !== selectedBiome.id))
     onSelectBiome(null)
+  }
+
+  const clearPaintedBiomes = () => {
+    onBiomesChange(biomes.filter((area) => area.source !== 'paint'))
+    setMessage('Peinture biome effacee.')
   }
 
   const saveObjects = async () => {
@@ -806,9 +916,68 @@ export function MapEditorPanel({
         <button type="button" style={styles.primaryButton} onClick={addBiome}>
           Ajouter biome
         </button>
-        {biomes.length ? (
+        {biomeBrush && (
+          <div style={styles.subcard}>
+            <strong>Pinceau biome</strong>
+            <div style={styles.actions}>
+              <button
+                type="button"
+                style={biomeBrush.active ? styles.primaryButton : styles.secondaryButton}
+                onClick={() => patchBiomeBrush({ active: !biomeBrush.active })}
+              >
+                {biomeBrush.active ? 'Pinceau actif' : 'Activer'}
+              </button>
+              <button
+                type="button"
+                style={biomeBrush.mode === 'erase' ? styles.dangerButton : styles.secondaryButton}
+                onClick={() => patchBiomeBrush({ mode: biomeBrush.mode === 'paint' ? 'erase' : 'paint' })}
+              >
+                {biomeBrush.mode === 'paint' ? 'Peindre' : 'Effacer'}
+              </button>
+            </div>
+            <SelectField label="Biome peint" value={biomeBrush.biome} options={biomeTypeOptions} onChange={(biome) => patchBiomeBrush({ biome })} />
+            <SliderField
+              label="Rayon pinceau"
+              value={biomeBrush.radius}
+              min={2}
+              max={36}
+              step={0.5}
+              onChange={(radius) => patchBiomeBrush({ radius })}
+            />
+            <SliderField
+              label="Transition"
+              value={biomeBrush.feather}
+              min={0.5}
+              max={Math.max(0.5, biomeBrush.radius - 0.1)}
+              step={0.5}
+              onChange={(feather) => patchBiomeBrush({ feather })}
+            />
+            <SliderField
+              label="Sol mort"
+              value={biomeBrush.groundIntensity}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(groundIntensity) => patchBiomeBrush({ groundIntensity })}
+            />
+            <SliderField
+              label="Brume"
+              value={biomeBrush.fogIntensity}
+              min={0}
+              max={1}
+              step={0.01}
+              onChange={(fogIntensity) => patchBiomeBrush({ fogIntensity })}
+            />
+            <div style={styles.actions}>
+              <button type="button" style={styles.secondaryButton} onClick={clearPaintedBiomes} disabled={!paintedBiomeCount}>
+                Effacer peinture ({paintedBiomeCount})
+              </button>
+            </div>
+          </div>
+        )}
+        {editableBiomes.length ? (
           <div style={styles.libraryList}>
-            {biomes.map((area, index) => {
+            {editableBiomes.map((area, index) => {
               const isSelected = area.id === selectedBiomeId
               const typeLabel = BIOME_TYPES[area.biome]?.name ?? area.biome
 

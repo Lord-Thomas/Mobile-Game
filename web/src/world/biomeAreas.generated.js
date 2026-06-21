@@ -17,6 +17,8 @@ export const MAP_BIOME_AREAS = [
       "ash": "#2c2e29",
       "boneDust": "#7a7566",
       "coldShadow": "#121716"
-    }
+    },
+    "source": "authored",
+    "ambient": true
   }
 ]

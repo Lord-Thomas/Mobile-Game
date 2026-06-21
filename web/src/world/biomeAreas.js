@@ -10,7 +10,7 @@ export const BIOME_TYPES = {
 }
 
 export const BIOME_TYPE_IDS = Object.keys(BIOME_TYPES)
-export const BIOME_SHADER_MAX_AREAS = 8
+export const BIOME_SHADER_MAX_AREAS = 64
 const DEFAULT_GRAVEYARD_GROUND_COLORS = {
   darkSoil: '#2e261f',
   dryClay: '#595046',
@@ -105,6 +105,8 @@ export function normalizeBiomeArea(area, index = 0) {
     fogIntensity: clamp01(asFiniteNumber(area?.fogIntensity, 0.5)),
     particleIntensity: clamp01(asFiniteNumber(area?.particleIntensity, 0.65)),
     groundColors: normalizeGroundColors(area?.groundColors),
+    source: area?.source === 'paint' ? 'paint' : 'authored',
+    ambient: area?.ambient === false ? false : true,
   }
 }
 
