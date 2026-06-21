@@ -110,7 +110,7 @@ export function MapObjectInstance({
 }) {
   const [x, savedY, z] = placement.position ?? [0, 0, 0]
   const terrainY = getTerrainHeight(x, z)
-  const y = Number.isFinite(savedY) ? Math.max(savedY, terrainY) : terrainY
+  const y = Number.isFinite(savedY) ? savedY : terrainY
 
   return (
     <group

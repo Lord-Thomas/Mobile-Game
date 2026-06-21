@@ -1,13 +1,28 @@
-import { MAP_OBJECT_PLACEMENTS } from './mapObjects'
+import { MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './mapObjects'
 import { SKELETON_TOWER_COLLISION } from './mapObjectCollisionData.generated'
 import { getTerrainHeight } from './terrain/terrainGeometry'
+
+const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
+const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
+const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
 
 const COLLISION_BY_OBJECT_ID = {
   skeleton_tower: SKELETON_TOWER_COLLISION,
 }
 
 const MAX_STEP_UP = 0.58
+const STEP_UP_BY_OBJECT_ID = {
+  skeleton_tower: 1.08,
+}
 const WALK_SEARCH_DOWN = 3.2
+const WALKABLE_TRIANGLE_TOLERANCE = 0.045
+const WALKABLE_SOLID_CLEARANCE = 0.2
+const LOW_SOLID_STEP_CLEARANCE_BY_OBJECT_ID = {
+  skeleton_tower: 0.42,
+}
+const WALKABLE_SOLID_IGNORE_LOCAL_RADIUS_BY_OBJECT_ID = {
+  skeleton_tower: 2.18,
+}
 const PLAYER_STANDING_HEIGHT = 1.72
 const PLAYER_KNEE_HEIGHT = 0.18
 
@@ -17,11 +32,80 @@ function getCollisionSource(objectId) {
   return COLLISION_BY_OBJECT_ID[objectId] ?? null
 }
 
-function buildCache(source) {
-  const vertices = new Float32Array(source.vertices)
+function getObjectTargetHeight(objectId) {
+  const targetHeightMeters = MAP_OBJECT_CATALOG[objectId]?.targetHeightMeters
+  return Number.isFinite(targetHeightMeters) && targetHeightMeters > 0
+    ? targetHeightMeters * WORLD_UNITS_PER_METER
+    : 0
+}
+
+function normalizeVertex(x, y, z, transform) {
+  return [
+    (x - transform.centerX) * transform.scale,
+    (y - transform.minY) * transform.scale,
+    (z - transform.centerZ) * transform.scale,
+  ]
+}
+
+function normalizeTriangleList(triangles, transform) {
+  const normalized = new Float32Array(triangles.length)
+
+  for (let index = 0; index < triangles.length; index += 12) {
+    for (let vertex = 0; vertex < 3; vertex += 1) {
+      const sourceIndex = index + vertex * 3
+      const [x, y, z] = normalizeVertex(
+        triangles[sourceIndex],
+        triangles[sourceIndex + 1],
+        triangles[sourceIndex + 2],
+        transform,
+      )
+      normalized[sourceIndex] = x
+      normalized[sourceIndex + 1] = y
+      normalized[sourceIndex + 2] = z
+    }
+
+    normalized[index + 9] = triangles[index + 9] ?? 0
+    normalized[index + 10] = triangles[index + 10] ?? 0
+    normalized[index + 11] = triangles[index + 11] ?? 0
+  }
+
+  return normalized
+}
+
+function buildCache(objectId, source) {
+  const rawVertices = source.vertices
   const indices = new Uint32Array(source.indices)
-  const walkTriangles = source.walkTriangles
-  const solidTriangles = source.solidTriangles
+  const rawBounds = {
+    minX: Infinity,
+    maxX: -Infinity,
+    minY: Infinity,
+    maxY: -Infinity,
+    minZ: Infinity,
+    maxZ: -Infinity,
+  }
+
+  for (let index = 0; index < rawVertices.length; index += 3) {
+    const x = rawVertices[index]
+    const y = rawVertices[index + 1]
+    const z = rawVertices[index + 2]
+    rawBounds.minX = Math.min(rawBounds.minX, x)
+    rawBounds.maxX = Math.max(rawBounds.maxX, x)
+    rawBounds.minY = Math.min(rawBounds.minY, y)
+    rawBounds.maxY = Math.max(rawBounds.maxY, y)
+    rawBounds.minZ = Math.min(rawBounds.minZ, z)
+    rawBounds.maxZ = Math.max(rawBounds.maxZ, z)
+  }
+
+  const rawHeight = Math.max(0.001, rawBounds.maxY - rawBounds.minY)
+  const targetHeight = getObjectTargetHeight(objectId)
+  const modelScale = targetHeight > 0 ? targetHeight / rawHeight : 1
+  const transform = {
+    centerX: (rawBounds.minX + rawBounds.maxX) * 0.5,
+    centerZ: (rawBounds.minZ + rawBounds.maxZ) * 0.5,
+    minY: rawBounds.minY,
+    scale: modelScale,
+  }
+  const vertices = new Float32Array(rawVertices.length)
   const bounds = {
     minX: Infinity,
     maxX: -Infinity,
@@ -31,10 +115,16 @@ function buildCache(source) {
     maxZ: -Infinity,
   }
 
-  for (let index = 0; index < vertices.length; index += 3) {
-    const x = vertices[index]
-    const y = vertices[index + 1]
-    const z = vertices[index + 2]
+  for (let index = 0; index < rawVertices.length; index += 3) {
+    const [x, y, z] = normalizeVertex(
+      rawVertices[index],
+      rawVertices[index + 1],
+      rawVertices[index + 2],
+      transform,
+    )
+    vertices[index] = x
+    vertices[index + 1] = y
+    vertices[index + 2] = z
     bounds.minX = Math.min(bounds.minX, x)
     bounds.maxX = Math.max(bounds.maxX, x)
     bounds.minY = Math.min(bounds.minY, y)
@@ -46,8 +136,8 @@ function buildCache(source) {
   return {
     vertices,
     indices,
-    walkTriangles,
-    solidTriangles,
+    walkTriangles: normalizeTriangleList(source.walkTriangles, transform),
+    solidTriangles: normalizeTriangleList(source.solidTriangles, transform),
     bounds,
   }
 }
@@ -59,7 +149,7 @@ export function getMapObjectCollisionData(objectId) {
   const cached = collisionCache.get(source)
   if (cached) return cached
 
-  const next = buildCache(source)
+  const next = buildCache(objectId, source)
   collisionCache.set(source, next)
   return next
 }
@@ -67,7 +157,7 @@ export function getMapObjectCollisionData(objectId) {
 export function getMapObjectBaseY(placement) {
   const [x = 0, savedY = 0, z = 0] = placement.position ?? []
   const terrainY = getTerrainHeight(x, z)
-  return Number.isFinite(savedY) ? Math.max(savedY, terrainY) : terrainY
+  return Number.isFinite(savedY) ? savedY : terrainY
 }
 
 function worldToLocalXZ(x, z, placement) {
@@ -76,8 +166,8 @@ function worldToLocalXZ(x, z, placement) {
   const rotationY = placement.rotationY ?? 0
   const dx = x - px
   const dz = z - pz
-  const cos = Math.cos(-rotationY)
-  const sin = Math.sin(-rotationY)
+  const cos = Math.cos(rotationY)
+  const sin = Math.sin(rotationY)
 
   return {
     x: (dx * cos - dz * sin) / scale,
@@ -122,6 +212,23 @@ function getBarycentricYOnTriangleXZ(x, z, ax, ay, az, bx, by, bz, cx, cy, cz) {
   return ay * u + by * v + cy * w
 }
 
+function getPlacementMaxStepUp(placement) {
+  return STEP_UP_BY_OBJECT_ID[placement.objectId] ?? MAX_STEP_UP
+}
+
+function shouldIgnoreWalkableSolid(placement, localX, localZ, footY, x, z) {
+  const ignoreRadius = WALKABLE_SOLID_IGNORE_LOCAL_RADIUS_BY_OBJECT_ID[placement.objectId]
+  if (!ignoreRadius || Math.hypot(localX, localZ) > ignoreRadius) return false
+
+  const walkableY = getPlacementWalkableHeight(placement, x, z, footY)
+  return walkableY !== null && Math.abs(walkableY - footY) <= WALKABLE_SOLID_CLEARANCE
+}
+
+function shouldIgnoreLowStepSolid(placement, localBottom, triMaxY) {
+  const clearance = LOW_SOLID_STEP_CLEARANCE_BY_OBJECT_ID[placement.objectId]
+  return Number.isFinite(clearance) && triMaxY <= localBottom + clearance
+}
+
 function distanceSqToSegmentXZ(px, pz, ax, az, bx, bz) {
   const abx = bx - ax
   const abz = bz - az
@@ -142,10 +249,10 @@ function getPlacementWalkableHeight(placement, x, z, currentFootY) {
   if (!data) return null
 
   const { x: localX, z: localZ, scale } = worldToLocalXZ(x, z, placement)
-  if (!isInsideLocalBounds(localX, localZ, data)) return null
+  if (!isInsideLocalBounds(localX, localZ, data, WALKABLE_TRIANGLE_TOLERANCE)) return null
 
   const baseY = getMapObjectBaseY(placement)
-  const maxLocalY = (currentFootY + MAX_STEP_UP - baseY) / scale
+  const maxLocalY = (currentFootY + getPlacementMaxStepUp(placement) - baseY) / scale
   const minLocalY = (currentFootY - WALK_SEARCH_DOWN - baseY) / scale
   let bestY = -Infinity
   const triangles = data.walkTriangles
@@ -165,7 +272,12 @@ function getPlacementWalkableHeight(placement, x, z, currentFootY) {
     const triMinZ = Math.min(az, bz, cz)
     const triMaxZ = Math.max(az, bz, cz)
 
-    if (localX < triMinX || localX > triMaxX || localZ < triMinZ || localZ > triMaxZ) continue
+    if (
+      localX < triMinX - WALKABLE_TRIANGLE_TOLERANCE ||
+      localX > triMaxX + WALKABLE_TRIANGLE_TOLERANCE ||
+      localZ < triMinZ - WALKABLE_TRIANGLE_TOLERANCE ||
+      localZ > triMaxZ + WALKABLE_TRIANGLE_TOLERANCE
+    ) continue
 
     const y = getBarycentricYOnTriangleXZ(localX, localZ, ax, ay, az, bx, by, bz, cx, cy, cz)
     if (y === null || y > maxLocalY || y < minLocalY) continue
@@ -199,6 +311,7 @@ export function collidesWithMapObjectSolid(x, z, footY, radius, placements = MAP
     const { x: localX, z: localZ, scale } = worldToLocalXZ(x, z, placement)
     const localRadius = radius / scale
     if (!isInsideLocalBounds(localX, localZ, data, localRadius)) return false
+    if (shouldIgnoreWalkableSolid(placement, localX, localZ, footY, x, z)) return false
 
     const baseY = getMapObjectBaseY(placement)
     const localBottom = (footY + PLAYER_KNEE_HEIGHT - baseY) / scale
@@ -220,6 +333,7 @@ export function collidesWithMapObjectSolid(x, z, footY, radius, placements = MAP
       const triMaxY = Math.max(ay, by, cy)
 
       if (triMaxY < localBottom || triMinY > localTop) continue
+      if (shouldIgnoreLowStepSolid(placement, localBottom, triMaxY)) continue
 
       const triMinX = Math.min(ax, bx, cx) - localRadius
       const triMaxX = Math.max(ax, bx, cx) + localRadius

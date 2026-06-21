@@ -35,6 +35,8 @@ const BALL_RADIUS = 0.138
 const PLAYER_CAPSULE_HALF_HEIGHT = 0.2
 const PLAYER_CAPSULE_RADIUS = 0.22
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
+const PLAYER_GROUNDED_DROP_TO_FALL = 0.85
+const PLAYER_LEDGE_FALL_INITIAL_VELOCITY = -0.35
 const PLAYER_MODEL_SCALE = 0.0129
 const PLAYER_MODEL_VERTICAL_OFFSET = 0.1
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
@@ -169,6 +171,8 @@ const SKELETON_ENEMY_COUNT = 5
 const SKELETON_ENEMY_MAX_HP = 80          // réduit (150 était abusé)
 const SKELETON_ENEMY_REWARD_COINS = 40    // 0.5 pièce/PV : plus rentable que le champignon
 const SKELETON_ENEMY_ATTACK_DAMAGE = 25
+const MOB_GROUNDED_DROP_TO_FALL = 1.25
+const MOB_TARGET_VERTICAL_WEIGHT = 1.1
 
 // ── Config système ─────────────────────────────────────────────────────────────
 // Ajouter un nouveau type de mob = créer une nouvelle entrée ici.
@@ -307,6 +311,7 @@ const PLAYER_STAND_UP_DURATION = 1.05
 const MOB_DEATH_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'mob_death')
 const HEAL_AURA_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'heal_aura')
 const INTERACTION_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'interaction')
+const EFFECT_WARMUP_FRAMES = 4
 const PLAYER_SITTING_HEIGHT = 0.34
 const SEAT_INTERACTION_DISTANCE = 1.1
 const EMOTE_LONG_PRESS_MS = 420
@@ -494,6 +499,12 @@ const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png
 const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
+const SKELETON_TOWER_CAMERA_ENTER_LOCAL_RADIUS = 2.22
+const SKELETON_TOWER_CAMERA_LOCAL_RADIUS = 2.03
+const SKELETON_TOWER_CAMERA_DISTANCE = 2.75
+const SKELETON_TOWER_CAMERA_HEIGHT = 1.05
+const SKELETON_TOWER_CAMERA_MIN_LOCAL_Y = 0.35
+const SKELETON_TOWER_CAMERA_TOP_MARGIN = 0.55
 const MAGIC_SKULL_DISCOVERY_POSITION = (() => {
   if (!MAGIC_SKULL_TOWER_PLACEMENT) return null
   const [x = 0, , z = 0] = MAGIC_SKULL_TOWER_PLACEMENT.position ?? []
@@ -502,6 +513,79 @@ const MAGIC_SKULL_DISCOVERY_POSITION = (() => {
     + (tower?.targetHeightMeters ?? 7.2) * WORLD_UNITS_PER_METER * (MAGIC_SKULL_TOWER_PLACEMENT.scale ?? 1)
   return [x, topY + 0.38, z]
 })()
+
+function getSkeletonTowerHeightWorld() {
+  const scale = MAGIC_SKULL_TOWER_PLACEMENT?.scale ?? 1
+  return (MAP_OBJECT_CATALOG.skeleton_tower?.targetHeightMeters ?? 7.2) * WORLD_UNITS_PER_METER * scale
+}
+
+function worldToSkeletonTowerLocal(x, y, z) {
+  if (!MAGIC_SKULL_TOWER_PLACEMENT) return null
+  const [px = 0, , pz = 0] = MAGIC_SKULL_TOWER_PLACEMENT.position ?? []
+  const baseY = getMapObjectBaseY(MAGIC_SKULL_TOWER_PLACEMENT)
+  const scale = MAGIC_SKULL_TOWER_PLACEMENT.scale ?? 1
+  const rotationY = MAGIC_SKULL_TOWER_PLACEMENT.rotationY ?? 0
+  const dx = x - px
+  const dz = z - pz
+  const cos = Math.cos(rotationY)
+  const sin = Math.sin(rotationY)
+
+  return {
+    x: (dx * cos - dz * sin) / scale,
+    y: (y - baseY) / scale,
+    z: (dx * sin + dz * cos) / scale,
+    baseY,
+    scale,
+    rotationY,
+    worldX: px,
+    worldZ: pz,
+  }
+}
+
+function skeletonTowerLocalToWorld(localX, localY, localZ, context) {
+  const cos = Math.cos(context.rotationY)
+  const sin = Math.sin(context.rotationY)
+  return {
+    x: context.worldX + (localX * cos + localZ * sin) * context.scale,
+    y: context.baseY + localY * context.scale,
+    z: context.worldZ + (-localX * sin + localZ * cos) * context.scale,
+  }
+}
+
+function getSkeletonTowerCameraContext(x, y, z) {
+  const local = worldToSkeletonTowerLocal(x, y, z)
+  if (!local) return null
+  const topLocalY = getSkeletonTowerHeightWorld() / local.scale
+  const radialDistance = Math.hypot(local.x, local.z)
+  const inside =
+    radialDistance <= SKELETON_TOWER_CAMERA_ENTER_LOCAL_RADIUS &&
+    local.y >= SKELETON_TOWER_CAMERA_MIN_LOCAL_Y &&
+    local.y <= topLocalY + SKELETON_TOWER_CAMERA_TOP_MARGIN
+
+  return inside ? { ...local, topLocalY } : null
+}
+
+function constrainCameraToSkeletonTower(x, y, z, context) {
+  const local = worldToSkeletonTowerLocal(x, y, z)
+  if (!local) return { x, y, z }
+  const radius = SKELETON_TOWER_CAMERA_LOCAL_RADIUS
+  const distance = Math.hypot(local.x, local.z)
+  let localX = local.x
+  let localZ = local.z
+
+  if (distance > radius) {
+    const inv = radius / distance
+    localX *= inv
+    localZ *= inv
+  }
+
+  return skeletonTowerLocalToWorld(
+    localX,
+    MathUtils.clamp(local.y, SKELETON_TOWER_CAMERA_MIN_LOCAL_Y, context.topLocalY + 0.25),
+    localZ,
+    context,
+  )
+}
 const CHARACTER_MATERIAL_COLOR_KEYS = {
   skin:          'skinColor',
   hair:          'hairColor',
@@ -4030,7 +4114,20 @@ function Player({
     const floorY = currentZone === ZONES.outside
       ? outdoorGroundY + PLAYER_HEIGHT
       : PLAYER_HEIGHT
-    let nextY = onGroundRef.current ? floorY : playerPosRef.current.y + velocityYRef.current * delta
+    const currentPlayerY = playerPosRef.current.y
+    const isSteppingOffLedge =
+      onGroundRef.current &&
+      currentZone === ZONES.outside &&
+      currentPlayerY - floorY > PLAYER_GROUNDED_DROP_TO_FALL
+
+    if (isSteppingOffLedge) {
+      onGroundRef.current = false
+      velocityYRef.current = Math.min(velocityYRef.current, PLAYER_LEDGE_FALL_INITIAL_VELOCITY)
+      jumpStartUntilRef.current = 0
+      landingPreparedRef.current = false
+    }
+
+    let nextY = onGroundRef.current ? floorY : currentPlayerY + velocityYRef.current * delta
     const distanceToGround = Math.max(0, nextY - floorY)
     const shouldPrepareLanding =
       !onGroundRef.current &&
@@ -4197,16 +4294,25 @@ function Player({
 
     const pitch = touch.cameraPitch
     const cameraSettings = CAMERA_SETTINGS[currentZone] ?? CAMERA_SETTINGS.interior
-    const cameraDistance = touch.cameraDistance ?? cameraSettings.distance
 
     const focusX = cameraOnCat && catPositionRef ? catPositionRef.current.x : nextX
     const focusY = cameraOnCat && catPositionRef ? catPositionRef.current.y : nextY
     const focusZ = cameraOnCat && catPositionRef ? catPositionRef.current.z : nextZ
     const lookHeight = cameraOnCat ? 0.3 : 0.55
+    const towerCameraContext = currentZone === ZONES.outside && !cameraOnCat
+      ? getSkeletonTowerCameraContext(focusX, focusY, focusZ)
+      : null
+    const effectivePitch = towerCameraContext
+      ? MathUtils.clamp(pitch, -0.52, 0.32)
+      : pitch
+    const cameraDistance = towerCameraContext
+      ? Math.min(touch.cameraDistance ?? cameraSettings.distance, SKELETON_TOWER_CAMERA_DISTANCE)
+      : touch.cameraDistance ?? cameraSettings.distance
+    const cameraHeight = towerCameraContext ? SKELETON_TOWER_CAMERA_HEIGHT : cameraSettings.height
 
-    const horizontalDistance = cameraDistance * Math.cos(pitch)
+    const horizontalDistance = cameraDistance * Math.cos(effectivePitch)
     const desiredX = focusX + Math.sin(yaw) * horizontalDistance
-    const desiredY = focusY + cameraSettings.height + Math.sin(pitch) * cameraDistance
+    const desiredY = focusY + cameraHeight + Math.sin(effectivePitch) * cameraDistance
     const desiredZ = focusZ + Math.cos(yaw) * horizontalDistance
 
     let targetX = desiredX
@@ -4261,10 +4367,18 @@ function Player({
       }
     }
 
+    if (towerCameraContext) {
+      const constrainedTarget = constrainCameraToSkeletonTower(targetX, targetY, targetZ, towerCameraContext)
+      targetX = constrainedTarget.x
+      targetY = constrainedTarget.y
+      targetZ = constrainedTarget.z
+    }
+
     const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ, currentZone)
-    camera.position.x = MathUtils.damp(camera.position.x, clampedTarget.x, 12, delta)
-    camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, 12, delta)
-    camera.position.z = MathUtils.damp(camera.position.z, clampedTarget.z, 12, delta)
+    const cameraDamping = towerCameraContext ? 20 : 12
+    camera.position.x = MathUtils.damp(camera.position.x, clampedTarget.x, cameraDamping, delta)
+    camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, cameraDamping, delta)
+    camera.position.z = MathUtils.damp(camera.position.z, clampedTarget.z, cameraDamping, delta)
 
     cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, focusX, 16, delta)
     cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, focusY + lookHeight, 16, delta)
@@ -8821,15 +8935,35 @@ function getMushroomEnemyWanderPoint(spawnPosition, seed) {
 // Angles de déflexion essayés en ordre quand le chemin direct est bloqué.
 // Le signe est multiplié par stuckDeflection (+1 ou -1) pour alterner gauche/droite
 // si le mob reste coincé longtemps.
+function getMobOutdoorFootY(x, z, currentFootY = getTerrainHeight(x, z)) {
+  return getOutdoorWalkableHeight(x, z, currentFootY)
+}
+
+function getMobTargetFootY(target, fallbackIsPlayer = false) {
+  if (!target?.position) return 0
+  const isPlayer = target.isPlayer ?? fallbackIsPlayer
+  return isPlayer ? target.position.y - PLAYER_HEIGHT : target.position.y
+}
+
+function getWeightedMobTargetDistance(enemyPosition, target, fallbackIsPlayer = false) {
+  if (!target?.position) return Infinity
+  const dx = target.position.x - enemyPosition.x
+  const dz = target.position.z - enemyPosition.z
+  const dy = getMobTargetFootY(target, fallbackIsPlayer) - enemyPosition.y
+  return Math.hypot(dx, dz, dy * MOB_TARGET_VERTICAL_WEIGHT)
+}
+
 const AVOIDANCE_ANGLES = [Math.PI / 6, Math.PI / 3, Math.PI / 2, (2 * Math.PI) / 3]
 
 function tryMoveAt(enemyPosition, dirX, dirZ, step) {
   const nx = enemyPosition.x + dirX * step
   const nz = enemyPosition.z + dirZ * step
-  if (collidesWithOutdoorObstacle(nx, nz)) return false
+  const nextY = getMobOutdoorFootY(nx, nz, enemyPosition.y)
+  if (enemyPosition.y - nextY > MOB_GROUNDED_DROP_TO_FALL) return false
+  if (collidesWithOutdoorObstacle(nx, nz, nextY)) return false
   enemyPosition.x = nx
   enemyPosition.z = nz
-  enemyPosition.y = getTerrainHeight(nx, nz)
+  enemyPosition.y = nextY
   return true
 }
 
@@ -8922,20 +9056,33 @@ function RuntimeParticleEffect({
 
 function PlayerHealingAura({ active, playerPositionRef, layer }) {
   const groupRef = useRef()
+  const [warming, setWarming] = useState(true)
+  const warmupFramesRef = useRef(EFFECT_WARMUP_FRAMES)
 
   useFrame(() => {
+    if (!groupRef.current) return
+
+    if (!active && warming) {
+      groupRef.current.position.set(0, -500, 0)
+      warmupFramesRef.current -= 1
+      if (warmupFramesRef.current <= 0) setWarming(false)
+      return
+    }
+
     const position = playerPositionRef?.current
-    if (!groupRef.current || !position) return
+    if (!active || !position) {
+      groupRef.current.position.set(0, -500, 0)
+      return
+    }
+
     groupRef.current.position.set(position.x, position.y - PLAYER_HEIGHT, position.z)
   })
 
-  if (!active) return null
-
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} visible={active || warming}>
       <RuntimeParticleEffect
         preset={HEAL_AURA_PARTICLE_PRESET}
-        playing
+        playing={active || warming}
         loop
         layer={layer}
       />
@@ -9416,6 +9563,8 @@ function SmallMushroomEnemy({
       aggroPosition.x - enemyPosition.x,
       aggroPosition.z - enemyPosition.z,
     )
+    const effectiveAggroTarget = aggroTarget ?? { id: 'player', position: playerPosition, isPlayer: true }
+    const weightedDistanceToTarget = getWeightedMobTargetDistance(enemyPosition, effectiveAggroTarget)
     const distanceToSpawn = Math.hypot(enemyPosition.x - spawnPosition[0], enemyPosition.z - spawnPosition[2])
     const canAct = !attackRef.current
 
@@ -9454,13 +9603,13 @@ function SmallMushroomEnemy({
         stateRef.current = 'return'
         attackRef.current = null
         closeAlertTimerRef.current = 0
-        setMotion('walk')
+        setMotionIfChanged('walk')
       }
     } else {
       if (leashTimerRef.current > 0) leashTimerRef.current = Math.max(0, leashTimerRef.current - delta)
     }
 
-    if (stateRef.current === 'attack' && canAct && distanceToTarget > cfg.attackRange) {
+    if (stateRef.current === 'attack' && canAct && weightedDistanceToTarget > cfg.attackRange) {
       stateRef.current = 'chase'
     }
 
@@ -9488,7 +9637,7 @@ function SmallMushroomEnemy({
       if (!wanderTarget || tooFarFromSpawn) {
         stateRef.current = 'return'
         wanderTargetRef.current = null
-        setMotion('walk')
+        setMotionIfChanged('walk')
       } else {
         const distanceToTarget = moveMushroomEnemyToward(enemyPosition, wanderTarget, cfg.wanderSpeed, delta, 0, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
         if (distanceToTarget <= cfg.wanderReachedDistance) {
@@ -9504,11 +9653,11 @@ function SmallMushroomEnemy({
     }
 
     if (stateRef.current === 'chase' && canAct) {
-      if (distanceToTarget > cfg.attackRange) {
+      if (weightedDistanceToTarget > cfg.attackRange) {
         if (distanceToTarget - cfg.stopDistance > 0.001) {
           moveMushroomEnemyToward(enemyPosition, aggroPosition, cfg.chaseSpeed, delta, cfg.stopDistance, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
         }
-        setMotion('walk')
+        setMotionIfChanged('walk')
       } else {
         stateRef.current = 'attack'
         setMotion('idle')
@@ -9532,14 +9681,14 @@ function SmallMushroomEnemy({
         setMotion('idle')
       } else {
         moveMushroomEnemyToward(enemyPosition, { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] }, cfg.returnSpeed, delta, 0, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
-        setMotion('walk')
+        setMotionIfChanged('walk')
       }
     }
 
     if (
       stateRef.current === 'attack' &&
       !attackRef.current &&
-      distanceToTarget <= cfg.attackRange &&
+      weightedDistanceToTarget <= cfg.attackRange &&
       state.clock.elapsedTime >= nextAttackAtRef.current
     ) {
       attackRef.current = {
@@ -9576,6 +9725,8 @@ function SmallMushroomEnemy({
       }
     }
 
+    enemyPosition.y = getMobOutdoorFootY(enemyPosition.x, enemyPosition.z, enemyPosition.y)
+
     targetRef.current.position.x = enemyPosition.x
     targetRef.current.position.y = enemyPosition.y
     targetRef.current.position.z = enemyPosition.z
@@ -9589,7 +9740,8 @@ function SmallMushroomEnemy({
         aggroPosition.x - enemyPosition.x,
         aggroPosition.z - enemyPosition.z,
       )
-      if (currentDistance <= cfg.attackRange + 0.15) {
+      const currentWeightedDistance = getWeightedMobTargetDistance(enemyPosition, effectiveAggroTarget)
+      if (currentWeightedDistance <= cfg.attackRange + 0.15) {
         if (aggroTarget && !aggroTarget.isPlayer) {
           // Frappe un squelette invoqué (allié)
           aggroTarget.takeDamage?.({
@@ -9614,7 +9766,7 @@ function SmallMushroomEnemy({
     if (state.clock.elapsedTime >= attack.endsAt) {
       attackRef.current = null
       if (stateRef.current === 'attack') {
-        stateRef.current = distanceToTarget > cfg.attackRange ? 'chase' : 'attack'
+        stateRef.current = weightedDistanceToTarget > cfg.attackRange ? 'chase' : 'attack'
       }
       setMotion(stateRef.current === 'chase' ? 'walk' : 'idle')
     }
@@ -9708,7 +9860,7 @@ function SmallMushroomEnemy({
 // squelettes ennemis qui existent dès le chargement du monde).
 function SummonedSkeleton({
   index,
-  slot,
+  slotRef,
   playerPositionRef,
   combatTargetsRef,
   groupPositionsRef,
@@ -9727,21 +9879,28 @@ function SummonedSkeleton({
   const groupRef = useRef()
   const [hp, setHp] = useState(SUMMON_SKELETON_MAX_HP)
   const [motion, setMotion] = useState('idle')
+  const [isActiveVisual, setIsActiveVisual] = useState(false)
   const hpRef = useRef(SUMMON_SKELETON_MAX_HP)
   const expiredRef = useRef(false)
+  const activeVisualRef = useRef(false)
   const activeTokenRef = useRef(null)
   const nextAttackAtRef = useRef(0)
   const stuckTimerRef = useRef(0)
   const stuckDeflectionRef = useRef(1)
   const lastPositionRef = useRef({ x: 0, z: 0 })
   const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const setActiveVisual = useCallback((nextActive) => {
+    if (activeVisualRef.current === nextActive) return
+    activeVisualRef.current = nextActive
+    setIsActiveVisual(nextActive)
+  }, [])
 
   // Reçoit les dégâts des ennemis qui l'ont pris pour cible (aggro réelle).
   const takeAllyDamage = useCallback(({ damage = 0 }) => {
-    if (expiredRef.current || !slot) return
+    if (expiredRef.current || !slotRef?.current) return
     hpRef.current = Math.max(0, hpRef.current - damage)
     setHp(Math.ceil(hpRef.current))
-  }, [slot])
+  }, [slotRef])
 
   // Entrée partagée pour que les ennemis puissent le cibler/le frapper.
   const allyEntryRef = useRef({
@@ -9818,9 +9977,12 @@ function SummonedSkeleton({
       })
   }, [idle.animations, walk.animations, punch.animations, skeletonHipsRestHeight])
 
-  const { actions } = useAnimations(animationClips, model.object)
+  const { actions, mixer } = useAnimations(animationClips, model.object)
   const currentActionRef = useRef(null)
   const currentMotionRef = useRef(null)
+  const setMotionIfChanged = useCallback((nextMotion) => {
+    setMotion((current) => (current === nextMotion ? current : nextMotion))
+  }, [])
 
   const playSummonMotion = useCallback((nextMotion) => {
     const nextAction = actions[nextMotion]
@@ -9841,14 +10003,22 @@ function SummonedSkeleton({
     currentMotionRef.current = nextMotion
   }, [actions])
 
+  useLayoutEffect(() => {
+    if (!actions.idle) return
+    playSummonMotion('idle')
+    mixer.update(1 / 30)
+  }, [actions.idle, mixer, playSummonMotion])
+
   const expire = useCallback(() => {
     if (expiredRef.current) return
     expiredRef.current = true
     groupPositionsRef?.current?.delete(index)
+    setActiveVisual(false)
     onExpire?.(index)
-  }, [index, onExpire, groupPositionsRef])
+  }, [index, onExpire, groupPositionsRef, setActiveVisual])
 
   useFrame((state, delta) => {
+    const slot = slotRef?.current ?? null
     if (currentMotionRef.current !== motion) playSummonMotion(motion)
 
     // ── Activation / réinitialisation sur nouveau slot ────────────────────────
@@ -9862,12 +10032,14 @@ function SummonedSkeleton({
         hpRef.current = SUMMON_SKELETON_MAX_HP
         setHp(SUMMON_SKELETON_MAX_HP)
         expiredRef.current = false
+        setActiveVisual(true)
         nextAttackAtRef.current = 0
       }
     }
 
     const active = Boolean(slot) && !expiredRef.current
     if (!active) {
+      setActiveVisual(false)
       allyEntryRef.current.disabled = true
       groupPositionsRef?.current?.delete(index)
       const g = groupRef.current
@@ -9898,7 +10070,7 @@ function SummonedSkeleton({
       if (preferredId) {
         const preferred = combatTargetsRef.current.get(preferredId)
         if (preferred?.position && !preferred.disabled) {
-          const d = Math.hypot(preferred.position.x - pos.x, preferred.position.z - pos.z)
+          const d = getWeightedMobTargetDistance(pos, preferred)
           if (d <= SUMMON_SKELETON_AGGRO_RANGE) {
             target = preferred
             targetDist = d
@@ -9914,7 +10086,7 @@ function SummonedSkeleton({
           pos, target.position, SUMMON_SKELETON_MOVE_SPEED, delta,
           SUMMON_SKELETON_ATTACK_RANGE * 0.8, stuckTimerRef, stuckDeflectionRef, lastPositionRef,
         )
-        setMotion('walk')
+        setMotionIfChanged('walk')
       } else {
         // En mêlée : on frappe l'ennemi (qui peut riposter via l'aggro réelle)
         if (state.clock.elapsedTime >= nextAttackAtRef.current) {
@@ -9927,21 +10099,21 @@ function SummonedSkeleton({
             direction: { x: dx / len, z: dz / len },
             attackerId: allyId,
           })
-          setMotion('punch')
-          window.setTimeout(() => setMotion('idle'), 360)
+          setMotionIfChanged('punch')
+          window.setTimeout(() => setMotionIfChanged('idle'), 360)
         }
       }
     } else if (playerPosition) {
       // Pas d'ennemi : reste près du joueur
-      const distToPlayer = Math.hypot(playerPosition.x - pos.x, playerPosition.z - pos.z)
+      const distToPlayer = getWeightedMobTargetDistance(pos, { position: playerPosition, isPlayer: true })
       if (distToPlayer > SUMMON_SKELETON_FOLLOW_DISTANCE) {
         moveMushroomEnemyToward(
           pos, playerPosition, SUMMON_SKELETON_MOVE_SPEED, delta,
           SUMMON_SKELETON_FOLLOW_DISTANCE * 0.8, stuckTimerRef, stuckDeflectionRef, lastPositionRef,
         )
-        setMotion('walk')
+        setMotionIfChanged('walk')
       } else {
-        setMotion('idle')
+        setMotionIfChanged('idle')
       }
     }
 
@@ -9970,7 +10142,7 @@ function SummonedSkeleton({
       }
     }
 
-    pos.y = slot.outdoor ? getTerrainHeight(pos.x, pos.z) : 0
+    pos.y = slot.outdoor ? getMobOutdoorFootY(pos.x, pos.z, pos.y) : 0
 
     const g = groupRef.current
     if (g) {
@@ -9992,31 +10164,29 @@ function SummonedSkeleton({
   }, [groupPositionsRef, index])
 
   const hpRatio = MathUtils.clamp(hp / SUMMON_SKELETON_MAX_HP, 0, 1)
-  const isActive = Boolean(slot)
+  const isActive = isActiveVisual
 
   return (
     <group ref={groupRef} position={[0, -500, 0]}>
       <group scale={model.scale}>
         <primitive object={model.object} position={model.offset} />
       </group>
-      {isActive && (
-        <>
+      <group>
           {/* Aura spectrale au sol pour signaler un allié */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
             <ringGeometry args={[0.28, 0.42, 28]} />
-            <meshBasicMaterial color="#7cc4ff" transparent opacity={0.4} depthWrite={false} />
+            <meshBasicMaterial color="#7cc4ff" transparent opacity={isActive ? 0.4 : 0} depthWrite={false} />
           </mesh>
-          <pointLight color="#6da8ff" intensity={0.7} distance={2.2} position={[0, 0.6, 0]} />
+          <pointLight color="#6da8ff" intensity={isActive ? 0.7 : 0} distance={2.2} position={[0, 0.6, 0]} />
           <Html position={[0, cfg.hudHeight ?? 1.1, 0]} center transform sprite distanceFactor={3.8}>
-            <div className="training-dummy-hud enemy-hud">
+            <div className="training-dummy-hud enemy-hud" style={{ display: isActive ? undefined : 'none' }}>
               <div className="training-dummy-bar enemy-hp-bar" style={{ '--hp-color': '#5aa9ff' }}>
                 <span style={{ width: `${hpRatio * 100}%`, background: '#5aa9ff' }} />
                 <div className="training-dummy-hp">{hp} / {SUMMON_SKELETON_MAX_HP}</div>
               </div>
             </div>
           </Html>
-        </>
-      )}
+      </group>
     </group>
   )
 }
@@ -13597,7 +13767,7 @@ function App() {
   const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
   const [magicSkullDiscovered, setMagicSkullDiscovered] = useState(isAdminMode)
   const [isNearMagicSkullDiscovery, setIsNearMagicSkullDiscovery] = useState(false)
-  const [summonSlots, setSummonSlots] = useState(() => Array(SUMMON_SKELETON_COUNT).fill(null))
+  const summonSlotRefs = useRef(Array.from({ length: SUMMON_SKELETON_COUNT }, () => ({ current: null })))
   const summonGroupPositionsRef = useRef(new Map())
   const summonCooldownRef = useRef(0)
   const [summonCooldownUntil, setSummonCooldownUntil] = useState(0)
@@ -14005,7 +14175,7 @@ function App() {
     setOwnedMagicSkull(false)
     setMagicSkullDiscovered(isAdminMode)
     setIsNearMagicSkullDiscovery(false)
-    setSummonSlots(Array(SUMMON_SKELETON_COUNT).fill(null))
+    summonSlotRefs.current.forEach((slotRef) => { slotRef.current = null })
     summonGroupPositionsRef.current.clear()
     summonCooldownRef.current = 0
     setSummonCooldownUntil(0)
@@ -15308,12 +15478,8 @@ function App() {
   }
 
   const handleSummonExpire = useCallback((index) => {
-    setSummonSlots((current) => {
-      if (!current[index]) return current
-      const next = current.slice()
-      next[index] = null
-      return next
-    })
+    const slotRef = summonSlotRefs.current[index]
+    if (slotRef) slotRef.current = null
   }, [])
 
   const summonSkeletons = useCallback(() => {
@@ -15329,19 +15495,18 @@ function App() {
     const spread = 0.6
     const distance = 1.5
     // Remplit les slots du pool (squelettes déjà montés → pas de freeze)
-    const next = Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => {
+    summonSlotRefs.current.forEach((slotRef, index) => {
       const angle = baseYaw + (index - (SUMMON_SKELETON_COUNT - 1) / 2) * spread
       const sx = pos.x - Math.sin(angle) * distance
       const sz = pos.z - Math.cos(angle) * distance
       const sy = outdoor ? getTerrainHeight(sx, sz) : 0
-      return {
+      slotRef.current = {
         spawnPosition: [sx, sy, sz],
         expiresAt,
         outdoor,
         token: `${now}_${index}`,
       }
     })
-    setSummonSlots(next)
     // Verrou : durée d'invocation + délai supplémentaire avant de réinvoquer
     summonCooldownRef.current = expiresAt + SUMMON_RECAST_EXTRA_MS
     setSummonCooldownUntil(summonCooldownRef.current)
@@ -16254,13 +16419,13 @@ function App() {
             projectilesRef={remoteProjectilesRef}
             combatTargetsRef={null}
           />
-          {/* Pool de squelettes invoqués : monté dès que le crâne est possédé
-              pour précharger modèle/animations et éviter tout freeze au sort. */}
-          {ownedMagicSkull && Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => (
+          {/* Pool de squelettes invoqués : monté dès le chargement du monde
+              pour précharger modèle/animations/GPU et éviter tout freeze au sort. */}
+          {Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => (
             <Suspense key={`summon_slot_${index}`} fallback={null}>
               <SummonedSkeleton
                 index={index}
-                slot={summonSlots[index]}
+                slotRef={summonSlotRefs.current[index]}
                 playerPositionRef={playerPositionRef}
                 combatTargetsRef={combatTargetsRef}
                 groupPositionsRef={summonGroupPositionsRef}

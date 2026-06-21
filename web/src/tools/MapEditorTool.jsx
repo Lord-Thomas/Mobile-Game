@@ -46,6 +46,15 @@ function clampMapPosition(x, z) {
   ]
 }
 
+function getPlacementHeightOffset(placement) {
+  const [x = 0, y = getTerrainHeight(x, 0), z = 0] = placement?.position ?? []
+  return y - getTerrainHeight(x, z)
+}
+
+function getTerrainAnchoredPosition(x, z, heightOffset = 0) {
+  return [x, getTerrainHeight(x, z) + heightOffset, z]
+}
+
 function createPlacement(objectId, existingCount) {
   const [x, z] = clampMapPosition(existingCount * 2, 0)
 
@@ -72,11 +81,11 @@ function createMonsterSpawner(monsterType, existingCount) {
 function toSavedPlacements(objects) {
   return objects.map((object, index) => {
     const placement = normalizeMapObjectPlacement(object, index)
-    const [x, , z] = placement.position
+    const [x, y, z] = placement.position
     return {
       id: placement.id,
       objectId: placement.objectId,
-      position: [x, getTerrainHeight(x, z), z],
+      position: [x, y, z],
       rotationY: placement.rotationY,
       scale: placement.scale,
     }
@@ -331,7 +340,8 @@ export function MapEditorScene({
   const moveToPoint = (id, point) => {
     if (!id || !point) return
     const [x, z] = clampMapPosition(point.x, point.z)
-    onMove(id, [x, getTerrainHeight(x, z), z])
+    const object = objects.find((candidate) => candidate.id === id)
+    onMove(id, getTerrainAnchoredPosition(x, z, getPlacementHeightOffset(object)))
   }
 
   const moveSpawnerToPoint = (id, point) => {
@@ -507,10 +517,11 @@ export function MapEditorPanel({
   const duplicateSelected = () => {
     if (!selected) return
     const [x, , z] = selected.position
+    const heightOffset = getPlacementHeightOffset(selected)
     const next = normalizeMapObjectPlacement({
       ...selected,
       id: `${selected.objectId}_${Date.now().toString(36)}`,
-      position: [x + 2, getTerrainHeight(x + 2, z + 2), z + 2],
+      position: getTerrainAnchoredPosition(x + 2, z + 2, heightOffset),
     }, objects.length)
     onObjectsChange([...objects, next])
     onSelect(next.id)
@@ -630,7 +641,7 @@ export function MapEditorPanel({
                 >
                   <strong>{catalogItem?.name ?? object.objectId} #{index + 1}</strong>
                   <span style={{ color: isMoving ? '#ffd447' : '#9fb3ac', fontSize: 11 }}>
-                    {isMoving ? 'Deplacement en cours' : `x ${object.position[0].toFixed(1)} / z ${object.position[2].toFixed(1)}`}
+                    {isMoving ? 'Deplacement en cours' : `x ${object.position[0].toFixed(1)} / y ${object.position[1].toFixed(2)} / z ${object.position[2].toFixed(1)}`}
                   </span>
                 </button>
               )
@@ -681,18 +692,39 @@ export function MapEditorPanel({
               <strong>{MAP_OBJECT_CATALOG[selected.objectId]?.name ?? selected.objectId}</strong>
               <NumberField label="X" value={selected.position[0]} step={0.5} onChange={(value) => {
                 const [, , z] = selected.position
+                const heightOffset = getPlacementHeightOffset(selected)
                 const [x, nextZ] = clampMapPosition(value, z)
-                patchSelected({ position: [x, getTerrainHeight(x, nextZ), nextZ] })
+                patchSelected({ position: getTerrainAnchoredPosition(x, nextZ, heightOffset) })
+              }} />
+              <NumberField label="Y" value={selected.position[1]} step={0.05} onChange={(value) => {
+                const [x, , z] = selected.position
+                patchSelected({ position: [x, value, z] })
               }} />
               <NumberField label="Z" value={selected.position[2]} step={0.5} onChange={(value) => {
                 const [currentX] = selected.position
+                const heightOffset = getPlacementHeightOffset(selected)
                 const [x, z] = clampMapPosition(currentX, value)
-                patchSelected({ position: [x, getTerrainHeight(x, z), z] })
+                patchSelected({ position: getTerrainAnchoredPosition(x, z, heightOffset) })
               }} />
+              <SliderField
+                label="Offset sol"
+                value={getPlacementHeightOffset(selected)}
+                min={-2}
+                max={2}
+                step={0.05}
+                onChange={(heightOffset) => {
+                  const [x, , z] = selected.position
+                  patchSelected({ position: getTerrainAnchoredPosition(x, z, heightOffset) })
+                }}
+              />
               <SliderField label="Rotation" value={selected.rotationY} min={-Math.PI} max={Math.PI} step={0.01} onChange={(rotationY) => patchSelected({ rotationY })} />
               <div style={styles.actions}>
                 <button type="button" style={styles.secondaryButton} onClick={() => patchSelected({ rotationY: selected.rotationY - Math.PI / 4 })}>-45 deg</button>
                 <button type="button" style={styles.secondaryButton} onClick={() => patchSelected({ rotationY: selected.rotationY + Math.PI / 4 })}>+45 deg</button>
+                <button type="button" style={styles.secondaryButton} onClick={() => {
+                  const [x, , z] = selected.position
+                  patchSelected({ position: getTerrainAnchoredPosition(x, z, 0) })
+                }}>Sol</button>
               </div>
               <SliderField label="Echelle" value={selected.scale} min={0.35} max={2.5} step={0.05} onChange={(scale) => patchSelected({ scale })} />
             </div>
