@@ -356,6 +356,14 @@ function isLikelyMobileDevice() {
   )
 }
 
+// Anisotropie : 16× (max) est coûteux par fragment sur mobile pour un gain visuel
+// marginal. On plafonne à 4× sur mobile, valeur native sur desktop.
+const MOBILE_MAX_ANISOTROPY = 4
+function getCappedAnisotropy(gl) {
+  const max = gl.capabilities.getMaxAnisotropy()
+  return isLikelyMobileDevice() ? Math.min(max, MOBILE_MAX_ANISOTROPY) : max
+}
+
 function getDefaultPerformanceSettings() {
   const mobile = isLikelyMobileDevice()
   return {
@@ -1845,7 +1853,7 @@ function Ball({ ballRef, skinTexturePath, spawnPosition = [0, 3.2, 0], linearDam
   const ballSkin = useGLTF('/models/ball/ballon.glb')
   const skinTexture = useTexture(skinTexturePath)
   skinTexture.colorSpace = SRGBColorSpace
-  skinTexture.anisotropy = gl.capabilities.getMaxAnisotropy()
+  skinTexture.anisotropy = getCappedAnisotropy(gl)
   const visual = useMemo(() => {
     const candidates = []
 
@@ -4485,7 +4493,7 @@ function PlayerAvatar({
   const avatar = useMemo(() => {
     const next = clone(modelScene)
     next.visible = false
-    const maxAnisotropy = gl.capabilities.getMaxAnisotropy()
+    const maxAnisotropy = getCappedAnisotropy(gl)
     next.traverse((object) => {
       object.name = normalizeMixamoObjectName(object.name)
       if (object.name === 'Armature') {

@@ -64,7 +64,9 @@
       "Bash(git rm *)",
       "Bash(node scripts/texture-inventory.cjs)",
       "Bash(node scripts/texture-downscale.cjs)",
-      "Bash(awk '{print $1}')"
+      "Bash(awk '{print $1}')",
+      "Bash(sort -t: -k2 -rn)",
+      "Bash(node -e \"console.log\\('three', require\\('three/package.json'\\).version\\)\")"
     ]
   }
 }
