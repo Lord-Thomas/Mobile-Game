@@ -139,7 +139,8 @@ function makeWispClusters(area) {
 
 function makeFogPatches(area) {
   const groundCount = Math.max(18, Math.round(20 + area.fogIntensity * 24))
-  const billboardCount = Math.max(9, Math.round(9 + area.fogIntensity * 12))
+  const billboardCount = Math.max(10, Math.round(10 + area.fogIntensity * 13))
+  const highBillboardCount = Math.max(7, Math.round(7 + area.fogIntensity * 9))
   const ground = Array.from({ length: groundCount }, (_, index) => {
     const angle = seededRandom(index + 401) * Math.PI * 2
     const distance = Math.sqrt(seededRandom(index + 409)) * area.radius * 0.92
@@ -173,7 +174,7 @@ function makeFogPatches(area) {
       type: 'billboard',
       x,
       z,
-      y: getTerrainHeight(area.center[0] + x, area.center[1] + z) + 0.85 + seededRandom(index + 523) * 1.35,
+      y: getTerrainHeight(area.center[0] + x, area.center[1] + z) + 0.95 + seededRandom(index + 523) * 1.55,
       scale: [size, size * (0.58 + seededRandom(index + 541) * 0.52), 1],
       rotation: 0,
       phase: seededRandom(index + 547) * Math.PI * 2,
@@ -183,7 +184,28 @@ function makeFogPatches(area) {
     }
   })
 
-  return [...ground, ...billboards]
+  const highBillboards = Array.from({ length: highBillboardCount }, (_, index) => {
+    const angle = seededRandom(index + 601) * Math.PI * 2
+    const distance = (0.12 + seededRandom(index + 607) * 0.78) * area.radius
+    const x = Math.cos(angle) * distance
+    const z = Math.sin(angle) * distance
+    const size = area.radius * (0.52 + seededRandom(index + 613) * 0.42)
+    return {
+      id: `${area.id}_fog_high_billboard_${index}`,
+      type: 'billboard',
+      x,
+      z,
+      y: getTerrainHeight(area.center[0] + x, area.center[1] + z) + 2.35 + seededRandom(index + 617) * 2.25,
+      scale: [size, size * (0.64 + seededRandom(index + 619) * 0.58), 1],
+      rotation: 0,
+      phase: seededRandom(index + 631) * Math.PI * 2,
+      driftX: (seededRandom(index + 641) - 0.5) * 0.018,
+      driftZ: (seededRandom(index + 643) - 0.5) * 0.018,
+      opacity: (0.12 + seededRandom(index + 647) * 0.14) * area.fogIntensity,
+    }
+  })
+
+  return [...ground, ...billboards, ...highBillboards]
 }
 
 function GraveyardFogPlanes({ area }) {
@@ -228,7 +250,7 @@ function GraveyardFogPlanes({ area }) {
             transparent
             opacity={patch.opacity}
             alphaTest={0.015}
-            depthTest={false}
+            depthTest
             depthWrite={false}
             fog={false}
             blending={NormalBlending}

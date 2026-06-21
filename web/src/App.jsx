@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, Fog as ThreeFog, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -1560,29 +1560,24 @@ const GRAVEYARD_SCENE_FOG = new Color(GRAVEYARD_ATMOSPHERE.fog)
 
 function SceneAtmosphere({
   currentZone,
-  mode,
   playerPositionRef,
   biomeAreas = MAP_BIOME_AREAS,
 }) {
   const { scene } = useThree()
   const isOutside = currentZone === ZONES.outside
   const backgroundColor = '#ecfdff'
-  const fogColor = '#fbffff'
-  const fogNear = isOutside ? 180 : mode === 'customize' ? 130 : 120
-  const fogFar = isOutside ? 520 : mode === 'customize' ? 360 : 340
   const backgroundRef = useRef()
-  const linearFog = useMemo(() => new ThreeFog(fogColor, fogNear, fogFar), [])
-  const graveyardFog = useMemo(() => new FogExp2(GRAVEYARD_ATMOSPHERE.fog, 0.001), [])
+  const atmosphereFog = useMemo(() => new FogExp2(BASE_SCENE_FOG, 0.0008), [])
   const influenceRef = useRef(0)
 
   useEffect(() => {
-    scene.fog = linearFog
+    scene.fog = atmosphereFog
     return () => {
-      if (scene.fog === linearFog || scene.fog === graveyardFog) {
+      if (scene.fog === atmosphereFog) {
         scene.fog = null
       }
     }
-  }, [graveyardFog, linearFog, scene])
+  }, [atmosphereFog, scene])
 
   useFrame((_, delta) => {
     const position = playerPositionRef?.current
@@ -1601,18 +1596,8 @@ function SceneAtmosphere({
       backgroundRef.current.copy(BASE_SCENE_BACKGROUND).lerp(GRAVEYARD_SCENE_BACKGROUND, fogInfluence)
     }
 
-    linearFog.color.copy(BASE_SCENE_FOG)
-    linearFog.near = fogNear
-    linearFog.far = fogFar
-
-    graveyardFog.color.copy(BASE_SCENE_FOG).lerp(GRAVEYARD_SCENE_FOG, fogInfluence)
-    graveyardFog.density = MathUtils.lerp(0.0008, GRAVEYARD_ATMOSPHERE.fogDensity, fogInfluence)
-
-    if (fogInfluence > 0.035) {
-      scene.fog = graveyardFog
-    } else {
-      scene.fog = linearFog
-    }
+    atmosphereFog.color.copy(BASE_SCENE_FOG).lerp(GRAVEYARD_SCENE_FOG, fogInfluence)
+    atmosphereFog.density = MathUtils.lerp(isOutside ? 0.0008 : 0.0016, GRAVEYARD_ATMOSPHERE.fogDensity, fogInfluence)
   })
 
   return (
@@ -16008,7 +15993,7 @@ function App() {
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
-        <SceneAtmosphere currentZone={currentZone} mode={mode} playerPositionRef={playerPositionRef} />
+        <SceneAtmosphere currentZone={currentZone} playerPositionRef={playerPositionRef} />
         <MultiplayerBridge
           channelRef={multiplayerChannelRef}
           role={multiplayerRole}
