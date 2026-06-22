@@ -26,17 +26,6 @@ export const MAP_OBJECT_PLACEMENTS = [
     "scale": 1
   },
   {
-    "id": "player_plot_ash_young_03",
-    "objectId": "tree_ashYoung",
-    "position": [
-      12.4,
-      0.09264952358943633,
-      -8.6
-    ],
-    "rotationY": 2.9,
-    "scale": 1
-  },
-  {
     "id": "meadow_ash_medium_01",
     "objectId": "tree_ashMedium",
     "position": [
@@ -172,12 +161,12 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "southwest_forest_ash_04",
     "objectId": "tree_ashSmall",
     "position": [
-      -7.5,
-      4.537679795212292,
-      -38
+      -7.75,
+      4.531596260836938,
+      -37.75
     ],
     "rotationY": 4.4,
-    "scale": 1.08
+    "scale": 2.5
   },
   {
     "id": "southwest_forest_ash_05",
@@ -210,7 +199,7 @@ export const MAP_OBJECT_PLACEMENTS = [
       -51.25
     ],
     "rotationY": 3.7,
-    "scale": 1.85
+    "scale": 2.5
   },
   {
     "id": "southwest_forest_ash_08",
@@ -221,15 +210,15 @@ export const MAP_OBJECT_PLACEMENTS = [
       -48
     ],
     "rotationY": 0.9,
-    "scale": 1.07
+    "scale": 2.5
   },
   {
     "id": "southwest_forest_ash_10",
     "objectId": "tree_ashMedium",
     "position": [
-      -33.7,
-      2.338466469046305,
-      -25.4
+      -39.5,
+      2.1583335245902773,
+      -29.75
     ],
     "rotationY": 4.9,
     "scale": 1.08
@@ -238,12 +227,12 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "southwest_forest_ash_11",
     "objectId": "tree_ashMedium",
     "position": [
-      -29.5,
-      2.819636666907166,
-      -26.7
+      -24.75,
+      2.8787723882498075,
+      -26.25
     ],
     "rotationY": 1.2,
-    "scale": 0.97
+    "scale": 2.5
   },
   {
     "id": "southwest_forest_ash_12",
@@ -271,31 +260,31 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "southwest_forest_ash_15",
     "objectId": "tree_ashSmall",
     "position": [
-      -15.25,
-      1.3483716832168275,
+      -15.5,
+      1.369162519933447,
       -22.75
     ],
     "rotationY": 2,
-    "scale": 1.09
+    "scale": 2.5
   },
   {
     "id": "southwest_forest_ash_16",
     "objectId": "tree_ashMedium",
     "position": [
-      0.75,
-      3.76469675988353,
-      -33.5
+      2.5,
+      2.4505395621310675,
+      -29
     ],
     "rotationY": 4,
-    "scale": 1.05
+    "scale": 2.5
   },
   {
     "id": "skeleton_tower_mqmdmv0g",
     "objectId": "skeleton_tower",
     "position": [
-      45.75,
-      1.4004956500083714,
-      146.5
+      43.75,
+      1.4005613135771124,
+      147.25
     ],
     "rotationY": 3.141592653589793,
     "scale": 1.7
@@ -436,9 +425,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob0793",
     "objectId": "stone_tombstone",
     "position": [
-      17.25,
-      1.3522122013648146,
-      145.5
+      16,
+      1.432235067014004,
+      146.25
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -448,8 +437,8 @@ export const MAP_OBJECT_PLACEMENTS = [
     "objectId": "stone_tombstone",
     "position": [
       11.75,
-      1.4462494034237454,
-      145.5
+      1.5322226438235615,
+      146.5
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -458,9 +447,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob1m5d",
     "objectId": "stone_tombstone",
     "position": [
-      11.5,
-      1.093121359028511,
-      140.5
+      12,
+      1.2321399390378036,
+      142.75
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -469,9 +458,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob1pdq",
     "objectId": "stone_tombstone",
     "position": [
-      17,
-      1.0339304119255825,
-      140.5
+      16,
+      1.1789660806092446,
+      142.75
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -480,9 +469,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob2ow6",
     "objectId": "stone_tombstone",
     "position": [
-      11.25,
-      0.897444146535153,
-      136.75
+      12,
+      0.9899358084913906,
+      138.75
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -491,9 +480,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob2r3e",
     "objectId": "stone_tombstone",
     "position": [
-      17,
-      0.8526717626370015,
-      136.75
+      16,
+      0.9526088391839262,
+      138.75
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -502,9 +491,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob2ta2",
     "objectId": "stone_tombstone",
     "position": [
-      6.75,
-      1.5570357091351197,
-      145.75
+      7.25,
+      1.6181992211735774,
+      146.5
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -513,9 +502,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob2x6x",
     "objectId": "stone_tombstone",
     "position": [
-      6.5,
-      1.179861786362608,
-      141
+      7.25,
+      1.2974674462459084,
+      142.75
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -524,9 +513,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "stone_tombstone_mqob2zsi",
     "objectId": "stone_tombstone",
     "position": [
-      6,
-      0.9321109918268065,
-      136.75
+      7.25,
+      1.0459378774223749,
+      139
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -595,6 +584,138 @@ export const MAP_OBJECT_PLACEMENTS = [
       147.75
     ],
     "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "tree_ashYoung_mqpmry5b",
+    "objectId": "tree_ashYoung",
+    "position": [
+      13.25,
+      0.08770157714994815,
+      -8
+    ],
+    "rotationY": 2.9,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpmu1wr",
+    "objectId": "stone_fence",
+    "position": [
+      4,
+      1.5093117658066137,
+      144.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpmx6su",
+    "objectId": "stone_fence",
+    "position": [
+      4,
+      1.259906427836025,
+      141.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo06kt",
+    "objectId": "stone_fence",
+    "position": [
+      4,
+      1.055651398957295,
+      138.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo090d",
+    "objectId": "stone_fence",
+    "position": [
+      4,
+      0.8923394398608263,
+      135.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo0cia",
+    "objectId": "stone_fence",
+    "position": [
+      5.5,
+      0.8192519112886776,
+      134.25
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo0rm8",
+    "objectId": "stone_fence",
+    "position": [
+      19,
+      1.505878589662266,
+      147.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo0yos",
+    "objectId": "stone_fence",
+    "position": [
+      19,
+      1.2750073480300452,
+      144.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo121b",
+    "objectId": "stone_fence",
+    "position": [
+      19,
+      1.0836710343434723,
+      141.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo15hm",
+    "objectId": "stone_fence",
+    "position": [
+      19,
+      0.9257559063719389,
+      138.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo1aqz",
+    "objectId": "stone_fence",
+    "position": [
+      19,
+      0.7975500363728603,
+      135.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpo1h7z",
+    "objectId": "stone_fence",
+    "position": [
+      17.5,
+      0.7532447343445172,
+      134.25
+    ],
+    "rotationY": 3.141592653589793,
     "scale": 1
   }
 ]
@@ -680,6 +801,27 @@ export const MAP_MONSTER_SPAWNERS = [
     "variants": [
       {
         "monsterType": "skeleton",
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "id": "monster_spawner_mqpo5rr7",
+    "monsterType": "mushroom",
+    "position": [
+      -18.25,
+      4.670530969042097,
+      -39.25
+    ],
+    "radius": 31,
+    "populationMax": 10,
+    "respawnSeconds": 45,
+    "minDistance": 5,
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "mushroom",
         "weight": 100
       }
     ]

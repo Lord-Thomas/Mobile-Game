@@ -554,6 +554,14 @@ export function MapEditorScene({
   // matter how many objects / spawners / biomes are on the map.
   const placeableRefs = useRef(new Map())
   const dragCommitRef = useRef(null)
+  const dragOffsetRef = useRef(null)
+  // The active drag id is tracked in a ref (synchronous) rather than via the
+  // draggingId React state (which updates a tick later). All the imperative drag
+  // logic reads this ref so the id, the offset and the moved object are always
+  // consistent — otherwise, in the tick between selecting object B and its state
+  // flushing, a stray pointermove could move the still-"active" object A with B's
+  // offset, teleporting it slightly.
+  const activeDragIdRef = useRef(null)
   const registerPlaceable = useCallback((id, object3D) => {
     if (object3D) placeableRefs.current.set(id, object3D)
     else placeableRefs.current.delete(id)
@@ -561,9 +569,15 @@ export function MapEditorScene({
 
   const dragObjectToPoint = (id, point) => {
     if (!id || !point) return
-    const [x, z] = clampMapPosition(point.x, point.z)
+    const offset = dragOffsetRef.current?.id === id
+      ? dragOffsetRef.current
+      : { x: 0, z: 0, heightOffset: null }
+    const [x, z] = clampMapPosition(point.x + offset.x, point.z + offset.z)
     const object = objects.find((candidate) => candidate.id === id)
-    const position = getTerrainAnchoredPosition(x, z, getPlacementHeightOffset(object))
+    const heightOffset = Number.isFinite(offset.heightOffset)
+      ? offset.heightOffset
+      : getPlacementHeightOffset(object)
+    const position = getTerrainAnchoredPosition(x, z, heightOffset)
     const group = placeableRefs.current.get(id)
     if (group) group.position.set(position[0], position[1], position[2])
     // Key the pending position by id so it can never be applied to the wrong
@@ -573,9 +587,13 @@ export function MapEditorScene({
   }
 
   const commitDraggedObject = () => {
+    // pending.id is authoritative (the object that was actually being dragged),
+    // so commit it directly rather than trusting the async draggingId state.
     const pending = dragCommitRef.current
-    if (pending && draggingId === pending.id) onMove(pending.id, pending.position)
+    if (pending) onMove(pending.id, pending.position)
     dragCommitRef.current = null
+    dragOffsetRef.current = null
+    activeDragIdRef.current = null
   }
 
   const handleStartObjectDrag = (id, event) => {
@@ -585,9 +603,49 @@ export function MapEditorScene({
     const pending = dragCommitRef.current
     if (pending && pending.id !== id) onMove(pending.id, pending.position)
     dragCommitRef.current = null
+    dragOffsetRef.current = null
     const dragId = event?.altKey ? onDuplicateObject?.(id) ?? id : id
+    const source = objects.find((candidate) => candidate.id === id)
+    const grabPoint = event ? groundPointFromEvent(event) : null
+    if (source && grabPoint) {
+      const [sourceX = 0, , sourceZ = 0] = source.position ?? []
+      dragOffsetRef.current = {
+        id: dragId,
+        x: sourceX - grabPoint.x,
+        z: sourceZ - grabPoint.z,
+        heightOffset: getPlacementHeightOffset(source),
+      }
+    } else {
+      dragOffsetRef.current = { id: dragId, x: 0, z: 0, heightOffset: null }
+    }
+    // Mark the drag active synchronously, before the React state catches up.
+    activeDragIdRef.current = dragId
     onStartDragging?.(dragId)
   }
+
+  const endObjectDrag = () => {
+    if (!activeDragIdRef.current && !dragCommitRef.current) return false
+    commitDraggedObject()
+    onStopDragging?.()
+    return true
+  }
+
+  // A drag can be released with the pointer over the object's floating HTML
+  // label or off the canvas, in which case the floor mesh never gets pointerup
+  // and the object would stay stuck to the cursor (then "jump" onto whatever you
+  // click next). Listen on the window so ANY release reliably ends the drag.
+  // endObjectDrag is idempotent, so the floor's own pointerup is harmless.
+  useEffect(() => {
+    if (!draggingId) return undefined
+    const onUp = () => endObjectDrag()
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingId, onMove, onStopDragging])
 
   // Raycast the ground ourselves from clientX/clientY instead of trusting
   // event.point. R3F derives event.point from event.offsetX/offsetY, which can
@@ -720,7 +778,7 @@ export function MapEditorScene({
           // here is on empty ground: clear the selection and (top view) begin a
           // camera pan tracked by screen-space deltas, like the in-game editor.
           if (event.button !== 0) return
-          if (draggingId || movingId) return
+          if (activeDragIdRef.current || movingId) return
           if (spawnerDragRef.current) return
           if (biomeDragRef.current) return
           if (terrainBrush?.active) {
@@ -755,7 +813,7 @@ export function MapEditorScene({
           if (isTopView) panRef.current = { x: event.clientX, y: event.clientY }
         }}
         onPointerMove={(event) => {
-          if (terrainBrush?.active && !draggingId && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
+          if (terrainBrush?.active && !activeDragIdRef.current && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
             const point = groundPointFromEvent(event)
             setBrushPreviewPoint(point ? clampMapPosition(point.x, point.z) : null)
             if (terrainPaintingRef.current) {
@@ -764,7 +822,7 @@ export function MapEditorScene({
               return
             }
           }
-          if (biomeBrush?.active && isTopView && !draggingId && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
+          if (biomeBrush?.active && isTopView && !activeDragIdRef.current && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
             const point = groundPointFromEvent(event)
             previewBrushAtPoint(point)
             if (brushPaintingRef.current) {
@@ -773,10 +831,11 @@ export function MapEditorScene({
               return
             }
           }
-          if (draggingId) {
+          if (activeDragIdRef.current) {
             // Active object drag: move the group imperatively (no re-render).
+            // Use the synchronous ref, never the async draggingId state.
             event.stopPropagation()
-            dragObjectToPoint(draggingId, groundPointFromEvent(event))
+            dragObjectToPoint(activeDragIdRef.current, groundPointFromEvent(event))
             return
           }
           if (spawnerDragRef.current) {
@@ -826,10 +885,9 @@ export function MapEditorScene({
           panRef.current = null
           spawnerDragRef.current = null
           biomeDragRef.current = null
-          if (!draggingId) return
+          if (!activeDragIdRef.current && !dragCommitRef.current) return
           event.stopPropagation()
-          commitDraggedObject()
-          onStopDragging()
+          endObjectDrag()
         }}
         onPointerMissed={() => {
           panRef.current = null
@@ -839,9 +897,8 @@ export function MapEditorScene({
           lastBrushPointRef.current = null
           terrainPaintingRef.current = false
           lastTerrainBrushPointRef.current = null
-          if (draggingId) {
-            commitDraggedObject()
-            onStopDragging()
+          if (activeDragIdRef.current || dragCommitRef.current) {
+            endObjectDrag()
           }
           else if (!movingId) {
             onSelect(null)
