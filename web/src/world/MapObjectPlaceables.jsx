@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef } from 'react'
-import { Html, useGLTF } from '@react-three/drei'
+import { Html, useFBX, useGLTF } from '@react-three/drei'
 import { Box3, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import ProceduralTree from './trees/ProceduralTree'
@@ -43,6 +43,43 @@ function MapObjectGltfModel({ catalogItem }) {
   )
 }
 
+function MapObjectFbxModel({ catalogItem }) {
+  const fbx = useFBX(catalogItem.modelUrl)
+  const model = useMemo(() => {
+    const object = clone(fbx)
+
+    object.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+      }
+    })
+
+    object.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(object)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const targetHeight = (catalogItem.targetHeightMeters ?? 0) * WORLD_UNITS_PER_METER
+    const scale = targetHeight > 0 ? targetHeight / Math.max(size.y, 0.001) : 1
+
+    return {
+      object,
+      offset: [-center.x, -box.min.y, -center.z],
+      scale,
+    }
+  }, [catalogItem.targetHeightMeters, fbx])
+
+  return (
+    <group scale={model.scale}>
+      <primitive object={model.object} position={model.offset} />
+    </group>
+  )
+}
+
+function getModelExtension(modelUrl = '') {
+  return modelUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+}
+
 function MapObjectTreeModel({ catalogItem }) {
   // Memoize the config object: ProceduralTree rebuilds its whole geometry when
   // the config reference changes, so a fresh literal each render would rebuild
@@ -61,6 +98,7 @@ function MapObjectTreeModel({ catalogItem }) {
 function MapObjectModel({ objectId }) {
   const catalogItem = getMapObjectCatalogItem(objectId)
   if (catalogItem?.type === 'tree') return <MapObjectTreeModel catalogItem={catalogItem} />
+  if (getModelExtension(catalogItem?.modelUrl) === 'fbx') return <MapObjectFbxModel catalogItem={catalogItem} />
   return <MapObjectGltfModel catalogItem={catalogItem} />
 }
 
@@ -205,5 +243,7 @@ export default function MapObjectPlaceables({
 }
 
 Object.values(MAP_OBJECT_CATALOG).forEach((item) => {
-  if (item.modelUrl) useGLTF.preload(item.modelUrl)
+  if (!item.modelUrl) return
+  if (getModelExtension(item.modelUrl) === 'fbx') useFBX.preload(item.modelUrl)
+  else useGLTF.preload(item.modelUrl)
 })

@@ -872,6 +872,7 @@ export function MapEditorPanel({
   const [spawnerType, setSpawnerType] = useState(MONSTER_SPAWNER_TYPE_IDS[0])
   const [biomeType, setBiomeType] = useState(BIOME_TYPE_IDS[0])
   const [saving, setSaving] = useState(false)
+  const [importingModels, setImportingModels] = useState(false)
   const [message, setMessage] = useState('')
   const selected = objects.find((object) => object.id === selectedId) ?? null
   const selectedSpawner = spawners.find((spawner) => spawner.id === selectedSpawnerId) ?? null
@@ -1018,6 +1019,28 @@ export function MapEditorPanel({
     }
   }
 
+  const importMapModels = async () => {
+    setImportingModels(true)
+    setMessage('')
+    try {
+      const response = await fetch('/dev/import-map-models', { method: 'POST' })
+      const raw = await response.text()
+      let payload = null
+      try {
+        payload = raw ? JSON.parse(raw) : null
+      } catch {
+        payload = null
+      }
+      if (!response.ok) throw new Error(payload?.message ?? raw)
+      setMessage(`${payload?.imported ?? 0} modele(s) importe(s). Rechargement de l'editeur...`)
+      window.setTimeout(() => window.location.reload(), 350)
+    } catch (error) {
+      setMessage(`Import impossible: ${error.message}`)
+    } finally {
+      setImportingModels(false)
+    }
+  }
+
   return (
     <aside style={styles.panel}>
       <div style={styles.header}>
@@ -1031,6 +1054,9 @@ export function MapEditorPanel({
         <SelectField label="Objet" value={selectedObjectId} options={options} onChange={setObjectId} />
         <button type="button" style={styles.primaryButton} onClick={addObject}>
           Ajouter
+        </button>
+        <button type="button" style={styles.secondaryButton} onClick={importMapModels} disabled={importingModels}>
+          {importingModels ? 'Import...' : 'Importer modeles'}
         </button>
       </Section>
 

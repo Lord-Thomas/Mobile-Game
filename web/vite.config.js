@@ -1,8 +1,89 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { Buffer } from 'node:buffer'
-import { writeFile, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { writeFile, mkdir, readdir } from 'node:fs/promises'
+import { basename, extname, join, relative, sep } from 'node:path'
+
+const MAP_MODEL_EXTENSIONS = new Set(['.glb', '.gltf', '.fbx'])
+const RESERVED_MAP_OBJECT_IDS = new Set(['skeleton_tower'])
+
+function sanitizeGeneratedObjectId(value) {
+  return String(value ?? 'map_object')
+    .trim()
+    .replace(/\.[a-zA-Z0-9]+$/, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    || 'map_object'
+}
+
+function titleFromObjectId(id) {
+  return id
+    .split(/[_-]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function getMapObjectIdFromRelativePath(relativePath) {
+  const normalized = relativePath.split(sep).join('/')
+  const parts = normalized.split('/')
+  const filename = parts.at(-1) ?? 'map_object'
+  const stem = basename(filename, extname(filename))
+  const parent = parts.length > 1 ? parts.at(-2) : ''
+  const sourceName = /^(model|scene|object)$/i.test(stem) && parent ? parent : stem
+  return sanitizeGeneratedObjectId(sourceName)
+}
+
+async function findMapModelFiles(dir) {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const files = []
+
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...await findMapModelFiles(fullPath))
+    } else if (entry.isFile() && MAP_MODEL_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+      files.push(fullPath)
+    }
+  }
+
+  return files
+}
+
+function createMapObjectDefinitionsFromFiles(files, mapModelsDir) {
+  const usedIds = new Set()
+
+  return files
+    .sort((a, b) => a.localeCompare(b))
+    .map((file) => {
+      const relativePath = relative(mapModelsDir, file)
+      let id = getMapObjectIdFromRelativePath(relativePath)
+      if (RESERVED_MAP_OBJECT_IDS.has(id)) return null
+
+      const baseId = id
+      let suffix = 2
+      while (usedIds.has(id)) {
+        id = `${baseId}_${suffix}`
+        suffix += 1
+      }
+      usedIds.add(id)
+
+      const publicPath = `/models/map/${relativePath.split(sep).map(encodeURIComponent).join('/')}`
+      return {
+        id,
+        name: titleFromObjectId(id),
+        modelUrl: publicPath,
+        targetHeightMeters: 1.5,
+        colliderRadius: 0,
+        selectionRadius: 0.85,
+        hitRadius: 0.95,
+        hitHeightMeters: 1.5,
+        defaultScale: 1,
+        thumbnailLabel: 'Objet',
+      }
+    })
+    .filter(Boolean)
+}
 
 function saveThumbnailPlugin() {
   return {
@@ -65,6 +146,27 @@ function saveThumbnailPlugin() {
         })
       })
 
+      server.middlewares.use('/dev/import-map-models', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        try {
+          const mapModelsDir = join(process.cwd(), 'public', 'models', 'map')
+          await mkdir(mapModelsDir, { recursive: true })
+          const files = await findMapModelFiles(mapModelsDir)
+          const definitions = createMapObjectDefinitionsFromFiles(files, mapModelsDir)
+          const source = [
+            `export const GENERATED_MAP_OBJECT_DEFINITIONS = ${JSON.stringify(definitions, null, 2)}`,
+            '',
+          ].join('\n')
+          await writeFile(join(process.cwd(), 'src', 'world', 'mapObjectLibrary.generated.js'), source)
+          res.setHeader('content-type', 'application/json')
+          res.statusCode = 200
+          res.end(JSON.stringify({ imported: definitions.length }))
+        } catch (err) {
+          res.statusCode = 500
+          res.end(err.message)
+        }
+      })
+
       server.middlewares.use('/dev/save-map-objects', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         const chunks = []
@@ -88,7 +190,7 @@ function saveThumbnailPlugin() {
               }
             }
             const sanitizedPlacements = placements.map((placement, index) => {
-              const objectId = placement.objectId === 'skeleton_tower' || /^tree_[a-zA-Z0-9_-]+$/.test(placement.objectId)
+              const objectId = typeof placement.objectId === 'string' && /^[a-zA-Z0-9_-]+$/.test(placement.objectId)
                 ? placement.objectId
                 : null
               const position = Array.isArray(placement.position) ? placement.position : [0, 0, 0]

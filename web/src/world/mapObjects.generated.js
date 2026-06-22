@@ -431,6 +431,105 @@ export const MAP_OBJECT_PLACEMENTS = [
     ],
     "rotationY": 0,
     "scale": 1.75
+  },
+  {
+    "id": "stone_tombstone_mqob0793",
+    "objectId": "stone_tombstone",
+    "position": [
+      17.25,
+      1.3522122013648146,
+      145.5
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob1c3d",
+    "objectId": "stone_tombstone",
+    "position": [
+      11.75,
+      1.4462494034237454,
+      145.5
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob1m5d",
+    "objectId": "stone_tombstone",
+    "position": [
+      11.5,
+      1.093121359028511,
+      140.5
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob1pdq",
+    "objectId": "stone_tombstone",
+    "position": [
+      17,
+      1.0339304119255825,
+      140.5
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob2ow6",
+    "objectId": "stone_tombstone",
+    "position": [
+      11.25,
+      0.897444146535153,
+      136.75
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob2r3e",
+    "objectId": "stone_tombstone",
+    "position": [
+      17,
+      0.8422226374589977,
+      136.5
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob2ta2",
+    "objectId": "stone_tombstone",
+    "position": [
+      6.75,
+      1.5570357091351197,
+      145.75
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob2x6x",
+    "objectId": "stone_tombstone",
+    "position": [
+      6.5,
+      1.179861786362608,
+      141
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
+  },
+  {
+    "id": "stone_tombstone_mqob2zsi",
+    "objectId": "stone_tombstone",
+    "position": [
+      6,
+      0.9321109918268065,
+      136.75
+    ],
+    "rotationY": 3.141592653589793,
+    "scale": 1
   }
 ]
 
@@ -439,9 +538,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "id": "monster_spawner_mqmjxq7z",
     "monsterType": "skeleton",
     "position": [
-      41.5,
-      1.4508430014056295,
-      147
+      45.25,
+      1.4505965799645704,
+      145.25
     ],
     "diameter": 53
   },
@@ -464,6 +563,16 @@ export const MAP_MONSTER_SPAWNERS = [
       124.5
     ],
     "diameter": 46
+  },
+  {
+    "id": "monster_spawner_mqob4eml",
+    "monsterType": "skeleton",
+    "position": [
+      11.75,
+      1.168109492262647,
+      141.75
+    ],
+    "diameter": 14
   }
 ]
 

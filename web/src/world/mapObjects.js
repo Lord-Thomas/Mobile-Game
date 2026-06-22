@@ -1,4 +1,5 @@
 import * as generatedMapObjects from './mapObjects.generated'
+import { MAP_OBJECT_DEFINITIONS } from './mapObjectLibrary'
 import { AUTHORED_TREES } from './outdoorData'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 import { estimateTreeHeight } from './trees/proceduralTreeConfig'
@@ -6,7 +7,6 @@ import {
   getRuntimeTreeLibrary,
   getTreeMapObjectEntries,
   getTreeMapObjectId,
-  getTreeMapObjectLibrary,
 } from './trees/treeLibrary'
 
 const generatedPlacements = Array.isArray(generatedMapObjects.MAP_OBJECT_PLACEMENTS)
@@ -30,6 +30,49 @@ const BASE_MAP_OBJECT_CATALOG = {
     defaultScale: 1,
     thumbnailLabel: 'Tour',
   },
+}
+
+function sanitizeObjectId(value, fallback = '') {
+  return String(value ?? fallback)
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+function normalizeMapObjectDefinition(definition) {
+  const id = sanitizeObjectId(definition?.id)
+  const modelUrl = typeof definition?.modelUrl === 'string' ? definition.modelUrl.trim() : ''
+  if (!id || !modelUrl) return null
+
+  const targetHeightMeters = asFiniteNumber(definition.targetHeightMeters, 1.5)
+  const colliderRadius = asFiniteNumber(definition.colliderRadius, 0)
+  const selectionRadius = asFiniteNumber(definition.selectionRadius, colliderRadius || 0.85)
+  const hitRadius = asFiniteNumber(definition.hitRadius, Math.max(selectionRadius, colliderRadius, 0.9))
+  const hitHeightMeters = asFiniteNumber(definition.hitHeightMeters, targetHeightMeters)
+
+  return {
+    id,
+    name: typeof definition.name === 'string' && definition.name.trim()
+      ? definition.name.trim()
+      : id,
+    modelUrl,
+    targetHeightMeters: Math.max(0.05, targetHeightMeters),
+    colliderRadius: Math.max(0, colliderRadius),
+    selectionRadius: Math.max(0.15, selectionRadius),
+    hitRadius: Math.max(0.15, hitRadius),
+    hitHeightMeters: Math.max(0.05, hitHeightMeters),
+    defaultScale: Math.max(0.05, asFiniteNumber(definition.defaultScale, 1)),
+    thumbnailLabel: typeof definition.thumbnailLabel === 'string' && definition.thumbnailLabel.trim()
+      ? definition.thumbnailLabel.trim()
+      : 'Objet',
+  }
+}
+
+function createCustomMapObjectCatalog() {
+  return MAP_OBJECT_DEFINITIONS.reduce((catalog, definition) => {
+    const item = normalizeMapObjectDefinition(definition)
+    if (item) catalog[item.id] = item
+    return catalog
+  }, {})
 }
 
 function createTreeMapObjectCatalog() {
@@ -64,6 +107,7 @@ export function getMapObjectCatalog() {
   if (!catalogCache) {
     catalogCache = {
       ...BASE_MAP_OBJECT_CATALOG,
+      ...createCustomMapObjectCatalog(),
       ...createTreeMapObjectCatalog(),
     }
   }
@@ -75,7 +119,7 @@ export function getMapObjectCatalogItem(objectId) {
 }
 
 export function getMapObjectLibrary() {
-  return ['skeleton_tower', ...getTreeMapObjectLibrary()]
+  return Object.keys(getMapObjectCatalog())
 }
 
 export const MAP_OBJECT_CATALOG = getMapObjectCatalog()

@@ -13512,7 +13512,7 @@ function App() {
   // Cible courante du joueur (dernier ennemi frappé) : les squelettes la focalisent.
   const playerTargetIdRef = useRef(null)
   const mushroomSpawnPositions = useMemo(() => (
-    getMonsterSpawnerPositions('mushroom', MUSHROOM_ENEMY_COUNT, getMushroomEnemySpawnPositions(MUSHROOM_ENEMY_COUNT))
+    getMonsterSpawnerPositions('mushroom', MUSHROOM_ENEMY_COUNT, [])
   ), [])
   const skeletonSpawnPositions = useMemo(() => (
     getMonsterSpawnerPositions(
@@ -16219,7 +16219,7 @@ function App() {
             })()}
           />
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
-          {Array.from({ length: MUSHROOM_ENEMY_COUNT }, (_, index) => (
+          {Array.from({ length: mushroomSpawnPositions.length }, (_, index) => (
             <SmallMushroomEnemy
               key={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
               enemyId={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
@@ -16239,7 +16239,7 @@ function App() {
             <SmallMushroomEnemy
               key={`${SKELETON_ENEMY_ID}_${index + 1}`}
               enemyId={`${SKELETON_ENEMY_ID}_${index + 1}`}
-              spawnIndex={MUSHROOM_ENEMY_COUNT + index}
+              spawnIndex={mushroomSpawnPositions.length + index}
               spawnPositionOverride={skeletonSpawnPositions[index]}
               active={currentZone === ZONES.outside}
               playerPositionRef={playerPositionRef}
