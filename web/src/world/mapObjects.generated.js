@@ -492,8 +492,8 @@ export const MAP_OBJECT_PLACEMENTS = [
     "objectId": "stone_tombstone",
     "position": [
       17,
-      0.8422226374589977,
-      136.5
+      0.8526717626370015,
+      136.75
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
@@ -530,6 +530,72 @@ export const MAP_OBJECT_PLACEMENTS = [
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpml5tc",
+    "objectId": "stone_fence",
+    "position": [
+      17.5,
+      1.6694565456394856,
+      149.25
+    ],
+    "rotationY": 0,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpmm1e1",
+    "objectId": "stone_fence",
+    "position": [
+      14.5,
+      1.7326280095977562,
+      149.25
+    ],
+    "rotationY": 0,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpmm1s1",
+    "objectId": "stone_fence",
+    "position": [
+      11.5,
+      1.8005718296820434,
+      149.25
+    ],
+    "rotationY": 0,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpmm1wp",
+    "objectId": "stone_fence",
+    "position": [
+      8.5,
+      1.8698163060894544,
+      149.25
+    ],
+    "rotationY": 0,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpmm2ak",
+    "objectId": "stone_fence",
+    "position": [
+      5.5,
+      1.9369426650697674,
+      149.25
+    ],
+    "rotationY": 0,
+    "scale": 1
+  },
+  {
+    "id": "stone_fence_mqpmm2fb",
+    "objectId": "stone_fence",
+    "position": [
+      4,
+      1.8046842249861785,
+      147.75
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
   }
 ]
 
@@ -538,11 +604,22 @@ export const MAP_MONSTER_SPAWNERS = [
     "id": "monster_spawner_mqmjxq7z",
     "monsterType": "skeleton",
     "position": [
-      45.25,
-      1.4505965799645704,
-      145.25
+      46,
+      1.4509256296607682,
+      147
     ],
-    "diameter": 53
+    "radius": 26.5,
+    "populationMax": 6,
+    "respawnSeconds": 30,
+    "minDistance": 5,
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "skeleton",
+        "weight": 100
+      }
+    ]
   },
   {
     "id": "monster_spawner_mqo68agf",
@@ -552,7 +629,18 @@ export const MAP_MONSTER_SPAWNERS = [
       9.328871438596675,
       166.25
     ],
-    "diameter": 80
+    "radius": 40,
+    "populationMax": 6,
+    "respawnSeconds": 30,
+    "minDistance": 5,
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "skeleton",
+        "weight": 100
+      }
+    ]
   },
   {
     "id": "monster_spawner_mqo68lqf",
@@ -562,7 +650,18 @@ export const MAP_MONSTER_SPAWNERS = [
       3.290132675056341,
       124.5
     ],
-    "diameter": 46
+    "radius": 23,
+    "populationMax": 6,
+    "respawnSeconds": 30,
+    "minDistance": 5,
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "skeleton",
+        "weight": 100
+      }
+    ]
   },
   {
     "id": "monster_spawner_mqob4eml",
@@ -572,7 +671,18 @@ export const MAP_MONSTER_SPAWNERS = [
       1.168109492262647,
       141.75
     ],
-    "diameter": 14
+    "radius": 7,
+    "populationMax": 6,
+    "respawnSeconds": 30,
+    "minDistance": 5,
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "skeleton",
+        "weight": 100
+      }
+    ]
   }
 ]
 

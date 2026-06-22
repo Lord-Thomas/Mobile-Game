@@ -202,6 +202,8 @@ function useMapEditorState() {
   const [moveOriginal, setMoveOriginal] = useState(null)
   const [draggingId, setDraggingId] = useState(null)
   const [cameraView, setCameraView] = useState('top')
+  const [spawnersLocked, setSpawnersLocked] = useState(false)
+  const [biomesLocked, setBiomesLocked] = useState(false)
 
   return {
     objects,
@@ -216,6 +218,8 @@ function useMapEditorState() {
     moveOriginal,
     draggingId,
     cameraView,
+    spawnersLocked,
+    biomesLocked,
     setObjects,
     setSpawners,
     setBiomes,
@@ -228,6 +232,8 @@ function useMapEditorState() {
     setMoveOriginal,
     setDraggingId,
     setCameraView,
+    setSpawnersLocked,
+    setBiomesLocked,
   }
 }
 
@@ -235,6 +241,7 @@ export default function Editor({ initialMode = 'tree' }) {
   const noPlayerRef = useRef({ x: 9999, y: 0, z: 9999 })
   const controlsRef = useRef(null)
   const mapViewFocusRef = useRef([0, 0])
+  const mapPlacementFocusRef = useRef([0, 0])
   const paintStampCounterRef = useRef(0)
   const biomeUndoStackRef = useRef([])
   const terrainUndoStackRef = useRef([])
@@ -456,6 +463,22 @@ export default function Editor({ initialMode = 'tree' }) {
     mapEditor.setMoveOriginal({ id, position: object.position })
   }
 
+  const duplicateMapObjectForDrag = (id) => {
+    const object = mapEditor.objects.find((nextObject) => nextObject.id === id)
+    if (!object) return id
+    const nextId = `${object.objectId}_${Date.now().toString(36)}`
+    const nextObject = normalizeMapObjectPlacement({
+      ...object,
+      id: nextId,
+      position: [...object.position],
+    }, mapEditor.objects.length)
+    mapEditor.setObjects((current) => [...current, nextObject])
+    selectMapObject(nextObject.id)
+    mapEditor.setMovingId(null)
+    mapEditor.setMoveOriginal(null)
+    return nextObject.id
+  }
+
   const confirmMapMove = () => {
     mapEditor.setMovingId(null)
     mapEditor.setDraggingId(null)
@@ -541,11 +564,13 @@ export default function Editor({ initialMode = 'tree' }) {
                 draggingId={mapEditor.draggingId}
                 cameraView={mapEditor.cameraView}
                 focusRef={mapViewFocusRef}
+                placementFocusRef={mapPlacementFocusRef}
                 onSelect={selectMapObject}
                 onSelectSpawner={selectMapSpawner}
                 onSelectBiome={selectMapBiome}
                 onStartDragging={mapEditor.setDraggingId}
                 onStopDragging={() => mapEditor.setDraggingId(null)}
+                onDuplicateObject={duplicateMapObjectForDrag}
                 onMove={(id, position) => {
                   mapEditor.setObjects((current) => current.map((object) => (
                     object.id === id ? { ...object, position } : object
@@ -568,6 +593,8 @@ export default function Editor({ initialMode = 'tree' }) {
                 terrainBrush={mapEditor.terrainBrush}
                 onBeginTerrainPaintStroke={pushTerrainUndoSnapshot}
                 onPaintTerrain={paintTerrainAt}
+                spawnersLocked={mapEditor.spawnersLocked}
+                biomesLocked={mapEditor.biomesLocked}
                 onTerrainPaintStrokeEnd={() => {
                   flushTerrainVisualUpdate()
                   setTerrainVersion((v) => v + 1)
@@ -657,6 +684,11 @@ export default function Editor({ initialMode = 'tree' }) {
           onPushBiomeUndoSnapshot={pushBiomeUndoSnapshot}
           terrainBrush={mapEditor.terrainBrush}
           onTerrainBrushChange={mapEditor.setTerrainBrush}
+          placementFocusRef={mapPlacementFocusRef}
+          spawnersLocked={mapEditor.spawnersLocked}
+          biomesLocked={mapEditor.biomesLocked}
+          onSpawnersLockedChange={mapEditor.setSpawnersLocked}
+          onBiomesLockedChange={mapEditor.setBiomesLocked}
         />
       )}
     </div>

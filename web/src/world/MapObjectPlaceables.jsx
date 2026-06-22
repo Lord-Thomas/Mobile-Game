@@ -234,7 +234,7 @@ export default function MapObjectPlaceables({
             if (event.button !== 0) return
             event.stopPropagation()
             onSelect(placement.id)
-            onStartDragging?.(placement.id)
+            onStartDragging?.(placement.id, event)
           } : null}
         />
       ))}

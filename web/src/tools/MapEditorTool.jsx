@@ -65,8 +65,10 @@ function getTerrainAnchoredPosition(x, z, heightOffset = 0) {
   return [x, getTerrainHeight(x, z) + heightOffset, z]
 }
 
-function createPlacement(objectId, existingCount) {
-  const [x, z] = clampMapPosition(existingCount * 2, 0)
+function createPlacement(objectId, existingCount, placementPoint = null) {
+  const [x, z] = placementPoint
+    ? clampMapPosition(placementPoint[0], placementPoint[1])
+    : clampMapPosition(existingCount * 2, 0)
 
   return normalizeMapObjectPlacement({
     id: createEditorId(objectId),
@@ -491,14 +493,18 @@ export function MapEditorScene({
   draggingId,
   cameraView,
   focusRef,
+  placementFocusRef,
   onSelect,
   onSelectSpawner,
   onSelectBiome,
   onStartDragging,
   onStopDragging,
+  onDuplicateObject,
   onMove,
   onMoveSpawner,
   onMoveBiome,
+  spawnersLocked = false,
+  biomesLocked = false,
   biomeBrush,
   onBeginBiomePaintStroke,
   onPaintBiome,
@@ -572,14 +578,15 @@ export function MapEditorScene({
     dragCommitRef.current = null
   }
 
-  const handleStartObjectDrag = (id) => {
+  const handleStartObjectDrag = (id, event) => {
     // If a previous drag never committed (pointer released over the label/HTML
     // overlay, so the floor never received pointerup), commit it now before
     // starting a new drag — otherwise its pending position leaks onto this one.
     const pending = dragCommitRef.current
     if (pending && pending.id !== id) onMove(pending.id, pending.position)
     dragCommitRef.current = null
-    onStartDragging?.(id)
+    const dragId = event?.altKey ? onDuplicateObject?.(id) ?? id : id
+    onStartDragging?.(dragId)
   }
 
   // Raycast the ground ourselves from clientX/clientY instead of trusting
@@ -601,6 +608,25 @@ export function MapEditorScene({
     raycaster.setFromCamera(ndc, camera)
     return raycaster.ray.intersectPlane(groundPlane, hitPoint)
   }
+
+  useFrame(() => {
+    if (!placementFocusRef) return
+    const cam = cameraRef.current
+    if (!cam) return
+
+    if (isTopView) {
+      const [x, z] = clampMapPosition(cam.position.x, cam.position.z)
+      placementFocusRef.current = [x, z]
+      return
+    }
+
+    ndc.set(0, 0)
+    raycaster.setFromCamera(ndc, cam)
+    const point = raycaster.ray.intersectPlane(groundPlane, hitPoint)
+    if (!point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    placementFocusRef.current = [x, z]
+  })
 
   const moveToPoint = (id, point) => {
     if (!id || !point) return
@@ -643,6 +669,7 @@ export function MapEditorScene({
     if (event.button !== 0) return
     event.stopPropagation()
     onSelectSpawner?.(id)
+    if (spawnersLocked) return
     spawnerDragRef.current = id
     event.target?.setPointerCapture?.(event.pointerId)
   }
@@ -664,6 +691,7 @@ export function MapEditorScene({
     if (event.button !== 0) return
     event.stopPropagation()
     onSelectBiome?.(id)
+    if (biomesLocked) return
     biomeDragRef.current = id
     event.target?.setPointerCapture?.(event.pointerId)
   }
@@ -881,6 +909,11 @@ export function MapEditorPanel({
   onPushBiomeUndoSnapshot,
   terrainBrush,
   onTerrainBrushChange,
+  placementFocusRef,
+  spawnersLocked = false,
+  biomesLocked = false,
+  onSpawnersLockedChange,
+  onBiomesLockedChange,
 }) {
   const [objectId, setObjectId] = useState(getMapObjectLibrary()[0])
   const [spawnerType, setSpawnerType] = useState(MONSTER_SPAWNER_TYPE_IDS[0])
@@ -964,10 +997,10 @@ export function MapEditorPanel({
   }
 
   const addObject = () => {
-    const next = createPlacement(selectedObjectId, objects.length)
+    const next = createPlacement(selectedObjectId, objects.length, placementFocusRef?.current)
     onObjectsChange([...objects, next])
     onSelect(next.id)
-    setMessage('Objet ajoute et selectionne. Clique sur "Deplacer" pour le poser ailleurs, puis valide.')
+    setMessage('Objet ajoute a la position visee.')
   }
 
   const addSpawner = () => {
@@ -1557,6 +1590,16 @@ export function MapEditorPanel({
             3D
           </button>
         </div>
+        <CheckboxField
+          label="Verrouiller spawners"
+          checked={spawnersLocked}
+          onChange={onSpawnersLockedChange}
+        />
+        <CheckboxField
+          label="Verrouiller zones"
+          checked={biomesLocked}
+          onChange={onBiomesLockedChange}
+        />
       </Section>
 
       <button type="button" style={{ ...styles.primaryButton, width: '100%', marginTop: 12 }} onClick={saveObjects} disabled={saving || Boolean(movingId)}>
