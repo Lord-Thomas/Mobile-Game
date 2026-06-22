@@ -118,6 +118,18 @@ export function getMapObjectCatalogItem(objectId) {
   return getMapObjectCatalog()[objectId] ?? null
 }
 
+function resolveMapObjectId(objectId) {
+  const catalog = getMapObjectCatalog()
+  if (catalog[objectId]) return objectId
+  if (typeof objectId !== 'string') return null
+
+  const withoutGeneratedSuffix = objectId
+    .replace(/_3d_model$/i, '')
+    .replace(/_model$/i, '')
+
+  return catalog[withoutGeneratedSuffix] ? withoutGeneratedSuffix : null
+}
+
 export function getMapObjectLibrary() {
   return Object.keys(getMapObjectCatalog())
 }
@@ -134,9 +146,20 @@ export const MONSTER_SPAWNER_TYPES = {
     id: 'skeleton',
     name: 'Squelette',
   },
+  skeleton_archer: {
+    id: 'skeleton_archer',
+    name: 'Archer squelette',
+  },
+  skeleton_mage: {
+    id: 'skeleton_mage',
+    name: 'Mage squelette',
+  },
 }
 
 export const MONSTER_SPAWNER_TYPE_IDS = Object.keys(MONSTER_SPAWNER_TYPES)
+const DEFAULT_SPAWNER_POPULATION_MAX = 6
+const DEFAULT_SPAWNER_RESPAWN_SECONDS = 30
+const DEFAULT_SPAWNER_MIN_DISTANCE = 5
 
 function asFiniteNumber(value, fallback = 0) {
   const number = Number(value)
@@ -156,8 +179,35 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+function normalizeSpawnerVariants(variants, fallbackMonsterType) {
+  const source = Array.isArray(variants) && variants.length
+    ? variants
+    : [{ monsterType: fallbackMonsterType, weight: 100 }]
+  const merged = new Map()
+
+  source.forEach((variant) => {
+    const monsterType = MONSTER_SPAWNER_TYPES[variant?.monsterType]?.id
+      ?? MONSTER_SPAWNER_TYPES[variant?.type]?.id
+      ?? null
+    if (!monsterType) return
+    const weight = clampNumber(asFiniteNumber(variant?.weight, 0), 0, 100)
+    if (weight <= 0) return
+    merged.set(monsterType, (merged.get(monsterType) ?? 0) + weight)
+  })
+
+  if (merged.size === 0) {
+    const fallback = MONSTER_SPAWNER_TYPES[fallbackMonsterType]?.id ?? 'mushroom'
+    merged.set(fallback, 100)
+  }
+
+  return [...merged.entries()].map(([monsterType, weight]) => ({
+    monsterType,
+    weight: Math.round(weight),
+  }))
+}
+
 export function normalizeMapObjectPlacement(placement, index = 0) {
-  const objectId = getMapObjectCatalogItem(placement?.objectId)?.id ?? 'skeleton_tower'
+  const objectId = resolveMapObjectId(placement?.objectId) ?? 'skeleton_tower'
   const catalogItem = getMapObjectCatalogItem(objectId)
 
   return {
@@ -205,15 +255,27 @@ export const MAP_OBJECT_PLACEMENTS = getInitialMapObjectPlacements().map(normali
 export function normalizeMonsterSpawner(spawner, index = 0) {
   const monsterType = MONSTER_SPAWNER_TYPES[spawner?.monsterType]?.id ?? 'mushroom'
   const position = normalizePosition(spawner?.position)
-  const diameter = clampNumber(asFiniteNumber(spawner?.diameter, 12), 2, 80)
+  const radius = clampNumber(
+    asFiniteNumber(spawner?.radius, asFiniteNumber(spawner?.diameter, 24) * 0.5),
+    1,
+    80,
+  )
+  const variants = normalizeSpawnerVariants(spawner?.variants, monsterType)
 
   return {
     id: typeof spawner?.id === 'string' && spawner.id.trim()
       ? spawner.id
       : `monster_spawner_${index + 1}`,
-    monsterType,
+    monsterType: MONSTER_SPAWNER_TYPES[spawner?.monsterType]?.id ?? variants[0]?.monsterType ?? 'mushroom',
     position,
-    diameter,
+    radius,
+    diameter: radius * 2,
+    populationMax: Math.round(clampNumber(asFiniteNumber(spawner?.populationMax, DEFAULT_SPAWNER_POPULATION_MAX), 1, 50)),
+    respawnSeconds: Math.round(clampNumber(asFiniteNumber(spawner?.respawnSeconds, DEFAULT_SPAWNER_RESPAWN_SECONDS), 1, 600)),
+    minDistance: clampNumber(asFiniteNumber(spawner?.minDistance, DEFAULT_SPAWNER_MIN_DISTANCE), 0, 40),
+    patrol: spawner?.patrol === undefined ? true : spawner.patrol !== false,
+    aggressive: spawner?.aggressive === undefined ? true : spawner.aggressive !== false,
+    variants,
   }
 }
 

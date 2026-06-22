@@ -110,7 +110,6 @@ const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const SOFA_WIDTH_METERS = 1.5
 const MAGIC_SKULL_LEARN_INTERACTION_DISTANCE = 1.65
-const MUSHROOM_ENEMY_ID = 'mushroom_enemy_01'
 const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
 const MUSHROOM_ENEMY_COUNT = 4
 const MUSHROOM_ENEMY_MAX_HP = 30
@@ -145,10 +144,8 @@ const MUSHROOM_ENEMY_ATTACK_RANGE = 1.2
 const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
 const MUSHROOM_ENEMY_ATTACK_DURATION = 0.82
 const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
-const SKELETON_ENEMY_ID = 'skeleton_enemy_01'
 const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'
 const SKELETON_ENEMY_TEXTURE_URL = '/models/enemies/skeleton/skeleton.fbm'
-const SKELETON_ENEMY_COUNT = 5
 const SKELETON_ENEMY_MAX_HP = 80          // réduit (150 était abusé)
 const SKELETON_ENEMY_REWARD_COINS = 40    // 0.5 pièce/PV : plus rentable que le champignon
 const SKELETON_ENEMY_ATTACK_DAMAGE = 25
@@ -229,6 +226,28 @@ const MOB_CONFIGS = {
     targetHeight: 0.85,
     hudHeight: 1.6,
   },
+}
+
+MOB_CONFIGS.skeleton_archer = {
+  ...MOB_CONFIGS.skeleton,
+  maxHp: 60,
+  rewardCoins: 35,
+  materialColor: '#d8c48a',
+  attackDamage: 18,
+  attackRange: 4.8,
+  stopDistance: 3.8,
+  chaseSpeed: 2.15,
+}
+
+MOB_CONFIGS.skeleton_mage = {
+  ...MOB_CONFIGS.skeleton,
+  maxHp: 55,
+  rewardCoins: 45,
+  materialColor: '#8bb7ff',
+  attackDamage: 30,
+  attackRange: 5.6,
+  stopDistance: 4.4,
+  chaseSpeed: 2.05,
 }
 
 // ── Séparation des monstres (anti-chevauchement) ────────────────────────────────
@@ -8725,22 +8744,85 @@ function getRandomEnemySpawnPositions(count, blockedPositions = []) {
   return selected.map(({ x, z }) => [x, getTerrainHeight(x, z), z])
 }
 
-function getMonsterSpawnerPositions(monsterType, count, fallbackPositions = []) {
-  const spawners = MAP_MONSTER_SPAWNERS.filter((spawner) => spawner.monsterType === monsterType)
-  if (spawners.length === 0) return fallbackPositions
+function hashSpawnerId(id) {
+  return String(id ?? 'spawner').split('').reduce((hash, char) => (
+    (hash * 31 + char.charCodeAt(0)) % 100000
+  ), 17)
+}
 
-  return Array.from({ length: count }, (_, index) => {
-    const spawner = spawners[index % spawners.length]
-    const [centerX, , centerZ] = spawner.position
-    const radius = Math.max(0.5, spawner.diameter * 0.5)
-    const angle = Math.random() * Math.PI * 2
-    const distance = Math.sqrt(Math.random()) * radius
+function getWeightedSpawnerVariant(spawner, slotIndex) {
+  const variants = Array.isArray(spawner.variants) && spawner.variants.length
+    ? spawner.variants
+    : [{ monsterType: spawner.monsterType, weight: 100 }]
+  const totalWeight = variants.reduce((total, variant) => total + Math.max(0, variant.weight ?? 0), 0)
+  if (totalWeight <= 0) return variants[0] ?? { monsterType: spawner.monsterType, weight: 100 }
+
+  const roll = getSeededUnitValue(hashSpawnerId(spawner.id) + slotIndex * 19.73) * totalWeight
+  let cursor = 0
+  for (const variant of variants) {
+    cursor += Math.max(0, variant.weight ?? 0)
+    if (roll <= cursor) return variant
+  }
+  return variants[variants.length - 1]
+}
+
+function getSpawnerSlotPosition(spawner, slotIndex, selectedSlots) {
+  const [centerX, , centerZ] = spawner.position
+  const radius = Math.max(0.5, spawner.radius ?? spawner.diameter * 0.5)
+  const minDistance = Math.max(0, spawner.minDistance ?? 0)
+  const seed = hashSpawnerId(spawner.id) + slotIndex * 43.17
+  let fallback = null
+
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const angle = getSeededUnitValue(seed + attempt * 11.31) * Math.PI * 2
+    const distance = Math.sqrt(getSeededUnitValue(seed + attempt * 7.77 + 3.5)) * radius
     const x = centerX + Math.sin(angle) * distance
     const z = centerZ + Math.cos(angle) * distance
     const [safeX, safeZ] = clampMapPositionForSpawn(x, z)
+    const candidate = [safeX, getTerrainHeight(safeX, safeZ), safeZ]
+    fallback = fallback ?? candidate
 
-    return [safeX, getTerrainHeight(safeX, safeZ), safeZ]
+    const hasSpacing = selectedSlots.every((slot) => (
+      Math.hypot(slot.spawnPosition[0] - safeX, slot.spawnPosition[2] - safeZ) >= minDistance
+    ))
+    if (hasSpacing) return candidate
+  }
+
+  return fallback ?? [centerX, getTerrainHeight(centerX, centerZ), centerZ]
+}
+
+function getSpawnerMobConfig(monsterType, spawner) {
+  const baseConfig = MOB_CONFIGS[monsterType] ?? MOB_CONFIGS[spawner.monsterType] ?? MOB_CONFIGS.mushroom
+  const radius = Math.max(1, spawner.radius ?? spawner.diameter * 0.5)
+  return {
+    ...baseConfig,
+    respawnMs: Math.max(1, spawner.respawnSeconds ?? 30) * 1000,
+    wanderRadius: spawner.patrol ? Math.max(0.8, Math.min(baseConfig.wanderRadius ?? 3.8, radius * 0.35)) : 0,
+    leashRange: Math.max(baseConfig.leashRange ?? 18, radius + 6),
+  }
+}
+
+function getMonsterSpawnerSlots() {
+  const slots = []
+
+  MAP_MONSTER_SPAWNERS.forEach((spawner) => {
+    const population = Math.max(1, Math.round(spawner.populationMax ?? 1))
+    for (let index = 0; index < population; index += 1) {
+      const variant = getWeightedSpawnerVariant(spawner, index)
+      const monsterType = MOB_CONFIGS[variant.monsterType] ? variant.monsterType : spawner.monsterType
+      const spawnPosition = getSpawnerSlotPosition(spawner, index, slots)
+      slots.push({
+        id: `${spawner.id}_${monsterType}_${index + 1}`,
+        monsterType,
+        spawnPosition,
+        config: getSpawnerMobConfig(monsterType, spawner),
+        aggressive: spawner.aggressive,
+        patrol: spawner.patrol,
+      })
+    }
   })
+
+  return slots
 }
 
 function clampMapPositionForSpawn(x, z) {
@@ -8942,6 +9024,8 @@ function SmallMushroomEnemy({
   spawnIndex = 0,
   spawnPositionOverride = null,
   passive = false,
+  aggressive = true,
+  patrol = true,
   active,
   playerPositionRef,
   registerCombatTarget,
@@ -9279,12 +9363,12 @@ function SmallMushroomEnemy({
 
   // ── Enregistrement dans le groupe pour l'aggro partagée ────────────────────
   const triggerAggro = useCallback(() => {
-    if (passive || defeatedRef.current || evadingRef.current) return
+    if (passive || !aggressive || defeatedRef.current || evadingRef.current) return
     if (stateRef.current === 'idle' || stateRef.current === 'wander') {
       wanderTargetRef.current = null
       stateRef.current = 'chase'
     }
-  }, [passive])
+  }, [aggressive, passive])
 
   useEffect(() => {
     if (!mobGroupRef || passive) return undefined
@@ -9345,7 +9429,7 @@ function SmallMushroomEnemy({
     let aggroTarget = null
     {
       const pp = playerPositionRef?.current
-      if (pp && active && !passive && !defeatedRef.current) {
+      if (pp && active && !passive && aggressive && !defeatedRef.current) {
         let best = null
         let bestThreat = 0
         for (const [aid, threat] of threatRef.current) {
@@ -9415,7 +9499,7 @@ function SmallMushroomEnemy({
     const distanceToSpawn = Math.hypot(enemyPosition.x - spawnPosition[0], enemyPosition.z - spawnPosition[2])
     const canAct = !attackRef.current
 
-    if (stateRef.current === 'idle' || stateRef.current === 'wander') {
+    if (aggressive && (stateRef.current === 'idle' || stateRef.current === 'wander')) {
       const enemyYaw = groupRef.current?.rotation.y ?? cfg.spawnYaw
       const seesPlayer = canMobSeePlayer(enemyPosition, enemyYaw, playerPosition, cfg.visibilityRange, cfg.viewConeDegrees)
 
@@ -9461,7 +9545,7 @@ function SmallMushroomEnemy({
     }
 
     if (stateRef.current === 'idle') {
-      if (state.clock.elapsedTime >= nextWanderAtRef.current) {
+      if (patrol && state.clock.elapsedTime >= nextWanderAtRef.current) {
         wanderSeedRef.current += 1
         wanderTargetRef.current = getMushroomEnemyWanderPoint(spawnPosition, wanderSeedRef.current)
         const targetDistance = Math.hypot(wanderTargetRef.current.x - enemyPosition.x, wanderTargetRef.current.z - enemyPosition.z)
@@ -9478,6 +9562,12 @@ function SmallMushroomEnemy({
     }
 
     if (stateRef.current === 'wander' && canAct) {
+      if (!patrol) {
+        stateRef.current = 'idle'
+        wanderTargetRef.current = null
+        setMotion('idle')
+        return
+      }
       const wanderTarget = wanderTargetRef.current
       const tooFarFromSpawn = distanceToSpawn > cfg.wanderRadius + 0.6
 
@@ -13511,16 +13601,7 @@ function App() {
   const allyTargetsRef = useRef(new Map())
   // Cible courante du joueur (dernier ennemi frappé) : les squelettes la focalisent.
   const playerTargetIdRef = useRef(null)
-  const mushroomSpawnPositions = useMemo(() => (
-    getMonsterSpawnerPositions('mushroom', MUSHROOM_ENEMY_COUNT, [])
-  ), [])
-  const skeletonSpawnPositions = useMemo(() => (
-    getMonsterSpawnerPositions(
-      'skeleton',
-      SKELETON_ENEMY_COUNT,
-      getRandomEnemySpawnPositions(SKELETON_ENEMY_COUNT, mushroomSpawnPositions),
-    )
-  ), [mushroomSpawnPositions])
+  const monsterSpawnSlots = useMemo(() => getMonsterSpawnerSlots(), [])
   const catPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const catGroupRef = useRef(null)
   const catNetworkStateRef = useRef(null)
@@ -16219,34 +16300,20 @@ function App() {
             })()}
           />
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
-          {Array.from({ length: mushroomSpawnPositions.length }, (_, index) => (
+          {monsterSpawnSlots.map((slot, index) => (
             <SmallMushroomEnemy
-              key={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
-              enemyId={`${MUSHROOM_ENEMY_ID}_${index + 1}`}
+              key={slot.id}
+              enemyId={slot.id}
               spawnIndex={index}
-              spawnPositionOverride={mushroomSpawnPositions[index]}
+              spawnPositionOverride={slot.spawnPosition}
               active={currentZone === ZONES.outside}
               playerPositionRef={playerPositionRef}
               registerCombatTarget={registerCombatTarget}
               onDefeated={handleSmallEnemyDefeated}
               onHitPlayer={handlePlayerHit}
-              config={MOB_CONFIGS.mushroom}
-              mobGroupRef={mobGroupRef}
-              allyTargetsRef={allyTargetsRef}
-            />
-          ))}
-          {Array.from({ length: SKELETON_ENEMY_COUNT }, (_, index) => (
-            <SmallMushroomEnemy
-              key={`${SKELETON_ENEMY_ID}_${index + 1}`}
-              enemyId={`${SKELETON_ENEMY_ID}_${index + 1}`}
-              spawnIndex={mushroomSpawnPositions.length + index}
-              spawnPositionOverride={skeletonSpawnPositions[index]}
-              active={currentZone === ZONES.outside}
-              playerPositionRef={playerPositionRef}
-              registerCombatTarget={registerCombatTarget}
-              onDefeated={handleSmallEnemyDefeated}
-              onHitPlayer={handlePlayerHit}
-              config={MOB_CONFIGS.skeleton}
+              config={slot.config}
+              aggressive={slot.aggressive}
+              patrol={slot.patrol}
               mobGroupRef={mobGroupRef}
               allyTargetsRef={allyTargetsRef}
             />

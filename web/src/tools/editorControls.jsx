@@ -53,6 +53,19 @@ export function ColorField({ label, value, onChange }) {
   )
 }
 
+export function CheckboxField({ label, checked, onChange }) {
+  return (
+    <label style={styles.row}>
+      <span style={styles.label}>{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
+  )
+}
+
 export function SelectField({ label, value, options, onChange }) {
   return (
     <label style={styles.blockField}>

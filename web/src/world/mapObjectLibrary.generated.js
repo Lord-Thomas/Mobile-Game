@@ -1,8 +1,8 @@
 export const GENERATED_MAP_OBJECT_DEFINITIONS = [
   {
-    "id": "stone_fence_3d_model",
-    "name": "Stone Fence 3d Model",
-    "modelUrl": "/models/map/stone%2Bfence%2B3d%2Bmodel.glb",
+    "id": "stone_fence",
+    "name": "Stone Fence",
+    "modelUrl": "/models/map/stone+fence+3d+model.glb",
     "targetHeightMeters": 1.5,
     "colliderRadius": 0,
     "selectionRadius": 0.85,
@@ -12,9 +12,9 @@ export const GENERATED_MAP_OBJECT_DEFINITIONS = [
     "thumbnailLabel": "Objet"
   },
   {
-    "id": "stone_tombstone_3d_model",
-    "name": "Stone Tombstone 3d Model",
-    "modelUrl": "/models/map/stone%2Btombstone%2B3d%2Bmodel.glb",
+    "id": "stone_tombstone",
+    "name": "Stone Tombstone",
+    "modelUrl": "/models/map/stone+tombstone+3d+model.glb",
     "targetHeightMeters": 1.5,
     "colliderRadius": 0,
     "selectionRadius": 0.85,

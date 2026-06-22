@@ -32,6 +32,8 @@ function getMapObjectIdFromRelativePath(relativePath) {
   const parent = parts.length > 1 ? parts.at(-2) : ''
   const sourceName = /^(model|scene|object)$/i.test(stem) && parent ? parent : stem
   return sanitizeGeneratedObjectId(sourceName)
+    .replace(/_3d_model$/i, '')
+    .replace(/_model$/i, '')
 }
 
 async function findMapModelFiles(dir) {
@@ -68,7 +70,7 @@ function createMapObjectDefinitionsFromFiles(files, mapModelsDir) {
       }
       usedIds.add(id)
 
-      const publicPath = `/models/map/${relativePath.split(sep).map(encodeURIComponent).join('/')}`
+      const publicPath = encodeURI(`/models/map/${relativePath.split(sep).join('/')}`)
       return {
         id,
         name: titleFromObjectId(id),
@@ -212,8 +214,9 @@ function saveThumbnailPlugin() {
                 scale: Number.isFinite(Number(placement.scale)) ? Math.max(0.2, Number(placement.scale)) : 1,
               }
             })
+            const allowedMonsterTypes = new Set(['skeleton', 'mushroom', 'skeleton_archer', 'skeleton_mage'])
             const sanitizedSpawners = spawners.map((spawner, index) => {
-              const monsterType = spawner.monsterType === 'skeleton' || spawner.monsterType === 'mushroom'
+              const monsterType = allowedMonsterTypes.has(spawner.monsterType)
                 ? spawner.monsterType
                 : null
               const position = Array.isArray(spawner.position) ? spawner.position : [0, 0, 0]
@@ -222,6 +225,17 @@ function saveThumbnailPlugin() {
                 : `monster_spawner_${index + 1}`
 
               if (!monsterType) throw new Error(`Unknown monster spawner type at index ${index}`)
+              const rawVariants = Array.isArray(spawner.variants) && spawner.variants.length
+                ? spawner.variants
+                : [{ monsterType, weight: 100 }]
+              const variants = rawVariants
+                .map((variant) => ({
+                  monsterType: allowedMonsterTypes.has(variant.monsterType) ? variant.monsterType : null,
+                  weight: Number.isFinite(Number(variant.weight))
+                    ? Math.min(100, Math.max(0, Number(variant.weight)))
+                    : 0,
+                }))
+                .filter((variant) => variant.monsterType && variant.weight > 0)
 
               return {
                 id,
@@ -231,9 +245,23 @@ function saveThumbnailPlugin() {
                   Number.isFinite(Number(position[1])) ? Number(position[1]) : 0,
                   Number.isFinite(Number(position[2])) ? Number(position[2]) : 0,
                 ],
-                diameter: Number.isFinite(Number(spawner.diameter))
-                  ? Math.min(80, Math.max(2, Number(spawner.diameter)))
-                  : 12,
+                radius: Number.isFinite(Number(spawner.radius))
+                  ? Math.min(80, Math.max(1, Number(spawner.radius)))
+                  : Number.isFinite(Number(spawner.diameter))
+                    ? Math.min(80, Math.max(1, Number(spawner.diameter) * 0.5))
+                    : 12,
+                populationMax: Number.isFinite(Number(spawner.populationMax))
+                  ? Math.min(50, Math.max(1, Math.round(Number(spawner.populationMax))))
+                  : 6,
+                respawnSeconds: Number.isFinite(Number(spawner.respawnSeconds))
+                  ? Math.min(600, Math.max(1, Math.round(Number(spawner.respawnSeconds))))
+                  : 30,
+                minDistance: Number.isFinite(Number(spawner.minDistance))
+                  ? Math.min(40, Math.max(0, Number(spawner.minDistance)))
+                  : 5,
+                patrol: spawner.patrol === false ? false : true,
+                aggressive: spawner.aggressive === false ? false : true,
+                variants: variants.length ? variants : [{ monsterType, weight: 100 }],
               }
             })
             const sanitizedBiomes = biomes.map((area, index) => {

@@ -19,7 +19,7 @@ import {
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { getTerrainHeight, terrainModifications } from '../world/terrain/terrainGeometry'
-import { ColorField, NumberField, Section, SelectField, SliderField } from './editorControls'
+import { CheckboxField, ColorField, NumberField, Section, SelectField, SliderField } from './editorControls'
 import { styles } from './editorStyles'
 
 const MAP_GRID_SIZE = 0.25
@@ -84,7 +84,13 @@ function createMonsterSpawner(monsterType, existingCount) {
     id: createEditorId('monster_spawner'),
     monsterType,
     position: [x, getTerrainHeight(x, z), z],
-    diameter: 14,
+    radius: 25,
+    populationMax: 8,
+    respawnSeconds: 45,
+    minDistance: 5,
+    patrol: true,
+    aggressive: true,
+    variants: [{ monsterType, weight: 100 }],
   }, existingCount)
 }
 
@@ -125,7 +131,13 @@ function toSavedSpawners(spawners) {
       id: normalized.id,
       monsterType: normalized.monsterType,
       position: [x, getTerrainHeight(x, z), z],
-      diameter: normalized.diameter,
+      radius: normalized.radius,
+      populationMax: normalized.populationMax,
+      respawnSeconds: normalized.respawnSeconds,
+      minDistance: normalized.minDistance,
+      patrol: normalized.patrol,
+      aggressive: normalized.aggressive,
+      variants: normalized.variants,
     }
   })
 }
@@ -150,6 +162,8 @@ function toSavedBiomes(biomes) {
 }
 
 function getSpawnerColor(monsterType) {
+  if (monsterType === 'skeleton_archer') return '#d4c28a'
+  if (monsterType === 'skeleton_mage') return '#8bb7ff'
   return monsterType === 'skeleton' ? '#d4d0c2' : '#83d37b'
 }
 
@@ -165,7 +179,7 @@ function MonsterSpawnerMarkers({
       {spawners.map((spawner) => {
         const [x, savedY, z] = spawner.position
         const y = Math.max(savedY, getTerrainHeight(x, z))
-        const radius = spawner.diameter * 0.5
+        const radius = spawner.radius ?? spawner.diameter * 0.5
         const selected = spawner.id === selectedSpawnerId
         const color = getSpawnerColor(spawner.monsterType)
         const label = MONSTER_SPAWNER_TYPES[spawner.monsterType]?.name ?? spawner.monsterType
@@ -909,6 +923,18 @@ export function MapEditorPanel({
     )))
   }
 
+  const patchSelectedSpawnerVariant = (monsterType, weight) => {
+    if (!selectedSpawner) return
+    const nextVariants = MONSTER_SPAWNER_TYPE_IDS.map((id) => {
+      const existing = selectedSpawner.variants.find((variant) => variant.monsterType === id)
+      return {
+        monsterType: id,
+        weight: id === monsterType ? weight : existing?.weight ?? 0,
+      }
+    }).filter((variant) => variant.weight > 0)
+    patchSelectedSpawner({ variants: nextVariants })
+  }
+
   const patchSelectedBiome = (patch) => {
     if (!selectedBiome) return
     onBiomesChange(biomes.map((area) => (
@@ -948,7 +974,7 @@ export function MapEditorPanel({
     const next = createMonsterSpawner(spawnerType, spawners.length)
     onSpawnersChange([...spawners, next])
     onSelectSpawner(next.id)
-    setMessage('Spawner ajoute. Ajuste son type, son diametre et sa position.')
+    setMessage('Zone de spawn ajoutee. Regle sa population, son rayon et ses variantes.')
   }
 
   const addBiome = () => {
@@ -1088,7 +1114,7 @@ export function MapEditorPanel({
                 >
                   <strong>Spawner {typeLabel} #{index + 1}</strong>
                   <span style={{ color: '#9fb3ac', fontSize: 11 }}>
-                    diam. {spawner.diameter.toFixed(0)} / x {spawner.position[0].toFixed(1)} / z {spawner.position[2].toFixed(1)}
+                    pop. {spawner.populationMax} / rayon {spawner.radius.toFixed(0)}m / respawn {spawner.respawnSeconds}s
                   </span>
                 </button>
               )
@@ -1375,7 +1401,10 @@ export function MapEditorPanel({
                 label="Monstre"
                 value={selectedSpawner.monsterType}
                 options={spawnerTypeOptions}
-                onChange={(monsterType) => patchSelectedSpawner({ monsterType })}
+                onChange={(monsterType) => patchSelectedSpawner({
+                  monsterType,
+                  variants: [{ monsterType, weight: 100 }],
+                })}
               />
               <NumberField label="X" value={selectedSpawner.position[0]} step={0.5} onChange={(value) => {
                 const [, , z] = selectedSpawner.position
@@ -1388,13 +1417,64 @@ export function MapEditorPanel({
                 patchSelectedSpawner({ position: [x, getTerrainHeight(x, z), z] })
               }} />
               <SliderField
-                label="Diametre"
-                value={selectedSpawner.diameter}
-                min={2}
+                label="Rayon"
+                value={selectedSpawner.radius}
+                min={1}
                 max={80}
                 step={1}
-                onChange={(diameter) => patchSelectedSpawner({ diameter })}
+                onChange={(radius) => patchSelectedSpawner({ radius })}
               />
+              <SliderField
+                label="Population max"
+                value={selectedSpawner.populationMax}
+                min={1}
+                max={30}
+                step={1}
+                onChange={(populationMax) => patchSelectedSpawner({ populationMax })}
+              />
+              <SliderField
+                label="Respawn sec"
+                value={selectedSpawner.respawnSeconds}
+                min={5}
+                max={180}
+                step={5}
+                onChange={(respawnSeconds) => patchSelectedSpawner({ respawnSeconds })}
+              />
+              <SliderField
+                label="Distance mini"
+                value={selectedSpawner.minDistance}
+                min={0}
+                max={20}
+                step={0.5}
+                onChange={(minDistance) => patchSelectedSpawner({ minDistance })}
+              />
+              <CheckboxField
+                label="Patrouille"
+                checked={selectedSpawner.patrol}
+                onChange={(patrol) => patchSelectedSpawner({ patrol })}
+              />
+              <CheckboxField
+                label="Agressif"
+                checked={selectedSpawner.aggressive}
+                onChange={(aggressive) => patchSelectedSpawner({ aggressive })}
+              />
+            </div>
+            <div style={styles.subcard}>
+              <strong>Variantes</strong>
+              {MONSTER_SPAWNER_TYPE_IDS.map((monsterType) => {
+                const variant = selectedSpawner.variants.find((item) => item.monsterType === monsterType)
+                return (
+                  <SliderField
+                    key={monsterType}
+                    label={MONSTER_SPAWNER_TYPES[monsterType]?.name ?? monsterType}
+                    value={variant?.weight ?? 0}
+                    min={0}
+                    max={100}
+                    step={5}
+                    onChange={(weight) => patchSelectedSpawnerVariant(monsterType, weight)}
+                  />
+                )
+              })}
             </div>
             <div style={styles.actions}>
               <button type="button" style={styles.dangerButton} onClick={deleteSelectedSpawner}>Supprimer</button>
