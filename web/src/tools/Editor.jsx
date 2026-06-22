@@ -21,6 +21,7 @@ import {
   MAP_BIOME_AREAS,
   normalizeBiomeArea,
 } from '../world/biomeAreas'
+import { MAP_PATHS, normalizePathStamp } from '../world/paths'
 
 // The whole outdoor world (terrain, houses, lights) lives on OUTDOOR_LIGHT_LAYER.
 // The editor camera must enable that layer or nothing renders, and the preview
@@ -188,12 +189,19 @@ function useMapEditorState() {
   const [objects, setObjects] = useState(() => MAP_OBJECT_PLACEMENTS.map(normalizeMapObjectPlacement))
   const [spawners, setSpawners] = useState(() => MAP_MONSTER_SPAWNERS.map(normalizeMonsterSpawner))
   const [biomes, setBiomes] = useState(() => MAP_BIOME_AREAS.map(normalizeBiomeArea))
+  const [paths, setPaths] = useState(() => MAP_PATHS.map(normalizePathStamp))
   const [biomeBrush, setBiomeBrush] = useState(createInitialBiomeBrush)
   const [terrainBrush, setTerrainBrush] = useState({
     active: false,
     op: 'add',
     radius: 6,
     strength: 0.15,
+  })
+  const [pathBrush, setPathBrush] = useState({
+    active: false,
+    type: 'dirt',
+    width: 3,
+    mode: 'paint',
   })
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
   const [selectedSpawnerId, setSelectedSpawnerId] = useState(null)
@@ -209,8 +217,10 @@ function useMapEditorState() {
     objects,
     spawners,
     biomes,
+    paths,
     biomeBrush,
     terrainBrush,
+    pathBrush,
     selectedId,
     selectedSpawnerId,
     selectedBiomeId,
@@ -223,8 +233,10 @@ function useMapEditorState() {
     setObjects,
     setSpawners,
     setBiomes,
+    setPaths,
     setBiomeBrush,
     setTerrainBrush,
+    setPathBrush,
     setSelectedId,
     setSelectedSpawnerId,
     setSelectedBiomeId,
@@ -243,8 +255,10 @@ export default function Editor({ initialMode = 'tree' }) {
   const mapViewFocusRef = useRef([0, 0])
   const mapPlacementFocusRef = useRef([0, 0])
   const paintStampCounterRef = useRef(0)
+  const pathStampCounterRef = useRef(0)
   const biomeUndoStackRef = useRef([])
   const terrainUndoStackRef = useRef([])
+  const pathUndoStackRef = useRef([])
   const terrainUpdateFrameRef = useRef(null)
   const terrainUpdateBoundsRef = useRef(null)
   const [terrainVersion, setTerrainVersion] = useState(0)
@@ -280,6 +294,22 @@ export default function Editor({ initialMode = 'tree' }) {
       terrainUndoStackRef.current.shift()
     }
   }, [])
+
+  const pushPathUndoSnapshot = useCallback(() => {
+    pathUndoStackRef.current.push(mapEditor.paths.map((stamp) => ({
+      ...stamp,
+      center: [...stamp.center],
+    })))
+    if (pathUndoStackRef.current.length > MAX_BIOME_UNDO_STEPS) {
+      pathUndoStackRef.current.shift()
+    }
+  }, [mapEditor.paths])
+
+  const undoLastPathEdit = useCallback(() => {
+    const previous = pathUndoStackRef.current.pop()
+    if (!previous) return
+    mapEditor.setPaths(previous.map(normalizePathStamp))
+  }, [mapEditor])
 
   const undoLastTerrainEdit = useCallback(() => {
     const previous = terrainUndoStackRef.current.pop()
@@ -415,6 +445,8 @@ export default function Editor({ initialMode = 'tree' }) {
       event.preventDefault()
       if (mapEditor.terrainBrush.active) {
         undoLastTerrainEdit()
+      } else if (mapEditor.pathBrush.active) {
+        undoLastPathEdit()
       } else {
         undoLastBiomeEdit()
       }
@@ -422,7 +454,7 @@ export default function Editor({ initialMode = 'tree' }) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, undoLastBiomeEdit, undoLastTerrainEdit, mapEditor.terrainBrush.active])
+  }, [mode, undoLastBiomeEdit, undoLastTerrainEdit, undoLastPathEdit, mapEditor.terrainBrush.active, mapEditor.pathBrush.active])
 
   const selectMapObject = (id) => {
     mapEditor.setSelectedId(id)
@@ -528,6 +560,34 @@ export default function Editor({ initialMode = 'tree' }) {
     })
   }
 
+  const paintPathAt = (center, brush) => {
+    if (!brush || !Array.isArray(center)) return
+    const [x = 0, z = 0] = center
+
+    mapEditor.setPaths((current) => {
+      if (brush.mode === 'erase') {
+        return current.filter((stamp) => {
+          const [stampX, stampZ] = stamp.center
+          return Math.hypot(stampX - x, stampZ - z) > brush.width * 0.5 + stamp.width * 0.4
+        })
+      }
+
+      pathStampCounterRef.current += 1
+      const stamp = normalizePathStamp({
+        id: `path_${Date.now().toString(36)}_${pathStampCounterRef.current}`,
+        type: brush.type,
+        center: [x, z],
+        width: MathUtils.clamp(brush.width, 0.5, 24),
+      }, current.length)
+      return [...current, stamp]
+    })
+  }
+
+  const clearPaths = useCallback(() => {
+    pushPathUndoSnapshot()
+    mapEditor.setPaths([])
+  }, [mapEditor, pushPathUndoSnapshot])
+
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
       <Canvas
@@ -557,6 +617,7 @@ export default function Editor({ initialMode = 'tree' }) {
                 objects={mapEditor.objects}
                 spawners={mapEditor.spawners}
                 biomes={mapEditor.biomes}
+                paths={mapEditor.paths}
                 selectedId={mapEditor.selectedId}
                 selectedSpawnerId={mapEditor.selectedSpawnerId}
                 selectedBiomeId={mapEditor.selectedBiomeId}
@@ -593,6 +654,9 @@ export default function Editor({ initialMode = 'tree' }) {
                 terrainBrush={mapEditor.terrainBrush}
                 onBeginTerrainPaintStroke={pushTerrainUndoSnapshot}
                 onPaintTerrain={paintTerrainAt}
+                pathBrush={mapEditor.pathBrush}
+                onBeginPathStroke={pushPathUndoSnapshot}
+                onPaintPath={paintPathAt}
                 spawnersLocked={mapEditor.spawnersLocked}
                 biomesLocked={mapEditor.biomesLocked}
                 onTerrainPaintStrokeEnd={() => {
@@ -659,6 +723,7 @@ export default function Editor({ initialMode = 'tree' }) {
           objects={mapEditor.objects}
           spawners={mapEditor.spawners}
           biomes={mapEditor.biomes}
+          paths={mapEditor.paths}
           selectedId={mapEditor.selectedId}
           selectedSpawnerId={mapEditor.selectedSpawnerId}
           selectedBiomeId={mapEditor.selectedBiomeId}
@@ -684,6 +749,10 @@ export default function Editor({ initialMode = 'tree' }) {
           onPushBiomeUndoSnapshot={pushBiomeUndoSnapshot}
           terrainBrush={mapEditor.terrainBrush}
           onTerrainBrushChange={mapEditor.setTerrainBrush}
+          pathBrush={mapEditor.pathBrush}
+          onPathBrushChange={mapEditor.setPathBrush}
+          onClearPaths={clearPaths}
+          pathCount={mapEditor.paths.length}
           placementFocusRef={mapPlacementFocusRef}
           spawnersLocked={mapEditor.spawnersLocked}
           biomesLocked={mapEditor.biomesLocked}

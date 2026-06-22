@@ -179,6 +179,26 @@ function saveThumbnailPlugin() {
             const placements = Array.isArray(payload.placements) ? payload.placements : []
             const spawners = Array.isArray(payload.spawners) ? payload.spawners : []
             const biomes = Array.isArray(payload.biomes) ? payload.biomes : []
+            const paths = Array.isArray(payload.paths) ? payload.paths : []
+            const allowedPathTypes = new Set(['dirt', 'stone', 'sand', 'gravel'])
+            const sanitizedPaths = paths.map((stamp, index) => {
+              const type = allowedPathTypes.has(stamp.type) ? stamp.type : 'dirt'
+              const center = Array.isArray(stamp.center) ? stamp.center : [0, 0]
+              const id = typeof stamp.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(stamp.id)
+                ? stamp.id
+                : `path_${index + 1}`
+              return {
+                id,
+                type,
+                center: [
+                  Number.isFinite(Number(center[0])) ? Number(center[0]) : 0,
+                  Number.isFinite(Number(center[1])) ? Number(center[1]) : 0,
+                ],
+                width: Number.isFinite(Number(stamp.width))
+                  ? Math.min(24, Math.max(0.5, Number(stamp.width)))
+                  : 3,
+              }
+            })
             const terrainModifications = payload.terrainModifications && typeof payload.terrainModifications === 'object'
               ? payload.terrainModifications
               : {}
@@ -335,6 +355,12 @@ function saveThumbnailPlugin() {
               '',
             ].join('\n')
             await writeFile(join(process.cwd(), 'src', 'world', 'terrain', 'terrainModifications.generated.js'), terrainSource)
+
+            const pathsSource = [
+              `export const MAP_PATHS = ${JSON.stringify(sanitizedPaths, null, 2)}`,
+              '',
+            ].join('\n')
+            await writeFile(join(process.cwd(), 'src', 'world', 'paths.generated.js'), pathsSource)
 
             res.statusCode = 200
             res.end('ok')

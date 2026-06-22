@@ -3,6 +3,8 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera } from '@react-three/drei'
 import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import MapObjectPlaceables from '../world/MapObjectPlaceables'
+import PaintedPaths from '../world/PaintedPaths'
+import { PATH_TYPES, PATH_TYPE_IDS, normalizePathStamp } from '../world/paths'
 import {
   MONSTER_SPAWNER_TYPE_IDS,
   MONSTER_SPAWNER_TYPES,
@@ -159,6 +161,18 @@ function toSavedBiomes(biomes) {
       groundColors: normalized.groundColors,
       source: normalized.source,
       ambient: normalized.ambient,
+    }
+  })
+}
+
+function toSavedPaths(paths) {
+  return paths.map((stamp, index) => {
+    const normalized = normalizePathStamp(stamp, index)
+    return {
+      id: normalized.id,
+      type: normalized.type,
+      center: normalized.center,
+      width: normalized.width,
     }
   })
 }
@@ -366,6 +380,28 @@ function TerrainBrushPreview({ brush, point }) {
   )
 }
 
+function PathBrushPreview({ brush, point }) {
+  if (!brush?.active || !point) return null
+
+  const [x, z] = point
+  const y = getTerrainHeight(x, z, true)
+  const color = brush.mode === 'erase' ? '#ff9c82' : PATH_TYPES[brush.type]?.color ?? '#6f5d44'
+  const radius = brush.width * 0.5
+
+  return (
+    <group position={[x, y + 0.16, z]} userData={{ debugCategory: 'path-brush-preview' }}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={24}>
+        <circleGeometry args={[radius, 48]} />
+        <meshBasicMaterial color={color} transparent opacity={0.16} depthWrite={false} depthTest={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={25}>
+        <ringGeometry args={[Math.max(0.06, radius - 0.12), radius, 48]} />
+        <meshBasicMaterial color={color} transparent opacity={0.92} depthWrite={false} depthTest={false} />
+      </mesh>
+    </group>
+  )
+}
+
 function createTerrainGridGeometry({ spacing, sampleStep, major = false }) {
   const positions = []
   const min = -OUTDOOR_HALF_SIZE
@@ -513,6 +549,10 @@ export function MapEditorScene({
   onBeginTerrainPaintStroke,
   onPaintTerrain,
   onTerrainPaintStrokeEnd,
+  paths = [],
+  pathBrush,
+  onBeginPathStroke,
+  onPaintPath,
 }) {
   // Ported from the in-game room editor (CustomizationCamera + EditableFloor):
   //  - a top-down ortho camera that never follows the selection,
@@ -532,9 +572,23 @@ export function MapEditorScene({
   const terrainPaintingRef = useRef(false)
   const lastTerrainBrushPointRef = useRef(null)
   const targetHeightRef = useRef(0)
+  const pathPaintingRef = useRef(false)
+  const lastPathPointRef = useRef(null)
   const [brushPreviewPoint, setBrushPreviewPoint] = useState(null)
   const isTopView = cameraView === 'top'
-  const editorBrushActive = Boolean(biomeBrush?.active || terrainBrush?.active)
+  const editorBrushActive = Boolean(biomeBrush?.active || terrainBrush?.active || pathBrush?.active)
+
+  const paintPathAtPoint = (point, force = false) => {
+    if (!pathBrush?.active || !isTopView || !point) return
+    const [x, z] = clampMapPosition(point.x, point.z)
+    const last = lastPathPointRef.current
+    const spacing = Math.max(0.35, pathBrush.width * 0.3)
+    if (!force && last && Math.hypot(x - last[0], z - last[1]) < spacing) return
+
+    lastPathPointRef.current = [x, z]
+    setBrushPreviewPoint([x, z])
+    onPaintPath?.([x, z], pathBrush)
+  }
 
   const paintTerrainAtPoint = (point, force = false) => {
     if (!terrainBrush?.active || !point) return
@@ -807,6 +861,18 @@ export function MapEditorScene({
             event.target?.setPointerCapture?.(event.pointerId)
             return
           }
+          if (pathBrush?.active && isTopView) {
+            event.stopPropagation()
+            onSelect(null)
+            onSelectSpawner?.(null)
+            onSelectBiome?.(null)
+            pathPaintingRef.current = true
+            lastPathPointRef.current = null
+            onBeginPathStroke?.()
+            paintPathAtPoint(groundPointFromEvent(event), true)
+            event.target?.setPointerCapture?.(event.pointerId)
+            return
+          }
           onSelect(null)
           onSelectSpawner?.(null)
           onSelectBiome?.(null)
@@ -828,6 +894,15 @@ export function MapEditorScene({
             if (brushPaintingRef.current) {
               event.stopPropagation()
               paintBiomeAtPoint(point)
+              return
+            }
+          }
+          if (pathBrush?.active && isTopView && !activeDragIdRef.current && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
+            const point = groundPointFromEvent(event)
+            setBrushPreviewPoint(point ? clampMapPosition(point.x, point.z) : null)
+            if (pathPaintingRef.current) {
+              event.stopPropagation()
+              paintPathAtPoint(point)
               return
             }
           }
@@ -882,6 +957,13 @@ export function MapEditorScene({
             event.stopPropagation()
             return
           }
+          if (pathPaintingRef.current) {
+            pathPaintingRef.current = false
+            lastPathPointRef.current = null
+            event.target?.releasePointerCapture?.(event.pointerId)
+            event.stopPropagation()
+            return
+          }
           panRef.current = null
           spawnerDragRef.current = null
           biomeDragRef.current = null
@@ -897,6 +979,8 @@ export function MapEditorScene({
           lastBrushPointRef.current = null
           terrainPaintingRef.current = false
           lastTerrainBrushPointRef.current = null
+          pathPaintingRef.current = false
+          lastPathPointRef.current = null
           if (activeDragIdRef.current || dragCommitRef.current) {
             endObjectDrag()
           }
@@ -910,10 +994,13 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
+      <PaintedPaths paths={paths} terrainVersion={terrainVersion} />
       {biomeBrush?.active ? (
         <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
       ) : terrainBrush?.active ? (
         <TerrainBrushPreview brush={terrainBrush} point={brushPreviewPoint} />
+      ) : pathBrush?.active ? (
+        <PathBrushPreview brush={pathBrush} point={brushPreviewPoint} />
       ) : null}
       <TerrainFollowingGrid key={terrainVersion} />
       <MonsterSpawnerMarkers
@@ -946,6 +1033,7 @@ export function MapEditorPanel({
   objects,
   spawners = [],
   biomes = [],
+  paths = [],
   selectedId,
   selectedSpawnerId = null,
   selectedBiomeId = null,
@@ -966,6 +1054,10 @@ export function MapEditorPanel({
   onPushBiomeUndoSnapshot,
   terrainBrush,
   onTerrainBrushChange,
+  pathBrush,
+  onPathBrushChange,
+  onClearPaths,
+  pathCount = 0,
   placementFocusRef,
   spawnersLocked = false,
   biomesLocked = false,
@@ -1034,7 +1126,10 @@ export function MapEditorPanel({
 
   const patchBiomeBrush = (patch) => {
     if (!biomeBrush) return
-    if (patch.active) onTerrainBrushChange?.({ ...terrainBrush, active: false })
+    if (patch.active) {
+      onTerrainBrushChange?.({ ...terrainBrush, active: false })
+      onPathBrushChange?.({ ...pathBrush, active: false })
+    }
     onBiomeBrushChange?.({
       ...biomeBrush,
       ...patch,
@@ -1046,9 +1141,24 @@ export function MapEditorPanel({
 
   const patchTerrainBrush = (patch) => {
     if (!terrainBrush) return
-    if (patch.active) onBiomeBrushChange?.({ ...biomeBrush, active: false })
+    if (patch.active) {
+      onBiomeBrushChange?.({ ...biomeBrush, active: false })
+      onPathBrushChange?.({ ...pathBrush, active: false })
+    }
     onTerrainBrushChange?.({
       ...terrainBrush,
+      ...patch,
+    })
+  }
+
+  const patchPathBrush = (patch) => {
+    if (!pathBrush) return
+    if (patch.active) {
+      onBiomeBrushChange?.({ ...biomeBrush, active: false })
+      onTerrainBrushChange?.({ ...terrainBrush, active: false })
+    }
+    onPathBrushChange?.({
+      ...pathBrush,
       ...patch,
     })
   }
@@ -1123,11 +1233,12 @@ export function MapEditorPanel({
           placements: toSavedPlacements(objects),
           spawners: toSavedSpawners(spawners),
           biomes: toSavedBiomes(biomes),
+          paths: toSavedPaths(paths),
           terrainModifications,
         }),
       })
       if (!response.ok) throw new Error(await response.text())
-      setMessage('Map, biomes et terrain sauvegardes.')
+      setMessage('Map, biomes, chemins et terrain sauvegardes.')
     } catch (error) {
       setMessage(`Sauvegarde impossible: ${error.message}`)
     } finally {
@@ -1254,6 +1365,49 @@ export function MapEditorPanel({
               step={0.01}
               onChange={(strength) => patchTerrainBrush({ strength })}
             />
+          </div>
+        )}
+      </Section>
+
+      <Section title="Chemins">
+        {pathBrush && (
+          <div style={styles.subcard}>
+            <div style={styles.actions}>
+              <button
+                type="button"
+                style={pathBrush.active ? styles.primaryButton : styles.secondaryButton}
+                onClick={() => patchPathBrush({ active: !pathBrush.active })}
+              >
+                {pathBrush.active ? 'Pinceau actif' : 'Activer'}
+              </button>
+            </div>
+            <span style={styles.subtitle}>{pathBrush.active ? 'Glisse sur le sol pour tracer.' : `${pathCount} segment(s) de chemin.`}</span>
+            <SelectField
+              label="Matiere"
+              value={pathBrush.type}
+              options={PATH_TYPE_IDS.map((id) => ({ value: id, label: PATH_TYPES[id].name }))}
+              onChange={(type) => patchPathBrush({ type })}
+            />
+            <SelectField
+              label="Mode"
+              value={pathBrush.mode}
+              options={[
+                { value: 'paint', label: 'Peindre' },
+                { value: 'erase', label: 'Effacer' },
+              ]}
+              onChange={(mode) => patchPathBrush({ mode })}
+            />
+            <SliderField
+              label="Largeur"
+              value={pathBrush.width}
+              min={0.5}
+              max={16}
+              step={0.5}
+              onChange={(width) => patchPathBrush({ width })}
+            />
+            <button type="button" style={styles.dangerButton} onClick={() => onClearPaths?.()} disabled={!pathCount}>
+              Effacer tous les chemins ({pathCount})
+            </button>
           </div>
         )}
       </Section>

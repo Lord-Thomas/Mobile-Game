@@ -10,6 +10,8 @@ import CloudSky from './CloudSky'
 import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import MapObjectPlaceables from './MapObjectPlaceables'
+import PaintedPaths from './PaintedPaths'
+import { MAP_PATHS } from './paths'
 import BiomeAmbientEffects from './BiomeAmbientEffects'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './biomeAreas'
 import { DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
@@ -170,6 +172,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
         <NeighborHouse key={house.id} {...house} />
       ))}
       {showMapObjects && <MapObjectPlaceables />}
+      {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
       {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}
       {showGrass && (
