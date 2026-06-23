@@ -420,6 +420,13 @@ const CAMERA_SETTINGS = {
   outside: { distance: 6.5, height: 2.2, minY: 0.55, maxY: 28 },
 }
 const EDGE_TRIGGER_PX = 14
+// Plage de pitch caméra du joueur (à pied + monture).
+// MIN (négatif) = regarder vers le haut (caméra plus basse → plus de ciel).
+// MAX (positif) = regarder vers le bas (caméra plus haute → vue plongeante).
+// La caméra ne traverse pas le sol : un raycast (focus → caméra) + clampCameraInPlayableVolume
+// la ramènent automatiquement devant tout obstacle, donc on peut élargir sans risque.
+const PLAYER_CAMERA_PITCH_MIN = -0.95
+const PLAYER_CAMERA_PITCH_MAX = 0.62
 const CAMERA_DRAG_SENSITIVITY = 0.007
 const CAMERA_WHEEL_ZOOM_SENSITIVITY = 0.0025
 const SHOW_FLOOR_GRID = false
@@ -3573,7 +3580,7 @@ function Player({
         touch.lookY = 0
       }
       touch.cameraYaw -= touch.lookX * 2.9 * delta
-      touch.cameraPitch = MathUtils.clamp(touch.cameraPitch + touch.lookY * 2.1 * delta, -0.8, 0.5)
+      touch.cameraPitch = MathUtils.clamp(touch.cameraPitch + touch.lookY * 2.1 * delta, PLAYER_CAMERA_PITCH_MIN, PLAYER_CAMERA_PITCH_MAX)
       return
     }
 
@@ -3595,8 +3602,8 @@ function Player({
       touch.cameraYaw -= touch.lookX * cameraYawSpeed * delta
       touch.cameraPitch = MathUtils.clamp(
         touch.cameraPitch + touch.lookY * cameraPitchSpeed * delta,
-        -0.8,
-        0.35,
+        PLAYER_CAMERA_PITCH_MIN,
+        PLAYER_CAMERA_PITCH_MAX,
       )
 
       if (seatPhaseRef.current !== seatedState.phase) {
@@ -3737,8 +3744,8 @@ function Player({
     touch.cameraYaw -= touch.lookX * cameraYawSpeed * delta
     touch.cameraPitch = MathUtils.clamp(
       touch.cameraPitch + touch.lookY * cameraPitchSpeed * delta,
-      -0.8,
-      0.35,
+      PLAYER_CAMERA_PITCH_MIN,
+      PLAYER_CAMERA_PITCH_MAX,
     )
 
     let isEmoting =
@@ -6460,8 +6467,8 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
     touchRef.current.cameraYaw -= stepX * CAMERA_DRAG_SENSITIVITY
     touchRef.current.cameraPitch = MathUtils.clamp(
       touchRef.current.cameraPitch + stepY * CAMERA_DRAG_SENSITIVITY,
-      -0.8,
-      0.35,
+      PLAYER_CAMERA_PITCH_MIN,
+      PLAYER_CAMERA_PITCH_MAX,
     )
 
     const viewportW = window.innerWidth
