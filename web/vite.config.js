@@ -260,6 +260,9 @@ function saveThumbnailPlugin() {
               return {
                 id,
                 monsterType,
+                heightOffset: Number.isFinite(Number(spawner.heightOffset))
+                  ? Math.min(30, Math.max(-10, Number(spawner.heightOffset)))
+                  : 0,
                 position: [
                   Number.isFinite(Number(position[0])) ? Number(position[0]) : 0,
                   Number.isFinite(Number(position[1])) ? Number(position[1]) : 0,

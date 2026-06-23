@@ -8825,7 +8825,10 @@ function getWeightedSpawnerVariant(spawner, slotIndex) {
 }
 
 function getSpawnerSlotPosition(spawner, slotIndex, selectedSlots) {
-  const [centerX, , centerZ] = spawner.position
+  const [centerX, centerY, centerZ] = spawner.position
+  const heightOffset = Number.isFinite(spawner.heightOffset)
+    ? spawner.heightOffset
+    : centerY - getTerrainHeight(centerX, centerZ)
   const radius = Math.max(0.5, spawner.radius ?? spawner.diameter * 0.5)
   const minDistance = Math.max(0, spawner.minDistance ?? 0)
   const seed = hashSpawnerId(spawner.id) + slotIndex * 43.17
@@ -8837,7 +8840,7 @@ function getSpawnerSlotPosition(spawner, slotIndex, selectedSlots) {
     const x = centerX + Math.sin(angle) * distance
     const z = centerZ + Math.cos(angle) * distance
     const [safeX, safeZ] = clampMapPositionForSpawn(x, z)
-    const candidate = [safeX, getTerrainHeight(safeX, safeZ), safeZ]
+    const candidate = [safeX, getTerrainHeight(safeX, safeZ) + heightOffset, safeZ]
     fallback = fallback ?? candidate
 
     const hasSpacing = selectedSlots.every((slot) => (
@@ -8846,7 +8849,7 @@ function getSpawnerSlotPosition(spawner, slotIndex, selectedSlots) {
     if (hasSpacing) return candidate
   }
 
-  return fallback ?? [centerX, getTerrainHeight(centerX, centerZ), centerZ]
+  return fallback ?? [centerX, getTerrainHeight(centerX, centerZ) + heightOffset, centerZ]
 }
 
 function getSpawnerMobConfig(monsterType, spawner) {
@@ -8912,7 +8915,7 @@ function getMushroomEnemyWanderPoint(spawnPosition, seed) {
       Math.hypot(x - spawnPosition[0], z - spawnPosition[2]) <= MUSHROOM_ENEMY_WANDER_RADIUS &&
       isMushroomEnemySpawnCandidateValid(x, z)
     ) {
-      return { x, y: getTerrainHeight(x, z), z }
+      return { x, y: getMobOutdoorFootY(x, z, spawnPosition[1]), z }
     }
   }
 

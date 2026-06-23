@@ -160,6 +160,7 @@ export const MONSTER_SPAWNER_TYPE_IDS = Object.keys(MONSTER_SPAWNER_TYPES)
 const DEFAULT_SPAWNER_POPULATION_MAX = 6
 const DEFAULT_SPAWNER_RESPAWN_SECONDS = 30
 const DEFAULT_SPAWNER_MIN_DISTANCE = 5
+const DEFAULT_SPAWNER_HEIGHT_OFFSET = 0
 
 function asFiniteNumber(value, fallback = 0) {
   const number = Number(value)
@@ -255,6 +256,11 @@ export const MAP_OBJECT_PLACEMENTS = getInitialMapObjectPlacements().map(normali
 export function normalizeMonsterSpawner(spawner, index = 0) {
   const monsterType = MONSTER_SPAWNER_TYPES[spawner?.monsterType]?.id ?? 'mushroom'
   const position = normalizePosition(spawner?.position)
+  const heightOffset = clampNumber(
+    asFiniteNumber(spawner?.heightOffset, position[1] - getTerrainHeight(position[0], position[2]) || DEFAULT_SPAWNER_HEIGHT_OFFSET),
+    -10,
+    30,
+  )
   const radius = clampNumber(
     asFiniteNumber(spawner?.radius, asFiniteNumber(spawner?.diameter, 24) * 0.5),
     1,
@@ -267,7 +273,8 @@ export function normalizeMonsterSpawner(spawner, index = 0) {
       ? spawner.id
       : `monster_spawner_${index + 1}`,
     monsterType: MONSTER_SPAWNER_TYPES[spawner?.monsterType]?.id ?? variants[0]?.monsterType ?? 'mushroom',
-    position,
+    position: [position[0], getTerrainHeight(position[0], position[2]) + heightOffset, position[2]],
+    heightOffset,
     radius,
     diameter: radius * 2,
     populationMax: Math.round(clampNumber(asFiniteNumber(spawner?.populationMax, DEFAULT_SPAWNER_POPULATION_MAX), 1, 50)),

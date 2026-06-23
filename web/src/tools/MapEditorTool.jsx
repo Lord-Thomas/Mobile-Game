@@ -88,6 +88,7 @@ function createMonsterSpawner(monsterType, existingCount) {
     id: createEditorId('monster_spawner'),
     monsterType,
     position: [x, getTerrainHeight(x, z), z],
+    heightOffset: 0,
     radius: 25,
     populationMax: 8,
     respawnSeconds: 45,
@@ -134,7 +135,8 @@ function toSavedSpawners(spawners) {
     return {
       id: normalized.id,
       monsterType: normalized.monsterType,
-      position: [x, getTerrainHeight(x, z), z],
+      position: [x, getTerrainHeight(x, z) + normalized.heightOffset, z],
+      heightOffset: normalized.heightOffset,
       radius: normalized.radius,
       populationMax: normalized.populationMax,
       respawnSeconds: normalized.respawnSeconds,
@@ -194,7 +196,7 @@ function MonsterSpawnerMarkers({
     <group userData={{ debugCategory: 'monster-spawners' }}>
       {spawners.map((spawner) => {
         const [x, savedY, z] = spawner.position
-        const y = Math.max(savedY, getTerrainHeight(x, z))
+        const y = Math.max(savedY, getTerrainHeight(x, z) + (spawner.heightOffset ?? 0))
         const radius = spawner.radius ?? spawner.diameter * 0.5
         const selected = spawner.id === selectedSpawnerId
         const color = getSpawnerColor(spawner.monsterType)
@@ -750,7 +752,9 @@ export function MapEditorScene({
   const moveSpawnerToPoint = (id, point) => {
     if (!id || !point) return
     const [x, z] = clampMapPosition(point.x, point.z)
-    onMoveSpawner?.(id, [x, getTerrainHeight(x, z), z])
+    const spawner = spawners.find((candidate) => candidate.id === id)
+    const heightOffset = spawner?.heightOffset ?? ((spawner?.position?.[1] ?? getTerrainHeight(x, z)) - getTerrainHeight(spawner?.position?.[0] ?? x, spawner?.position?.[2] ?? z))
+    onMoveSpawner?.(id, [x, getTerrainHeight(x, z) + heightOffset, z])
   }
 
   const moveBiomeToPoint = (id, point) => {
@@ -1653,12 +1657,21 @@ export function MapEditorPanel({
               <NumberField label="X" value={selectedSpawner.position[0]} step={0.5} onChange={(value) => {
                 const [, , z] = selectedSpawner.position
                 const [x, nextZ] = clampMapPosition(value, z)
-                patchSelectedSpawner({ position: [x, getTerrainHeight(x, nextZ), nextZ] })
+                const heightOffset = selectedSpawner.heightOffset ?? 0
+                patchSelectedSpawner({ position: [x, getTerrainHeight(x, nextZ) + heightOffset, nextZ] })
               }} />
               <NumberField label="Z" value={selectedSpawner.position[2]} step={0.5} onChange={(value) => {
                 const [currentX] = selectedSpawner.position
                 const [x, z] = clampMapPosition(currentX, value)
-                patchSelectedSpawner({ position: [x, getTerrainHeight(x, z), z] })
+                const heightOffset = selectedSpawner.heightOffset ?? 0
+                patchSelectedSpawner({ position: [x, getTerrainHeight(x, z) + heightOffset, z] })
+              }} />
+              <NumberField label="Offset hauteur" value={selectedSpawner.heightOffset ?? 0} step={0.1} onChange={(heightOffset) => {
+                const [x, , z] = selectedSpawner.position
+                patchSelectedSpawner({
+                  heightOffset,
+                  position: [x, getTerrainHeight(x, z) + heightOffset, z],
+                })
               }} />
               <SliderField
                 label="Rayon"

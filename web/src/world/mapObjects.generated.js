@@ -7,9 +7,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "player_plot_ash_medium_01",
     "objectId": "tree_ashMedium",
     "position": [
-      8.6,
-      0.018000000000000002,
-      12.2
+      22.5,
+      0.40841063233545083,
+      -11.25
     ],
     "rotationY": 0,
     "scale": 1
@@ -724,14 +724,15 @@ export const MAP_MONSTER_SPAWNERS = [
   {
     "id": "monster_spawner_mqmjxq7z",
     "monsterType": "skeleton",
+    "heightOffset": 0,
     "position": [
-      46,
-      1.4509256296607682,
+      43.25,
+      1.4508810477552925,
       147
     ],
-    "radius": 26.5,
-    "populationMax": 6,
-    "respawnSeconds": 30,
+    "radius": 6,
+    "populationMax": 4,
+    "respawnSeconds": 95,
     "minDistance": 5,
     "patrol": true,
     "aggressive": true,
@@ -745,6 +746,7 @@ export const MAP_MONSTER_SPAWNERS = [
   {
     "id": "monster_spawner_mqo68agf",
     "monsterType": "skeleton",
+    "heightOffset": 0,
     "position": [
       112.5,
       9.328871438596675,
@@ -766,6 +768,7 @@ export const MAP_MONSTER_SPAWNERS = [
   {
     "id": "monster_spawner_mqo68lqf",
     "monsterType": "skeleton",
+    "heightOffset": 0,
     "position": [
       159.5,
       3.290132675056341,
@@ -787,6 +790,7 @@ export const MAP_MONSTER_SPAWNERS = [
   {
     "id": "monster_spawner_mqob4eml",
     "monsterType": "skeleton",
+    "heightOffset": 0,
     "position": [
       11.75,
       1.168109492262647,
@@ -808,6 +812,7 @@ export const MAP_MONSTER_SPAWNERS = [
   {
     "id": "monster_spawner_mqpo5rr7",
     "monsterType": "mushroom",
+    "heightOffset": 0,
     "position": [
       -18.25,
       4.670530969042097,
@@ -822,6 +827,28 @@ export const MAP_MONSTER_SPAWNERS = [
     "variants": [
       {
         "monsterType": "mushroom",
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "id": "monster_spawner_mqqkfvfp",
+    "monsterType": "skeleton",
+    "heightOffset": 15.4,
+    "position": [
+      43.75,
+      16.85045429312538,
+      147.5
+    ],
+    "radius": 3,
+    "populationMax": 3,
+    "respawnSeconds": 145,
+    "minDistance": 5,
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "skeleton",
         "weight": 100
       }
     ]
