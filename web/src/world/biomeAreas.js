@@ -26,7 +26,7 @@ export const BIOME_VISUALS = {
       fog: '#aebfbb',
       fogNear: 18,
       fogFar: 145,
-      fogDensity: 0.045,
+      fogDensity: 0.022,
       sun: '#cfd9cf',
       sky: '#bdced3',
       ground: '#7b8278',

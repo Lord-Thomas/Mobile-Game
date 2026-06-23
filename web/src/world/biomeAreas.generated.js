@@ -3,8 +3,8 @@ export const MAP_BIOME_AREAS = [
     "id": "graveyard_tower",
     "biome": "graveyard",
     "center": [
-      11.5,
-      138.5
+      41.25,
+      148
     ],
     "radius": 48,
     "feather": 10,
