@@ -579,7 +579,7 @@ export function MapEditorScene({
   const editorBrushActive = Boolean(biomeBrush?.active || terrainBrush?.active || pathBrush?.active)
 
   const paintPathAtPoint = (point, force = false) => {
-    if (!pathBrush?.active || !isTopView || !point) return
+    if (!pathBrush?.active || !point) return
     const [x, z] = clampMapPosition(point.x, point.z)
     const last = lastPathPointRef.current
     const spacing = Math.max(0.35, pathBrush.width * 0.3)
@@ -861,7 +861,7 @@ export function MapEditorScene({
             event.target?.setPointerCapture?.(event.pointerId)
             return
           }
-          if (pathBrush?.active && isTopView) {
+          if (pathBrush?.active) {
             event.stopPropagation()
             onSelect(null)
             onSelectSpawner?.(null)
@@ -897,7 +897,7 @@ export function MapEditorScene({
               return
             }
           }
-          if (pathBrush?.active && isTopView && !activeDragIdRef.current && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
+          if (pathBrush?.active && !activeDragIdRef.current && !movingId && !spawnerDragRef.current && !biomeDragRef.current) {
             const point = groundPointFromEvent(event)
             setBrushPreviewPoint(point ? clampMapPosition(point.x, point.z) : null)
             if (pathPaintingRef.current) {
