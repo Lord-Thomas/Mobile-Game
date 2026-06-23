@@ -717,6 +717,17 @@ export const MAP_OBJECT_PLACEMENTS = [
     ],
     "rotationY": 3.141592653589793,
     "scale": 1
+  },
+  {
+    "id": "magic_skull_discovery_tower",
+    "objectId": "magic_skull_discovery",
+    "position": [
+      30.25,
+      17.2364372288987,
+      147.25
+    ],
+    "rotationY": 4.71238898038469,
+    "scale": 1
   }
 ]
 

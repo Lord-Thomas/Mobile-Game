@@ -16,6 +16,11 @@ const generatedMonsterSpawners = Array.isArray(generatedMapObjects.MAP_MONSTER_S
   ? generatedMapObjects.MAP_MONSTER_SPAWNERS
   : []
 const generatedHasAuthoringState = generatedMapObjects.MAP_OBJECTS_ARE_AUTHORING_STATE === true
+const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
+const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
+const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
+const MAGIC_SKULL_DISCOVERY_TOWER_Y_OFFSET = 0.14
+export const MAGIC_SKULL_DISCOVERY_OBJECT_ID = 'magic_skull_discovery'
 
 const BASE_MAP_OBJECT_CATALOG = {
   skeleton_tower: {
@@ -29,6 +34,18 @@ const BASE_MAP_OBJECT_CATALOG = {
     hitHeightMeters: 7.4,
     defaultScale: 1,
     thumbnailLabel: 'Tour',
+  },
+  [MAGIC_SKULL_DISCOVERY_OBJECT_ID]: {
+    id: MAGIC_SKULL_DISCOVERY_OBJECT_ID,
+    name: 'Crane necromancien',
+    modelUrl: '/models/weapons/magic_skull_necromancer.glb',
+    targetHeightMeters: 0.15,
+    colliderRadius: 0,
+    selectionRadius: 0.55,
+    hitRadius: 0.8,
+    hitHeightMeters: 0.8,
+    defaultScale: 1,
+    thumbnailLabel: 'Crane',
   },
 }
 
@@ -242,13 +259,36 @@ function createAuthoredTreeMapObjectPlacements() {
 }
 
 function getInitialMapObjectPlacements() {
-  if (generatedHasAuthoringState) return generatedPlacements
+  if (generatedHasAuthoringState) return ensureMagicSkullDiscoveryPlacement(generatedPlacements)
 
   const generatedIds = new Set(generatedPlacements.map((placement) => placement?.id))
   const authoredTreePlacements = createAuthoredTreeMapObjectPlacements()
     .filter((placement) => !generatedIds.has(placement.id))
 
-  return [...authoredTreePlacements, ...generatedPlacements]
+  return ensureMagicSkullDiscoveryPlacement([...authoredTreePlacements, ...generatedPlacements])
+}
+
+function ensureMagicSkullDiscoveryPlacement(placements) {
+  if (placements.some((placement) => placement?.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID)) return placements
+
+  const towerPlacement = placements.find((placement) => placement?.objectId === 'skeleton_tower')
+  if (!towerPlacement) return placements
+
+  const [x = 0, savedY, z = 0] = towerPlacement.position ?? []
+  const scale = Math.max(0.05, asFiniteNumber(towerPlacement.scale, 1))
+  const baseY = asFiniteNumber(savedY, getTerrainHeight(x, z))
+  const towerHeight = (BASE_MAP_OBJECT_CATALOG.skeleton_tower.targetHeightMeters ?? 7.2) * WORLD_UNITS_PER_METER * scale
+
+  return [
+    ...placements,
+    {
+      id: 'magic_skull_discovery_tower',
+      objectId: MAGIC_SKULL_DISCOVERY_OBJECT_ID,
+      position: [x, baseY + towerHeight + MAGIC_SKULL_DISCOVERY_TOWER_Y_OFFSET, z],
+      rotationY: Math.PI,
+      scale: 1,
+    },
+  ]
 }
 
 export const MAP_OBJECT_PLACEMENTS = getInitialMapObjectPlacements().map(normalizeMapObjectPlacement)

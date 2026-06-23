@@ -2,8 +2,10 @@ import { Suspense, useEffect, useMemo, useRef } from 'react'
 import { Html, useFBX, useGLTF } from '@react-three/drei'
 import { Box3, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import ParticleEffect from '../effects/ParticleEffect'
+import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from '../effects/storedParticlePresets'
 import ProceduralTree from './trees/ProceduralTree'
-import { MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, getMapObjectCatalogItem } from './mapObjects'
+import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, getMapObjectCatalogItem } from './mapObjects'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
@@ -97,9 +99,46 @@ function MapObjectTreeModel({ catalogItem }) {
 
 function MapObjectModel({ objectId }) {
   const catalogItem = getMapObjectCatalogItem(objectId)
+  if (objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) return <MagicSkullDiscoveryMapModel catalogItem={catalogItem} />
   if (catalogItem?.type === 'tree') return <MapObjectTreeModel catalogItem={catalogItem} />
   if (getModelExtension(catalogItem?.modelUrl) === 'fbx') return <MapObjectFbxModel catalogItem={catalogItem} />
   return <MapObjectGltfModel catalogItem={catalogItem} />
+}
+
+function MagicSkullDiscoveryMapModel({ catalogItem }) {
+  const { scene } = useGLTF(catalogItem.modelUrl)
+  const necroParticlePreset = useStoredParticlePreset(NECRO_WEAPON_PARTICLE_NAME)
+  const skullScene = useMemo(() => {
+    const next = clone(scene)
+    next.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+        child.frustumCulled = false
+      }
+    })
+    return next
+  }, [scene])
+  const fitScale = useMemo(() => {
+    const box = new Box3().setFromObject(skullScene)
+    const size = box.getSize(new Vector3())
+    const targetHeight = (catalogItem.targetHeightMeters ?? 0.15) * WORLD_UNITS_PER_METER
+    return targetHeight / Math.max(size.x, size.y, size.z, 0.001)
+  }, [catalogItem.targetHeightMeters, skullScene])
+
+  return (
+    <group>
+      <primitive object={skullScene} scale={fitScale} />
+      {necroParticlePreset && (
+        <ParticleEffect
+          preset={necroParticlePreset}
+          playing
+          loop
+        />
+      )}
+      <pointLight color="#8b5cf6" intensity={1.1} distance={3.2} decay={2} />
+    </group>
+  )
 }
 
 function MapObjectSelection({ placement, color = '#9fe0bc' }) {

@@ -10,7 +10,8 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
-import { BUILTIN_PARTICLE_PRESETS, normalizeParticlePreset } from './effects/particlePresets'
+import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
+import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
@@ -25,7 +26,7 @@ import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
-import { MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
+import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
@@ -115,10 +116,11 @@ const MUSHROOM_ENEMY_COUNT = 4
 const MUSHROOM_ENEMY_MAX_HP = 30
 const MUSHROOM_ENEMY_REWARD_COINS = 10  // 0.33 pièce/PV
 const MUSHROOM_ENEMY_RESPAWN_MS = 30000
-const MUSHROOM_ENEMY_VISIBILITY_RANGE = 6.2
-const MUSHROOM_ENEMY_VIEW_CONE_DEGREES = 95
-const MUSHROOM_ENEMY_CLOSE_ALERT_RANGE = 1.35
-const MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS = 0.75
+const MUSHROOM_ENEMY_VISIBILITY_RANGE = 9.0   // vue frontale (cône) — portée allongée
+const MUSHROOM_ENEMY_VIEW_CONE_DEGREES = 140  // champ de vision élargi
+const MUSHROOM_ENEMY_CLOSE_ALERT_RANGE = 4.2  // perception 360° (ouïe) : repère le joueur même hors du cône
+const MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS = 0.55 // temps de réaction au bord de l'ouïe (réduit près du mob)
+const MUSHROOM_ENEMY_INVESTIGATE_LOOK_SECONDS = 2.0 // temps passé à fouiller la dernière position connue
 const MUSHROOM_ENEMY_LOSE_INTEREST_RANGE = 14
 const MUSHROOM_ENEMY_LEASH_RANGE = 18
 const MUSHROOM_ENEMY_STOP_DISTANCE = 0.95
@@ -134,7 +136,7 @@ const MUSHROOM_ENEMY_HOUSE_CLEARANCE = 8.5
 const MUSHROOM_ENEMY_SPAWN_CLEARANCE = 1.35
 const MUSHROOM_ENEMY_MIN_SPAWN_SPACING = 6.5
 const MUSHROOM_ENEMY_SPAWN_YAW = Math.PI * 0.72
-const MUSHROOM_ENEMY_WANDER_RADIUS = 3.8
+const MUSHROOM_ENEMY_WANDER_RADIUS = 5.5
 const MUSHROOM_ENEMY_WANDER_SPEED = 0.72
 const MUSHROOM_ENEMY_WANDER_MIN_WAIT = 1.2
 const MUSHROOM_ENEMY_WANDER_MAX_WAIT = 3.2
@@ -166,6 +168,7 @@ const MOB_CONFIGS = {
     viewConeDegrees: MUSHROOM_ENEMY_VIEW_CONE_DEGREES,
     closeAlertRange: MUSHROOM_ENEMY_CLOSE_ALERT_RANGE,
     closeAlertSeconds: MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS,
+    investigateLookSeconds: MUSHROOM_ENEMY_INVESTIGATE_LOOK_SECONDS,
     loseInterestRange: MUSHROOM_ENEMY_LOSE_INTEREST_RANGE,
     leashRange: MUSHROOM_ENEMY_LEASH_RANGE,
     leashTime: MUSHROOM_ENEMY_LEASH_TIME,
@@ -202,6 +205,7 @@ const MOB_CONFIGS = {
     viewConeDegrees: MUSHROOM_ENEMY_VIEW_CONE_DEGREES,
     closeAlertRange: MUSHROOM_ENEMY_CLOSE_ALERT_RANGE,
     closeAlertSeconds: MUSHROOM_ENEMY_CLOSE_ALERT_SECONDS,
+    investigateLookSeconds: MUSHROOM_ENEMY_INVESTIGATE_LOOK_SECONDS,
     loseInterestRange: MUSHROOM_ENEMY_LOSE_INTEREST_RANGE,
     leashRange: MUSHROOM_ENEMY_LEASH_RANGE,
     leashTime: MUSHROOM_ENEMY_LEASH_TIME,
@@ -309,53 +313,9 @@ const PLAYER_DANCE_DURATION = 15.97
 const PLAYER_POINTING_UP_DURATION = 2.4
 const PLAYER_SIT_DOWN_DURATION = 1.05
 const PLAYER_STAND_UP_DURATION = 1.05
-const PARTICLE_LIBRARY_STORAGE_KEY = 'lab_particle_library_v1'
-const NECRO_WEAPON_PARTICLE_NAME = 'Nécro 01'
 const MOB_DEATH_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'mob_death')
 const HEAL_AURA_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'heal_aura')
 const INTERACTION_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'interaction')
-
-function normalizeParticleLookupKey(value) {
-  return String(value ?? '')
-    .trim()
-    .toLocaleLowerCase()
-}
-
-function findStoredParticlePresetByName(name) {
-  if (typeof window === 'undefined') return null
-
-  try {
-    const targetKey = normalizeParticleLookupKey(name)
-    const stored = JSON.parse(window.localStorage.getItem(PARTICLE_LIBRARY_STORAGE_KEY) ?? '[]')
-    if (!Array.isArray(stored)) return null
-
-    const entry = stored.find((item) => (
-      normalizeParticleLookupKey(item?.name) === targetKey
-      || normalizeParticleLookupKey(item?.id) === targetKey
-      || normalizeParticleLookupKey(item?.preset?.name) === targetKey
-      || normalizeParticleLookupKey(item?.preset?.id) === targetKey
-    ))
-    return entry?.preset ? normalizeParticlePreset(entry.preset) : null
-  } catch {
-    return null
-  }
-}
-
-function useStoredParticlePreset(name) {
-  const [preset, setPreset] = useState(() => findStoredParticlePresetByName(name))
-
-  useEffect(() => {
-    const refresh = () => setPreset(findStoredParticlePresetByName(name))
-    window.addEventListener('storage', refresh)
-    window.addEventListener('focus', refresh)
-    return () => {
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener('focus', refresh)
-    }
-  }, [name])
-
-  return preset
-}
 const EFFECT_WARMUP_FRAMES = 4
 const PLAYER_SITTING_HEIGHT = 0.34
 const SEAT_INTERACTION_DISTANCE = 1.1
@@ -537,6 +497,7 @@ const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png
 const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
+const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) ?? null
 const EDITABLE_TREE_PLACEMENTS = MAP_OBJECT_PLACEMENTS
   .map((placement) => ({
     placement,
@@ -550,6 +511,7 @@ const SKELETON_TOWER_CAMERA_HEIGHT = 1.05
 const SKELETON_TOWER_CAMERA_MIN_LOCAL_Y = 0.35
 const SKELETON_TOWER_CAMERA_TOP_MARGIN = 0.55
 const MAGIC_SKULL_DISCOVERY_POSITION = (() => {
+  if (MAGIC_SKULL_DISCOVERY_PLACEMENT) return MAGIC_SKULL_DISCOVERY_PLACEMENT.position
   if (!MAGIC_SKULL_TOWER_PLACEMENT) return null
   const [x = 0, , z = 0] = MAGIC_SKULL_TOWER_PLACEMENT.position ?? []
   const tower = MAP_OBJECT_CATALOG.skeleton_tower
@@ -9127,6 +9089,8 @@ function SmallMushroomEnemy({
   const attackRef = useRef(null)
   const nextAttackAtRef = useRef(0)
   const closeAlertTimerRef = useRef(0)
+  const investigateTimerRef = useRef(0)
+  const lastSeenPosRef = useRef(null)
   const leashTimerRef = useRef(0)
   const evadingRef = useRef(false)
   const stuckTimerRef = useRef(0)
@@ -9303,6 +9267,8 @@ function SmallMushroomEnemy({
     attackRef.current = null
     nextAttackAtRef.current = 0
     closeAlertTimerRef.current = 0
+    investigateTimerRef.current = 0
+    lastSeenPosRef.current = null
     leashTimerRef.current = 0
     evadingRef.current = false
     setIsEvading(false)
@@ -9366,8 +9332,9 @@ function SmallMushroomEnemy({
       closeAlertTimerRef.current = 0
       // Combat actif = réduit le leash timer (le mob reste engagé plus longtemps)
       leashTimerRef.current = Math.max(0, leashTimerRef.current - cfg.leashCombatBonus)
-      const wasIdle = stateRef.current === 'idle' || stateRef.current === 'wander'
+      const wasIdle = stateRef.current === 'idle' || stateRef.current === 'wander' || stateRef.current === 'investigate'
       if (nextHp > 0 && wasIdle) {
+        investigateTimerRef.current = 0
         stateRef.current = 'chase'
         // Aggro groupe : prévenir les alliés proches (mollo : max 2, délai aléatoire)
         if (mobGroupRef) {
@@ -9435,8 +9402,9 @@ function SmallMushroomEnemy({
   // ── Enregistrement dans le groupe pour l'aggro partagée ────────────────────
   const triggerAggro = useCallback(() => {
     if (passive || !aggressive || defeatedRef.current || evadingRef.current) return
-    if (stateRef.current === 'idle' || stateRef.current === 'wander') {
+    if (stateRef.current === 'idle' || stateRef.current === 'wander' || stateRef.current === 'investigate') {
       wanderTargetRef.current = null
+      investigateTimerRef.current = 0
       stateRef.current = 'chase'
     }
   }, [aggressive, passive])
@@ -9455,6 +9423,8 @@ function SmallMushroomEnemy({
     stateRef.current = defeatedRef.current ? 'dead' : 'idle'
     attackRef.current = null
     closeAlertTimerRef.current = 0
+    investigateTimerRef.current = 0
+    lastSeenPosRef.current = null
     wanderTargetRef.current = null
     setMotion('idle')
     return undefined
@@ -9532,7 +9502,8 @@ function SmallMushroomEnemy({
       const lookTarget = stateRef.current === 'return'
         ? { x: spawnPosition[0], z: spawnPosition[2] }
         : stateRef.current === 'wander' ? wanderTargetRef.current
-          : shouldFacePlayer ? (aggroTarget?.position ?? playerPosition) : null
+          : stateRef.current === 'investigate' ? lastSeenPosRef.current
+            : shouldFacePlayer ? (aggroTarget?.position ?? playerPosition) : null
       if (lookTarget && !defeated) {
         const dx = lookTarget.x - enemyPosition.x
         const dz = lookTarget.z - enemyPosition.z
@@ -9570,23 +9541,28 @@ function SmallMushroomEnemy({
     const distanceToSpawn = Math.hypot(enemyPosition.x - spawnPosition[0], enemyPosition.z - spawnPosition[2])
     const canAct = !attackRef.current
 
-    if (aggressive && (stateRef.current === 'idle' || stateRef.current === 'wander')) {
+    if (aggressive && (stateRef.current === 'idle' || stateRef.current === 'wander' || stateRef.current === 'investigate')) {
       const enemyYaw = groupRef.current?.rotation.y ?? cfg.spawnYaw
       const seesPlayer = canMobSeePlayer(enemyPosition, enemyYaw, playerPosition, cfg.visibilityRange, cfg.viewConeDegrees)
-
-      if (seesPlayer) {
+      const acquire = () => {
         closeAlertTimerRef.current = 0
+        investigateTimerRef.current = 0
         wanderTargetRef.current = null
         stateRef.current = 'chase'
+      }
+
+      if (seesPlayer) {
+        // Vue directe = aggro immédiate
+        acquire()
       } else if (distanceToPlayer <= cfg.closeAlertRange) {
-        closeAlertTimerRef.current += delta
-        if (closeAlertTimerRef.current >= cfg.closeAlertSeconds) {
-          closeAlertTimerRef.current = 0
-          wanderTargetRef.current = null
-          stateRef.current = 'chase'
-        }
+        // Perception 360° (ouïe) : la jauge d'alerte monte d'autant plus vite
+        // que le joueur est proche (réaction quasi instantanée au contact).
+        const proximity = 1 - distanceToPlayer / cfg.closeAlertRange // 0 au bord → 1 collé
+        closeAlertTimerRef.current += delta * (0.5 + proximity * 2.2)
+        if (closeAlertTimerRef.current >= cfg.closeAlertSeconds) acquire()
       } else {
-        closeAlertTimerRef.current = 0
+        // Hors de portée : l'alerte retombe progressivement (pas de reset brutal)
+        closeAlertTimerRef.current = Math.max(0, closeAlertTimerRef.current - delta * 0.8)
       }
     }
 
@@ -9600,12 +9576,20 @@ function SmallMushroomEnemy({
       }
       if (leashTimerRef.current >= cfg.leashTime) {
         leashTimerRef.current = 0
-        evadingRef.current = true
-        setIsEvading(true)
-        stateRef.current = 'return'
         attackRef.current = null
         closeAlertTimerRef.current = 0
-        setMotion('walk')
+        // Au lieu d'oublier le joueur d'un coup, le mob va fouiller sa dernière
+        // position connue avant de rentrer. S'il n'a pas de piste, retour direct.
+        if (lastSeenPosRef.current) {
+          investigateTimerRef.current = 0
+          stateRef.current = 'investigate'
+          setMotion('walk')
+        } else {
+          evadingRef.current = true
+          setIsEvading(true)
+          stateRef.current = 'return'
+          setMotion('walk')
+        }
       }
     } else {
       if (leashTimerRef.current > 0) leashTimerRef.current = Math.max(0, leashTimerRef.current - delta)
@@ -9660,6 +9644,14 @@ function SmallMushroomEnemy({
       }
     }
 
+    // Mémorise en continu la position de la cible tant qu'on la poursuit :
+    // sert de point de fouille si on finit par la perdre (état 'investigate').
+    if (stateRef.current === 'chase' || stateRef.current === 'attack') {
+      if (!lastSeenPosRef.current) lastSeenPosRef.current = { x: 0, z: 0 }
+      lastSeenPosRef.current.x = aggroPosition.x
+      lastSeenPosRef.current.z = aggroPosition.z
+    }
+
     if (stateRef.current === 'chase' && canAct) {
       if (weightedDistanceToTarget > cfg.attackRange) {
         if (distanceToTarget - cfg.stopDistance > 0.001) {
@@ -9669,6 +9661,47 @@ function SmallMushroomEnemy({
       } else {
         stateRef.current = 'attack'
         setMotion('idle')
+      }
+    }
+
+    if (stateRef.current === 'investigate' && canAct) {
+      const lead = lastSeenPosRef.current
+      // Trop loin de la zone de spawn pour continuer à fouiller : on rentre.
+      const tooFar = distanceToSpawn > cfg.leashRange + cfg.loseInterestRange * 0.5
+      if (!lead || tooFar) {
+        lastSeenPosRef.current = null
+        evadingRef.current = true
+        setIsEvading(true)
+        stateRef.current = 'return'
+        setMotion('walk')
+      } else {
+        const reached = moveMushroomEnemyToward(
+          enemyPosition,
+          { x: lead.x, y: enemyPosition.y, z: lead.z },
+          cfg.moveSpeed,
+          delta,
+          0.1,
+          stuckTimerRef,
+          stuckDeflectionRef,
+          lastPositionRef,
+        )
+        if (reached <= 0.3) {
+          // Arrivé sur la piste : marque une pause pour « regarder autour »,
+          // puis abandonne et rentre si rien n'a été repéré (la ré-acquisition
+          // se fait via le bloc de détection ci-dessus, qui inclut 'investigate').
+          investigateTimerRef.current += delta
+          setMotion('idle')
+          if (investigateTimerRef.current >= cfg.investigateLookSeconds) {
+            investigateTimerRef.current = 0
+            lastSeenPosRef.current = null
+            evadingRef.current = true
+            setIsEvading(true)
+            stateRef.current = 'return'
+            setMotion('walk')
+          }
+        } else {
+          setMotion('walk')
+        }
       }
     }
 

@@ -14,6 +14,7 @@ import PaintedPaths from './PaintedPaths'
 import { MAP_PATHS } from './paths'
 import BiomeAmbientEffects from './BiomeAmbientEffects'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './biomeAreas'
+import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_OBJECT_PLACEMENTS } from './mapObjects'
 import { DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from './lightingLayers'
 
@@ -25,6 +26,9 @@ const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
 const GRAVEYARD_SUN_COLOR = new Color(GRAVEYARD_ATMOSPHERE.sun)
 const GRAVEYARD_SKY_LIGHT_COLOR = new Color(GRAVEYARD_ATMOSPHERE.sky)
 const GRAVEYARD_GROUND_LIGHT_COLOR = new Color(GRAVEYARD_ATMOSPHERE.ground)
+const DECOR_MAP_OBJECT_PLACEMENTS = MAP_OBJECT_PLACEMENTS.filter((placement) => (
+  placement.objectId !== MAGIC_SKULL_DISCOVERY_OBJECT_ID
+))
 
 function getGraveyardAtmosphereInfluence(playerPositionRef, viewerOutside, active, biomeAreas) {
   const position = playerPositionRef?.current
@@ -171,7 +175,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />
       ))}
-      {showMapObjects && <MapObjectPlaceables />}
+      {showMapObjects && <MapObjectPlaceables objects={DECOR_MAP_OBJECT_PLACEMENTS} />}
       {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
       {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}

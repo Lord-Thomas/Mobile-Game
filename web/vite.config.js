@@ -5,7 +5,7 @@ import { writeFile, mkdir, readdir } from 'node:fs/promises'
 import { basename, extname, join, relative, sep } from 'node:path'
 
 const MAP_MODEL_EXTENSIONS = new Set(['.glb', '.gltf', '.fbx'])
-const RESERVED_MAP_OBJECT_IDS = new Set(['skeleton_tower'])
+const RESERVED_MAP_OBJECT_IDS = new Set(['skeleton_tower', 'magic_skull_necromancer'])
 
 function sanitizeGeneratedObjectId(value) {
   return String(value ?? 'map_object')
