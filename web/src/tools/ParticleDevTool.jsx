@@ -154,6 +154,7 @@ function EmitterSection({ emitter, index, total }) {
       <SliderField label="Particules" value={emitter.count} min={1} max={500} step={1} onChange={update('count')} />
       <SliderField label="Durée de vie" value={emitter.lifetime} min={0.05} max={4} step={0.05} onChange={update('lifetime')} />
       <SliderField label="Vitesse" value={emitter.speed} min={0} max={10} step={0.1} onChange={update('speed')} />
+      <SliderField label="Ralentissement global" value={emitter.motionScale} min={0} max={1} step={0.01} onChange={update('motionScale')} />
       <SliderField label="Dispersion" value={emitter.spread} min={0} max={1} step={0.01} onChange={update('spread')} />
       <SliderField label="Gravité" value={emitter.gravity} min={-12} max={6} step={0.1} onChange={update('gravity')} />
       <SliderField label="Turbulence" value={emitter.turbulence} min={0} max={2} step={0.05} onChange={update('turbulence')} />

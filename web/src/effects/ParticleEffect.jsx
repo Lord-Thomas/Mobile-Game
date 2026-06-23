@@ -28,6 +28,7 @@ const VERTEX_SHADER = /* glsl */ `
   uniform float uDelay;
   uniform float uLifetime;
   uniform float uLifetimeVariance;
+  uniform float uMotionScale;
   uniform float uGravity;
   uniform float uTurbulence;
   uniform float uRotationSpeed;
@@ -74,17 +75,18 @@ const VERTEX_SHADER = /* glsl */ `
     }
 
     float age = t * life;
-    vec3 pos = position + aVelocity * age;
-    pos.y += 0.5 * uGravity * age * age;
+    float motionAge = age * uMotionScale;
+    vec3 pos = position + aVelocity * motionAge;
+    pos.y += 0.5 * uGravity * motionAge * motionAge;
     pos += vec3(
-      sin(age * 7.0 + aRandom.w * 41.0),
-      sin(age * 5.3 + aRandom.z * 37.0),
-      cos(age * 6.1 + aRandom.x * 43.0)
-    ) * uTurbulence * 0.25 * t;
+      sin(motionAge * 7.0 + aRandom.w * 41.0),
+      sin(motionAge * 5.3 + aRandom.z * 37.0),
+      cos(motionAge * 6.1 + aRandom.x * 43.0)
+    ) * uTurbulence * uMotionScale * 0.25 * t;
 
     vColor = mix(uColorStart, uColorEnd, t);
     vAlpha = mix(uAlphaStart, uAlphaEnd, t);
-    vRotation = aRandom.w * 6.2831 + uRotationSpeed * age;
+    vRotation = aRandom.w * 6.2831 + uRotationSpeed * motionAge;
 
     float size = mix(uSizeStart, uSizeEnd, t) * (1.0 + (aRandom.z * 2.0 - 1.0) * uSizeVariance);
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -239,6 +241,7 @@ function buildMaterial(emitter, preset, loop) {
       uDelay: { value: emitter.delay },
       uLifetime: { value: emitter.lifetime },
       uLifetimeVariance: { value: emitter.lifetimeVariance },
+      uMotionScale: { value: emitter.motionScale },
       uGravity: { value: emitter.gravity },
       uTurbulence: { value: emitter.turbulence },
       uRotationSpeed: { value: emitter.rotationSpeed },
