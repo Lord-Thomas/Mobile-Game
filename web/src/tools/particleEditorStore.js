@@ -196,16 +196,28 @@ export function duplicateParticlePreset() {
 }
 
 export function saveParticleToLibrary() {
+  const preset = normalizeParticlePreset(state.preset)
+  const existingIndex = state.library.findIndex((entry) => (
+    entry.preset?.id === preset.id
+    || entry.id === preset.id
+  ))
   const entry = {
-    id: `fx-${Date.now()}`,
-    name: state.preset.name,
-    category: state.preset.category,
-    preset: normalizeParticlePreset(state.preset),
+    id: existingIndex >= 0 ? state.library[existingIndex].id : `fx-${Date.now()}`,
+    name: preset.name,
+    category: preset.category,
+    preset,
   }
-  const library = [...state.library, entry]
+  const updated = existingIndex >= 0
+  const library = updated
+    ? state.library.reduce((items, item, index) => {
+      if (index === existingIndex) return [...items, entry]
+      if (item.preset?.id === preset.id || item.id === preset.id) return items
+      return [...items, item]
+    }, [])
+    : [...state.library, entry]
   setParticleEditorState({ library })
   persistLibrary(library)
-  return entry
+  return { entry, updated }
 }
 
 export function loadParticleFromLibrary(id) {

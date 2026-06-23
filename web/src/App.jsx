@@ -10,7 +10,7 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
-import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
+import { BUILTIN_PARTICLE_PRESETS, normalizeParticlePreset } from './effects/particlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
@@ -308,9 +308,53 @@ const PLAYER_DANCE_DURATION = 15.97
 const PLAYER_POINTING_UP_DURATION = 2.4
 const PLAYER_SIT_DOWN_DURATION = 1.05
 const PLAYER_STAND_UP_DURATION = 1.05
+const PARTICLE_LIBRARY_STORAGE_KEY = 'lab_particle_library_v1'
+const NECRO_WEAPON_PARTICLE_NAME = 'Nécro 01'
 const MOB_DEATH_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'mob_death')
 const HEAL_AURA_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'heal_aura')
 const INTERACTION_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'interaction')
+
+function normalizeParticleLookupKey(value) {
+  return String(value ?? '')
+    .trim()
+    .toLocaleLowerCase()
+}
+
+function findStoredParticlePresetByName(name) {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const targetKey = normalizeParticleLookupKey(name)
+    const stored = JSON.parse(window.localStorage.getItem(PARTICLE_LIBRARY_STORAGE_KEY) ?? '[]')
+    if (!Array.isArray(stored)) return null
+
+    const entry = stored.find((item) => (
+      normalizeParticleLookupKey(item?.name) === targetKey
+      || normalizeParticleLookupKey(item?.id) === targetKey
+      || normalizeParticleLookupKey(item?.preset?.name) === targetKey
+      || normalizeParticleLookupKey(item?.preset?.id) === targetKey
+    ))
+    return entry?.preset ? normalizeParticlePreset(entry.preset) : null
+  } catch {
+    return null
+  }
+}
+
+function useStoredParticlePreset(name) {
+  const [preset, setPreset] = useState(() => findStoredParticlePresetByName(name))
+
+  useEffect(() => {
+    const refresh = () => setPreset(findStoredParticlePresetByName(name))
+    window.addEventListener('storage', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.removeEventListener('storage', refresh)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [name])
+
+  return preset
+}
 const EFFECT_WARMUP_FRAMES = 4
 const PLAYER_SITTING_HEIGHT = 0.34
 const SEAT_INTERACTION_DISTANCE = 1.1
@@ -5124,6 +5168,7 @@ function FloatingMagicSkull({ active, handBoneRef, playerGroupRef }) {
   const groupRef = useRef(null)
   const worldPos = useRef(new Vector3())
   const localTarget = useRef(new Vector3(0.4, 0.9, 0))
+  const necroParticlePreset = useStoredParticlePreset(NECRO_WEAPON_PARTICLE_NAME)
 
   useFrame((state, delta) => {
     const g = groupRef.current
@@ -5161,6 +5206,12 @@ function FloatingMagicSkull({ active, handBoneRef, playerGroupRef }) {
       <Suspense fallback={null}>
         <MagicSkullMesh />
       </Suspense>
+      <RuntimeParticleEffect
+        preset={necroParticlePreset}
+        playing={active}
+        loop
+        layer={OUTDOOR_LIGHT_LAYER}
+      />
       <pointLight color="#8b5cf6" intensity={active ? 1.2 : 0} distance={2.7} />
     </group>
   )
@@ -5170,6 +5221,7 @@ function FloatingMagicSkull({ active, handBoneRef, playerGroupRef }) {
 // Avoids per-cast GPU upload stutter.
 function MagicSkullDiscovery({ discovered, isNear }) {
   const skullRef = useRef(null)
+  const necroParticlePreset = useStoredParticlePreset(NECRO_WEAPON_PARTICLE_NAME)
 
   useFrame((state) => {
     if (!skullRef.current || !MAGIC_SKULL_DISCOVERY_POSITION) return
@@ -5188,6 +5240,12 @@ function MagicSkullDiscovery({ discovered, isNear }) {
           <Suspense fallback={null}>
             <MagicSkullMesh />
           </Suspense>
+          <RuntimeParticleEffect
+            preset={necroParticlePreset}
+            playing
+            loop
+            layer={OUTDOOR_LIGHT_LAYER}
+          />
         </group>
         {!discovered && (
           <RuntimeParticleEffect

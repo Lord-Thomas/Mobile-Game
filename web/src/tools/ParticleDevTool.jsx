@@ -239,8 +239,8 @@ export function ParticleDevPanel() {
   }
 
   const saveToLibrary = () => {
-    const entry = saveParticleToLibrary()
-    showMessage(`${entry.name} sauvegardé`)
+    const { entry, updated } = saveParticleToLibrary()
+    showMessage(`${entry.name} ${updated ? 'mis à jour' : 'sauvegardé'}`)
   }
 
   const copyAiPrompt = async () => {
