@@ -274,6 +274,7 @@ const FIREBALL_COLLISION_RADIUS = 0.9
 const MAX_ACTIVE_FIREBALLS = 5
 const FIREBALL_PROJECTILE_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
 const FIREBALL_IMPACT_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
+const MAGIC_SKULL_DISCOVERY_CHARGE_MS = 5000
 const CHARGE_TIME_MS = 1200
 const MIN_CHARGE_RATIO = 0.2
 
@@ -554,7 +555,7 @@ const MAGIC_SKULL_DISCOVERY_POSITION = (() => {
   const tower = MAP_OBJECT_CATALOG.skeleton_tower
   const topY = getMapObjectBaseY(MAGIC_SKULL_TOWER_PLACEMENT)
     + (tower?.targetHeightMeters ?? 7.2) * WORLD_UNITS_PER_METER * (MAGIC_SKULL_TOWER_PLACEMENT.scale ?? 1)
-  return [x, topY + 0.38, z]
+  return [x, topY + 0.14, z]
 })()
 
 function getEditableTreePosition(treeEntry) {
@@ -3298,6 +3299,7 @@ function Player({
   playerCombatActionsRef = null,
   appearance = null,
   freeCameraActive = false,
+  movementLocked = false,
   dragonRide = null,
 }) {
   const playerBodyRef = useRef()
@@ -3438,21 +3440,29 @@ function Player({
     const key = keyboardRef.current
     const touch = touchRef.current
 
-    if (freeCameraActive) {
+    if (freeCameraActive || movementLocked) {
       key.forward = false
       key.back = false
       key.left = false
       key.right = false
       key.actionQueued = false
+      touch.moveX = 0
+      touch.moveY = 0
+      touch.actionQueued = false
       planarVelocityRef.current.x = 0
       planarVelocityRef.current.z = 0
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
       setPlayerMotion((current) => (current === 'idle' ? current : 'idle'))
-      return
+      if (movementLocked) {
+        const current = playerPosRef.current
+        playerBodyRef.current.setNextKinematicTranslation(current)
+        visualRef.current.position.set(current.x, current.y, current.z)
+      }
+      if (freeCameraActive) return
     }
 
-    if (dragonRide?.active && dragonRide.positionRef && dragonRide.yawRef) {
+    if (!movementLocked && dragonRide?.active && dragonRide.positionRef && dragonRide.yawRef) {
       const mountConfig = dragonRide.config ?? MOUNT_CONFIGS.dragon
       const flight = dragonFlightInputRef.current
       const pos = dragonRide.positionRef.current
@@ -13750,6 +13760,8 @@ function App() {
   const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
   const [magicSkullDiscovered, setMagicSkullDiscovered] = useState(isAdminMode)
   const [isNearMagicSkullDiscovery, setIsNearMagicSkullDiscovery] = useState(false)
+  const [isLearningMagicSkull, setIsLearningMagicSkull] = useState(false)
+  const [magicSkullLearnProgress, setMagicSkullLearnProgress] = useState(0)
   const summonSlotRefs = useRef(Array.from({ length: SUMMON_SKELETON_COUNT }, () => ({ current: null })))
   const summonGroupPositionsRef = useRef(new Map())
   const summonCooldownRef = useRef(0)
@@ -13765,6 +13777,7 @@ function App() {
   const fireballCooldownRef = useRef(0)
   const isChargingRef = useRef(false)
   const [isCharging, setIsCharging] = useState(false)
+  const magicSkullLearnTimerRef = useRef(null)
   const chargeProgressRef = useRef(0)
   const [chargeProgress, setChargeProgress] = useState(0)
   const chargeStartTimeRef = useRef(0)
@@ -15437,11 +15450,13 @@ function App() {
     setOwnedMagicBook(true)
   }
 
-  const learnMagicSkull = useCallback(() => {
+  const completeMagicSkullLearning = useCallback(() => {
     if (magicSkullDiscovered) return
     if (currentZone !== ZONES.outside) return
     setMagicSkullDiscovered(true)
     setIsNearMagicSkullDiscovery(false)
+    setIsLearningMagicSkull(false)
+    setMagicSkullLearnProgress(0)
     showAchievementToast({
       kind: 'info',
       kicker: 'Pouvoir appris',
@@ -15449,6 +15464,51 @@ function App() {
       description: 'Il est maintenant disponible dans la boutique.',
     })
   }, [currentZone, magicSkullDiscovered, showAchievementToast])
+
+  const cancelMagicSkullLearning = useCallback(() => {
+    if (magicSkullLearnTimerRef.current) {
+      window.clearInterval(magicSkullLearnTimerRef.current)
+      magicSkullLearnTimerRef.current = null
+    }
+    setIsLearningMagicSkull(false)
+    setMagicSkullLearnProgress(0)
+  }, [])
+
+  const learnMagicSkull = useCallback(() => {
+    if (magicSkullDiscovered || isLearningMagicSkull) return
+    if (magicSkullLearnTimerRef.current) return
+    if (currentZone !== ZONES.outside || !isNearMagicSkullDiscovery) return
+
+    const startedAt = Date.now()
+    setIsLearningMagicSkull(true)
+    setMagicSkullLearnProgress(0)
+    magicSkullLearnTimerRef.current = window.setInterval(() => {
+      const progress = Math.min(1, (Date.now() - startedAt) / MAGIC_SKULL_DISCOVERY_CHARGE_MS)
+      setMagicSkullLearnProgress(progress)
+      if (progress < 1) return
+      if (magicSkullLearnTimerRef.current) {
+        window.clearInterval(magicSkullLearnTimerRef.current)
+        magicSkullLearnTimerRef.current = null
+      }
+      completeMagicSkullLearning()
+    }, 50)
+  }, [completeMagicSkullLearning, currentZone, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered])
+
+  useEffect(() => (
+    () => {
+      if (magicSkullLearnTimerRef.current) {
+        window.clearInterval(magicSkullLearnTimerRef.current)
+        magicSkullLearnTimerRef.current = null
+      }
+    }
+  ), [])
+
+  useEffect(() => {
+    if (!isLearningMagicSkull) return
+    if (mode !== 'play' || currentZone !== ZONES.outside || magicSkullDiscovered || !isNearMagicSkullDiscovery) {
+      cancelMagicSkullLearning()
+    }
+  }, [cancelMagicSkullLearning, currentZone, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, mode])
 
   const buyMagicSkull = async () => {
     if (ownedMagicSkull) return
@@ -15746,6 +15806,10 @@ function App() {
     const onKeyDown = (event) => {
       if (getKeyboardKey(event) !== 'e') return
       if (mode !== 'play') return
+      if (isLearningMagicSkull) {
+        event.preventDefault()
+        return
+      }
       if (isNearMagicSkullDiscovery && !magicSkullDiscovered) {
         event.preventDefault()
         learnMagicSkull()
@@ -15769,7 +15833,7 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [mode, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
+  }, [mode, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
 
   const openCustomizationMode = () => {
     if (!canModifyWorld) return
@@ -16449,6 +16513,7 @@ function App() {
               playerBodyYawRef={playerBodyYawRef}
               appearance={characterAppearance}
               freeCameraActive={isLocalNetwork && freeCameraActive}
+              movementLocked={isCharging || isLearningMagicSkull}
               playerCombatActionsRef={playerCombatActionsRef}
               dragonRide={{
                 active: dragonMounted,
@@ -16555,6 +16620,12 @@ function App() {
         <div className="charge-bar-wrap">
           <div className="charge-bar-fill" style={{ width: `${chargeProgress * 100}%` }} />
           <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
+        </div>
+      )}
+      {showCaptureUi && isLearningMagicSkull && (
+        <div className="charge-bar-wrap">
+          <div className="charge-bar-fill" style={{ width: `${magicSkullLearnProgress * 100}%` }} />
+          <span className="charge-bar-label">💀 {magicSkullLearnProgress >= 1 ? 'Appris !' : 'Apprentissage...'}</span>
         </div>
       )}
       {showCaptureUi && mode === 'play' && equippedWeapon === 'magic_skull' && (
@@ -16692,8 +16763,8 @@ function App() {
         </button>
       )}
       {showCaptureUi && currentZone === ZONES.outside && isNearMagicSkullDiscovery && !magicSkullDiscovered && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={learnMagicSkull}>
-          Apprendre
+        <button className="skin-open-btn custom-open-btn" type="button" onClick={learnMagicSkull} disabled={isLearningMagicSkull}>
+          {isLearningMagicSkull ? 'Apprentissage...' : 'Apprendre'}
         </button>
       )}
       {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (

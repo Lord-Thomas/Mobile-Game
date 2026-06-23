@@ -282,8 +282,8 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "skeleton_tower_mqmdmv0g",
     "objectId": "skeleton_tower",
     "position": [
-      43.75,
-      1.4005613135771124,
+      27.75,
+      1.3326327565834357,
       147.25
     ],
     "rotationY": 3.141592653589793,
@@ -726,9 +726,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "skeleton",
     "heightOffset": 0,
     "position": [
-      43.25,
-      1.4508810477552925,
-      147
+      27.75,
+      1.3826327565834358,
+      147.25
     ],
     "radius": 6,
     "populationMax": 4,
@@ -836,8 +836,8 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "skeleton",
     "heightOffset": 15.4,
     "position": [
-      43.75,
-      16.85045429312538,
+      27.75,
+      16.801910615174947,
       147.5
     ],
     "radius": 3,
