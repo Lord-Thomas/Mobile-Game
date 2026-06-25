@@ -4572,13 +4572,24 @@ function CharacterAuraGlow({ visible }) {
   )
 }
 
+// FBX2glTF exporte les translations en mètres, alors que three.FBXLoader (l'ancien
+// chargement) les donnait en centimètres. Les pistes de position d'un GLB Mixamo sont
+// donc 100x trop petites → le perso s'enfonce dans le sol. On les remet à l'échelle cm.
+const MIXAMO_GLB_POSITION_SCALE = 100
+
 // Anim issue d'un GLB Mixamo (converti depuis FBX via FBX2glTF, cf. scripts/convert-anims-glb.mjs) :
-// renormalise les noms de pistes (mixamorig:Hips.position -> mixamorigHips.position)
-// pour qu'ils correspondent aux os de l'avatar (cf. normalizeMixamoObjectName).
+// - renormalise les noms de pistes (mixamorig:Hips.position -> mixamorigHips.position)
+//   pour qu'ils correspondent aux os de l'avatar (cf. normalizeMixamoObjectName) ;
+// - remet les translations à l'échelle cm (cf. MIXAMO_GLB_POSITION_SCALE).
 function cloneMixamoAnimationClip(clip) {
   const next = clip.clone()
   next.tracks.forEach((track) => {
     track.name = normalizeMixamoObjectName(track.name)
+    if (track.name.endsWith('.position')) {
+      for (let i = 0; i < track.values.length; i += 1) {
+        track.values[i] *= MIXAMO_GLB_POSITION_SCALE
+      }
+    }
   })
   return next
 }
