@@ -12,24 +12,25 @@
 import convert from 'fbx2gltf'
 import { mkdirSync } from 'node:fs'
 
+const SRC_DIR = 'anim-src' // FBX sources hors public/ (non déployés)
 const OUT_DIR = 'public/models/player/anim'
 
-// nom logique de sortie -> chemin FBX source (relatif à public/, tel qu'utilisé par useFBX)
+// nom logique de sortie -> fichier FBX source (dans anim-src/)
 const ANIMATIONS = {
-  idle: 'models/player/player-idle.fbx',
-  walk: 'models/player/player-walk.fbx',
-  run: 'models/player/player-run.fbx',
-  kick: 'models/player/player-kick.fbx',
-  punch: 'models/player/player-punch.fbx',
-  waving: 'models/Waving.fbx',
-  dance: 'models/Wave Hip Hop Dance.fbx',
-  'pointing-up': 'models/player/pointing-up.fbx',
-  'jump-start': 'models/player/player-jump-start.fbx',
-  'jump-loop': 'models/player/player-jump-loop.fbx',
-  'jump-land': 'models/player/player-jump-land.fbx',
-  'stand-to-sit': 'models/player/Stand To Sit.fbx',
-  'sitting-idle': 'models/player/Sitting Idle.fbx',
-  'stand-up': 'models/player/Stand Up.fbx',
+  idle: 'player-idle.fbx',
+  walk: 'player-walk.fbx',
+  run: 'player-run.fbx',
+  kick: 'player-kick.fbx',
+  punch: 'player-punch.fbx',
+  waving: 'Waving.fbx',
+  dance: 'Wave Hip Hop Dance.fbx',
+  'pointing-up': 'pointing-up.fbx',
+  'jump-start': 'player-jump-start.fbx',
+  'jump-loop': 'player-jump-loop.fbx',
+  'jump-land': 'player-jump-land.fbx',
+  'stand-to-sit': 'Stand To Sit.fbx',
+  'sitting-idle': 'Sitting Idle.fbx',
+  'stand-up': 'Stand Up.fbx',
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
@@ -44,7 +45,7 @@ for (const [name, file] of entries) {
   }
   const output = `${OUT_DIR}/${name}.glb`
   try {
-    await convert(`public/${file}`, output, ['--binary', '--keep-attribute', 'auto'])
+    await convert(`${SRC_DIR}/${file}`, output, ['--binary', '--keep-attribute', 'auto'])
     console.log(`OK ${file} -> anim/${name}.glb`)
   } catch (err) {
     console.error(`ECHEC ${file}:`, String(err).slice(0, 200))

@@ -4594,6 +4594,16 @@ function cloneMixamoAnimationClip(clip) {
   return next
 }
 
+// Charge un GLB d'animation Mixamo (converti via FBX2glTF) et renvoie un objet de
+// même forme que l'ancien useFBX ({ animations: [clip] }), pistes renormalisées.
+function useMixamoGlbAnimation(url) {
+  const glb = useGLTF(url)
+  return useMemo(
+    () => ({ animations: glb.animations.map(cloneMixamoAnimationClip) }),
+    [glb],
+  )
+}
+
 function PlayerAvatar({
   motion,
   handBoneRef,
@@ -4605,25 +4615,21 @@ function PlayerAvatar({
   const { gl } = useThree()
   const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
   const faceDetailsMask = useTexture(PLAYER_FACE_DETAILS_MASK_URL)
-  // Pilote FBX->GLB (FBX2glTF) : idle en GLB (316 Ko) au lieu du FBX (2,1 Mo).
-  const idleGlb = useGLTF('/models/player/anim/idle.glb')
-  const idle = useMemo(
-    () => ({ animations: idleGlb.animations.map(cloneMixamoAnimationClip) }),
-    [idleGlb],
-  )
-  const walk = useFBX('/models/player/player-walk.fbx')
-  const run = useFBX('/models/player/player-run.fbx')
-  const kick = useFBX('/models/player/player-kick.fbx')
-  const punch = useFBX('/models/player/player-punch.fbx')
-  const wave = useFBX('/models/Waving.fbx')
-  const dance = useFBX('/models/Wave Hip Hop Dance.fbx')
-  const pointingUp = useFBX('/models/player/pointing-up.fbx')
-  const jumpStart = useFBX('/models/player/player-jump-start.fbx')
-  const jumpLoop = useFBX('/models/player/player-jump-loop.fbx')
-  const jumpLand = useFBX('/models/player/player-jump-land.fbx')
-  const sitDown = useFBX('/models/player/Stand To Sit.fbx')
-  const sittingIdle = useFBX('/models/player/Sitting Idle.fbx')
-  const standUp = useFBX('/models/player/Stand Up.fbx')
+  // Animations en GLB (converties depuis FBX via FBX2glTF) : ~15 Mo de FBX -> ~1,5 Mo.
+  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb')
+  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb')
+  const run = useMixamoGlbAnimation('/models/player/anim/run.glb')
+  const kick = useMixamoGlbAnimation('/models/player/anim/kick.glb')
+  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
+  const wave = useMixamoGlbAnimation('/models/player/anim/waving.glb')
+  const dance = useMixamoGlbAnimation('/models/player/anim/dance.glb')
+  const pointingUp = useMixamoGlbAnimation('/models/player/anim/pointing-up.glb')
+  const jumpStart = useMixamoGlbAnimation('/models/player/anim/jump-start.glb')
+  const jumpLoop = useMixamoGlbAnimation('/models/player/anim/jump-loop.glb')
+  const jumpLand = useMixamoGlbAnimation('/models/player/anim/jump-land.glb')
+  const sitDown = useMixamoGlbAnimation('/models/player/anim/stand-to-sit.glb')
+  const sittingIdle = useMixamoGlbAnimation('/models/player/anim/sitting-idle.glb')
+  const standUp = useMixamoGlbAnimation('/models/player/anim/stand-up.glb')
   const avatar = useMemo(() => {
     const next = clone(modelScene)
     next.visible = false
@@ -9113,9 +9119,9 @@ function SmallMushroomEnemy({
   const sourceModel = useFBX(cfg.modelUrl)
   const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
   const sourceAnimations = sourceModel.animations ?? []
-  const idle = useFBX('/models/player/player-idle.fbx')
-  const walk = useFBX('/models/player/player-walk.fbx')
-  const punch = useFBX('/models/player/player-punch.fbx')
+  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb')
+  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb')
+  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
   const groupRef = useRef()
   const [hp, setHp] = useState(cfg.maxHp)
   const [damageNumbers, setDamageNumbers] = useState([])
@@ -9954,9 +9960,9 @@ function SummonedSkeleton({
   const allyId = `summon_${index}`
   const sourceModel = useFBX(cfg.modelUrl)
   const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
-  const idle = useFBX('/models/player/player-idle.fbx')
-  const walk = useFBX('/models/player/player-walk.fbx')
-  const punch = useFBX('/models/player/player-punch.fbx')
+  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb')
+  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb')
+  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
 
   const groupRef = useRef()
   const [hp, setHp] = useState(SUMMON_SKELETON_MAX_HP)
@@ -17427,20 +17433,20 @@ useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
 useFBX.preload(SKELETON_ENEMY_MODEL_URL)
 useTexture.preload(SKELETON_ENEMY_TEXTURE_URL)
 useGLTF.preload(PLAYER_MODEL_URL)
-useFBX.preload('/models/player/player-idle.fbx')
-useFBX.preload('/models/player/player-walk.fbx')
-useFBX.preload('/models/player/player-run.fbx')
-useFBX.preload('/models/player/player-kick.fbx')
-useFBX.preload('/models/player/player-punch.fbx')
-useFBX.preload('/models/Waving.fbx')
-useFBX.preload('/models/Wave Hip Hop Dance.fbx')
-useFBX.preload('/models/player/pointing-up.fbx')
-useFBX.preload('/models/player/player-jump-start.fbx')
-useFBX.preload('/models/player/player-jump-loop.fbx')
-useFBX.preload('/models/player/player-jump-land.fbx')
-useFBX.preload('/models/player/Stand To Sit.fbx')
-useFBX.preload('/models/player/Sitting Idle.fbx')
-useFBX.preload('/models/player/Stand Up.fbx')
+useGLTF.preload('/models/player/anim/idle.glb')
+useGLTF.preload('/models/player/anim/walk.glb')
+useGLTF.preload('/models/player/anim/run.glb')
+useGLTF.preload('/models/player/anim/kick.glb')
+useGLTF.preload('/models/player/anim/punch.glb')
+useGLTF.preload('/models/player/anim/waving.glb')
+useGLTF.preload('/models/player/anim/dance.glb')
+useGLTF.preload('/models/player/anim/pointing-up.glb')
+useGLTF.preload('/models/player/anim/jump-start.glb')
+useGLTF.preload('/models/player/anim/jump-loop.glb')
+useGLTF.preload('/models/player/anim/jump-land.glb')
+useGLTF.preload('/models/player/anim/stand-to-sit.glb')
+useGLTF.preload('/models/player/anim/sitting-idle.glb')
+useGLTF.preload('/models/player/anim/stand-up.glb')
 useFBX.preload('/models/placeables/modular-sofa/modular-sofa.fbx')
 useTexture.preload('/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG')
 useTexture.preload('/textures/outdoor/grass-patchy-basecolor-512.jpg')
