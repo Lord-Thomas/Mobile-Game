@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { CanvasTexture, ClampToEdgeWrapping, Color, DoubleSide, InstancedBufferAttribute, InstancedBufferGeometry, LinearFilter, LinearMipmapLinearFilter, MeshBasicMaterial, NormalBlending, PlaneGeometry, SRGBColorSpace } from 'three'
+import { CanvasTexture, ClampToEdgeWrapping, Color, DoubleSide, InstancedBufferAttribute, InstancedBufferGeometry, LinearFilter, MeshBasicMaterial, NormalBlending, PlaneGeometry, SRGBColorSpace } from 'three'
 import ParticleEffect from '../effects/ParticleEffect'
 import { normalizeParticlePreset } from '../effects/particlePresets'
 import { MAP_BIOME_AREAS } from './biomeAreas'
@@ -43,14 +43,13 @@ function createFogSheetTexture() {
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
-  // Mipmaps trilinéaires + anisotropie : sans ça, les plans de fog (surtout les
-  // 'ground' à plat vus en angle rasant) sont minifiés SANS filtrage → le bord
-  // d'alphaTest et les blobs aliasent en motif pointillé. Très visible sur mobile
-  // (DPR élevé + render-scale dynamique) → "points colorés". 256² = POT, OK partout.
-  texture.generateMipmaps = true
-  texture.minFilter = LinearMipmapLinearFilter
+  // TEST (hypothèse "optimisation = points colorés iPhone") : on retire toute
+  // optimisation de texture sur la brume → échantillonnage brut, AUCUN mipmap, AUCUNE
+  // anisotropie. La texture n'est de toute façon pas compressée (CanvasTexture blanche).
+  // Si les points colorés disparaissent → c'était bien le traitement de texture.
+  texture.generateMipmaps = false
+  texture.minFilter = LinearFilter
   texture.magFilter = LinearFilter
-  texture.anisotropy = 4 // clampé à la limite GPU par three (négligeable en coût)
   texture.wrapS = ClampToEdgeWrapping
   texture.wrapT = ClampToEdgeWrapping
   texture.needsUpdate = true
@@ -292,7 +291,9 @@ function buildFogMaterial(texture, color, params) {
     depthWrite: false,
     blending: NormalBlending,
     side: DoubleSide,
-    alphaTest: 0.015,
+    // PAS d'alphaTest : la brume est déjà transparent:true (blending doux). alphaTest
+    // créait un bord "tout ou rien" qui aliase en mouchetis coloré au render-scale
+    // réduit du mobile, et qui dérive avec la brume → c'était ça les "points qui bougent".
     fog: false,
   })
   const uniforms = {
@@ -502,6 +503,11 @@ function GraveyardAmbience({ area }) {
   )
 }
 
+// Debug : ?nofog masque uniquement les plans de brume (garde ciel/sol/particules).
+// Sert à trancher : si les points colorés restent avec ?nofog → ils ne viennent PAS
+// de la brume (donc ciel/atmosphère ou sol). Sinon → c'est bien la brume.
+const HIDE_FOG = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('nofog')
+
 export default function BiomeAmbientEffects({ areas = MAP_BIOME_AREAS }) {
   const graveyardAreas = areas.filter((area) => area.biome === 'graveyard' && area.ambient !== false)
 
@@ -526,10 +532,14 @@ export default function BiomeAmbientEffects({ areas = MAP_BIOME_AREAS }) {
       {graveyardAreas.map((area) => (
         <GraveyardAmbience key={area.id} area={area} />
       ))}
-      <InstancedFogLayer items={fog.graveyard.ground} texture={fogTexture} color="#b7c4b8" params={GRAVEYARD_GROUND_PARAMS} renderOrder={12} />
-      <InstancedFogLayer items={fog.graveyard.billboard} texture={fogTexture} color="#adcac0" params={GRAVEYARD_BILLBOARD_PARAMS} renderOrder={12} />
-      <InstancedFogLayer items={fog.painted.ground} texture={fogTexture} color="#b8c4b8" params={PAINTED_GROUND_PARAMS} renderOrder={11} />
-      <InstancedFogLayer items={fog.painted.billboard} texture={fogTexture} color="#a9c5bd" params={PAINTED_BILLBOARD_PARAMS} renderOrder={11} />
+      {!HIDE_FOG && (
+        <>
+          <InstancedFogLayer items={fog.graveyard.ground} texture={fogTexture} color="#b7c4b8" params={GRAVEYARD_GROUND_PARAMS} renderOrder={12} />
+          <InstancedFogLayer items={fog.graveyard.billboard} texture={fogTexture} color="#adcac0" params={GRAVEYARD_BILLBOARD_PARAMS} renderOrder={12} />
+          <InstancedFogLayer items={fog.painted.ground} texture={fogTexture} color="#b8c4b8" params={PAINTED_GROUND_PARAMS} renderOrder={11} />
+          <InstancedFogLayer items={fog.painted.billboard} texture={fogTexture} color="#a9c5bd" params={PAINTED_BILLBOARD_PARAMS} renderOrder={11} />
+        </>
+      )}
     </group>
   )
 }
