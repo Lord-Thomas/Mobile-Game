@@ -52,14 +52,17 @@ manuellement crée une divergence silencieuse. Édite la donnée via l'outil con
 - `src/world/trees/treeLibrary.generated.js`
 
 > **Terrain — `.generated.js` n'est plus chargé par le jeu.** Le runtime lit désormais
-> `public/terrain/modifications.bin` (fetch async, voir `terrainReady` dans
-> `terrainGeometry.js`). `terrainModifications.generated.js` reste UNIQUEMENT la source
-> du script d'encodage. **PIÈGE : après toute édition du terrain (qui met à jour le
-> `.generated.js`), il faut régénérer le binaire** sinon le jeu affiche l'ancien terrain :
+> `public/terrain/modifications.bin` (fetch async versionné anti-cache, voir `terrainReady`
+> et `TERRAIN_BIN_VERSION` dans `terrainGeometry.js`). `terrainModifications.generated.js`
+> reste la source de référence du script d'encodage.
 >
-> ```bash
-> node scripts/encode-terrain-bin.mjs   # régénère public/terrain/modifications.bin
-> ```
+> La sauvegarde de l'éditeur (`/dev/save-map-objects` dans `vite.config.js`) régénère
+> **automatiquement** le `.bin` en même temps que le `.generated.js` — rien à faire à la main.
+> Le script `node scripts/encode-terrain-bin.mjs` ne sert qu'à reconstruire le `.bin`
+> hors éditeur (ex. après un merge git qui touche le `.generated.js`).
+>
+> Rappel : `vite.config.js` n'est lu qu'au **démarrage** du serveur — après l'avoir
+> modifié, redémarrer `npm run dev`.
 >
 > Même principe que la collision (`mapObjectCollisionData.js` + `encode-collision-bin.mjs`).
 
