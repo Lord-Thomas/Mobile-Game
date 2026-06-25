@@ -5,6 +5,7 @@ import { ColorManagement } from 'three'
 import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './ui/ErrorBoundary.jsx'
+import { terrainReady } from './world/terrain/terrainGeometry.js'
 
 ColorManagement.enabled = true
 
@@ -28,7 +29,8 @@ if (isThumbnailTool) {
   })
 } else if (isEditor) {
   const initialMode = params.get('editor') || (params.has('treeeditor') ? 'tree' : '')
-  import('./tools/Editor.jsx').then(({ default: Editor }) => {
+  // terrainReady : l'éditeur lit/mute terrainModifications, il doit attendre le .bin.
+  Promise.all([terrainReady, import('./tools/Editor.jsx')]).then(([, { default: Editor }]) => {
     createRoot(document.getElementById('root')).render(
       <StrictMode>
         <ErrorBoundary>
@@ -38,14 +40,18 @@ if (isThumbnailTool) {
     )
   })
 } else {
-  createRoot(document.getElementById('root')).render(
-    <StrictMode>
-      <ErrorBoundary>
-        <App />
-        <Analytics />
-      </ErrorBoundary>
-    </StrictMode>,
-  )
+  // terrainReady : garantit que les modifications de terrain (.bin) sont chargées
+  // AVANT le premier rendu, donc avant toute construction de géométrie de terrain.
+  terrainReady.then(() => {
+    createRoot(document.getElementById('root')).render(
+      <StrictMode>
+        <ErrorBoundary>
+          <App />
+          <Analytics />
+        </ErrorBoundary>
+      </StrictMode>,
+    )
+  })
 }
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

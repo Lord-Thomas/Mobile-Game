@@ -3,10 +3,49 @@ import { getRoomBounds, houseLayout } from '../house/houseLayout'
 import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
-import { MAP_TERRAIN_MODIFICATIONS } from './terrainModifications.generated'
 
 export const MODIFICATION_GRID_SPACING = 1.0
-export const terrainModifications = { ...MAP_TERRAIN_MODIFICATIONS }
+
+// Rempli de façon asynchrone depuis public/terrain/modifications.bin (voir terrainReady),
+// en remplacement de l'ancien import statique de terrainModifications.generated.js
+// (~3,1 Mo de texte JS parsé au boot → ~1,1 Mo de binaire lu en quasi-instantané).
+// Même approche que mapObjectCollisionData.js.
+// Référence STABLE : l'éditeur (src/tools/Editor.jsx) mute cet objet EN PLACE
+// (delete / Object.assign / affectations). Ne jamais le réassigner.
+export const terrainModifications = {}
+
+// Format du .bin (voir scripts/encode-terrain-bin.mjs) :
+//   [0..4) header uint32 = N ; puis xs(Int32×N) | zs(Int32×N) | vals(Float32×N)
+// Anti-cache : en dev, une version unique à chaque chargement garantit qu'une édition
+// de terrain est toujours relue (le navigateur ne sert jamais un ancien .bin). En prod,
+// une version figée par build (__TERRAIN_BIN_BUILD__, défini dans vite.config.js) garde
+// un cache normal mais le rafraîchit à chaque déploiement.
+const TERRAIN_BIN_VERSION = import.meta.env.DEV ? Date.now() : __TERRAIN_BIN_BUILD__
+
+async function loadTerrainModifications() {
+  try {
+    const response = await fetch(`/terrain/modifications.bin?v=${TERRAIN_BIN_VERSION}`)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const buffer = await response.arrayBuffer()
+    const N = new Uint32Array(buffer, 0, 1)[0]
+    let offset = 4
+    const xs = new Int32Array(buffer, offset, N)
+    offset += N * 4
+    const zs = new Int32Array(buffer, offset, N)
+    offset += N * 4
+    const vals = new Float32Array(buffer, offset, N)
+    for (let i = 0; i < N; i += 1) {
+      terrainModifications[`${xs[i]}_${zs[i]}`] = vals[i]
+    }
+  } catch (error) {
+    console.warn('Modifications de terrain non chargées (terrain plat)', error)
+  }
+}
+
+// Le fetch démarre dès l'import du module. main.jsx attend terrainReady AVANT de
+// rendre l'app, pour qu'aucune géométrie de terrain ne soit construite (et mise en
+// cache) sur des données vides.
+export const terrainReady = loadTerrainModifications()
 
 export function getTerrainModificationOffset(x, z) {
   const spacing = MODIFICATION_GRID_SPACING

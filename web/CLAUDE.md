@@ -51,8 +51,20 @@ manuellement crée une divergence silencieuse. Édite la donnée via l'outil con
 - `src/world/terrain/terrainModifications.generated.js` (~3,2 Mo — voir note perf ci-dessous)
 - `src/world/trees/treeLibrary.generated.js`
 
-> Note perf : `terrainModifications.generated.js` est importé en dur et parsé au démarrage.
-> Toute croissance de ce fichier alourdit le bundle et le temps de chargement (surtout mobile).
+> **Terrain — `.generated.js` n'est plus chargé par le jeu.** Le runtime lit désormais
+> `public/terrain/modifications.bin` (fetch async versionné anti-cache, voir `terrainReady`
+> et `TERRAIN_BIN_VERSION` dans `terrainGeometry.js`). `terrainModifications.generated.js`
+> reste la source de référence du script d'encodage.
+>
+> La sauvegarde de l'éditeur (`/dev/save-map-objects` dans `vite.config.js`) régénère
+> **automatiquement** le `.bin` en même temps que le `.generated.js` — rien à faire à la main.
+> Le script `node scripts/encode-terrain-bin.mjs` ne sert qu'à reconstruire le `.bin`
+> hors éditeur (ex. après un merge git qui touche le `.generated.js`).
+>
+> Rappel : `vite.config.js` n'est lu qu'au **démarrage** du serveur — après l'avoir
+> modifié, redémarrer `npm run dev`.
+>
+> Même principe que la collision (`mapObjectCollisionData.js` + `encode-collision-bin.mjs`).
 
 ## Règles de sauvegarde (persistance)
 
