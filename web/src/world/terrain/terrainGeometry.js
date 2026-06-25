@@ -16,9 +16,15 @@ export const terrainModifications = {}
 
 // Format du .bin (voir scripts/encode-terrain-bin.mjs) :
 //   [0..4) header uint32 = N ; puis xs(Int32×N) | zs(Int32×N) | vals(Float32×N)
+// Anti-cache : en dev, une version unique à chaque chargement garantit qu'une édition
+// de terrain est toujours relue (le navigateur ne sert jamais un ancien .bin). En prod,
+// une version figée par build (__TERRAIN_BIN_BUILD__, défini dans vite.config.js) garde
+// un cache normal mais le rafraîchit à chaque déploiement.
+const TERRAIN_BIN_VERSION = import.meta.env.DEV ? Date.now() : __TERRAIN_BIN_BUILD__
+
 async function loadTerrainModifications() {
   try {
-    const response = await fetch('/terrain/modifications.bin')
+    const response = await fetch(`/terrain/modifications.bin?v=${TERRAIN_BIN_VERSION}`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const buffer = await response.arrayBuffer()
     const N = new Uint32Array(buffer, 0, 1)[0]
