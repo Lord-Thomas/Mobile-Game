@@ -40,6 +40,7 @@ const VERTEX_SHADER = /* glsl */ `
   uniform float uAlphaStart;
   uniform float uAlphaEnd;
   uniform float uPixelScale;
+  uniform float uMaxPointSize;
 
   varying vec3 vColor;
   varying float vAlpha;
@@ -90,7 +91,7 @@ const VERTEX_SHADER = /* glsl */ `
 
     float size = mix(uSizeStart, uSizeEnd, t) * (1.0 + (aRandom.z * 2.0 - 1.0) * uSizeVariance);
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-    gl_PointSize = clamp(size * uPixelScale / max(0.1, -mvPosition.z), 0.0, 320.0);
+    gl_PointSize = clamp(size * uPixelScale / max(0.1, -mvPosition.z), 0.0, uMaxPointSize);
     gl_Position = projectionMatrix * mvPosition;
   }
 `
@@ -253,6 +254,11 @@ function buildMaterial(emitter, preset, loop) {
       uAlphaStart: { value: emitter.alphaStart },
       uAlphaEnd: { value: emitter.alphaEnd },
       uPixelScale: { value: 400 },
+      // Plafond de gl_PointSize. Mis à jour avec la vraie limite GPU
+      // (ALIASED_POINT_SIZE_RANGE) : 320 sur desktop, plus bas sur mobile.
+      // Au-delà de cette limite, gl_PointCoord devient invalide sur beaucoup de
+      // GPU mobiles → sprites cassés (dots colorés) au lieu de halos doux.
+      uMaxPointSize: { value: 320 },
       uMap: { value: getParticleTexture(emitter.texture) },
     },
   })
@@ -320,6 +326,8 @@ export default function ParticleEffect({
   const lightRef = useRef()
   // Shared effect clock read by the shader shells so they stay in sync.
   const timeRef = useRef(0)
+  // Limite matérielle de taille de point-sprite, lue une seule fois (0 = pas encore lue).
+  const maxPointSizeRef = useRef(0)
   const totalTime = useMemo(() => computeEffectTotalTime(preset), [preset])
 
   useEffect(() => {
@@ -340,10 +348,21 @@ export default function ParticleEffect({
     const pixelScale = (state.size.height * state.viewport.dpr)
       / (2 * Math.tan((state.camera.fov * Math.PI) / 360))
 
+    if (maxPointSizeRef.current === 0) {
+      try {
+        const ctx = state.gl.getContext()
+        const range = ctx.getParameter(ctx.ALIASED_POINT_SIZE_RANGE)
+        maxPointSizeRef.current = range && range[1] ? Math.min(320, range[1]) : 320
+      } catch {
+        maxPointSizeRef.current = 320
+      }
+    }
+
     for (const material of materialsRef.current) {
       // eslint-disable-next-line react-hooks/immutability -- per-frame uniform writes are the standard r3f pattern
       material.uniforms.uTime.value = time
       material.uniforms.uPixelScale.value = pixelScale
+      material.uniforms.uMaxPointSize.value = maxPointSizeRef.current
     }
 
     if (lightRef.current) {

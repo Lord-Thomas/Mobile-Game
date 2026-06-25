@@ -1,6 +1,6 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { CanvasTexture, ClampToEdgeWrapping, DoubleSide, LinearFilter, NormalBlending, SRGBColorSpace } from 'three'
+import { CanvasTexture, ClampToEdgeWrapping, Color, DoubleSide, InstancedBufferAttribute, InstancedBufferGeometry, LinearFilter, LinearMipmapLinearFilter, MeshBasicMaterial, NormalBlending, PlaneGeometry, SRGBColorSpace } from 'three'
 import ParticleEffect from '../effects/ParticleEffect'
 import { normalizeParticlePreset } from '../effects/particlePresets'
 import { MAP_BIOME_AREAS } from './biomeAreas'
@@ -43,8 +43,14 @@ function createFogSheetTexture() {
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
-  texture.minFilter = LinearFilter
+  // Mipmaps trilinéaires + anisotropie : sans ça, les plans de fog (surtout les
+  // 'ground' à plat vus en angle rasant) sont minifiés SANS filtrage → le bord
+  // d'alphaTest et les blobs aliasent en motif pointillé. Très visible sur mobile
+  // (DPR élevé + render-scale dynamique) → "points colorés". 256² = POT, OK partout.
+  texture.generateMipmaps = true
+  texture.minFilter = LinearMipmapLinearFilter
   texture.magFilter = LinearFilter
+  texture.anisotropy = 4 // clampé à la limite GPU par three (négligeable en coût)
   texture.wrapS = ClampToEdgeWrapping
   texture.wrapT = ClampToEdgeWrapping
   texture.needsUpdate = true
@@ -210,58 +216,202 @@ function makeFogPatches(area) {
   return [...ground, ...billboards, ...highBillboards]
 }
 
-function GraveyardFogPlanes({ area }) {
-  const groupRef = useRef()
-  const patches = useMemo(() => makeFogPatches(area), [area])
-  const fogTexture = useMemo(() => createFogSheetTexture(), [])
+// ─── Brume instanciée ────────────────────────────────────────────────────────
+// Avant : chaque patch de brume = un <mesh> séparé → ~4500 draw calls + autant de
+// géométries/matériaux montés d'un coup en sortant de la maison (freeze) + un
+// useFrame qui parcourait tous les enfants par frame. Désormais : tous les patches
+// d'un même type (ground/billboard) sont fusionnés dans UN InstancedBufferGeometry.
+// Le drift, le pulse d'opacité et le billboard (face caméra) sont calculés dans le
+// shader (onBeforeCompile sur un MeshBasicMaterial pour garder couleur/tonemapping/
+// alphaTest de three intacts). Coût par frame ≈ une seule écriture d'uniform uTime.
+
+// Paramètres d'animation par couche (anciennes valeurs des useFrame conservées).
+const GRAVEYARD_GROUND_PARAMS = { billboard: false, pulseBase: 0.82, pulseAmp: 0.18, pulseSpeed: 0.18, opacityCap: 0.82, driftSpeedX: 0.11, driftSpeedZ: 0.09, rotSpeed: 0.012, wobbleAmp: 0 }
+const GRAVEYARD_BILLBOARD_PARAMS = { billboard: true, pulseBase: 0.82, pulseAmp: 0.18, pulseSpeed: 0.18, opacityCap: 0.82, driftSpeedX: 0.11, driftSpeedZ: 0.09, rotSpeed: 0.16, wobbleAmp: 0.4 }
+const PAINTED_GROUND_PARAMS = { billboard: false, pulseBase: 0.78, pulseAmp: 0.22, pulseSpeed: 0.16, opacityCap: 0.56, driftSpeedX: 0.08, driftSpeedZ: 0.07, rotSpeed: 0.01, wobbleAmp: 0 }
+const PAINTED_BILLBOARD_PARAMS = { billboard: true, pulseBase: 0.78, pulseAmp: 0.22, pulseSpeed: 0.16, opacityCap: 0.56, driftSpeedX: 0.08, driftSpeedZ: 0.07, rotSpeed: 0.14, wobbleAmp: 0.28 }
+
+const FOG_INSTANCE_HEADER = /* glsl */ `
+  attribute vec3 aOffset;
+  attribute vec2 aScale;
+  attribute float aPhase;
+  attribute float aOpacity;
+  attribute vec2 aDrift;
+  attribute float aRot;
+  uniform float uTime;
+  uniform float uBillboard;
+  uniform float uPulseBase;
+  uniform float uPulseAmp;
+  uniform float uPulseSpeed;
+  uniform float uOpacityCap;
+  uniform float uDriftSpeedX;
+  uniform float uDriftSpeedZ;
+  uniform float uRotSpeed;
+  uniform float uWobbleAmp;
+  varying float vFogOpacity;
+`
+
+// Convertit une liste de patches (coords absolues) en InstancedBufferGeometry.
+function buildFogGeometry(items) {
+  const base = new PlaneGeometry(1, 1)
+  const geometry = new InstancedBufferGeometry()
+  geometry.index = base.index
+  geometry.setAttribute('position', base.getAttribute('position'))
+  geometry.setAttribute('uv', base.getAttribute('uv'))
+
+  const count = items.length
+  const offset = new Float32Array(count * 3)
+  const scale = new Float32Array(count * 2)
+  const phase = new Float32Array(count)
+  const opacity = new Float32Array(count)
+  const drift = new Float32Array(count * 2)
+  const rot = new Float32Array(count)
+  items.forEach((it, i) => {
+    offset[i * 3] = it.x; offset[i * 3 + 1] = it.y; offset[i * 3 + 2] = it.z
+    scale[i * 2] = it.w; scale[i * 2 + 1] = it.h
+    phase[i] = it.phase
+    opacity[i] = it.opacity
+    drift[i * 2] = it.driftAmpX; drift[i * 2 + 1] = it.driftAmpZ
+    rot[i] = it.rot
+  })
+  geometry.setAttribute('aOffset', new InstancedBufferAttribute(offset, 3))
+  geometry.setAttribute('aScale', new InstancedBufferAttribute(scale, 2))
+  geometry.setAttribute('aPhase', new InstancedBufferAttribute(phase, 1))
+  geometry.setAttribute('aOpacity', new InstancedBufferAttribute(opacity, 1))
+  geometry.setAttribute('aDrift', new InstancedBufferAttribute(drift, 2))
+  geometry.setAttribute('aRot', new InstancedBufferAttribute(rot, 1))
+  geometry.instanceCount = count
+  return geometry
+}
+
+function buildFogMaterial(texture, color, params) {
+  const material = new MeshBasicMaterial({
+    map: texture,
+    color: new Color(color),
+    transparent: true,
+    depthWrite: false,
+    blending: NormalBlending,
+    side: DoubleSide,
+    alphaTest: 0.015,
+    fog: false,
+  })
+  const uniforms = {
+    uTime: { value: 0 },
+    uBillboard: { value: params.billboard ? 1 : 0 },
+    uPulseBase: { value: params.pulseBase },
+    uPulseAmp: { value: params.pulseAmp },
+    uPulseSpeed: { value: params.pulseSpeed },
+    uOpacityCap: { value: params.opacityCap },
+    uDriftSpeedX: { value: params.driftSpeedX },
+    uDriftSpeedZ: { value: params.driftSpeedZ },
+    uRotSpeed: { value: params.rotSpeed },
+    uWobbleAmp: { value: params.wobbleAmp ?? 0 },
+  }
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms)
+    shader.vertexShader = FOG_INSTANCE_HEADER + shader.vertexShader
+      .replace('#include <begin_vertex>', /* glsl */ `
+        vFogOpacity = min(uOpacityCap, aOpacity * (uPulseBase + sin(uTime * uPulseSpeed + aPhase) * uPulseAmp));
+        vec3 fogCenter = aOffset;
+        fogCenter.x += sin(uTime * uDriftSpeedX + aPhase) * aDrift.x;
+        fogCenter.z += cos(uTime * uDriftSpeedZ + aPhase) * aDrift.y;
+        float fogAngle = (uBillboard > 0.5) ? (sin(uTime * uRotSpeed + aPhase) * uWobbleAmp) : (aRot + uTime * uRotSpeed);
+        float fogCos = cos(fogAngle);
+        float fogSin = sin(fogAngle);
+        vec2 fogQuad = position.xy * aScale;
+        vec2 fogRot = vec2(fogCos * fogQuad.x - fogSin * fogQuad.y, fogSin * fogQuad.x + fogCos * fogQuad.y);
+        vec2 fogBillboardQuad = vec2(0.0);
+        vec3 transformed;
+        if (uBillboard > 0.5) {
+          transformed = fogCenter;
+          fogBillboardQuad = fogRot;
+        } else {
+          transformed = fogCenter + vec3(fogRot.x, 0.0, fogRot.y);
+        }
+      `)
+      .replace('#include <project_vertex>', /* glsl */ `
+        vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
+        mvPosition.xy += fogBillboardQuad;
+        gl_Position = projectionMatrix * mvPosition;
+      `)
+    shader.fragmentShader = 'varying float vFogOpacity;\n' + shader.fragmentShader
+      .replace(
+        'vec4 diffuseColor = vec4( diffuse, opacity );',
+        'vec4 diffuseColor = vec4( diffuse, opacity * vFogOpacity );',
+      )
+  }
+  material.userData.fogUniforms = uniforms
+  return material
+}
+
+function InstancedFogLayer({ items, texture, color, params, renderOrder }) {
+  const geometry = useMemo(() => buildFogGeometry(items), [items])
+  const material = useMemo(() => buildFogMaterial(texture, color, params), [texture, color, params])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => material.dispose(), [material])
 
   useFrame((state) => {
-    const group = groupRef.current
-    if (!group) return
-    const time = state.clock.elapsedTime
-    group.children.forEach((child, index) => {
-      const patch = patches[index]
-      if (!patch) return
-      const pulse = 0.82 + Math.sin(time * 0.18 + patch.phase) * 0.18
-      child.position.x = patch.x + Math.sin(time * 0.11 + patch.phase) * patch.driftX * area.radius
-      child.position.z = patch.z + Math.cos(time * 0.09 + patch.phase) * patch.driftZ * area.radius
-      child.material.opacity = Math.min(0.82, patch.opacity * pulse)
-      if (patch.type === 'ground') {
-        child.rotation.z = patch.rotation + time * 0.012
-      } else {
-        child.lookAt(state.camera.position)
-        child.rotation.z += Math.sin(time * 0.16 + patch.phase) * 0.08
-      }
-    })
+    // eslint-disable-next-line react-hooks/immutability -- per-frame uniform write (r3f pattern)
+    material.userData.fogUniforms.uTime.value = state.clock.elapsedTime
   })
 
+  if (!items.length) return null
   return (
-    <group ref={groupRef} position={[area.center[0], 0, area.center[1]]} userData={{ debugCategory: 'graveyard-fog-planes' }}>
-      {patches.map((patch) => (
-        <mesh
-          key={patch.id}
-          position={[patch.x, patch.y, patch.z]}
-          rotation={patch.type === 'ground' ? [-Math.PI / 2, 0, patch.rotation] : [0, patch.rotation, 0]}
-          scale={patch.scale}
-          renderOrder={12}
-        >
-          <planeGeometry args={[1, 1]} />
-          <meshBasicMaterial
-            map={fogTexture}
-            color={patch.type === 'ground' ? '#b7c4b8' : '#adcac0'}
-            transparent
-            opacity={patch.opacity}
-            alphaTest={0.015}
-            depthTest
-            depthWrite={false}
-            fog={false}
-            blending={NormalBlending}
-            side={DoubleSide}
-          />
-        </mesh>
-      ))}
-    </group>
+    <mesh
+      geometry={geometry}
+      material={material}
+      frustumCulled={false}
+      renderOrder={renderOrder}
+      userData={{ debugCategory: 'instanced-fog' }}
+    />
   )
+}
+
+// Aplatit les patches de toutes les zones en listes absolues {x,y,z,w,h,...} par type.
+function flattenGraveyardFog(areas) {
+  const ground = []
+  const billboard = []
+  for (const area of areas) {
+    if (!(area.fogIntensity > 0.01)) continue
+    for (const patch of makeFogPatches(area)) {
+      const item = {
+        x: area.center[0] + patch.x,
+        y: patch.y,
+        z: area.center[1] + patch.z,
+        w: patch.scale[0],
+        h: patch.scale[1],
+        phase: patch.phase,
+        opacity: patch.opacity,
+        driftAmpX: patch.driftX * area.radius,
+        driftAmpZ: patch.driftZ * area.radius,
+        rot: patch.rotation,
+      }
+      ;(patch.type === 'ground' ? ground : billboard).push(item)
+    }
+  }
+  return { ground, billboard }
+}
+
+function flattenPaintedFog(areas) {
+  const ground = []
+  const billboard = []
+  for (const patch of makePaintedFogPatches(areas)) {
+    const item = {
+      x: patch.x,
+      y: patch.y,
+      z: patch.z,
+      w: patch.scale[0],
+      h: patch.scale[1],
+      phase: patch.phase,
+      opacity: patch.opacity,
+      driftAmpX: patch.driftX * 20,
+      driftAmpZ: patch.driftZ * 20,
+      rot: patch.rotation,
+    }
+    ;(patch.type === 'ground' ? ground : billboard).push(item)
+  }
+  return { ground, billboard }
 }
 
 function samplePaintedFogAreas(areas) {
@@ -323,70 +473,17 @@ function makePaintedFogPatches(areas) {
   })
 }
 
-function GraveyardPaintedFog({ areas }) {
-  const groupRef = useRef()
-  const patches = useMemo(() => makePaintedFogPatches(areas), [areas])
-  const fogTexture = useMemo(() => createFogSheetTexture(), [])
-
-  useFrame((state) => {
-    const group = groupRef.current
-    if (!group) return
-    const time = state.clock.elapsedTime
-    group.children.forEach((child, index) => {
-      const patch = patches[index]
-      if (!patch) return
-      const pulse = 0.78 + Math.sin(time * 0.16 + patch.phase) * 0.22
-      child.position.x = patch.x + Math.sin(time * 0.08 + patch.phase) * patch.driftX * 20
-      child.position.z = patch.z + Math.cos(time * 0.07 + patch.phase) * patch.driftZ * 20
-      child.material.opacity = Math.min(0.56, patch.opacity * pulse)
-      if (patch.type === 'ground') {
-        child.rotation.z = patch.rotation + time * 0.01
-      } else {
-        child.lookAt(state.camera.position)
-        child.rotation.z += Math.sin(time * 0.14 + patch.phase) * 0.055
-      }
-    })
-  })
-
-  if (!patches.length) return null
-
-  return (
-    <group ref={groupRef} userData={{ debugCategory: 'graveyard-painted-fog' }}>
-      {patches.map((patch) => (
-        <mesh
-          key={patch.id}
-          position={[patch.x, patch.y, patch.z]}
-          rotation={patch.type === 'ground' ? [-Math.PI / 2, 0, patch.rotation] : [0, patch.rotation, 0]}
-          scale={patch.scale}
-          renderOrder={11}
-        >
-          <planeGeometry args={[1, 1]} />
-          <meshBasicMaterial
-            map={fogTexture}
-            color={patch.type === 'ground' ? '#b8c4b8' : '#a9c5bd'}
-            transparent
-            opacity={patch.opacity}
-            alphaTest={0.015}
-            depthTest
-            depthWrite={false}
-            fog={false}
-            blending={NormalBlending}
-            side={DoubleSide}
-          />
-        </mesh>
-      ))}
-    </group>
-  )
-}
-
+// Particules d'ambiance uniquement (la brume est désormais rendue en instancié
+// au niveau de BiomeAmbientEffects, plus par zone).
 function GraveyardAmbience({ area }) {
   const preset = useMemo(() => makeWispPreset(area), [area])
   const clusters = useMemo(() => makeWispClusters(area), [area])
 
+  if (!(area.particleIntensity > 0.01)) return null
+
   return (
     <group userData={{ debugCategory: 'graveyard-ambience', biomeAreaId: area.id }}>
-      {area.fogIntensity > 0.01 && <GraveyardFogPlanes area={area} />}
-      {area.particleIntensity > 0.01 && clusters.map((cluster) => {
+      {clusters.map((cluster) => {
         const worldX = area.center[0] + cluster.x
         const worldZ = area.center[1] + cluster.z
         const y = getTerrainHeight(worldX, worldZ)
@@ -407,18 +504,32 @@ function GraveyardAmbience({ area }) {
 
 export default function BiomeAmbientEffects({ areas = MAP_BIOME_AREAS }) {
   const graveyardAreas = areas.filter((area) => area.biome === 'graveyard' && area.ambient !== false)
-  const paintedFogAreas = areas.filter((area) => (
-    area.biome === 'graveyard'
-    && area.source === 'paint'
-    && area.fogIntensity > 0.01
-  ))
+
+  // Texture partagée par toutes les couches de brume (créée une seule fois).
+  const fogTexture = useMemo(() => createFogSheetTexture(), [])
+  useEffect(() => () => fogTexture.dispose(), [fogTexture])
+
+  // Tous les patches de brume aplatis en 4 couches instanciées (au lieu de ~4500 meshes).
+  const fog = useMemo(() => {
+    const paintedFogAreas = areas.filter((area) => (
+      area.biome === 'graveyard' && area.source === 'paint' && area.fogIntensity > 0.01
+    ))
+    return {
+      graveyard: flattenGraveyardFog(graveyardAreas),
+      painted: flattenPaintedFog(paintedFogAreas),
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areas])
 
   return (
     <group userData={{ debugCategory: 'biome-ambient-effects' }}>
       {graveyardAreas.map((area) => (
         <GraveyardAmbience key={area.id} area={area} />
       ))}
-      <GraveyardPaintedFog areas={paintedFogAreas} />
+      <InstancedFogLayer items={fog.graveyard.ground} texture={fogTexture} color="#b7c4b8" params={GRAVEYARD_GROUND_PARAMS} renderOrder={12} />
+      <InstancedFogLayer items={fog.graveyard.billboard} texture={fogTexture} color="#adcac0" params={GRAVEYARD_BILLBOARD_PARAMS} renderOrder={12} />
+      <InstancedFogLayer items={fog.painted.ground} texture={fogTexture} color="#b8c4b8" params={PAINTED_GROUND_PARAMS} renderOrder={11} />
+      <InstancedFogLayer items={fog.painted.billboard} texture={fogTexture} color="#a9c5bd" params={PAINTED_BILLBOARD_PARAMS} renderOrder={11} />
     </group>
   )
 }
