@@ -8885,15 +8885,20 @@ function getSeededUnitValue(seed) {
   return value - Math.floor(value)
 }
 
-function getMushroomEnemyWanderPoint(spawnPosition, seed) {
+// `wanderRadius` DOIT correspondre au rayon de laisse utilisé par l'état 'wander'
+// (cfg.wanderRadius), sinon la cible générée tombe hors laisse → 'return' immédiat
+// → aucune patrouille. Pour un spawner ce rayon est petit (radius*0.35) ; on ne peut
+// donc pas utiliser la constante globale 5.5 ici.
+function getMushroomEnemyWanderPoint(spawnPosition, seed, wanderRadius = MUSHROOM_ENEMY_WANDER_RADIUS) {
+  const minDistance = Math.min(1.1, wanderRadius * 0.5)
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const angle = getSeededUnitValue(seed + attempt * 2.31) * Math.PI * 2
-    const distance = 1.1 + getSeededUnitValue(seed + attempt * 5.17) * (MUSHROOM_ENEMY_WANDER_RADIUS - 1.1)
+    const distance = minDistance + getSeededUnitValue(seed + attempt * 5.17) * Math.max(0, wanderRadius - minDistance)
     const x = spawnPosition[0] + Math.sin(angle) * distance
     const z = spawnPosition[2] + Math.cos(angle) * distance
 
     if (
-      Math.hypot(x - spawnPosition[0], z - spawnPosition[2]) <= MUSHROOM_ENEMY_WANDER_RADIUS &&
+      Math.hypot(x - spawnPosition[0], z - spawnPosition[2]) <= wanderRadius &&
       isMushroomEnemySpawnCandidateValid(x, z)
     ) {
       return { x, y: getMobOutdoorFootY(x, z, spawnPosition[1]), z }
@@ -9611,7 +9616,7 @@ function SmallMushroomEnemy({
     if (stateRef.current === 'idle') {
       if (patrol && state.clock.elapsedTime >= nextWanderAtRef.current) {
         wanderSeedRef.current += 1
-        wanderTargetRef.current = getMushroomEnemyWanderPoint(spawnPosition, wanderSeedRef.current)
+        wanderTargetRef.current = getMushroomEnemyWanderPoint(spawnPosition, wanderSeedRef.current, cfg.wanderRadius)
         const targetDistance = Math.hypot(wanderTargetRef.current.x - enemyPosition.x, wanderTargetRef.current.z - enemyPosition.z)
         if (targetDistance > cfg.wanderReachedDistance) {
           stateRef.current = 'wander'
