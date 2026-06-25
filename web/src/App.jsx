@@ -10,6 +10,7 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
+import { markLoad, reportLoadTiming } from './lib/loadTiming'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -12850,6 +12851,9 @@ function ShaderWarmupGate({ onComplete }) {
     })
 
     const runWarmup = async () => {
+      // Jalon : tous les assets (GLB/FBX/textures) sont téléchargés+parsés ici,
+      // useProgress.active vient de passer à false. Début de la phase warmup.
+      markLoad('assetsLoaded')
       // Let the loading overlay and the initial scene commit before WebGL shader work starts.
       await waitFrame()
       await waitFrame()
@@ -12895,9 +12899,12 @@ function ShaderWarmupGate({ onComplete }) {
         // the first outdoor camera. The first-click freezes happened because
         // camera/frustum-specific visibility could leave shaders cold until
         // those modes were used for real.
-        for (const warmupCamera of [camera, customizeCamera, outsideCamera]) {
+        const warmupLabels = ['warmup:runtime', 'warmup:customize', 'warmup:outside']
+        const warmupCameras = [camera, customizeCamera, outsideCamera]
+        for (let i = 0; i < warmupCameras.length; i += 1) {
           if (cancelled) break
-          await compileAndRender(warmupCamera)
+          await compileAndRender(warmupCameras[i])
+          markLoad(warmupLabels[i])
         }
       } catch (error) {
         console.warn('Shader warmup failed', error)
@@ -12909,6 +12916,8 @@ function ShaderWarmupGate({ onComplete }) {
 
       if (!cancelled) {
         completedRef.current = true
+        markLoad('warmupEnd')
+        reportLoadTiming()
         onComplete()
       }
     }
@@ -17360,6 +17369,15 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Décodeur Draco hébergé localement (copié dans public/draco/ depuis three).
+// Route TOUS les useGLTF du jeu vers ce décodeur, sans dépendre du CDN Google.
+// Les .glb sont recompressés en Draco par scripts/compress-glb.mjs : le décodage
+// se fait dans un worker et ne crée donc aucun freeze au spawn.
+useGLTF.setDecoderPath('/draco/')
+
+// Jalon de chargement : début d'exécution du module App (bundle JS téléchargé+parsé).
+markLoad('jsBoot')
 
 useGLTF.preload('/models/ball/ballon.glb')
 useGLTF.preload('/models/dragon.glb')

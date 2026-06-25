@@ -76,7 +76,14 @@
       "Bash(node -e \"console.log\\('three KTX2Loader path ok'\\)\")",
       "Bash(xargs du -ch)",
       "Bash(awk -F: '$1>=1176 && $1<=1260')",
-      "Bash(awk '{print $9}')"
+      "Bash(awk '{print $9}')",
+      "Bash(node -e \"console.log\\(require\\('@react-three/drei/package.json'\\).version\\)\")",
+      "Bash(node -e \"import\\('@gltf-transform/core'\\).then\\(\\(\\)=>console.log\\('core OK'\\)\\); import\\('draco3dgltf'\\).then\\(\\(\\)=>console.log\\('draco3dgltf OK'\\)\\).catch\\(e=>console.log\\('ERR',e.message\\)\\)\")",
+      "Bash(node scripts/compress-glb.mjs --dry)",
+      "Bash(node -e \"import\\('sharp'\\).then\\(\\(\\)=>console.log\\('sharp present'\\)\\).catch\\(\\(\\)=>console.log\\('need install'\\)\\)\")",
+      "Bash(node scripts/compress-glb.mjs)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(cat .claude/launch.json)"
     ]
   }
 }
