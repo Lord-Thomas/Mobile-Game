@@ -51,8 +51,17 @@ manuellement crée une divergence silencieuse. Édite la donnée via l'outil con
 - `src/world/terrain/terrainModifications.generated.js` (~3,2 Mo — voir note perf ci-dessous)
 - `src/world/trees/treeLibrary.generated.js`
 
-> Note perf : `terrainModifications.generated.js` est importé en dur et parsé au démarrage.
-> Toute croissance de ce fichier alourdit le bundle et le temps de chargement (surtout mobile).
+> **Terrain — `.generated.js` n'est plus chargé par le jeu.** Le runtime lit désormais
+> `public/terrain/modifications.bin` (fetch async, voir `terrainReady` dans
+> `terrainGeometry.js`). `terrainModifications.generated.js` reste UNIQUEMENT la source
+> du script d'encodage. **PIÈGE : après toute édition du terrain (qui met à jour le
+> `.generated.js`), il faut régénérer le binaire** sinon le jeu affiche l'ancien terrain :
+>
+> ```bash
+> node scripts/encode-terrain-bin.mjs   # régénère public/terrain/modifications.bin
+> ```
+>
+> Même principe que la collision (`mapObjectCollisionData.js` + `encode-collision-bin.mjs`).
 
 ## Règles de sauvegarde (persistance)
 
