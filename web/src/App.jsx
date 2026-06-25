@@ -27,6 +27,7 @@ import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
+import { collisionReady } from './world/mapObjectCollisionData'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
@@ -12854,6 +12855,10 @@ function ShaderWarmupGate({ onComplete }) {
       // Jalon : tous les assets (GLB/FBX/textures) sont téléchargés+parsés ici,
       // useProgress.active vient de passer à false. Début de la phase warmup.
       markLoad('assetsLoaded')
+      // Garantit que la collision binaire est chargée avant de masquer l'écran de
+      // chargement (le fetch a démarré à l'import, donc déjà résolu en pratique).
+      await collisionReady
+      markLoad('collisionReady')
       // Let the loading overlay and the initial scene commit before WebGL shader work starts.
       await waitFrame()
       await waitFrame()

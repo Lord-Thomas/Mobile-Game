@@ -83,7 +83,8 @@
       "Bash(node -e \"import\\('sharp'\\).then\\(\\(\\)=>console.log\\('sharp present'\\)\\).catch\\(\\(\\)=>console.log\\('need install'\\)\\)\")",
       "Bash(node scripts/compress-glb.mjs)",
       "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
-      "Bash(cat .claude/launch.json)"
+      "Bash(cat .claude/launch.json)",
+      "Bash(node scripts/encode-collision-bin.mjs)"
     ]
   }
 }

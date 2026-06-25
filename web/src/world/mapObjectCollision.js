@@ -1,14 +1,10 @@
 import { MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './mapObjects'
-import { SKELETON_TOWER_COLLISION } from './mapObjectCollisionData.generated'
+import { getMapObjectCollisionSource } from './mapObjectCollisionData'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
-
-const COLLISION_BY_OBJECT_ID = {
-  skeleton_tower: SKELETON_TOWER_COLLISION,
-}
 
 const MAX_STEP_UP = 0.58
 const STEP_UP_BY_OBJECT_ID = {
@@ -29,7 +25,9 @@ const PLAYER_KNEE_HEIGHT = 0.18
 const collisionCache = new WeakMap()
 
 function getCollisionSource(objectId) {
-  return COLLISION_BY_OBJECT_ID[objectId] ?? null
+  // Source binaire chargée par mapObjectCollisionData (référence stable → WeakMap OK).
+  // null tant que le .bin n'est pas chargé (pendant l'écran de chargement).
+  return getMapObjectCollisionSource(objectId)
 }
 
 function getObjectTargetHeight(objectId) {

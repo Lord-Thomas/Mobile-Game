@@ -728,83 +728,6 @@ export const MAP_OBJECT_PLACEMENTS = [
     ],
     "rotationY": 4.71238898038469,
     "scale": 1
-  },
-  {
-    "id": "skeleton_tower_mqqq450a",
-    "objectId": "skeleton_tower",
-    "position": [
-      -103.25,
-      -0.030405347348726103,
-      10.25
-    ],
-    "rotationY": 0,
-    "scale": 1
-  },
-  {
-    "id": "tree_tree-1782064216827_mqqqesiw",
-    "objectId": "tree_tree-1782064216827",
-    "position": [
-      -98,
-      -0.03490222610059876,
-      6.25
-    ],
-    "rotationY": 0,
-    "scale": 1
-  },
-  {
-    "id": "tree_tree-1782064216827_mqqqf9z5",
-    "objectId": "tree_tree-1782064216827",
-    "position": [
-      -114.25,
-      0.08355920458330873,
-      9.75
-    ],
-    "rotationY": 0,
-    "scale": 1
-  },
-  {
-    "id": "tree_tree-1782064216827_mqqqfbn6",
-    "objectId": "tree_tree-1782064216827",
-    "position": [
-      -95.75,
-      -0.18607751012737725,
-      18.25
-    ],
-    "rotationY": 0,
-    "scale": 1
-  },
-  {
-    "id": "stone_fence_mqqqfjz4",
-    "objectId": "stone_fence",
-    "position": [
-      -107,
-      0.012541356150833238,
-      10.75
-    ],
-    "rotationY": 0,
-    "scale": 1
-  },
-  {
-    "id": "stone_fence_mqqqfso1",
-    "objectId": "stone_fence",
-    "position": [
-      -110,
-      0.03979490767100961,
-      10.75
-    ],
-    "rotationY": 0,
-    "scale": 1
-  },
-  {
-    "id": "stone_fence_mqqqg42m",
-    "objectId": "stone_fence",
-    "position": [
-      -99.25,
-      -0.1313835711292336,
-      11.25
-    ],
-    "rotationY": 0,
-    "scale": 1
   }
 ]
 
@@ -902,9 +825,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "mushroom",
     "heightOffset": 0,
     "position": [
-      -18.25,
-      4.670530969042097,
-      -39.25
+      -18,
+      2.8640113616205976,
+      -46.25
     ],
     "radius": 31,
     "populationMax": 10,
@@ -933,7 +856,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "respawnSeconds": 145,
     "minDistance": 5,
     "patrol": true,
-    "aggressive": false,
+    "aggressive": true,
     "variants": [
       {
         "monsterType": "skeleton",
@@ -946,9 +869,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "mushroom",
     "heightOffset": 0,
     "position": [
-      18,
-      0.05865765848158345,
-      -4
+      31.25,
+      5.500992893684242,
+      -49.25
     ],
     "radius": 25,
     "populationMax": 8,
