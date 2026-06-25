@@ -116,7 +116,7 @@ function sanitizeBallState(message) {
   }
 }
 
-function sanitizeImpulse(message) {
+export function sanitizeImpulse(message) {
   const impulse = message?.impulse
   if (!impulse) return null
 
@@ -132,12 +132,12 @@ function sanitizeImpulse(message) {
   }
 }
 
-function sanitizeChatText(message) {
+export function sanitizeChatText(message) {
   if (typeof message?.text !== 'string') return ''
   return message.text.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_LENGTH)
 }
 
-function sanitizeCoinGain(message) {
+export function sanitizeCoinGain(message) {
   const delta = Number(message?.delta)
   if (!Number.isFinite(delta) || delta <= 0 || delta > 10000) return null
 
@@ -149,7 +149,7 @@ function sanitizeCoinGain(message) {
   }
 }
 
-function sanitizeSpellCast(message) {
+export function sanitizeSpellCast(message) {
   if (!message || typeof message !== 'object') return null
   if (message.kind !== 'fireball') return null
   if (!isVector(message.position) || !isVector(message.direction, 2)) return null

@@ -9,6 +9,9 @@
     "multiplayer": "node server/index.js",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run test && npm run build",
     "preview": "vite preview",
     "thumbnails": "vite --host 127.0.0.1 --port 5173 --open /?tool=thumbnail"
   },
@@ -39,6 +42,7 @@
     "globals": "^17.5.0",
     "jimp": "^0.22.12",
     "ktx2-encoder": "^0.5.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.9"
   }
 }
