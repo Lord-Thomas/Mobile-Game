@@ -31,9 +31,29 @@ le combat sont simulés **localement par chaque client**.
   une vérité d'économie côté autres clients.
 - **Divergence d'ennemis** : chaque client simule ses propres ennemis (positions, PV,
   morts non partagés). Conséquence directe de l'absence d'autorité serveur sur le combat.
-- **Bug connexe identifié** : `applyRemoteCoinGain` (dans `App.jsx`) crédite le
-  portefeuille local quand l'AUTRE joueur gagne des pièces — duplication non voulue.
-  Voir le test et la tâche de correction associés.
+- **Partage des pièces = comportement VOULU (pas un bug)** : `applyRemoteCoinGain`
+  (dans `App.jsx`) crédite le portefeuille local quand l'AUTRE joueur gagne des pièces.
+  C'est intentionnel tant que les sessions sont strictement à 2 joueurs : les deux
+  joueurs partagent les gains, sans division. Voir la décision dédiée ci-dessous.
+
+## Partage des pièces entre joueurs
+
+**Décision (actuelle)** : en session de visite à 2 joueurs, les pièces gagnées par un
+joueur sont aussi créditées à l'autre, **sans division**. Les deux repartent avec le
+plein montant.
+
+**Raison** : les sessions sont aujourd'hui limitées à 2 joueurs (`MAX_CLIENTS = 2`
+dans `VisitRoom.js`). Un partage simple et généreux est le comportement souhaité pour
+le coop à deux.
+
+**À faire le jour où une session dépasse 2 joueurs (PAS maintenant)** :
+
+- introduire une notion de **groupe** : seuls les joueurs d'un même groupe partagent ;
+- **diviser** le gain par le nombre de joueurs du groupe (au lieu de tout dupliquer) ;
+- déplacer ce calcul côté serveur si la triche devient un enjeu (cf. limite ci-dessus).
+
+Quand ce moment arrive : écrire une ADR `0002-groupes-et-partage.md` qui remplace
+cette section, et adapter `applyRemoteCoinGain` + le serveur en conséquence.
 
 ## Si on veut changer cela plus tard
 
