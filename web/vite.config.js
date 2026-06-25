@@ -411,4 +411,27 @@ export default defineConfig({
   define: {
     __TERRAIN_BIN_BUILD__: JSON.stringify(String(Date.now())),
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Découpe les dépendances lourdes en chunks séparés du code applicatif.
+        // Bénéfice : entre deux déploiements, three/rapier/react ne changent pas →
+        // le navigateur garde ces chunks en cache et ne re-télécharge que le code
+        // applicatif modifié. Aussi : téléchargement/parse en parallèle au 1er chargement.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          // @anthropic-ai : lourd ET utilisé uniquement par l'Éditeur (chargé en lazy).
+          // On le laisse au bundler -> il reste dans le chunk lazy de l'Éditeur.
+          if (/[\\/]@anthropic-ai[\\/]/.test(id)) return undefined
+          if (/[\\/](three|@react-three|@dimforge|rapier)/.test(id)) return 'vendor-three'
+          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
+          if (/[\\/](colyseus|@supabase)/.test(id)) return 'vendor-net'
+          // Reste de l'écosystème (drei, troika, ez-tree…) : chunk stable, mis en cache
+          // par le navigateur entre déploiements -> une MAJ de gameplay ne re-télécharge
+          // que le petit chunk applicatif.
+          return 'vendor'
+        },
+      },
+    },
+  },
 })
