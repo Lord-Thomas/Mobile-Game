@@ -359,6 +359,31 @@ function saveThumbnailPlugin() {
             ].join('\n')
             await writeFile(join(process.cwd(), 'src', 'world', 'terrain', 'terrainModifications.generated.js'), terrainSource)
 
+            // Régénère aussi le binaire lu par le jeu (cf. terrainGeometry.js / terrainReady).
+            // Sans ça, l'éditeur écrit le .generated.js mais le runtime continue de lire
+            // l'ancien .bin → les éditions de terrain n'apparaissent pas. Même format que
+            // scripts/encode-terrain-bin.mjs : header uint32 N | xs(Int32) | zs(Int32) | vals(Float32).
+            const terrainKeys = Object.keys(sanitizedTerrainModifications)
+            const terrainCount = terrainKeys.length
+            const terrainXs = new Int32Array(terrainCount)
+            const terrainZs = new Int32Array(terrainCount)
+            const terrainVals = new Float32Array(terrainCount)
+            terrainKeys.forEach((key, i) => {
+              const sepIndex = key.indexOf('_')
+              terrainXs[i] = Number(key.slice(0, sepIndex))
+              terrainZs[i] = Number(key.slice(sepIndex + 1))
+              terrainVals[i] = sanitizedTerrainModifications[key]
+            })
+            const terrainHeader = Uint32Array.from([terrainCount])
+            const terrainBin = Buffer.concat([
+              Buffer.from(terrainHeader.buffer),
+              Buffer.from(terrainXs.buffer),
+              Buffer.from(terrainZs.buffer),
+              Buffer.from(terrainVals.buffer),
+            ])
+            await mkdir(join(process.cwd(), 'public', 'terrain'), { recursive: true })
+            await writeFile(join(process.cwd(), 'public', 'terrain', 'modifications.bin'), terrainBin)
+
             const pathsSource = [
               `export const MAP_PATHS = ${JSON.stringify(sanitizedPaths, null, 2)}`,
               '',
