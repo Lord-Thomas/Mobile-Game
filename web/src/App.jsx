@@ -4572,6 +4572,17 @@ function CharacterAuraGlow({ visible }) {
   )
 }
 
+// Anime issue d'un GLB Mixamo (converti depuis FBX via scripts/fbx-anim-to-glb.py) :
+// renormalise les noms de pistes (mixamorig:Hips.position -> mixamorigHips.position)
+// pour qu'ils correspondent aux os de l'avatar (cf. normalizeMixamoObjectName).
+function cloneMixamoAnimationClip(clip) {
+  const next = clip.clone()
+  next.tracks.forEach((track) => {
+    track.name = normalizeMixamoObjectName(track.name)
+  })
+  return next
+}
+
 function PlayerAvatar({
   motion,
   handBoneRef,
@@ -4583,7 +4594,12 @@ function PlayerAvatar({
   const { gl } = useThree()
   const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
   const faceDetailsMask = useTexture(PLAYER_FACE_DETAILS_MASK_URL)
-  const idle = useFBX('/models/player/player-idle.fbx')
+  // Pilote FBX->GLB : idle chargé en GLB (576 Ko) au lieu du FBX (2,1 Mo).
+  const idleGlb = useGLTF('/models/player/anim/idle.glb')
+  const idle = useMemo(
+    () => ({ animations: idleGlb.animations.map(cloneMixamoAnimationClip) }),
+    [idleGlb],
+  )
   const walk = useFBX('/models/player/player-walk.fbx')
   const run = useFBX('/models/player/player-run.fbx')
   const kick = useFBX('/models/player/player-kick.fbx')
