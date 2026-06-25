@@ -50,6 +50,18 @@ manuellement crée une divergence silencieuse. Édite la donnée via l'outil con
 - `src/world/*.generated.js`
 - `src/world/terrain/terrainModifications.generated.js` (~3,2 Mo — voir note perf ci-dessous)
 - `src/world/trees/treeLibrary.generated.js`
+- `public/models/player/anim/*.glb` (animations du joueur — voir note ci-dessous)
+
+> **Animations joueur — GLB, pas FBX.** Les animations Mixamo sont chargées en GLB
+> (via `useMixamoGlbAnimation` dans `App.jsx`), convertis depuis les FBX sources par
+> FBX2glTF. Gain : ~15 Mo de FBX -> ~1,5 Mo de GLB, parse runtime quasi nul.
+> - Sources FBX dans `anim-src/` (hors `public/`, donc NON déployées).
+> - Régénérer les GLB : `node scripts/convert-anims-glb.mjs` (ou `... <nom>` pour une seule).
+> - Deux pièges de la conversion, gérés par `cloneMixamoAnimationClip` : les noms d'os
+>   gardent le `:` Mixamo (renormalisé `mixamorig:` -> `mixamorig`) et FBX2glTF exporte
+>   les positions en mètres alors que le rig attend des cm (x100, `MIXAMO_GLB_POSITION_SCALE`).
+> - Pour ajouter une animation : poser le FBX dans `anim-src/`, l'ajouter au map du script,
+>   régénérer, puis `useMixamoGlbAnimation('/models/player/anim/<nom>.glb')`.
 
 > **Terrain — `.generated.js` n'est plus chargé par le jeu.** Le runtime lit désormais
 > `public/terrain/modifications.bin` (fetch async versionné anti-cache, voir `terrainReady`
