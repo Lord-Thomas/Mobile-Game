@@ -87,7 +87,30 @@
       "Bash(node scripts/encode-collision-bin.mjs)",
       "Bash(echo \"exit: $?\")",
       "Bash(grep -viE \"noiseScale|fbm|seededRandom|//|getNoise|nextNoise|noise\\\\\\(\")",
-      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(Object.keys\\({...p.dependencies,...p.devDependencies}\\).filter\\(d=>/postprocess|effect|bloom/i.test\\(d\\)\\).join\\(', '\\)||'AUCUNE'\\)\")"
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(Object.keys\\({...p.dependencies,...p.devDependencies}\\).filter\\(d=>/postprocess|effect|bloom/i.test\\(d\\)\\).join\\(', '\\)||'AUCUNE'\\)\")",
+      "Bash(gh auth *)",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)",
+      "Bash(git check-ignore *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(git stash *)",
+      "Bash(awk 'NR<=4586 && /^function [A-Z]/ {line=NR\": \"$0} END{print line}' src/App.jsx)",
+      "Bash(sed -n '/function getHipsRestHeight/,/^}/p' src/App.jsx)",
+      "Bash(git revert *)",
+      "Bash(mkdir -p public/models/player/anim)",
+      "Bash(node scripts/convert-anims-glb.mjs idle)",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(awk 'NR<=9089 && /^function [A-Z]/{l=NR\": \"$0} END{print \"avant 9089: \"l}' src/App.jsx)",
+      "Bash(awk 'NR<=9930 && /^function [A-Z]/{l=NR\": \"$0} END{print \"avant 9930: \"l}' src/App.jsx)",
+      "Bash(node scripts/convert-anims-glb.mjs)",
+      "Bash(git merge *)",
+      "Bash(git branch *)",
+      "Bash(node scripts/convert-enemies-glb.mjs)",
+      "Bash(sed -i \"s|const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'|const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.glb'|\" src/App.jsx)",
+      "Bash(sed -i \"s|const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'|const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.glb'|\" src/App.jsx)",
+      "Bash(mkdir -p .tmp-conv)"
     ]
   }
 }
