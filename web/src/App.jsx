@@ -17459,6 +17459,7 @@ Object.values(objectCatalog).forEach((item) => {
   if (item.thumbnailTextureUrl) useTexture.preload(item.thumbnailTextureUrl)
   if (item.imageUrl) useTexture.preload(item.imageUrl)
 })
-ballSkins.forEach((skin) => useTexture.preload(skin.texture))
-floorSkins.forEach((skin) => useTexture.preload(skin.texture))
-wallSkins.forEach((skin) => useTexture.preload(skin.texture))
+// NE PAS précharger toutes les variantes de skins : ces .png (~26 textures, ~50 Mo)
+// gonflaient l'écran de chargement pour RIEN — le rendu utilise les .ktx2 (via
+// useGameTexture), pas ces PNG. Le skin actif charge son .ktx2 au montage de la scène ;
+// les autres variantes chargent à la demande (sélection / vignettes boutique en CSS).
