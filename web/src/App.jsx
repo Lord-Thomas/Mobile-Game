@@ -49,7 +49,7 @@ const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFER
 const MAX_RENDER_DPR = 1.5
 const MIN_RENDER_DPR = 0.45
 const TARGET_MAX_RENDER_PIXELS = 2_200_000
-const MIN_DYNAMIC_RENDER_SCALE = 0.82
+const MIN_DYNAMIC_RENDER_SCALE = 0.5
 const MAX_DYNAMIC_RENDER_SCALE = 1
 const LOW_FPS_THRESHOLD = 48
 const HIGH_FPS_THRESHOLD = 57
@@ -12800,9 +12800,13 @@ function getViewportRenderSettings(renderScale = MAX_DYNAMIC_RENDER_SCALE) {
   const { width, height } = getActiveViewportSize()
   const nativeDpr = Math.min(MAX_RENDER_DPR, Math.max(MIN_RENDER_DPR, window.devicePixelRatio || 1))
   const viewportPixels = width * height
-  const targetPixels = TARGET_MAX_RENDER_PIXELS * renderScale
-  const pixelCappedDpr = Math.sqrt(targetPixels / viewportPixels)
-  const dpr = MathUtils.clamp(pixelCappedDpr, MIN_RENDER_DPR, nativeDpr)
+  // Plafond lié au budget pixels (utile sur grands écrans haute densité).
+  const pixelCappedDpr = Math.sqrt(TARGET_MAX_RENDER_PIXELS / viewportPixels)
+  // IMPORTANT : renderScale (qualité auto + basse résolution) s'applique DIRECTEMENT
+  // au dpr. Sinon, sur petit écran (mobile), le budget pixels ne mord jamais et la
+  // résolution ne baisse JAMAIS, même quand le jeu rame → scaler inopérant.
+  const baseDpr = Math.min(pixelCappedDpr, nativeDpr)
+  const dpr = MathUtils.clamp(baseDpr * renderScale, MIN_RENDER_DPR, nativeDpr)
 
   return {
     dpr: Number(dpr.toFixed(2)),
