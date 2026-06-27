@@ -4,10 +4,22 @@
 // 50% de chance de looter l'objet associé au type de monstre.
 
 export const LOOT_TABLES = {
-  skeleton: [{ itemId: 'bone', chance: 0.5 }],
-  skeleton_archer: [{ itemId: 'bone', chance: 0.5 }],
-  skeleton_mage: [{ itemId: 'bone', chance: 0.5 }],
-  mushroom: [{ itemId: 'mushroom', chance: 0.5 }],
+  skeleton: [
+    { itemId: 'bone', chance: 0.5 },
+    { itemId: 'blue_crystal', chance: 0.04 },
+  ],
+  skeleton_archer: [
+    { itemId: 'bone', chance: 0.5 },
+    { itemId: 'blue_crystal', chance: 0.04 },
+  ],
+  skeleton_mage: [
+    { itemId: 'bone', chance: 0.5 },
+    { itemId: 'blue_crystal', chance: 0.04 },
+  ],
+  mushroom: [
+    { itemId: 'mushroom', chance: 0.5 },
+    { itemId: 'red_crystal', chance: 0.04 },
+  ],
 }
 
 // Renvoie la liste des itemId lootés à la mort d'un monstre `mobType`.

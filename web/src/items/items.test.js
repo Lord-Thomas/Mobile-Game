@@ -31,8 +31,18 @@ describe('lootTable', () => {
   })
 
   it('les variantes squelette droppent des os', () => {
-    expect(rollLoot('skeleton_archer', seededRng([0]))).toEqual(['bone'])
-    expect(rollLoot('skeleton_mage', seededRng([0]))).toEqual(['bone'])
+    expect(rollLoot('skeleton_archer', seededRng([0, 1]))).toEqual(['bone'])
+    expect(rollLoot('skeleton_mage', seededRng([0, 1]))).toEqual(['bone'])
+  })
+
+  it('drop rare des cristaux (4%)', () => {
+    // 1er tirage = objet commun (raté), 2e tirage = cristal (réussi sous 0.04).
+    expect(rollLoot('skeleton', seededRng([0.9, 0.02]))).toEqual(['blue_crystal'])
+    expect(rollLoot('mushroom', seededRng([0.9, 0.02]))).toEqual(['red_crystal'])
+    // Au-dessus du seuil : pas de cristal.
+    expect(rollLoot('skeleton', seededRng([0.9, 0.05]))).toEqual([])
+    // Jackpot : commun + cristal.
+    expect(rollLoot('mushroom', seededRng([0.1, 0.01]))).toEqual(['mushroom', 'red_crystal'])
   })
 })
 
@@ -60,7 +70,7 @@ describe('materialsInventory', () => {
     const mats = { bone: 3 }
     const r1 = sellItem(mats, 'bone', 2)
     expect(r1.sold).toBe(2)
-    expect(r1.coins).toBe(10) // 2 * 5
+    expect(r1.coins).toBe(16) // 2 * 8
     expect(r1.materials).toEqual({ bone: 1 })
 
     const r2 = sellItem(mats, 'bone', 99)
@@ -71,13 +81,13 @@ describe('materialsInventory', () => {
   it('vend tout', () => {
     const { materials, coins } = sellAll({ bone: 2, mushroom: 3 })
     expect(materials).toEqual({})
-    expect(coins).toBe(2 * 5 + 3 * 4)
+    expect(coins).toBe(2 * 8 + 3 * 5)
   })
 
   it('liste les entrées pour le marchand', () => {
     const entries = getMaterialEntries({ bone: 2 })
     expect(entries).toEqual([
-      { itemId: 'bone', def: expect.objectContaining({ id: 'bone' }), count: 2, unitPrice: 5, totalPrice: 10 },
+      { itemId: 'bone', def: expect.objectContaining({ id: 'bone' }), count: 2, unitPrice: 8, totalPrice: 16 },
     ])
   })
 })
