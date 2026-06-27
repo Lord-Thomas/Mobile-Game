@@ -5,14 +5,17 @@ import { Box3, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { ITEMS, getItemDefinition } from '../../items/itemDefinitions'
 
-// Objets lootés qui tombent au sol puis sont aimantés vers le joueur ("absorbés").
-// Perf : animation pilotée par refs dans un seul useFrame (aucun setState par
-// frame) ; les drops s'absorbent en ~0,8 s donc il y en a très peu à l'écran.
-// Les modèles 3D sont préchargés une fois (bas) puis clonés par instance.
+// Objets lootés qui tombent au sol et y restent. Ils ne sont aimantés/absorbés
+// QUE si le joueur s'approche (PICKUP_RADIUS) ; sinon ils restent au sol pendant
+// LIFETIME_MS puis disparaissent (avec un fondu en fin de vie).
+// Perf : animation pilotée par refs dans un seul useFrame (aucun setState/frame) ;
+// modèles 3D préchargés une fois (bas) puis clonés par instance.
 
-const REST_MS = 320 // temps de repos au sol avant aimantation
-const FLY_MS = 460 // durée de l'aimantation vers le joueur
-const DROP_TARGET_SIZE = 0.5 // taille normalisée (unités monde) de tout objet au sol
+const PICKUP_RADIUS = 2.0 // distance (unités monde) à laquelle le joueur aspire l'objet
+const FLY_MS = 360 // durée de l'aimantation une fois déclenchée
+const LIFETIME_MS = 30000 // durée au sol avant disparition
+const FADE_MS = 900 // fondu de sortie en fin de vie
+const DROP_TARGET_SIZE = 0.25 // taille normalisée (unités monde) de tout objet au sol
 
 function smoothstep(t) {
   return t * t * (3 - 2 * t)
@@ -58,16 +61,18 @@ function LootDropVisual({ def }) {
   )
 }
 
-export default function LootDrops({ drops = [], playerPositionRef, onAbsorb }) {
+export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onExpire }) {
   const groupRefs = useRef(new Map())
-  const absorbedRef = useRef(new Set())
+  const doneRef = useRef(new Set()) // drops absorbés/expirés (anti double-traitement)
+  const magnetStartRef = useRef(new Map()) // id -> timestamp du déclenchement de l'aimantation
 
   const register = (id, group) => {
     if (group) {
       groupRefs.current.set(id, group)
     } else {
       groupRefs.current.delete(id)
-      absorbedRef.current.delete(id)
+      doneRef.current.delete(id)
+      magnetStartRef.current.delete(id)
     }
   }
 
@@ -76,20 +81,38 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb }) {
     const player = playerPositionRef?.current
     for (const drop of drops) {
       const group = groupRefs.current.get(drop.id)
-      if (!group || absorbedRef.current.has(drop.id)) continue
+      if (!group || doneRef.current.has(drop.id)) continue
       const [fx, fy, fz] = drop.from
       const restY = fy + 0.3
       const age = now - drop.bornAt
       group.rotation.y = age * 0.003 // rotation lente "loot"
 
-      if (age < REST_MS) {
+      const magnetStart = magnetStartRef.current.get(drop.id)
+
+      if (magnetStart == null) {
+        // --- Au sol : disparition en fin de vie, sinon repos + détection joueur.
+        if (age >= LIFETIME_MS) {
+          doneRef.current.add(drop.id)
+          onExpire?.(drop.id)
+          continue
+        }
+        const remaining = LIFETIME_MS - age
+        group.scale.setScalar(remaining < FADE_MS ? Math.max(0, remaining / FADE_MS) : 1)
         group.position.set(fx, restY + Math.sin(age * 0.012) * 0.06, fz)
+
+        // Déclenche l'aimantation seulement si le joueur est assez proche.
+        if (player) {
+          const distance = Math.hypot(player.x - fx, player.z - fz)
+          if (distance < PICKUP_RADIUS) magnetStartRef.current.set(drop.id, now)
+        }
         continue
       }
-      if (!player) continue
 
-      const k = Math.min(1, (age - REST_MS) / FLY_MS)
+      // --- Aimantation vers le joueur jusqu'à absorption.
+      if (!player) continue
+      const k = Math.min(1, (now - magnetStart) / FLY_MS)
       const e = smoothstep(k)
+      group.scale.setScalar(1)
       group.position.set(
         fx + (player.x - fx) * e,
         restY + (player.y + 0.7 - restY) * e,
@@ -97,7 +120,7 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb }) {
       )
 
       if (k >= 1) {
-        absorbedRef.current.add(drop.id)
+        doneRef.current.add(drop.id)
         onAbsorb(drop.id, drop.itemId)
       }
     }

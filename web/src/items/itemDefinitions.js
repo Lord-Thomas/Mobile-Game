@@ -12,7 +12,7 @@ export const ITEMS = {
     name: 'Os',
     model: '/items/bone+3d+model.glb',
     emoji: '🦴',
-    sellPrice: 8,
+    sellPrice: 10,
   },
   mushroom: {
     id: 'mushroom',

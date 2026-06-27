@@ -6,19 +6,19 @@
 export const LOOT_TABLES = {
   skeleton: [
     { itemId: 'bone', chance: 0.5 },
-    { itemId: 'blue_crystal', chance: 0.04 },
+    { itemId: 'blue_crystal', chance: 0.06 },
   ],
   skeleton_archer: [
     { itemId: 'bone', chance: 0.5 },
-    { itemId: 'blue_crystal', chance: 0.04 },
+    { itemId: 'blue_crystal', chance: 0.06 },
   ],
   skeleton_mage: [
     { itemId: 'bone', chance: 0.5 },
-    { itemId: 'blue_crystal', chance: 0.04 },
+    { itemId: 'blue_crystal', chance: 0.06 },
   ],
   mushroom: [
     { itemId: 'mushroom', chance: 0.5 },
-    { itemId: 'red_crystal', chance: 0.04 },
+    { itemId: 'red_crystal', chance: 0.06 },
   ],
 }
 

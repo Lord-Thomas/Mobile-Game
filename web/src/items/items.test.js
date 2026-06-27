@@ -40,7 +40,7 @@ describe('lootTable', () => {
     expect(rollLoot('skeleton', seededRng([0.9, 0.02]))).toEqual(['blue_crystal'])
     expect(rollLoot('mushroom', seededRng([0.9, 0.02]))).toEqual(['red_crystal'])
     // Au-dessus du seuil : pas de cristal.
-    expect(rollLoot('skeleton', seededRng([0.9, 0.05]))).toEqual([])
+    expect(rollLoot('skeleton', seededRng([0.9, 0.08]))).toEqual([])
     // Jackpot : commun + cristal.
     expect(rollLoot('mushroom', seededRng([0.1, 0.01]))).toEqual(['mushroom', 'red_crystal'])
   })
@@ -70,7 +70,7 @@ describe('materialsInventory', () => {
     const mats = { bone: 3 }
     const r1 = sellItem(mats, 'bone', 2)
     expect(r1.sold).toBe(2)
-    expect(r1.coins).toBe(16) // 2 * 8
+    expect(r1.coins).toBe(20) // 2 * 10
     expect(r1.materials).toEqual({ bone: 1 })
 
     const r2 = sellItem(mats, 'bone', 99)
@@ -81,13 +81,13 @@ describe('materialsInventory', () => {
   it('vend tout', () => {
     const { materials, coins } = sellAll({ bone: 2, mushroom: 3 })
     expect(materials).toEqual({})
-    expect(coins).toBe(2 * 8 + 3 * 5)
+    expect(coins).toBe(2 * 10 + 3 * 5)
   })
 
   it('liste les entrées pour le marchand', () => {
     const entries = getMaterialEntries({ bone: 2 })
     expect(entries).toEqual([
-      { itemId: 'bone', def: expect.objectContaining({ id: 'bone' }), count: 2, unitPrice: 8, totalPrice: 16 },
+      { itemId: 'bone', def: expect.objectContaining({ id: 'bone' }), count: 2, unitPrice: 10, totalPrice: 20 },
     ])
   })
 })

@@ -163,7 +163,7 @@ const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
 const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'
 const SKELETON_ENEMY_TEXTURE_URL = '/models/enemies/skeleton/skeleton.fbm'
 const SKELETON_ENEMY_MAX_HP = 80          // réduit (150 était abusé)
-const SKELETON_ENEMY_REWARD_COINS = 40    // 0.5 pièce/PV : plus rentable que le champignon
+const SKELETON_ENEMY_REWARD_COINS = 30    // réduit (40 était trop rentable)
 const SKELETON_ENEMY_ATTACK_DAMAGE = 25
 const MOB_GROUNDED_DROP_TO_FALL = 1.25
 const MOB_TARGET_VERTICAL_WEIGHT = 1.1
@@ -15362,6 +15362,11 @@ function App() {
   const handleSellItem = (itemId, quantity) => sellMaterialsForCoins(sellItem(materials, itemId, quantity))
   const handleSellAll = () => sellMaterialsForCoins(sellAll(materials))
 
+  // Un objet au sol disparaît (durée de vie écoulée, jamais ramassé).
+  const expireLootDrop = (dropId) => {
+    setLootDrops((prev) => prev.filter((drop) => drop.id !== dropId))
+  }
+
   // Le joueur absorbe un objet au sol : il rejoint l'inventaire + petit popup.
   const absorbLootDrop = (dropId, itemId) => {
     setLootDrops((prev) => prev.filter((drop) => drop.id !== dropId))
@@ -16798,6 +16803,7 @@ function App() {
             drops={lootDrops}
             playerPositionRef={playerPositionRef}
             onAbsorb={absorbLootDrop}
+            onExpire={expireLootDrop}
           />
           <SeatInteractionTrigger
             playerPositionRef={playerPositionRef}
