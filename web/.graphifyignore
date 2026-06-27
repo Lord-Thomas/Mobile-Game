@@ -1,0 +1,37 @@
+# Dossiers inutiles
+node_modules/
+dist/
+.git/
+.codex-screenshots/
+.thumbnail-test-profile/
+.tmp.drivedownload/
+.tmp.driveupload/
+
+# Documents
+*.md
+*.txt
+*.pdf
+*.doc
+*.docx
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.svg
+*.ico
+
+# Archives et modèles 3D
+*.zip
+*.glb
+*.gltf
+*.fbx
+*.blend
+
+# Sortie de Graphify
+graphify-out/
+
+# Pages HTML
+*.html
