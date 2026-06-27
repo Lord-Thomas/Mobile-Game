@@ -65,15 +65,28 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
   const groupRefs = useRef(new Map())
   const doneRef = useRef(new Set()) // drops absorbés/expirés (anti double-traitement)
   const magnetStartRef = useRef(new Map()) // id -> timestamp du déclenchement de l'aimantation
+  const registrarsRef = useRef(new Map()) // callbacks de ref STABLES par id
 
-  const register = (id, group) => {
-    if (group) {
-      groupRefs.current.set(id, group)
-    } else {
-      groupRefs.current.delete(id)
-      doneRef.current.delete(id)
-      magnetStartRef.current.delete(id)
+  // IMPORTANT : un callback de ref inline est recréé à chaque rendu, ce qui pousse
+  // React à appeler le cleanup (group=null) à CHAQUE re-render du parent — ici très
+  // fréquent — effaçant l'état d'aimantation. On mémorise donc un callback stable
+  // par id : le cleanup ne se déclenche alors qu'au vrai démontage de l'objet.
+  const getRegistrar = (id) => {
+    let registrar = registrarsRef.current.get(id)
+    if (!registrar) {
+      registrar = (group) => {
+        if (group) {
+          groupRefs.current.set(id, group)
+        } else {
+          groupRefs.current.delete(id)
+          doneRef.current.delete(id)
+          magnetStartRef.current.delete(id)
+          registrarsRef.current.delete(id)
+        }
+      }
+      registrarsRef.current.set(id, registrar)
     }
+    return registrar
   }
 
   useFrame(() => {
@@ -129,7 +142,7 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
   return (
     <>
       {drops.map((drop) => (
-        <group key={drop.id} ref={(group) => register(drop.id, group)} position={drop.from}>
+        <group key={drop.id} ref={getRegistrar(drop.id)} position={drop.from}>
           <LootDropVisual def={getItemDefinition(drop.itemId)} />
         </group>
       ))}
