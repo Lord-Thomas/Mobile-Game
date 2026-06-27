@@ -30,14 +30,16 @@ import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight
 import { collisionReady } from './world/mapObjectCollisionData'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
 import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
+import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
 import QuestJournal from './ui/QuestJournal'
 import QuestTracker from './ui/QuestTracker'
 import VendorPanel from './ui/VendorPanel'
+import ItemIcon from './ui/ItemIcon'
 import { FIRST_QUEST_ID, QUEST_NPC_OBJECT_ID, getQuestDefinition } from './quests/questDefinitions'
 import { completeQuest as completeQuestState, isReadyToComplete, normalizeQuestProgress, registerKill, startQuest } from './quests/questState'
 import { rollLoot } from './items/lootTable'
-import { addItems, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
+import { addItems, getMaterialEntries, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
 import { getItemDefinition } from './items/itemDefinitions'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
@@ -520,6 +522,9 @@ const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) =
 // PNJ de quête placés depuis l'éditeur (statique au chargement, comme les autres
 // placements). Vide tant qu'aucun PNJ n'a été placé + sauvegardé.
 const QUEST_NPC_PLACEMENTS = MAP_OBJECT_PLACEMENTS.filter((placement) => placement.objectId === QUEST_NPC_OBJECT_ID)
+// Plafond d'objets lootés au sol affichés simultanément (anti-lag : ils
+// s'absorbent en ~0,8 s, ce plafond ne mord qu'en cas de massacre simultané).
+const LOOT_DROP_MAX = 60
 const EDITABLE_TREE_PLACEMENTS = MAP_OBJECT_PLACEMENTS
   .map((placement) => ({
     placement,
@@ -6693,7 +6698,7 @@ const BAG_ITEM_DEFS = [
 
 const BAG_GRID_SIZE = 12
 
-function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, ownedMountIds = [], mountedMountId, onToggleMount, onClose }) {
+function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, ownedMountIds = [], mountedMountId, onToggleMount, onClose, materials = {} }) {
   const lastTapRef = useRef({})
 
   function handleSlotInteraction(itemId) {
@@ -6710,6 +6715,7 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
   if (!open) return null
 
   const slots = Array.from({ length: BAG_GRID_SIZE }, (_, i) => ownedItems[i] ?? null)
+  const materialEntries = getMaterialEntries(materials)
 
   return (
     <div className="weapon-inventory-overlay" onClick={onClose}>
@@ -6779,6 +6785,19 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
             )
           })}
         </div>
+        {materialEntries.length > 0 && (
+          <>
+            <p className="bag-hint">Objets</p>
+            <div className="bag-materials">
+              {materialEntries.map(({ itemId, def, count }) => (
+                <div key={itemId} className="bag-material" title={def?.name ?? itemId}>
+                  <ItemIcon def={def} className="bag-material-icon" />
+                  <span className="bag-material-count">x{count}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -13926,6 +13945,8 @@ function App() {
   // Inventaire de matériaux lootés (persisté dans world_settings.materials).
   const [materials, setMaterials] = useState({})
   const [vendorOpen, setVendorOpen] = useState(false)
+  // Objets lootés au sol en attente d'absorption (transitoire, non persisté).
+  const [lootDrops, setLootDrops] = useState([])
   // Quête épinglée (mini-tracker). Préférence d'UI : persistée en localStorage,
   // pas dans la sauvegarde de progression.
   const [pinnedQuestId, setPinnedQuestId] = useState(() => {
@@ -14315,6 +14336,7 @@ function App() {
     setMobKillCount(0)
     setQuestProgress({})
     setMaterials({})
+    setLootDrops([])
     setVendorOpen(false)
     setNearbyQuestNpcId(null)
     setQuestDialogOpen(false)
@@ -15235,23 +15257,27 @@ function App() {
     // Progression des quêtes : avance les objectifs "tuer N <type>" actifs.
     if (mobType) setQuestProgress((prev) => registerKill(prev, mobType))
 
-    // Loot : tirage par type de monstre, ajout à l'inventaire de matériaux.
+    // Loot : tirage par type de monstre. Les objets tombent au sol (LootDrops)
+    // puis sont aimantés/absorbés par le joueur, où ils rejoignent l'inventaire.
     if (mobType) {
       const drops = rollLoot(mobType)
       if (drops.length) {
-        setMaterials((prev) => addItems(prev, drops))
-        setScorePopups((previous) => [
-          ...previous,
-          ...drops.map((itemId, index) => ({
-            id: `loot-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
-            label: `+1 ${getItemDefinition(itemId)?.emoji ?? '📦'}`,
-            x: popupPosition[0] + (index + 1) * 0.35,
-            y: popupPosition[1] + 0.4,
-            z: popupPosition[2],
-            startAt: Date.now(),
-            duration: 900,
-          })),
-        ])
+        const base = [position?.[0] ?? 0, position?.[1] ?? 0, position?.[2] ?? 0]
+        const born = performance.now()
+        setLootDrops((prev) => {
+          const additions = drops.map((itemId, index) => ({
+            id: `drop-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+            itemId,
+            from: [
+              base[0] + (Math.random() - 0.5) * 0.6,
+              base[1] + 0.1,
+              base[2] + (Math.random() - 0.5) * 0.6,
+            ],
+            bornAt: born,
+          }))
+          const merged = [...prev, ...additions]
+          return merged.length > LOOT_DROP_MAX ? merged.slice(merged.length - LOOT_DROP_MAX) : merged
+        })
       }
     }
 
@@ -15335,6 +15361,25 @@ function App() {
 
   const handleSellItem = (itemId, quantity) => sellMaterialsForCoins(sellItem(materials, itemId, quantity))
   const handleSellAll = () => sellMaterialsForCoins(sellAll(materials))
+
+  // Le joueur absorbe un objet au sol : il rejoint l'inventaire + petit popup.
+  const absorbLootDrop = (dropId, itemId) => {
+    setLootDrops((prev) => prev.filter((drop) => drop.id !== dropId))
+    setMaterials((prev) => addItems(prev, [itemId]))
+    const p = playerPositionRef.current
+    setScorePopups((previous) => [
+      ...previous,
+      {
+        id: `lootpop-${dropId}`,
+        label: `+1 ${getItemDefinition(itemId)?.emoji ?? '📦'}`,
+        x: p?.x ?? 0,
+        y: (p?.y ?? 0) + 1.3,
+        z: p?.z ?? 0,
+        startAt: Date.now(),
+        duration: 700,
+      },
+    ])
+  }
 
   const stopPlayerRegeneration = useCallback(() => {
     if (playerRegenDelayRef.current) {
@@ -16749,6 +16794,11 @@ function App() {
             enabled={currentZone === ZONES.outside && mode === 'play'}
             onNearChange={(id) => { setNearbyQuestNpcId(id); if (!id) setQuestDialogOpen(false) }}
           />
+          <LootDrops
+            drops={lootDrops}
+            playerPositionRef={playerPositionRef}
+            onAbsorb={absorbLootDrop}
+          />
           <SeatInteractionTrigger
             playerPositionRef={playerPositionRef}
             objects={placedEditableObjects}
@@ -16897,6 +16947,7 @@ function App() {
           mountedMountId={mountedMountId}
           onToggleMount={mode === 'play' ? toggleMount : undefined}
           onClose={() => setIsWeaponMenuOpen(false)}
+          materials={materials}
         />
       )}
       {showCaptureUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (

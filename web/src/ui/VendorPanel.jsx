@@ -1,14 +1,5 @@
-import { useState } from 'react'
 import { getMaterialEntries, sellAll } from '../items/materialsInventory'
-
-// Icône d'objet : tente l'image, retombe sur l'emoji si l'image n'existe pas.
-function ItemIcon({ def }) {
-  const [failed, setFailed] = useState(false)
-  if (def?.icon && !failed) {
-    return <img className="vendor-item-icon" src={def.icon} alt={def.name} onError={() => setFailed(true)} />
-  }
-  return <span className="vendor-item-icon vendor-item-emoji">{def?.emoji ?? '❔'}</span>
-}
+import ItemIcon from './ItemIcon'
 
 // Panneau marchand du PNJ : revente des matériaux lootés contre des pièces.
 export default function VendorPanel({ materials, onSell, onSellAll, onClose }) {
@@ -30,7 +21,7 @@ export default function VendorPanel({ materials, onSell, onSellAll, onClose }) {
             <ul className="vendor-list">
               {entries.map(({ itemId, def, count, unitPrice, totalPrice }) => (
                 <li key={itemId} className="vendor-item">
-                  <ItemIcon def={def} />
+                  <ItemIcon def={def} className="vendor-item-icon" />
                   <div className="vendor-item-info">
                     <div className="vendor-item-name">{def?.name ?? itemId}</div>
                     <div className="vendor-item-sub">x{count} · {unitPrice} 🪙 pièce</div>
