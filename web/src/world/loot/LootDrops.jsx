@@ -62,27 +62,23 @@ function LootDropVisual({ def }) {
 }
 
 export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onExpire }) {
+  // groupRefs : nœud 3D par id (pour bouger l'objet impérativement).
   const groupRefs = useRef(new Map())
-  const doneRef = useRef(new Set()) // drops absorbés/expirés (anti double-traitement)
-  const magnetStartRef = useRef(new Map()) // id -> timestamp du déclenchement de l'aimantation
-  const registrarsRef = useRef(new Map()) // callbacks de ref STABLES par id
+  // animState : état d'animation par id { magnetStart, done }. CRUCIAL : il est
+  // découplé du cycle de vie du ref. Le cleanup du ref ne le touche JAMAIS (sinon
+  // les toggles de ref de React/StrictMode l'effaceraient en plein vol). Il est
+  // purgé en fin de frame selon les drops réellement présents.
+  const animState = useRef(new Map())
+  const registrarsRef = useRef(new Map())
 
-  // IMPORTANT : un callback de ref inline est recréé à chaque rendu, ce qui pousse
-  // React à appeler le cleanup (group=null) à CHAQUE re-render du parent — ici très
-  // fréquent — effaçant l'état d'aimantation. On mémorise donc un callback stable
-  // par id : le cleanup ne se déclenche alors qu'au vrai démontage de l'objet.
+  // Callback de ref stable par id : ne gère QUE groupRefs. Il ne se supprime pas
+  // lui-même de registrarsRef (sinon il redeviendrait instable au rendu suivant).
   const getRegistrar = (id) => {
     let registrar = registrarsRef.current.get(id)
     if (!registrar) {
       registrar = (group) => {
-        if (group) {
-          groupRefs.current.set(id, group)
-        } else {
-          groupRefs.current.delete(id)
-          doneRef.current.delete(id)
-          magnetStartRef.current.delete(id)
-          registrarsRef.current.delete(id)
-        }
+        if (group) groupRefs.current.set(id, group)
+        else groupRefs.current.delete(id)
       }
       registrarsRef.current.set(id, registrar)
     }
@@ -92,20 +88,29 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
   useFrame(() => {
     const now = performance.now()
     const player = playerPositionRef?.current
+    const liveIds = new Set()
+
     for (const drop of drops) {
+      liveIds.add(drop.id)
       const group = groupRefs.current.get(drop.id)
-      if (!group || doneRef.current.has(drop.id)) continue
+      if (!group) continue
+
+      let state = animState.current.get(drop.id)
+      if (!state) {
+        state = { magnetStart: null, done: false }
+        animState.current.set(drop.id, state)
+      }
+      if (state.done) continue
+
       const [fx, fy, fz] = drop.from
       const restY = fy + 0.3
       const age = now - drop.bornAt
       group.rotation.y = age * 0.003 // rotation lente "loot"
 
-      const magnetStart = magnetStartRef.current.get(drop.id)
-
-      if (magnetStart == null) {
+      if (state.magnetStart == null) {
         // --- Au sol : disparition en fin de vie, sinon repos + détection joueur.
         if (age >= LIFETIME_MS) {
-          doneRef.current.add(drop.id)
+          state.done = true
           onExpire?.(drop.id)
           continue
         }
@@ -116,14 +121,14 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
         // Déclenche l'aimantation seulement si le joueur est assez proche.
         if (player) {
           const distance = Math.hypot(player.x - fx, player.z - fz)
-          if (distance < PICKUP_RADIUS) magnetStartRef.current.set(drop.id, now)
+          if (distance < PICKUP_RADIUS) state.magnetStart = now
         }
         continue
       }
 
       // --- Aimantation vers le joueur jusqu'à absorption.
       if (!player) continue
-      const k = Math.min(1, (now - magnetStart) / FLY_MS)
+      const k = Math.min(1, (now - state.magnetStart) / FLY_MS)
       const e = smoothstep(k)
       group.scale.setScalar(1)
       group.position.set(
@@ -133,9 +138,17 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
       )
 
       if (k >= 1) {
-        doneRef.current.add(drop.id)
-        onAbsorb(drop.id, drop.itemId)
+        state.done = true
+        onAbsorb?.(drop.id, drop.itemId)
       }
+    }
+
+    // Purge l'état/les registrars des drops disparus (anti-fuite mémoire).
+    for (const id of animState.current.keys()) {
+      if (!liveIds.has(id)) animState.current.delete(id)
+    }
+    for (const id of registrarsRef.current.keys()) {
+      if (!liveIds.has(id)) registrarsRef.current.delete(id)
     }
   })
 
