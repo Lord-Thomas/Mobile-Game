@@ -1,6 +1,6 @@
-import { Suspense, useEffect, useMemo, useRef } from 'react'
-import { Html, useFBX, useGLTF } from '@react-three/drei'
-import { Box3, Mesh, Vector3 } from 'three'
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { Html, useAnimations, useFBX, useGLTF } from '@react-three/drei'
+import { Box3, LoopRepeat, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import ParticleEffect from '../effects/ParticleEffect'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from '../effects/storedParticlePresets'
@@ -11,6 +11,13 @@ import { getTerrainHeight } from './terrain/terrainGeometry'
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
+
+function cloneInPlaceAnimationClip(clip, fallbackName) {
+  const next = clip.clone()
+  next.name = next.name || fallbackName
+  next.tracks = next.tracks.filter((track) => !track.name.endsWith('.position'))
+  return next
+}
 
 function MapObjectGltfModel({ catalogItem }) {
   const gltf = useGLTF(catalogItem.modelUrl)
@@ -70,6 +77,29 @@ function MapObjectFbxModel({ catalogItem }) {
       scale,
     }
   }, [catalogItem.targetHeightMeters, fbx])
+  const animationClips = useMemo(
+    () => (fbx.animations ?? []).map((clip, index) => {
+      return cloneInPlaceAnimationClip(clip, `fbxIdle${index}`)
+    }),
+    [fbx.animations],
+  )
+  const { actions, mixer } = useAnimations(animationClips, model.object)
+
+  useLayoutEffect(() => {
+    const action = actions.idle ?? actions.Idle ?? Object.values(actions)[0]
+    if (!action) return undefined
+
+    action
+      .reset()
+      .setLoop(LoopRepeat, Infinity)
+      .setEffectiveWeight(1)
+      .setEffectiveTimeScale(1)
+      .play()
+    mixer.update(1 / 30)
+    model.object.updateMatrixWorld(true)
+
+    return () => action.stop()
+  }, [actions, mixer, model.object])
 
   return (
     <group scale={model.scale}>
