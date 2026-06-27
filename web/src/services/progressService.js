@@ -201,6 +201,7 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
       quests: progress.quests && typeof progress.quests === 'object' ? progress.quests : {},
+      materials: progress.materials && typeof progress.materials === 'object' ? progress.materials : {},
     },
     updated_at: new Date().toISOString(),
   }
@@ -237,6 +238,7 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
       quests: progress.quests && typeof progress.quests === 'object' ? progress.quests : {},
+      materials: progress.materials && typeof progress.materials === 'object' ? progress.materials : {},
     },
   }
 }
@@ -280,6 +282,9 @@ export function fromProgressRow(row) {
     friends: normalizeFriends(row.world_settings?.friends),
     quests: row.world_settings?.quests && typeof row.world_settings.quests === 'object'
       ? row.world_settings.quests
+      : {},
+    materials: row.world_settings?.materials && typeof row.world_settings.materials === 'object'
+      ? row.world_settings.materials
       : {},
   }
 }

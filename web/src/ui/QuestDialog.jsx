@@ -30,7 +30,7 @@ function Objectives({ objectives }) {
 
 // Boîte de dialogue du PNJ de quête — UI HTML responsive (hors canvas 3D).
 // Présentationnel : l'état vient de `questProgress`, les actions sont déléguées.
-export default function QuestDialog({ questId, questProgress, onAccept, onComplete, onClose }) {
+export default function QuestDialog({ questId, questProgress, onAccept, onComplete, onClose, onOpenVendor }) {
   // Affiche l'écran de confirmation juste après avoir accepté (réinitialisé à
   // chaque ouverture puisque le composant est démonté à la fermeture).
   const [justAccepted, setJustAccepted] = useState(false)
@@ -87,6 +87,12 @@ export default function QuestDialog({ questId, questProgress, onAccept, onComple
             <button type="button" className="quest-dialog-btn" onClick={onClose}>Fermer</button>
           )}
         </div>
+
+        {onOpenVendor && !justAccepted && (
+          <button type="button" className="quest-dialog-vendor" onClick={onOpenVendor}>
+            🪙 Vendre des objets
+          </button>
+        )}
       </div>
     </div>
   )

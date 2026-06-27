@@ -33,8 +33,12 @@ import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
 import QuestDialog from './ui/QuestDialog'
 import QuestJournal from './ui/QuestJournal'
 import QuestTracker from './ui/QuestTracker'
+import VendorPanel from './ui/VendorPanel'
 import { FIRST_QUEST_ID, QUEST_NPC_OBJECT_ID, getQuestDefinition } from './quests/questDefinitions'
 import { completeQuest as completeQuestState, isReadyToComplete, normalizeQuestProgress, registerKill, startQuest } from './quests/questState'
+import { rollLoot } from './items/lootTable'
+import { addItems, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
+import { getItemDefinition } from './items/itemDefinitions'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
@@ -12795,7 +12799,7 @@ function ScorePopups({ popups }) {
             className="score-value score-burst-world"
             style={{ animationDuration: `${popup.duration}ms` }}
           >
-            +{popup.value}
+            {popup.label ?? `+${popup.value}`}
           </div>
         </Html>
       ))}
@@ -13919,6 +13923,9 @@ function App() {
   const [nearbyQuestNpcId, setNearbyQuestNpcId] = useState(null)
   const [questDialogOpen, setQuestDialogOpen] = useState(false)
   const [questJournalOpen, setQuestJournalOpen] = useState(false)
+  // Inventaire de matériaux lootés (persisté dans world_settings.materials).
+  const [materials, setMaterials] = useState({})
+  const [vendorOpen, setVendorOpen] = useState(false)
   // Quête épinglée (mini-tracker). Préférence d'UI : persistée en localStorage,
   // pas dans la sauvegarde de progression.
   const [pinnedQuestId, setPinnedQuestId] = useState(() => {
@@ -14214,6 +14221,7 @@ function App() {
     characterAppearance,
     friends,
     quests: questProgress,
+    materials,
   })
 
   const createWorldSyncSnapshot = () => ({
@@ -14257,6 +14265,7 @@ function App() {
       characterAppearance,
       friends,
       quests: questProgress,
+      materials,
       roomLightOn: savedWorld.roomLightOn ?? roomLightOn,
       lightColor: savedWorld.lightColor ?? lightColor,
       lightIntensity: savedWorld.lightIntensity ?? lightIntensity,
@@ -14305,6 +14314,8 @@ function App() {
     setUnlockedAchievements([])
     setMobKillCount(0)
     setQuestProgress({})
+    setMaterials({})
+    setVendorOpen(false)
     setNearbyQuestNpcId(null)
     setQuestDialogOpen(false)
     setQuestJournalOpen(false)
@@ -14434,6 +14445,7 @@ function App() {
         setMobKillCount(parsed.mobKillCount)
       }
       setQuestProgress(normalizeQuestProgress(parsed.quests))
+      setMaterials(normalizeMaterials(parsed.materials))
       const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
       const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
@@ -14653,7 +14665,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -15081,7 +15093,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -15223,6 +15235,26 @@ function App() {
     // Progression des quêtes : avance les objectifs "tuer N <type>" actifs.
     if (mobType) setQuestProgress((prev) => registerKill(prev, mobType))
 
+    // Loot : tirage par type de monstre, ajout à l'inventaire de matériaux.
+    if (mobType) {
+      const drops = rollLoot(mobType)
+      if (drops.length) {
+        setMaterials((prev) => addItems(prev, drops))
+        setScorePopups((previous) => [
+          ...previous,
+          ...drops.map((itemId, index) => ({
+            id: `loot-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+            label: `+1 ${getItemDefinition(itemId)?.emoji ?? '📦'}`,
+            x: popupPosition[0] + (index + 1) * 0.35,
+            y: popupPosition[1] + 0.4,
+            z: popupPosition[2],
+            startAt: Date.now(),
+            duration: 900,
+          })),
+        ])
+      }
+    }
+
     if (!isAdminMode && !isGuestVisit && authUserRef.current) {
       try {
         const rewardResult = await claimFirstMobDefeatRewards({ scope: progressScope })
@@ -15288,6 +15320,21 @@ function App() {
     setQuestProgress((prev) => completeQuestState(prev, questId))
     setQuestDialogOpen(false)
   }
+
+  // --- Marchand : revente des matériaux lootés (logique pure dans materialsInventory)
+  const sellMaterialsForCoins = async (result) => {
+    if (!result || result.coins <= 0) return
+    const p = playerPositionRef.current
+    const rewarded = await applyCoinDelta(result.coins, {
+      reason: 'vendor_sell',
+      position: p ? [p.x, p.y + 1.4, p.z] : undefined,
+    })
+    if (!rewarded) return // on ne retire pas les objets si le crédit a échoué
+    setMaterials(result.materials)
+  }
+
+  const handleSellItem = (itemId, quantity) => sellMaterialsForCoins(sellItem(materials, itemId, quantity))
+  const handleSellAll = () => sellMaterialsForCoins(sellAll(materials))
 
   const stopPlayerRegeneration = useCallback(() => {
     if (playerRegenDelayRef.current) {
@@ -16953,6 +17000,15 @@ function App() {
           onAccept={acceptQuest}
           onComplete={completeQuest}
           onClose={() => setQuestDialogOpen(false)}
+          onOpenVendor={() => { setQuestDialogOpen(false); setVendorOpen(true) }}
+        />
+      )}
+      {vendorOpen && (
+        <VendorPanel
+          materials={materials}
+          onSell={handleSellItem}
+          onSellAll={handleSellAll}
+          onClose={() => setVendorOpen(false)}
         />
       )}
       {showCaptureUi && mode === 'play' && pinnedQuestId && !questJournalOpen && (
