@@ -4629,3 +4629,381 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   from { transform: scale(0.92) translateY(10px); opacity: 0; }
   to { transform: scale(1) translateY(0); opacity: 1; }
 }
+
+/* ---- PNJ de quête : marqueur flottant "!" / "?" ---- */
+.quest-marker {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #ffd400;
+  color: #2b2100;
+  font: 900 24px/1 system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  user-select: none;
+  pointer-events: none;
+  animation: quest-marker-bounce 1.2s ease-in-out infinite;
+}
+
+.quest-marker.is-active {
+  background: #5b6b7a;
+  color: #eef4f2;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: none;
+}
+
+.quest-marker.is-ready {
+  background: #ffb31a;
+  color: #2b1a00;
+}
+
+@keyframes quest-marker-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* ---- PNJ de quête : boîte de dialogue ---- */
+.quest-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 12px calc(env(safe-area-inset-bottom, 0px) + 18px);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.quest-dialog {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  background: rgba(18, 24, 28, 0.96);
+  border: 1px solid rgba(255, 212, 71, 0.45);
+  border-radius: 16px;
+  padding: 16px 18px 18px;
+  color: #eef4f2;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  animation: pwa-scale-in 0.18s ease-out;
+}
+
+.quest-dialog-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cfd9d5;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.quest-dialog-npc {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffd447;
+}
+
+.quest-dialog-title {
+  font-size: 19px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.quest-dialog-text {
+  margin: 10px 0 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #d3ddd9;
+  max-height: 38vh;
+  overflow-y: auto;
+}
+
+.quest-dialog-text p {
+  margin: 0 0 6px;
+}
+
+.quest-dialog-text p:last-child {
+  margin-bottom: 0;
+}
+
+.quest-dialog-objectives {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quest-dialog-objectives li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.quest-dialog-objectives li.is-done {
+  color: #8fe6a3;
+  background: rgba(80, 200, 120, 0.12);
+}
+
+.quest-dialog-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.quest-dialog-reward {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffd447;
+  margin-bottom: 12px;
+}
+
+.quest-dialog-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.quest-dialog-btn {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #eef4f2;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.quest-dialog-btn.primary {
+  background: #ffd400;
+  border-color: #ffd400;
+  color: #2b2100;
+}
+
+/* ---- Bouton d'ouverture du journal de quêtes (HUD persistant) ---- */
+.quest-journal-btn {
+  position: fixed;
+  bottom: 200px;
+  right: 20px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 212, 71, 0.7);
+  background: rgba(40, 30, 10, 0.85);
+  font-size: 1.4rem;
+  cursor: pointer;
+  z-index: 110;
+  box-shadow: 0 0 12px rgba(255, 212, 71, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  transition: transform 0.12s;
+}
+.quest-journal-btn:active { transform: scale(0.92); }
+
+html[data-orientation='landscape'] .quest-journal-btn {
+  bottom: calc(var(--bottom-ui-action-2) + 56px);
+  right: max(10px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  font-size: 1.15rem;
+}
+
+/* ---- Journal de quêtes (overlay) ---- */
+.quest-journal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.quest-journal {
+  width: 100%;
+  max-width: 460px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: rgba(18, 24, 28, 0.97);
+  border: 1px solid rgba(255, 212, 71, 0.4);
+  border-radius: 16px;
+  padding: 16px 18px;
+  color: #eef4f2;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+
+.quest-journal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 17px;
+  margin-bottom: 12px;
+}
+
+.quest-journal-close {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cfd9d5;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.quest-journal-empty {
+  color: #9fb3ac;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.quest-journal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.quest-journal-item {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.quest-journal-item.is-completed { opacity: 0.6; }
+
+.quest-journal-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.quest-journal-item-title {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.quest-journal-item-npc {
+  font-size: 12px;
+  color: #9fb3ac;
+}
+
+.quest-journal-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cfd9d5;
+}
+.quest-journal-badge.is-ready { background: rgba(255, 179, 26, 0.22); color: #ffce7a; }
+.quest-journal-badge.is-completed { background: rgba(80, 200, 120, 0.18); color: #8fe6a3; }
+
+.quest-journal-objectives {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.quest-journal-objectives li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.quest-journal-objectives li.is-done { color: #8fe6a3; }
+
+.quest-journal-count { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+.quest-journal-pin {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 212, 71, 0.5);
+  border-radius: 8px;
+  background: transparent;
+  color: #ffd447;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.quest-journal-pin.is-pinned {
+  background: rgba(255, 212, 71, 0.16);
+}
+
+/* ---- Mini-tracker de la quête épinglée ---- */
+.quest-tracker {
+  position: fixed;
+  top: 84px;
+  right: 12px;
+  z-index: 80;
+  width: max-content;
+  max-width: 220px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 3px solid #ffd400;
+  background: rgba(18, 24, 28, 0.82);
+  color: #eef4f2;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+.quest-tracker.is-ready { border-left-color: #ffb31a; }
+
+.quest-tracker-title {
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.quest-tracker-objectives {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.quest-tracker-objectives li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #cfd9d5;
+}
+.quest-tracker-objectives li.is-done { color: #8fe6a3; }
+
+.quest-tracker-count { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+.quest-tracker-ready {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffce7a;
+}

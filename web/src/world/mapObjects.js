@@ -47,6 +47,21 @@ const BASE_MAP_OBJECT_CATALOG = {
     defaultScale: 1,
     thumbnailLabel: 'Crane',
   },
+  // PNJ de quête : plaçable depuis l'éditeur de map comme n'importe quel objet.
+  // Le modèle (FBX) est rendu par MapObjectPlaceables ; l'interaction (marqueur,
+  // proximité, dialogue) est gérée séparément via QUEST_NPC_OBJECT_ID (App.jsx).
+  village_quest_npc: {
+    id: 'village_quest_npc',
+    name: 'PNJ de quete',
+    modelUrl: '/models/pnj/pnj-01.fbx',
+    targetHeightMeters: 1.7,
+    colliderRadius: 0,
+    selectionRadius: 0.6,
+    hitRadius: 0.85,
+    hitHeightMeters: 1.7,
+    defaultScale: 1,
+    thumbnailLabel: 'PNJ',
+  },
 }
 
 function sanitizeObjectId(value, fallback = '') {

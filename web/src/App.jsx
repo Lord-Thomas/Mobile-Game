@@ -29,6 +29,12 @@ import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PL
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { collisionReady } from './world/mapObjectCollisionData'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
+import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
+import QuestDialog from './ui/QuestDialog'
+import QuestJournal from './ui/QuestJournal'
+import QuestTracker from './ui/QuestTracker'
+import { FIRST_QUEST_ID, QUEST_NPC_OBJECT_ID, getQuestDefinition } from './quests/questDefinitions'
+import { completeQuest as completeQuestState, isReadyToComplete, normalizeQuestProgress, registerKill, startQuest } from './quests/questState'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
@@ -507,6 +513,9 @@ const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
 const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) ?? null
+// PNJ de quête placés depuis l'éditeur (statique au chargement, comme les autres
+// placements). Vide tant qu'aucun PNJ n'a été placé + sauvegardé.
+const QUEST_NPC_PLACEMENTS = MAP_OBJECT_PLACEMENTS.filter((placement) => placement.objectId === QUEST_NPC_OBJECT_ID)
 const EDITABLE_TREE_PLACEMENTS = MAP_OBJECT_PLACEMENTS
   .map((placement) => ({
     placement,
@@ -9112,6 +9121,7 @@ function SmallMushroomEnemy({
   onDefeated,
   onHitPlayer,
   config = MOB_CONFIGS.mushroom,
+  monsterType = null,
   mobGroupRef = null,
   allyTargetsRef = null,
 }) {
@@ -9416,6 +9426,7 @@ function SmallMushroomEnemy({
             currentPositionRef.current.z,
           ],
           reward: cfg.rewardCoins,
+          mobType: monsterType,
         })
         if (respawnTimerRef.current) window.clearTimeout(respawnTimerRef.current)
         const tryRespawn = () => {
@@ -9439,7 +9450,7 @@ function SmallMushroomEnemy({
     })
 
     return true
-  }, [active, cfg, enemyId, mobGroupRef, onDefeated, passive, playerPositionRef, resetEnemy, spawnPosition])
+  }, [active, cfg, enemyId, monsterType, mobGroupRef, onDefeated, passive, playerPositionRef, resetEnemy, spawnPosition])
 
   useEffect(() => {
     if (!registerCombatTarget || passive) return undefined
@@ -13902,6 +13913,23 @@ function App() {
   const [unlockedAchievements, setUnlockedAchievements] = useState([])
   const unlockedAchievementsRef = useRef([])
   const [mobKillCount, setMobKillCount] = useState(0)
+  // État des quêtes (sérialisable, persisté dans world_settings.quests). Toute la
+  // logique est dans src/quests/questState.js — ici on ne stocke que le bag.
+  const [questProgress, setQuestProgress] = useState({})
+  const [nearbyQuestNpcId, setNearbyQuestNpcId] = useState(null)
+  const [questDialogOpen, setQuestDialogOpen] = useState(false)
+  const [questJournalOpen, setQuestJournalOpen] = useState(false)
+  // Quête épinglée (mini-tracker). Préférence d'UI : persistée en localStorage,
+  // pas dans la sauvegarde de progression.
+  const [pinnedQuestId, setPinnedQuestId] = useState(() => {
+    try { return window.localStorage.getItem('questPinnedId') || null } catch { return null }
+  })
+  useEffect(() => {
+    try {
+      if (pinnedQuestId) window.localStorage.setItem('questPinnedId', pinnedQuestId)
+      else window.localStorage.removeItem('questPinnedId')
+    } catch { /* localStorage indisponible : on ignore */ }
+  }, [pinnedQuestId])
   // Tant que true, on débloque en silence (hydratation/rattrapage) sans toast
   const suppressAchievementToastsRef = useRef(true)
   const [soloNameplateVisible, setSoloNameplateVisible] = useState(() => {
@@ -14185,6 +14213,7 @@ function App() {
     equippedTitleId,
     characterAppearance,
     friends,
+    quests: questProgress,
   })
 
   const createWorldSyncSnapshot = () => ({
@@ -14227,6 +14256,7 @@ function App() {
       equippedTitleId,
       characterAppearance,
       friends,
+      quests: questProgress,
       roomLightOn: savedWorld.roomLightOn ?? roomLightOn,
       lightColor: savedWorld.lightColor ?? lightColor,
       lightIntensity: savedWorld.lightIntensity ?? lightIntensity,
@@ -14274,6 +14304,10 @@ function App() {
     unlockedAchievementsRef.current = []
     setUnlockedAchievements([])
     setMobKillCount(0)
+    setQuestProgress({})
+    setNearbyQuestNpcId(null)
+    setQuestDialogOpen(false)
+    setQuestJournalOpen(false)
     setOwnedMounts([])
     setMountedMountId(null)
     setEquippedWeapon(null)
@@ -14399,6 +14433,7 @@ function App() {
       if (typeof parsed.mobKillCount === 'number' && parsed.mobKillCount >= 0) {
         setMobKillCount(parsed.mobKillCount)
       }
+      setQuestProgress(normalizeQuestProgress(parsed.quests))
       const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
       const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
@@ -14618,7 +14653,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -15046,7 +15081,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -15176,7 +15211,7 @@ function App() {
     ])
   }
 
-  const handleSmallEnemyDefeated = async ({ enemyId, position, reward = MUSHROOM_ENEMY_REWARD_COINS }) => {
+  const handleSmallEnemyDefeated = async ({ enemyId, position, reward = MUSHROOM_ENEMY_REWARD_COINS, mobType = null }) => {
     const popupPosition = [position?.[0] ?? 0, (position?.[1] ?? 0) + 1.05, position?.[2] ?? 0]
     const rewarded = await applyCoinDelta(reward, { reason: 'enemy_defeat', position: popupPosition })
     if (!rewarded) return
@@ -15184,6 +15219,9 @@ function App() {
     // Hauts faits : compteur de kills + type de monstre
     setMobKillCount((current) => current + 1)
     if (typeof enemyId === 'string' && enemyId.includes('skeleton')) unlockAchievement('kill_skeleton')
+
+    // Progression des quêtes : avance les objectifs "tuer N <type>" actifs.
+    if (mobType) setQuestProgress((prev) => registerKill(prev, mobType))
 
     if (!isAdminMode && !isGuestVisit && authUserRef.current) {
       try {
@@ -15227,6 +15265,28 @@ function App() {
         duration: 700,
       },
     ])
+  }
+
+  // --- Quêtes : accepter / terminer (logique pure dans src/quests/questState.js)
+  const acceptQuest = (questId) => {
+    setQuestProgress((prev) => startQuest(prev, questId))
+  }
+
+  const completeQuest = async (questId) => {
+    // Garde anti-triche : on ne récompense que si les objectifs sont réellement
+    // atteints (la source de vérité reste l'état sérialisé + Supabase).
+    if (!isReadyToComplete(questProgress, questId)) return
+    const def = getQuestDefinition(questId)
+    const rewardCoins = def?.reward?.coins ?? 0
+    if (rewardCoins > 0) {
+      const p = playerPositionRef.current
+      await applyCoinDelta(rewardCoins, {
+        reason: 'quest_reward',
+        position: p ? [p.x, p.y + 1.4, p.z] : undefined,
+      })
+    }
+    setQuestProgress((prev) => completeQuestState(prev, questId))
+    setQuestDialogOpen(false)
   }
 
   const stopPlayerRegeneration = useCallback(() => {
@@ -16533,6 +16593,7 @@ function App() {
               onDefeated={handleSmallEnemyDefeated}
               onHitPlayer={handlePlayerHit}
               config={slot.config}
+              monsterType={slot.monsterType}
               aggressive={slot.aggressive}
               patrol={slot.patrol}
               mobGroupRef={mobGroupRef}
@@ -16634,6 +16695,13 @@ function App() {
             enabled={currentZone === ZONES.outside && mode === 'play' && !magicSkullDiscovered}
             onNearChange={setIsNearMagicSkullDiscovery}
           />
+          <QuestNpcInteraction
+            placements={QUEST_NPC_PLACEMENTS}
+            playerPositionRef={playerPositionRef}
+            questProgress={questProgress}
+            enabled={currentZone === ZONES.outside && mode === 'play'}
+            onNearChange={(id) => { setNearbyQuestNpcId(id); if (!id) setQuestDialogOpen(false) }}
+          />
           <SeatInteractionTrigger
             playerPositionRef={playerPositionRef}
             objects={placedEditableObjects}
@@ -16710,6 +16778,16 @@ function App() {
           aria-label="Sac"
         >
           🎒
+        </button>
+      )}
+      {showCaptureUi && mode === 'play' && (
+        <button
+          className="quest-journal-btn"
+          type="button"
+          onClick={() => setQuestJournalOpen((v) => !v)}
+          aria-label="Journal de quêtes"
+        >
+          📜
         </button>
       )}
       {showCaptureUi && isCharging && (
@@ -16862,6 +16940,31 @@ function App() {
         <button className="skin-open-btn custom-open-btn" type="button" onClick={learnMagicSkull} disabled={isLearningMagicSkull}>
           {isLearningMagicSkull ? 'Apprentissage...' : 'Apprendre'}
         </button>
+      )}
+      {showCaptureUi && nearbyQuestNpcId && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
+        <button className="skin-open-btn custom-open-btn" type="button" onClick={() => setQuestDialogOpen(true)}>
+          Parler
+        </button>
+      )}
+      {questDialogOpen && (
+        <QuestDialog
+          questId={FIRST_QUEST_ID}
+          questProgress={questProgress}
+          onAccept={acceptQuest}
+          onComplete={completeQuest}
+          onClose={() => setQuestDialogOpen(false)}
+        />
+      )}
+      {showCaptureUi && mode === 'play' && pinnedQuestId && !questJournalOpen && (
+        <QuestTracker questId={pinnedQuestId} questProgress={questProgress} />
+      )}
+      {questJournalOpen && (
+        <QuestJournal
+          questProgress={questProgress}
+          pinnedQuestId={pinnedQuestId}
+          onPin={setPinnedQuestId}
+          onClose={() => setQuestJournalOpen(false)}
+        />
       )}
       {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
         <button className="skin-open-btn" type="button" onClick={openSkinMenu}>

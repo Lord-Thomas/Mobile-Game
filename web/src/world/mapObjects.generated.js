@@ -728,6 +728,17 @@ export const MAP_OBJECT_PLACEMENTS = [
     ],
     "rotationY": 4.71238898038469,
     "scale": 1
+  },
+  {
+    "id": "village_quest_npc_mqwh9fmj",
+    "objectId": "village_quest_npc",
+    "position": [
+      -10.25,
+      0.018000000000000002,
+      -0.5
+    ],
+    "rotationY": 1.5707963267948966,
+    "scale": 1
   }
 ]
 
@@ -760,7 +771,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "heightOffset": 0,
     "position": [
       112.5,
-      9.328871438596675,
+      9.328871379451654,
       166.25
     ],
     "radius": 40,
@@ -782,7 +793,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "heightOffset": 0,
     "position": [
       159.5,
-      3.290132675056341,
+      3.2901326743550188,
       124.5
     ],
     "radius": 23,
@@ -826,7 +837,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "heightOffset": 0,
     "position": [
       -18,
-      2.8640113616205976,
+      2.864011261988809,
       -46.25
     ],
     "radius": 31,
@@ -870,7 +881,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "heightOffset": 0,
     "position": [
       31.25,
-      5.500992893684242,
+      5.500992963244312,
       -49.25
     ],
     "radius": 25,
