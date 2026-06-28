@@ -1,16 +1,18 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useProgress, useTexture } from '@react-three/drei'
+import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
-import { markLoad, reportLoadTiming } from './lib/loadTiming'
+import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, subscribeInitialAssetBatch } from './lib/loadTiming'
+import { PERF_NO_MAP_COLLIDERS } from './lib/perfFlags'
+import { Defer, startWorldStream } from './lib/worldStream'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -12911,14 +12913,55 @@ function RenderQualityGovernor({ onScaleChange }) {
   return null
 }
 
+const INITIAL_ASSET_BATCH_MAX_WAIT_MS = 6500
+
 function ShaderWarmupGate({ onComplete }) {
   const { gl, scene, camera } = useThree()
-  const { active: assetsLoading } = useProgress()
+  const [initialAssetsReady, setInitialAssetsReady] = useState(() => isInitialAssetBatchReady())
   const completedRef = useRef(false)
 
   useEffect(() => {
+    let cancelled = false
+    let frameId = 0
+    let secondFrameId = 0
+    let timeoutId = 0
+
+    // Sonde : QUAND l'effet du gate s'exécute = quand le gate s'est monté. S'il
+    // est suspendu par la scène, ce jalon arrive tard (≈ fin de chargement).
+    markLoad('gate:mount')
+
+    const refresh = () => {
+      if (!cancelled) setInitialAssetsReady(isInitialAssetBatchReady())
+    }
+
+    const unsubscribe = subscribeInitialAssetBatch(refresh)
+    frameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
+        markLoad('gate:lock')
+        lockInitialAssetBatch()
+        refresh()
+      })
+    })
+    timeoutId = window.setTimeout(() => {
+      if (!isInitialAssetBatchReady()) {
+        forceInitialAssetBatchReady(`${INITIAL_ASSET_BATCH_MAX_WAIT_MS}ms max wait`)
+        refresh()
+      }
+    }, INITIAL_ASSET_BATCH_MAX_WAIT_MS)
+    refresh()
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+      if (frameId) window.cancelAnimationFrame(frameId)
+      if (secondFrameId) window.cancelAnimationFrame(secondFrameId)
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
+  }, [])
+
+  useEffect(() => {
     if (completedRef.current) return undefined
-    if (assetsLoading) return undefined
+    if (!initialAssetsReady) return undefined
 
     let cancelled = false
     let frameId = 0
@@ -12928,8 +12971,8 @@ function ShaderWarmupGate({ onComplete }) {
     })
 
     const runWarmup = async () => {
-      // Jalon : tous les assets (GLB/FBX/textures) sont téléchargés+parsés ici,
-      // useProgress.active vient de passer à false. Début de la phase warmup.
+      // Jalon : le lot initial est prêt ou libéré par le garde-fou. Les assets
+      // démarrés ensuite ne peuvent plus garder l'overlay ouvert.
       markLoad('assetsLoaded')
       // Garantit que la collision binaire est chargée avant de masquer l'écran de
       // chargement (le fetch a démarré à l'import, donc déjà résolu en pratique).
@@ -13009,7 +13052,7 @@ function ShaderWarmupGate({ onComplete }) {
       cancelled = true
       if (frameId) window.cancelAnimationFrame(frameId)
     }
-  }, [assetsLoading, camera, gl, onComplete, scene])
+  }, [camera, gl, initialAssetsReady, onComplete, scene])
 
   return null
 }
@@ -16405,6 +16448,9 @@ function App() {
 
   const completeShaderWarmup = useCallback(() => {
     setShaderWarmupComplete(true)
+    // L'overlay tombe : on commence à monter les sous-arbres lourds différés,
+    // un par frame, pour ne plus jamais geler le commit initial ni le jeu.
+    startWorldStream()
   }, [])
 
   const requestAccountSubmit = async (event) => {
@@ -16516,6 +16562,8 @@ function App() {
           lightIntensity={lightIntensity}
         />
         {(!isDebugMode || debugToggles.house) && (
+        <Suspense fallback={null}>
+        <Profiler id="PlayerHouse+Interior" onRender={recordRenderProfile}>
         <PlayerHouse exteriorVisible>
           <group>
             <HouseInterior
@@ -16581,6 +16629,7 @@ function App() {
               <SeatTargetMarker seat={mode === 'play' && !seatedState?.phase ? nearbySeat : null} />
             </group>
           </group>
+          <Defer level={6}>
           <CustomizationLayer
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             objects={editableObjects}
@@ -16599,8 +16648,13 @@ function App() {
             registerCombatTarget={registerCombatTarget}
             onTrainingDummyDefeated={handleTrainingDummyDefeated}
           />
+          </Defer>
         </PlayerHouse>
+        </Profiler>
+        </Suspense>
         )}
+        <Profiler id="OutdoorNeighborhood" onRender={recordRenderProfile}>
+        <Suspense fallback={null}>
         <group>
           <OutdoorNeighborhood
             lightingActive
@@ -16618,6 +16672,8 @@ function App() {
             debugStats={isDebugMode}
           />
         </group>
+        </Suspense>
+        </Profiler>
         {hasRemotePlayer && (
           <RemotePlayer
             stateRef={remotePlayerStateRef}
@@ -16645,11 +16701,16 @@ function App() {
             title={equippedTitle}
           />
         )}
+        <Suspense fallback={null}>
         <Physics gravity={[0, -9.81, 0]}>
           <PhysicsBounds />
           <GlassContainmentColliders />
           <OutdoorBounds includeHouseFootprint={false} />
-          <MapObjectPhysicsColliders />
+          {!PERF_NO_MAP_COLLIDERS && (
+            <Profiler id="MapObjectPhysicsColliders" onRender={recordRenderProfile}>
+              <MapObjectPhysicsColliders />
+            </Profiler>
+          )}
           <Goal
             object={goalObject}
             mode={canModifyWorld ? mode : 'play'}
@@ -16660,24 +16721,28 @@ function App() {
             onBallZoneExit={handleBallZoneExit}
             ballRef={ballRef}
           />
-          <Ball
-            ballRef={ballRef}
-            skinTexturePath={activeSkin.texture}
-            linearDamping={currentZone === ZONES.outside ? 0.08 : 0.35}
-            angularDamping={currentZone === ZONES.outside ? 0.12 : 0.4}
-            spawnPosition={(() => {
-              const gx = goalObject.position?.[0] ?? 0
-              const gy = goalObject.position?.[1] ?? 0
-              const gz = goalObject.position?.[2] ?? 0
-              const rotY = goalObject.rotationY ?? 0
-              const offset = 3.5
-              const sx = gx + Math.sin(rotY) * offset
-              const sz = gz + Math.cos(rotY) * offset
-              const groundY = isGoalInsideHouse(goalObject.position) ? 0 : getTerrainHeight(sx, sz)
-              return [sx, Math.max(gy + 1.2, groundY + 0.5), sz]
-            })()}
-          />
+          <Suspense fallback={null}>
+            <Ball
+              ballRef={ballRef}
+              skinTexturePath={activeSkin.texture}
+              linearDamping={currentZone === ZONES.outside ? 0.08 : 0.35}
+              angularDamping={currentZone === ZONES.outside ? 0.12 : 0.4}
+              spawnPosition={(() => {
+                const gx = goalObject.position?.[0] ?? 0
+                const gy = goalObject.position?.[1] ?? 0
+                const gz = goalObject.position?.[2] ?? 0
+                const rotY = goalObject.rotationY ?? 0
+                const offset = 3.5
+                const sx = gx + Math.sin(rotY) * offset
+                const sz = gz + Math.cos(rotY) * offset
+                const groundY = isGoalInsideHouse(goalObject.position) ? 0 : getTerrainHeight(sx, sz)
+                return [sx, Math.max(gy + 1.2, groundY + 0.5), sz]
+              })()}
+            />
+          </Suspense>
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
+          <Defer level={2}>
+          <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
           {monsterSpawnSlots.map((slot, index) => (
             <SmallMushroomEnemy
               key={slot.id}
@@ -16697,6 +16762,8 @@ function App() {
               allyTargetsRef={allyTargetsRef}
             />
           ))}
+          </Profiler>
+          </Defer>
           <FireballManager
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
@@ -16708,6 +16775,8 @@ function App() {
           />
           {/* Pool de squelettes invoqués : monté dès le chargement du monde
               pour précharger modèle/animations/GPU et éviter tout freeze au sort. */}
+          <Defer level={4}>
+          <Profiler id="SummonSkeletonPool" onRender={recordRenderProfile}>
           {Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => (
             <Suspense key={`summon_slot_${index}`} fallback={null}>
               <SummonedSkeleton
@@ -16722,6 +16791,8 @@ function App() {
               />
             </Suspense>
           ))}
+          </Profiler>
+          </Defer>
           <PlayerHealingAura
             active={playerHealing}
             playerPositionRef={playerPositionRef}
@@ -16741,6 +16812,8 @@ function App() {
             onLaunch={launchFromCharge}
           />
           {(!isDebugMode || debugToggles.player) && (
+            <Suspense fallback={null}>
+            <Profiler id="Player" onRender={recordRenderProfile}>
             <Player
               touchRef={touchRef}
               ballRef={ballRef}
@@ -16781,6 +16854,8 @@ function App() {
                 onFlight: () => unlockAchievement('first_fly'),
               }}
             />
+            </Profiler>
+            </Suspense>
           )}
           <OutdoorDoorTrigger
             playerPositionRef={playerPositionRef}
@@ -16835,6 +16910,7 @@ function App() {
           )}
           {showCaptureUi && <ScorePopups popups={scorePopups} />}
         </Physics>
+        </Suspense>
       </Canvas>
       </div>
       {!shaderWarmupComplete && (
@@ -17639,6 +17715,9 @@ function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef
 // se fait dans un worker et ne crée donc aucun freeze au spawn.
 useGLTF.setDecoderPath('/draco/')
 
+installAssetLoadProfiler(DefaultLoadingManager)
+installLongTaskObserver()
+
 // Jalon de chargement : début d'exécution du module App (bundle JS téléchargé+parsé).
 markLoad('jsBoot')
 
@@ -17652,6 +17731,7 @@ useGLTF.preload(MAGIC_SKULL_MODEL_URL)
 useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
 useFBX.preload(SKELETON_ENEMY_MODEL_URL)
 useTexture.preload(SKELETON_ENEMY_TEXTURE_URL)
+useTexture.preload(PLAYER_FACE_DETAILS_MASK_URL)
 useGLTF.preload(PLAYER_MODEL_URL)
 useGLTF.preload('/models/player/anim/idle.glb')
 useGLTF.preload('/models/player/anim/walk.glb')
@@ -17673,12 +17753,11 @@ useTexture.preload('/textures/outdoor/grass-patchy-basecolor-512.jpg')
 useTexture.preload('/textures/outdoor/dirt-ground-basecolor-512.jpg')
 useTexture.preload('/textures/outdoor/grass-patchy-normal.png')
 useTexture.preload('/textures/outdoor/dirt-ground-normal.jpg')
-Object.values(objectCatalog).forEach((item) => {
-  if (item.modelUrl) useGLTF.preload(item.modelUrl)
-  if (item.thumbnailModelUrl?.endsWith('.fbx')) useFBX.preload(item.thumbnailModelUrl)
-  if (item.thumbnailTextureUrl) useTexture.preload(item.thumbnailTextureUrl)
-  if (item.imageUrl) useTexture.preload(item.imageUrl)
-})
+useTexture.preload('/textures/outdoor/grass-001-white.png')
+useTexture.preload('/textures/outdoor/asphalt-clean-basecolor-512.jpg')
+// Test de chargement mobile : ne pas bloquer l'affichage initial sur tout le
+// catalogue boutique/maison. Les assets encore nécessaires apparaîtront dans le
+// tableau "Assets Three.js les plus lents" s'ils sont montés par la scène initiale.
 // NE PAS précharger toutes les variantes de skins : ces .png (~26 textures, ~50 Mo)
 // gonflaient l'écran de chargement pour RIEN — le rendu utilise les .ktx2 (via
 // useGameTexture), pas ces PNG. Le skin actif charge son .ktx2 au montage de la scène ;

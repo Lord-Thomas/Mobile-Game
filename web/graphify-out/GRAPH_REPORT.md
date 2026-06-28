@@ -1,15 +1,16 @@
-# Graph Report - C:\Users\thoma\Documents\New project\web  (2026-06-26)
+# Graph Report - web  (2026-06-28)
 
 ## Corpus Check
-- cluster-only mode — file stats not available
+- 124 files · ~336,115 words
+- Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1375 nodes · 2512 edges · 83 communities (61 shown, 22 thin omitted)
+- 1453 nodes · 2729 edges · 79 communities (58 shown, 21 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 17 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `9570d822`
+- Built from commit: `7df5e9a5`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -35,14 +36,12 @@
 - [[_COMMUNITY_Community 18|Community 18]]
 - [[_COMMUNITY_Community 19|Community 19]]
 - [[_COMMUNITY_Community 20|Community 20]]
-- [[_COMMUNITY_Community 21|Community 21]]
 - [[_COMMUNITY_Community 22|Community 22]]
 - [[_COMMUNITY_Community 23|Community 23]]
 - [[_COMMUNITY_Community 24|Community 24]]
 - [[_COMMUNITY_Community 25|Community 25]]
 - [[_COMMUNITY_Community 26|Community 26]]
 - [[_COMMUNITY_Community 27|Community 27]]
-- [[_COMMUNITY_Community 28|Community 28]]
 - [[_COMMUNITY_Community 29|Community 29]]
 - [[_COMMUNITY_Community 30|Community 30]]
 - [[_COMMUNITY_Community 31|Community 31]]
@@ -69,13 +68,11 @@
 - [[_COMMUNITY_Community 52|Community 52]]
 - [[_COMMUNITY_Community 53|Community 53]]
 - [[_COMMUNITY_Community 54|Community 54]]
-- [[_COMMUNITY_Community 55|Community 55]]
 - [[_COMMUNITY_Community 56|Community 56]]
 - [[_COMMUNITY_Community 57|Community 57]]
 - [[_COMMUNITY_Community 58|Community 58]]
 - [[_COMMUNITY_Community 60|Community 60]]
 - [[_COMMUNITY_Community 61|Community 61]]
-- [[_COMMUNITY_Community 62|Community 62]]
 - [[_COMMUNITY_Community 63|Community 63]]
 - [[_COMMUNITY_Community 64|Community 64]]
 - [[_COMMUNITY_Community 65|Community 65]]
@@ -95,8 +92,8 @@
 - [[_COMMUNITY_Community 81|Community 81]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `getTerrainHeight()` - 65 edges
-2. `App()` - 34 edges
+1. `getTerrainHeight()` - 67 edges
+2. `App()` - 46 edges
 3. `getCache()` - 21 edges
 4. `h()` - 18 edges
 5. `x()` - 18 edges
@@ -121,23 +118,23 @@
 ## Import Cycles
 - None detected.
 
-## Communities (83 total, 22 thin omitted)
+## Communities (79 total, 21 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.01
-Nodes (64): AVOIDANCE_ANGLES, BAG_ITEM_DEFS, ballSkins, BASE_SCENE_BACKGROUND, BASE_SCENE_FOG, CAMERA_SETTINGS, CAT_OFFSETS, CHARACTER_BASE_COLORS (+56 more)
+Nodes (65): AVOIDANCE_ANGLES, BAG_ITEM_DEFS, ballSkins, BASE_SCENE_BACKGROUND, BASE_SCENE_FOG, CAMERA_SETTINGS, CAT_OFFSETS, CHARACTER_BASE_COLORS (+57 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.06
-Nodes (64): asColor(), asEnum(), asNumber(), asVec3(), BUILTIN_PARTICLE_PRESETS, clamp(), DEFAULT_EMITTER, DEFAULT_PARTICLE_PRESET (+56 more)
+Nodes (65): asColor(), asEnum(), asNumber(), asVec3(), BUILTIN_PARTICLE_PRESETS, clamp(), DEFAULT_EMITTER, DEFAULT_PARTICLE_PRESET (+57 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.05
 Nodes (47): ColorField(), controlBase, PRESETS, styles, toHex(), addCurrentTreeToLibrary(), deleteTreeFromLibrary(), getTreeEditorState() (+39 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.09
-Nodes (50): isSupabaseConfigured, connectColyseusVisitSession(), getColyseusConnectionLabel(), getColyseusUrl(), getDefaultColyseusUrl(), connectMultiplayerSession(), connectOnlinePresence(), createSessionFromRequest() (+42 more)
+Cohesion: 0.06
+Nodes (75): isSupabaseConfigured, getMarkerHeight(), getPlacementY(), MARKER_CLASS, MARKER_GLYPH, QuestNpcInteraction(), QuestNpcMarker(), ALL_QUEST_IDS (+67 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.06
@@ -153,7 +150,7 @@ Nodes (25): A(), B(), ba(), C(), D(), E(), f(), G() (+17 more)
 
 ### Community 7 - "Community 7"
 Cohesion: 0.06
-Nodes (29): buildGeometry(), buildMaterial(), mulberry32(), ParticleEffect(), randomUnitVector(), tmpBase, tmpDir, tmpRandom (+21 more)
+Nodes (28): buildGeometry(), buildMaterial(), mulberry32(), ParticleEffect(), randomUnitVector(), tmpBase, tmpDir, tmpRandom (+20 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.04
@@ -168,8 +165,8 @@ Cohesion: 0.08
 Nodes (30): buildGlobalGrassChunk(), _cameraForward, clamp01(), continueGrassChunkBuild(), createGrassCardGeometry(), createGrassChunkBuildJob(), createRockCover(), dummy (+22 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.12
-Nodes (28): DEFAULT_HOUSE_CONFIG, GAME_HOUSE_LIBRARY, normalizeHouseConfig(), CheckboxField(), ColorField(), NumberField(), Section(), SelectField() (+20 more)
+Cohesion: 0.18
+Nodes (20): DEFAULT_HOUSE_CONFIG, GAME_HOUSE_LIBRARY, normalizeHouseConfig(), HouseDevPanel(), HouseDevScene(), ROOF_TYPES, addCurrentHouseToLibrary(), addHousePart() (+12 more)
 
 ### Community 12 - "Community 12"
 Cohesion: 0.14
@@ -177,67 +174,59 @@ Nodes (19): APPEARANCE_COLOR_KEYS, isFiniteNumber(), isVector(), now(), sanitize
 
 ### Community 13 - "Community 13"
 Cohesion: 0.10
-Nodes (27): buildCache(), collisionCache, getBarycentricYOnTriangleXZ(), getCollisionSource(), getMapObjectBaseY(), getMapObjectCollisionData(), getObjectTargetHeight(), getPlacementMaxStepUp() (+19 more)
+Nodes (26): buildCache(), collisionCache, getBarycentricYOnTriangleXZ(), getCollisionSource(), getMapObjectBaseY(), getMapObjectCollisionData(), getObjectTargetHeight(), getPlacementMaxStepUp() (+18 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.11
-Nodes (28): BallRespawnGuard(), Cat(), CustomizationLayer(), NetworkCat(), clamp01(), distanceToPolylineSamples(), getNeighborHousePadHeight(), getNeighborHousePadHeightAt() (+20 more)
+Cohesion: 0.09
+Nodes (32): BallRespawnGuard(), Cat(), CustomizationLayer(), NetworkCat(), clamp01(), distanceToPolylineSamples(), getNeighborHousePadHeight(), getNeighborHousePadHeightAt() (+24 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.10
-Nodes (20): SceneAtmosphere(), BIOME_VISUALS, getBiomeInfluence(), MAP_BIOME_AREAS, BASE_SKY_COLORS, CloudSky(), DEFAULT_SUN_DIRECTION, GRAVEYARD_SKY_COLORS (+12 more)
+Cohesion: 0.09
+Nodes (24): SceneAtmosphere(), BIOME_VISUALS, clamp01(), clampNumber(), getBiomeInfluence(), MAP_BIOME_AREAS, smoothstep(), BASE_SKY_COLORS (+16 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.16
-Nodes (21): toSavedPlacements(), toSavedSpawners(), getTreeMapObjectEntries(), asFiniteNumber(), BASE_MAP_OBJECT_CATALOG, clampNumber(), createCustomMapObjectCatalog(), createTreeMapObjectCatalog() (+13 more)
+Cohesion: 0.14
+Nodes (23): toSavedSpawners(), estimateTreeHeight(), getTreeMapObjectId(), asFiniteNumber(), BASE_MAP_OBJECT_CATALOG, clampNumber(), createAuthoredTreeMapObjectPlacements(), createCustomMapObjectCatalog() (+15 more)
 
 ### Community 17 - "Community 17"
-Cohesion: 0.14
-Nodes (11): GableRoof(), LeanToRoof(), createGeometryCollector(), createMergedHouseGeometry(), createSlopedCeilingGeometry(), getDoorData(), pushBox(), pushCeilingPlate() (+3 more)
+Cohesion: 0.06
+Nodes (36): GableRoof(), LeanToRoof(), createNeighborFloorplan(), createRoomWalls(), getExteriorContour(), getGroupBounds(), getRoofGroups(), getRoomBounds() (+28 more)
 
 ### Community 18 - "Community 18"
 Cohesion: 0.13
 Nodes (15): HouseColliders(), cornerById, corners, getRoomBounds(), getRoomHalfSize(), houseLayout, mainRoom, mainToSecondOpening (+7 more)
 
 ### Community 19 - "Community 19"
-Cohesion: 0.12
-Nodes (16): dummy, InstancedTrees(), AUTHORED_TREES, clamp01(), createHouseWallColliders(), createNeighborHouseColliders(), createWallCollider(), DISTANT_TREES (+8 more)
+Cohesion: 0.16
+Nodes (13): AUTHORED_TREES, clamp01(), createHouseWallColliders(), createNeighborHouseColliders(), DISTANT_TREES, distantTreePlacements, FOREST_TREES, getDistanceToRoadPoints() (+5 more)
 
 ### Community 20 - "Community 20"
 Cohesion: 0.12
 Nodes (18): addRunDependency(), createWasm(), findWasmBinary(), getBinaryPromise(), getWasmImports(), instantiateArrayBuffer(), instantiateAsync(), locateFile() (+10 more)
 
-### Community 21 - "Community 21"
-Cohesion: 0.14
-Nodes (14): getCachedVisualGeometry(), getBiomeGroundColorUniforms(), getBiomeShaderAreas(), GRAVEYARD_SHADER_GROUND_INTENSITIES, graveyardGroundColorUniforms, graveyardGroundIntensities, graveyardGroundIntensityUniforms, graveyardShaderAreas (+6 more)
-
 ### Community 22 - "Community 22"
-Cohesion: 0.15
-Nodes (15): activeModeButtonStyle, createInitialBiomeBrush(), Editor(), EditorCamera(), modeButtonStyle, MODES, modeSwitchStyle, useMapEditorState() (+7 more)
+Cohesion: 0.17
+Nodes (13): updateCachedVisualGeometryHeights(), activeModeButtonStyle, Editor(), EditorCamera(), modeButtonStyle, MODES, modeSwitchStyle, useMapEditorState() (+5 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.23
 Nodes (16): getVisualGrassDensity(), canPlaceObject(), clamp01(), distanceToSamples(), getDistanceToPath(), getDistanceToRoad(), getZoneAt(), getZoneDensity() (+8 more)
 
 ### Community 25 - "Community 25"
-Cohesion: 0.20
-Nodes (15): toSavedBiomes(), asColor(), asFiniteNumber(), BIOME_TYPE_IDS, BIOME_TYPES, clamp01(), clampNumber(), DEFAULT_GRAVEYARD_GROUND_COLORS (+7 more)
+Cohesion: 0.10
+Nodes (24): getCachedVisualGeometry(), asColor(), asFiniteNumber(), BIOME_TYPE_IDS, BIOME_TYPES, DEFAULT_GRAVEYARD_GROUND_COLORS, MAP_BIOME_AREAS, getBiomeGroundColors() (+16 more)
 
 ### Community 27 - "Community 27"
 Cohesion: 0.16
 Nodes (14): collidesWithGoalFrame(), getKickContact(), getNearestPunchTarget(), getPunchContact(), intersectsAabbSphere(), collidesWithEditableTree(), collidesWithOutdoorObstacle(), getMobOutdoorFootY() (+6 more)
 
-### Community 28 - "Community 28"
-Cohesion: 0.18
-Nodes (12): createNeighborFloorplan(), createRoomWalls(), getExteriorContour(), getGroupBounds(), getRoofGroups(), getRoomBounds(), getRoomCorners(), getWallCoverageIntervals() (+4 more)
-
 ### Community 29 - "Community 29"
-Cohesion: 0.19
-Nodes (12): BiomeAreaMarkers(), BiomeBrushPreview(), clampMapPosition(), createBiomeArea(), createEditorId(), createMonsterSpawner(), createPlacement(), getPlacementHeightOffset() (+4 more)
+Cohesion: 0.12
+Nodes (22): createInitialBiomeBrush(), CheckboxField(), ColorField(), NumberField(), Section(), SelectField(), SliderField(), controlBase (+14 more)
 
 ### Community 30 - "Community 30"
-Cohesion: 0.20
-Nodes (12): getWallColliderTransform(), getWallDirection(), getWallFootprint(), getWallPointAt(), splitWallIntoSolidRects(), createColoredGeometryCollector(), createPlayerExteriorShellGeometry(), HouseOpeningReveals() (+4 more)
+Cohesion: 0.15
+Nodes (15): ALL_ITEM_IDS, getItemDefinition(), ITEMS, LOOT_TABLES, rollLoot(), addItems(), getItemCount(), getMaterialEntries() (+7 more)
 
 ### Community 32 - "Community 32"
 Cohesion: 0.22
@@ -252,8 +241,8 @@ Cohesion: 0.23
 Nodes (12): charHexToVec(), getCharacterMaterialKey(), makePantsDetailsTintApplyGlsl(), makeSkinWithDetailsTintApplyGlsl(), makeTintApplyGlsl(), normalizeMixamoObjectName(), srgbChannelToLinear(), cloneMixamoAnimationClip() (+4 more)
 
 ### Community 35 - "Community 35"
-Cohesion: 0.24
-Nodes (11): BUILTIN_TREE_LIBRARY, SAVED_TREE_LIBRARY, getLibraryTreeConfig(), getRuntimeTreeLibrary(), getStoredTreeLibrary(), getTreeForMapObjectId(), getTreeIdFromMapObjectId(), getTreeMapObjectId() (+3 more)
+Cohesion: 0.27
+Nodes (10): BUILTIN_TREE_LIBRARY, SAVED_TREE_LIBRARY, getLibraryTreeConfig(), getRuntimeTreeLibrary(), getStoredTreeLibrary(), getTreeForMapObjectId(), getTreeIdFromMapObjectId(), getTreeMapObjectEntries() (+2 more)
 
 ### Community 36 - "Community 36"
 Cohesion: 0.18
@@ -268,8 +257,8 @@ Cohesion: 0.20
 Nodes (4): params, terrainReady, ErrorBoundary, styles
 
 ### Community 39 - "Community 39"
-Cohesion: 0.25
-Nodes (7): getModelExtension(), MapObjectHitTarget(), MapObjectInstance(), MapObjectModel(), MapObjectPlaceables(), MapObjectSelection(), getMapObjectCatalogItem()
+Cohesion: 0.15
+Nodes (12): useStoredParticlePreset(), FloatingMagicSkull(), MagicSkullDiscovery(), getModelExtension(), MagicSkullDiscoveryMapModel(), MapObjectHitTarget(), MapObjectInstance(), MapObjectModel() (+4 more)
 
 ### Community 40 - "Community 40"
 Cohesion: 0.20
@@ -296,8 +285,8 @@ Cohesion: 0.29
 Nodes (7): appendTwitchParents(), getOnlineVideoEmbedUrl(), getTikTokEmbedUrl(), getTwitchEmbedUrl(), getTwitchParentHost(), getTwitchParentHosts(), getYouTubeEmbedUrl()
 
 ### Community 46 - "Community 46"
-Cohesion: 0.47
-Nodes (5): fmt(), markLoad(), marks, reportLoadTiming(), ShaderWarmupGate()
+Cohesion: 0.13
+Nodes (20): activeAssetIdsByUrl, assetLoads, assetUrlByLoadId, fmt(), forceInitialAssetBatchReady(), getAssetRecord(), getInitialAssetBatchSnapshot(), initialAssetBatchForcedPendingUrls (+12 more)
 
 ### Community 47 - "Community 47"
 Cohesion: 0.40
@@ -331,10 +320,6 @@ Nodes (4): c(), l(), ma(), p()
 Cohesion: 0.50
 Nodes (4): emscripten_realloc_buffer(), _emscripten_resize_heap(), getHeapMax(), updateMemoryViews()
 
-### Community 55 - "Community 55"
-Cohesion: 0.50
-Nodes (4): useStoredParticlePreset(), FloatingMagicSkull(), MagicSkullDiscovery(), MagicSkullDiscoveryMapModel()
-
 ### Community 57 - "Community 57"
 Cohesion: 0.50
 Nodes (4): getMaterialDrawCallCount(), getObjectDrawCallCount(), getObjectTriangleCount(), isObjectVisibleInScene()
@@ -352,24 +337,24 @@ Cohesion: 0.67
 Nodes (3): getActiveViewportSize(), getViewportOrientation(), getViewportRenderSettings()
 
 ## Knowledge Gaps
-- **266 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+261 more)
+- **279 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+274 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **22 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **21 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `clone()` connect `Community 5` to `Community 9`?**
-  _High betweenness centrality (0.267) - this node is a cross-community bridge._
-- **Why does `getTerrainHeight()` connect `Community 14` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 7`, `Community 10`, `Community 13`, `Community 16`, `Community 17`, `Community 18`, `Community 19`, `Community 22`, `Community 27`, `Community 28`, `Community 29`, `Community 32`, `Community 33`, `Community 35`, `Community 37`, `Community 39`, `Community 58`?**
-  _High betweenness centrality (0.075) - this node is a cross-community bridge._
+  _High betweenness centrality (0.264) - this node is a cross-community bridge._
+- **Why does `getTerrainHeight()` connect `Community 14` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 33`, `Community 37`, `Community 32`, `Community 7`, `Community 39`, `Community 10`, `Community 13`, `Community 16`, `Community 17`, `Community 18`, `Community 22`, `Community 58`, `Community 27`, `Community 29`?**
+  _High betweenness centrality (0.079) - this node is a cross-community bridge._
 - **What connects `name`, `private`, `version` to the rest of the system?**
-  _266 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _279 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.011049723756906077 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.06034801925212884 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0590990990990991 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.054563492063492064 - nodes in this community are weakly interconnected._
 - **Should `Community 3` be split into smaller, more focused modules?**
-  _Cohesion score 0.08956228956228957 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.056429463171036205 - nodes in this community are weakly interconnected._
