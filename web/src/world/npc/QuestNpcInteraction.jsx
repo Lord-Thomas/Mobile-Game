@@ -95,7 +95,12 @@ export default function QuestNpcInteraction({
 
   return (
     <>
-      {placements.map((placement) => (
+      {/* Le marqueur "!" est un <Html distanceFactor> : sous la caméra
+          orthographique du mode personnalisation, ce facteur le fait grossir
+          jusqu'à recouvrir tout l'écran. On ne le rend donc que quand le PNJ est
+          réellement pertinent (extérieur + mode jeu), même condition que la
+          détection de proximité. */}
+      {enabled && placements.map((placement) => (
         <QuestNpcMarker key={placement.id} placement={placement} questProgress={questProgress} />
       ))}
       <QuestNpcProximity
