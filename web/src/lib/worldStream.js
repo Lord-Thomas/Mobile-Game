@@ -5,11 +5,15 @@ import { useEffect, useState } from 'react'
 // dans le commit initial. Chaque <Defer level={k}> ne monte ses enfants que quand
 // le niveau de révélation atteint k.
 //
-// Pourquoi par requestAnimationFrame et pas requestIdleCallback : le rAF se cale
-// naturellement sur la durée réelle de la frame précédente (si monter un ennemi
-// prend 250 ms, le prochain rAF ne tire qu'après ces 250 ms). Donc jamais deux
-// montages lourds dans la même frame, et la progression continue même thread
-// chargé — contrairement à rIC qui était affamé quand le thread restait occupé.
+// Cadencement par requestAnimationFrame, PAS par un délai fixe : le rAF se cale
+// sur le rythme réel de rendu. Si monter un ennemi prend 250 ms, le navigateur ne
+// rappelle le rAF qu'après cette frame de 250 ms → jamais deux montages lourds
+// collés, et la révélation va aussi vite que la machine le permet (un PC inactif
+// révèle en ~16 ms/niveau au lieu d'un plancher artificiel). Un délai plancher
+// optionnel (REVEAL_STEP_FLOOR_MS) laisse le navigateur souffler entre deux
+// montages sur les machines rapides ; mis à 0 il révèle au rythme du rAF pur.
+//
+// Repli sur setTimeout si rAF indisponible (onglet en arrière-plan au boot, SSR…).
 
 let revealLevel = 0
 let running = false
@@ -18,17 +22,30 @@ const listeners = new Set()
 // Plafond de sécurité : on arrête de tirer des frames une fois tous les niveaux
 // utilisés révélés. Largement au-dessus du nombre de sous-arbres différés.
 const MAX_LEVEL = 64
-const REVEAL_STEP_DELAY_MS = 320
+// Délai plancher entre deux niveaux. Le rAF cadence déjà sur la frame ; ce plancher
+// évite juste de tout révéler en 6 frames d'affilée sur une machine très rapide,
+// pour étaler la création GPU. Bien plus court que l'ancien 320 ms fixe.
+const REVEAL_STEP_FLOOR_MS = 90
+
+const raf = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+  ? (cb) => window.requestAnimationFrame(cb)
+  : (cb) => window.setTimeout(cb, 16)
 
 function tick() {
   revealLevel += 1
   listeners.forEach((notify) => {
     try { notify(revealLevel) } catch { /* ignore */ }
   })
-  if (revealLevel < MAX_LEVEL) {
-    window.setTimeout(tick, REVEAL_STEP_DELAY_MS)
-  } else {
+  if (revealLevel >= MAX_LEVEL) {
     running = false
+    return
+  }
+  // On attend le plancher (souffle GPU) PUIS la prochaine frame : ainsi le montage
+  // du niveau suivant tombe en début de frame, jamais à la suite du précédent.
+  if (REVEAL_STEP_FLOOR_MS > 0) {
+    window.setTimeout(() => raf(tick), REVEAL_STEP_FLOOR_MS)
+  } else {
+    raf(tick)
   }
 }
 
@@ -36,7 +53,7 @@ function tick() {
 export function startWorldStream() {
   if (running || revealLevel >= MAX_LEVEL) return
   running = true
-  window.setTimeout(tick, REVEAL_STEP_DELAY_MS)
+  raf(tick)
 }
 
 export function getRevealLevel() {
