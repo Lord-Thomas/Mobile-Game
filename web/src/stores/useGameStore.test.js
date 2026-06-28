@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useGameStore } from './gameStore'
+import { useGameStore } from './useGameStore'
 
 // Réinitialise le slice de proximité avant chaque test (le store est un singleton).
 beforeEach(() => {

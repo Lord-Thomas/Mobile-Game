@@ -15,16 +15,24 @@ import { create } from 'zustand'
 //      tranche en petits composants qui s'abonnent directement au store → `App`
 //      cesse de re-rendre pour cette tranche (c'est là qu'est le gain).
 //
-// RÈGLE D'ABONNEMENT : toujours sélectionner la valeur la plus fine
-// (`useGameStore(s => s.near.lightSwitch)`), jamais l'objet entier, sinon on
-// re-rend à chaque changement d'un voisin. Hors composant, écrire via
-// `useGameStore.getState().setX(...)` (ex. depuis un callback `useFrame`/onNearChange,
-// pour ne déclencher aucun rendu côté émetteur).
+// CONVENTIONS (validées avec l'utilisateur, cf. mémoire zustand-refactor-conventions) :
+// - Sélecteur FIN toujours : `useGameStore(s => s.near.lightSwitch)`, jamais
+//   `useGameStore()` entier. Si un sélecteur renvoie un objet/tableau calculé,
+//   l'envelopper dans `useShallow` (`import { useShallow } from 'zustand/react/shallow'`)
+//   pour éviter des rendus sur une nouvelle référence à valeurs égales.
+// - Écrire hors composant via `useGameStore.getState().setX(...)` (callback
+//   `useFrame`/onNearChange) → aucun rendu côté émetteur.
+// - JAMAIS d'état temps réel ici (position joueur/ballon, caméra, physique, anim
+//   mobs, distance recalculée par frame) : ça reste `useRef` + `useFrame`. Seul
+//   l'état ÉVÉNEMENTIEL (proximité on/off, zone, mode, achats, quêtes…) va au store.
+// - Préférer des ACTIONS MÉTIER (`spendCoins`, `buyItem`…) aux `setX` génériques
+//   quand il y a une règle de jeu à centraliser.
+// - PLUSIEURS stores par domaine (`useGameStore`, `useInventoryStore`,
+//   `useQuestStore`…), pas un fourre-tout. Ce store = état de jeu global/transverse.
 //
-// PÉRIMÈTRE : uniquement de l'état RUNTIME éphémère ou dérivé. La persistance
-// reste gérée par `src/services/progressService.js` (cf. CLAUDE.md) ; on ne met
-// PAS ici de donnée permanente du joueur tant qu'on n'a pas migré proprement le
-// chemin de sauvegarde.
+// PERSISTANCE : on n'utilise PAS le middleware `persist`. La sauvegarde reste
+// `src/services/progressService.js` (Supabase + repli local, cf. CLAUDE.md) — pas
+// de 2e système concurrent. Ici uniquement de l'état runtime éphémère ou dérivé.
 
 export const useGameStore = create((set) => ({
   // --- Slice "proximité" -------------------------------------------------
