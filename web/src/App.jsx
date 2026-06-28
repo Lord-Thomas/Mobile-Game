@@ -13,6 +13,7 @@ import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { PERF_NO_MAP_COLLIDERS, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
 import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
+import { useGameStore } from './state/gameStore'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -13997,7 +13998,10 @@ function App() {
   const [roomLightOn, setRoomLightOn] = useState(true)
   const [lightColor, setLightColor] = useState('#ffffff')
   const [lightIntensity, setLightIntensity] = useState(2)
-  const [isNearLightSwitch, setIsNearLightSwitch] = useState(false)
+  // Migré vers le store (slice proximité). L'état ne vit plus dans App() ; on s'y
+  // abonne via un sélecteur fin. Prochaine étape : descendre les lecteurs (prop de
+  // scène + invite d'UI) dans des composants abonnés pour qu'App cesse de re-rendre.
+  const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
   const [ownedFloorSkins, setOwnedFloorSkins] = useState(['floor-classic'])
@@ -17052,7 +17056,7 @@ function App() {
           <LightSwitchTrigger
             playerPositionRef={playerPositionRef}
             enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
-            onNearChange={(near) => { setIsNearLightSwitch(near); if (!near) setIsLightMenuOpen(false) }}
+            onNearChange={(near) => { useGameStore.getState().setNear('lightSwitch', near); if (!near) setIsLightMenuOpen(false) }}
           />
           <BallStationTrigger playerPositionRef={playerPositionRef} goalObject={goalObject} onNearChange={setIsNearSkinStation} />
           {currentZone !== ZONES.outside && (
