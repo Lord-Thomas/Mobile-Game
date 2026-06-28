@@ -36,6 +36,7 @@ import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
 import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
 import QuestTalkPrompt from './ui/QuestTalkPrompt'
+import InteractionPrompts from './ui/InteractionPrompts'
 import QuestJournal from './ui/QuestJournal'
 import QuestTracker from './ui/QuestTracker'
 import VendorPanel from './ui/VendorPanel'
@@ -17280,16 +17281,23 @@ function App() {
           onShowPwaGuide={() => setShowPwaGuide(true)}
         />
       )}
-      {showCaptureUi && isNearOutdoorDoor && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-        <button className="skin-open-btn outdoor-open-btn" type="button" onClick={requestOutdoorTransition}>
-          {currentZone === ZONES.outside ? 'Entrer' : 'Sortir'}
-        </button>
-      )}
-      {showCaptureUi && currentZone === ZONES.outside && isNearMagicSkullDiscovery && !magicSkullDiscovered && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={learnMagicSkull} disabled={isLearningMagicSkull}>
-          {isLearningMagicSkull ? 'Apprentissage...' : 'Apprendre'}
-        </button>
-      )}
+      <InteractionPrompts
+        showCaptureUi={showCaptureUi}
+        modePlay={mode === 'play'}
+        isOutsideZone={isOutsideZone}
+        canModifyWorld={canModifyWorld}
+        magicSkullDiscovered={magicSkullDiscovered}
+        isLearningMagicSkull={isLearningMagicSkull}
+        seatedPhase={seatedState?.phase ?? null}
+        onOutdoorToggle={requestOutdoorTransition}
+        onLearnSkull={learnMagicSkull}
+        onOpenSkinMenu={openSkinMenu}
+        onOpenEnvironmentMenu={openEnvironmentMenu}
+        onOpenCustomizationChoice={openCustomizationChoice}
+        onRequestTv={requestTvMenu}
+        onRequestSit={requestSit}
+        onRequestStandUp={requestStandUp}
+      />
       <QuestTalkPrompt
         canShow={showCaptureUi && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen}
         onTalk={() => setQuestDialogOpen(true)}
@@ -17323,21 +17331,7 @@ function App() {
           onClose={() => setQuestJournalOpen(false)}
         />
       )}
-      {showCaptureUi && isNearSkinStation && !isSkinMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
-        <button className="skin-open-btn" type="button" onClick={openSkinMenu}>
-          Personnaliser le ballon
-        </button>
-      )}
-      {showCaptureUi && currentZone !== ZONES.outside && isNearEnvironmentStation && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && mode === 'play' && (
-        <button className="skin-open-btn environment-open-btn" type="button" onClick={openEnvironmentMenu}>
-          Boutique
-        </button>
-      )}
-      {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={openCustomizationChoice}>
-          Personnaliser
-        </button>
-      )}
+      {/* Invites stations/porte/crâne/tv/siège déplacées dans <InteractionPrompts> (abonné au store). */}
       {showCaptureUi && canModifyWorld && isLightMenuOpen && isNearLightSwitch && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
         <div className="light-panel">
           <button
@@ -17371,21 +17365,6 @@ function App() {
             Fermer
           </button>
         </div>
-      )}
-      {showCaptureUi && canModifyWorld && nearbyTv && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-        <button className="skin-open-btn tv-open-btn" type="button" onClick={requestTvMenu}>
-          TV
-        </button>
-      )}
-      {showCaptureUi && nearbySeat && mode === 'play' && !seatedState?.phase && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-        <button className="skin-open-btn seat-open-btn" type="button" onClick={requestSit}>
-          S'asseoir
-        </button>
-      )}
-      {showCaptureUi && seatedState?.phase === 'sitting' && (
-        <button className="skin-open-btn seat-open-btn" type="button" onClick={requestStandUp}>
-          Se relever
-        </button>
       )}
       {showCaptureUi && isMultiplayerSession && !blocksBottomGameChat && (
         <GameChatPanel
