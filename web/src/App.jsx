@@ -2251,6 +2251,12 @@ function formatMountPrice(mount) {
   return `${mount.price} ${mount.currencyLabel ?? 'pieces'}`
 }
 
+function preloadMountModel(mountId) {
+  const config = getMountConfig(mountId)
+  if (!config?.modelUrl) return
+  useGLTF.preload(config.modelUrl)
+}
+
 function aimBoneAtWorldPoint(bone, childBone, target, scratch) {
   if (!bone?.parent || !childBone || !target) return false
 
@@ -12930,6 +12936,17 @@ const INITIAL_ASSET_BATCH_MAX_WAIT_MS = 1800
 const STABLE_INITIAL_ASSET_MAX_WAIT_MS = 9000
 const WORLD_STREAM_INITIAL_READY_LEVEL = 2
 const WORLD_STREAM_INITIAL_MAX_WAIT_MS = 2500
+const OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS = 420
+const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 320
+const OUTDOOR_CONTENT_STAGES = [
+  { level: 1, delay: 0 },
+  { level: 2, delay: 140 },
+  { level: 3, delay: 320 },
+  { level: 4, delay: 640 },
+  { level: 5, delay: 920 },
+]
+const MOUNT_PRELOAD_START_DELAY_MS = 900
+const MOUNT_PRELOAD_STAGGER_MS = 450
 
 const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload(PLAYER_MODEL_URL),
@@ -13984,6 +14001,8 @@ function App() {
   const [mode, setMode] = useState('play')
   const [currentZone, setCurrentZone] = useState(ZONES.interior)
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
+  const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
+  const [outdoorContentStage, setOutdoorContentStage] = useState(0)
   const [spawnRequest, setSpawnRequest] = useState(null)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
   const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
@@ -14194,6 +14213,39 @@ function App() {
     if (ownedMagicBook || ownedMagicSkull) earned.push('own_weapon')
     earned.forEach(unlockAchievement)
   }, [mobKillCount, coins, editableObjects, ownedMounts, ownedMagicBook, ownedMagicSkull, unlockAchievement])
+
+  useEffect(() => {
+    if (!shaderWarmupComplete || ownedMounts.length === 0) return undefined
+
+    const timerIds = ownedMounts
+      .filter((mountId) => VALID_MOUNT_IDS.has(mountId))
+      .map((mountId, index) => window.setTimeout(() => {
+        preloadMountModel(mountId)
+      }, MOUNT_PRELOAD_START_DELAY_MS + index * MOUNT_PRELOAD_STAGGER_MS))
+
+    return () => {
+      timerIds.forEach((timerId) => window.clearTimeout(timerId))
+    }
+  }, [ownedMounts, shaderWarmupComplete])
+
+  useEffect(() => {
+    const shouldPrepareOutdoor = (
+      currentZone === ZONES.outside ||
+      outdoorTransitionPrimed ||
+      (shaderWarmupComplete && currentZone !== ZONES.outside && isNearOutdoorDoor)
+    )
+    if (!shouldPrepareOutdoor) return undefined
+
+    const timerIds = OUTDOOR_CONTENT_STAGES.map(({ level, delay }) => (
+      window.setTimeout(() => {
+        setOutdoorContentStage((stage) => Math.max(stage, level))
+      }, delay)
+    ))
+
+    return () => {
+      timerIds.forEach((timerId) => window.clearTimeout(timerId))
+    }
+  }, [currentZone, isNearOutdoorDoor, outdoorTransitionPrimed, shaderWarmupComplete])
 
   // Fin de la période de silence : les déblocages suivants affichent un toast.
   useEffect(() => {
@@ -15928,6 +15980,7 @@ function App() {
     if (!isAdminMode && coins < mount.price) return
     const paid = isAdminMode ? true : await applyCoinDelta(-mount.price)
     if (!paid) return
+    preloadMountModel(mount.id)
     setOwnedMounts((current) => (
       current.includes(mount.id) ? current : [...current, mount.id]
     ))
@@ -16032,6 +16085,7 @@ function App() {
 
     const config = getMountConfig(mountId)
     if (!config) return
+    preloadMountModel(mountId)
 
     const yaw = playerBodyYawRef.current
     const px = playerPositionRef.current.x
@@ -16108,7 +16162,12 @@ function App() {
 
   const transitionToZone = (nextZone) => {
     if (zoneFadeActive || currentZone === nextZone) return
+    const goingOutside = nextZone === ZONES.outside
     setZoneFadeActive(true)
+    if (goingOutside) {
+      setOutdoorTransitionPrimed(true)
+      setOutdoorContentStage((stage) => Math.max(stage, 1))
+    }
     setIsNearOutdoorDoor(false)
     setIsNearSkinStation(false)
     setIsNearEnvironmentStation(false)
@@ -16130,14 +16189,21 @@ function App() {
     window.setTimeout(() => {
       const spawn = PLAYER_SPAWNS[nextZone] ?? PLAYER_SPAWNS.interior
       setCurrentZone(nextZone)
+      if (!goingOutside) {
+        setOutdoorTransitionPrimed(false)
+        setOutdoorContentStage(0)
+      }
       setSpawnRequest({ zone: nextZone, position: spawn, token: Date.now() })
       touchRef.current.moveX = 0
       touchRef.current.moveY = 0
       touchRef.current.lookX = 0
       touchRef.current.lookY = 0
       touchRef.current.cameraDistance = CAMERA_SETTINGS[nextZone]?.distance ?? CAMERA_DISTANCE
-      window.setTimeout(() => setZoneFadeActive(false), 180)
-    }, 180)
+      window.setTimeout(() => {
+        setZoneFadeActive(false)
+        if (goingOutside) setOutdoorTransitionPrimed(false)
+      }, goingOutside ? OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS : 180)
+    }, goingOutside ? OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS : 180)
   }
 
   const requestOutdoorTransition = () => {
@@ -16563,6 +16629,12 @@ function App() {
 
   const isFramedViewport = isAdminMode || isVerticalFrameMode
   const isOutsideZone = currentZone === ZONES.outside
+  const outdoorContentMounted = isOutsideZone || outdoorTransitionPrimed
+  const outdoorStaticReady = outdoorContentMounted && outdoorContentStage >= 1
+  const outdoorVegetationReady = outdoorContentMounted && outdoorContentStage >= 2
+  const outdoorObjectsReady = outdoorContentMounted && outdoorContentStage >= 3
+  const outdoorGrassReady = isOutsideZone && outdoorContentStage >= 4
+  const outdoorEnemiesReady = isOutsideZone && outdoorContentStage >= 5
   const showInteriorHouseDetails = !isOutsideZone
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
     isNearOutdoorDoor ||
@@ -16727,14 +16799,15 @@ function App() {
             viewerOutside={isOutsideZone}
             playerPositionRef={playerPositionRef}
             ballRef={ballRef}
-            showGrass={isOutsideZone && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
-            showTrees={isOutsideZone && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
+            showGrass={outdoorGrassReady && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+            showTrees={outdoorVegetationReady && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
             showTerrain
-            showRoad={isOutsideZone}
-            showNeighborHouses={isOutsideZone}
-            showMapObjects={isOutsideZone}
-            showBiomeEffects={isOutsideZone}
-            showSky={isOutsideZone && performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
+            showRoad={outdoorStaticReady}
+            showNeighborHouses={outdoorStaticReady}
+            showMapObjects={outdoorObjectsReady}
+            preloadMapObjects={outdoorContentStage >= 3}
+            showBiomeEffects={outdoorVegetationReady}
+            showSky={outdoorStaticReady && performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
             castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
             showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
             debugStats={isDebugMode}
@@ -16809,7 +16882,7 @@ function App() {
             />
           </Suspense>
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
-          {currentZone === ZONES.outside && (
+          {outdoorEnemiesReady && (
             <Defer level={2}>
             <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
             {monsterSpawnSlots.map((slot, index) => (

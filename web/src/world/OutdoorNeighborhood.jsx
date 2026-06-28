@@ -9,7 +9,7 @@ import TerrainGroundCover from './TerrainGroundCover'
 import CloudSky from './CloudSky'
 import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
-import MapObjectPlaceables from './MapObjectPlaceables'
+import MapObjectPlaceables, { MapObjectAssetsPreloader } from './MapObjectPlaceables'
 import PaintedPaths from './PaintedPaths'
 import { MAP_PATHS } from './paths'
 import BiomeAmbientEffects from './BiomeAmbientEffects'
@@ -143,6 +143,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showRoad = true,
   showNeighborHouses = true,
   showMapObjects = true,
+  preloadMapObjects = false,
   showBiomeEffects = true,
   showSky = true,
   castShadows = true,
@@ -175,6 +176,9 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />
       ))}
+      {preloadMapObjects && !showMapObjects && (
+        <MapObjectAssetsPreloader objects={DECOR_MAP_OBJECT_PLACEMENTS} />
+      )}
       {showMapObjects && <MapObjectPlaceables objects={DECOR_MAP_OBJECT_PLACEMENTS} />}
       {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
       {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}

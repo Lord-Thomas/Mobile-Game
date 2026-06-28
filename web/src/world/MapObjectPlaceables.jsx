@@ -112,6 +112,22 @@ function getModelExtension(modelUrl = '') {
   return modelUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
 }
 
+function preloadMapObjectAssets(objects = MAP_OBJECT_PLACEMENTS) {
+  objects.forEach((placement) => {
+    const item = MAP_OBJECT_CATALOG[placement.objectId]
+    if (!item?.modelUrl) return
+    if (getModelExtension(item.modelUrl) === 'fbx') useFBX.preload(item.modelUrl)
+    else useGLTF.preload(item.modelUrl)
+  })
+}
+
+export function MapObjectAssetsPreloader({ objects = MAP_OBJECT_PLACEMENTS }) {
+  useEffect(() => {
+    preloadMapObjectAssets(objects)
+  }, [objects])
+  return null
+}
+
 function MapObjectTreeModel({ catalogItem }) {
   // Memoize the config object: ProceduralTree rebuilds its whole geometry when
   // the config reference changes, so a fresh literal each render would rebuild
@@ -287,12 +303,7 @@ export default function MapObjectPlaceables({
   registerRef = null,
 }) {
   useEffect(() => {
-    objects.forEach((placement) => {
-      const item = MAP_OBJECT_CATALOG[placement.objectId]
-      if (!item?.modelUrl) return
-      if (getModelExtension(item.modelUrl) === 'fbx') useFBX.preload(item.modelUrl)
-      else useGLTF.preload(item.modelUrl)
-    })
+    preloadMapObjectAssets(objects)
   }, [objects])
 
   return (
