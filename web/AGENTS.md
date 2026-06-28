@@ -1,5 +1,17 @@
 ## graphify
 
+On Windows, do not call `graphify` directly.
+
+Use:
+uv tool run --from graphifyy graphify ...
+
+Examples:
+uv tool run --from graphifyy graphify query "question" --budget 2000
+uv tool run --from graphifyy graphify explain "SymbolName"
+uv tool run --from graphifyy graphify affected "SymbolName"
+
+The direct `graphify.exe` launcher may point to an invalid local Python installation.
+
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
 
 When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.

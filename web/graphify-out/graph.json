@@ -3547,7 +3547,7 @@
       "label": "SOCIAL_MENU_TABS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L85",
+      "source_location": "L87",
       "_origin": "ast",
       "id": "src_app_social_menu_tabs",
       "community": 0,
@@ -3557,7 +3557,7 @@
       "label": "PUBLIC_BUILD_FLAGS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L86",
+      "source_location": "L88",
       "_origin": "ast",
       "id": "src_app_public_build_flags",
       "community": 0,
@@ -3567,7 +3567,7 @@
       "label": "WORLD_CHAT_Z_INDEX_RANGE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L92",
+      "source_location": "L94",
       "_origin": "ast",
       "id": "src_app_world_chat_z_index_range",
       "community": 0,
@@ -3577,7 +3577,7 @@
       "label": "WORLD_NAMEPLATE_Z_INDEX_RANGE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L93",
+      "source_location": "L95",
       "_origin": "ast",
       "id": "src_app_world_nameplate_z_index_range",
       "community": 0,
@@ -3587,7 +3587,7 @@
       "label": "activeSessionStorageKey()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L101",
+      "source_location": "L103",
       "_origin": "ast",
       "id": "src_app_activesessionstoragekey",
       "community": 60,
@@ -3597,7 +3597,7 @@
       "label": "readSavedSession()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L104",
+      "source_location": "L106",
       "_origin": "ast",
       "id": "src_app_readsavedsession",
       "community": 60,
@@ -3607,7 +3607,7 @@
       "label": "hasSavedGuestSession()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L120",
+      "source_location": "L122",
       "_origin": "ast",
       "id": "src_app_hassavedguestsession",
       "community": 60,
@@ -3617,7 +3617,7 @@
       "label": "MOB_CONFIGS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L173",
+      "source_location": "L175",
       "_origin": "ast",
       "id": "src_app_mob_configs",
       "community": 0,
@@ -3627,7 +3627,7 @@
       "label": "FIREBALL_PROJECTILE_POOL",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L293",
+      "source_location": "L295",
       "_origin": "ast",
       "id": "src_app_fireball_projectile_pool",
       "community": 0,
@@ -3637,7 +3637,7 @@
       "label": "FIREBALL_IMPACT_POOL",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L294",
+      "source_location": "L296",
       "_origin": "ast",
       "id": "src_app_fireball_impact_pool",
       "community": 0,
@@ -3647,7 +3647,7 @@
       "label": "MOB_DEATH_PARTICLE_PRESET",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L330",
+      "source_location": "L332",
       "_origin": "ast",
       "id": "src_app_mob_death_particle_preset",
       "community": 0,
@@ -3657,7 +3657,7 @@
       "label": "HEAL_AURA_PARTICLE_PRESET",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L331",
+      "source_location": "L333",
       "_origin": "ast",
       "id": "src_app_heal_aura_particle_preset",
       "community": 0,
@@ -3667,7 +3667,7 @@
       "label": "INTERACTION_PARTICLE_PRESET",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L332",
+      "source_location": "L334",
       "_origin": "ast",
       "id": "src_app_interaction_particle_preset",
       "community": 0,
@@ -3677,7 +3677,7 @@
       "label": "ZONES",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L346",
+      "source_location": "L348",
       "_origin": "ast",
       "id": "src_app_zones",
       "community": 0,
@@ -3687,7 +3687,7 @@
       "label": "MAIN_ROOM_BOUNDS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L351",
+      "source_location": "L353",
       "_origin": "ast",
       "id": "src_app_main_room_bounds",
       "community": 0,
@@ -3697,7 +3697,7 @@
       "label": "OUTDOOR_DOOR_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L352",
+      "source_location": "L354",
       "_origin": "ast",
       "id": "src_app_outdoor_door_position",
       "community": 0,
@@ -3707,7 +3707,7 @@
       "label": "OUTDOOR_EXIT_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L357",
+      "source_location": "L359",
       "_origin": "ast",
       "id": "src_app_outdoor_exit_position",
       "community": 0,
@@ -3717,7 +3717,7 @@
       "label": "OUTDOOR_ENTRY_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L362",
+      "source_location": "L364",
       "_origin": "ast",
       "id": "src_app_outdoor_entry_position",
       "community": 0,
@@ -3727,7 +3727,7 @@
       "label": "PLAYER_SPAWNS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L367",
+      "source_location": "L369",
       "_origin": "ast",
       "id": "src_app_player_spawns",
       "community": 0,
@@ -3737,7 +3737,7 @@
       "label": "PLAY_AREA_LIMITS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L372",
+      "source_location": "L374",
       "_origin": "ast",
       "id": "src_app_play_area_limits",
       "community": 0,
@@ -3747,7 +3747,7 @@
       "label": "getUserDisplayName()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L378",
+      "source_location": "L380",
       "_origin": "ast",
       "id": "src_app_getuserdisplayname",
       "community": 74,
@@ -3757,7 +3757,7 @@
       "label": "getVisiblePlayerName()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L387",
+      "source_location": "L389",
       "_origin": "ast",
       "id": "src_app_getvisibleplayername",
       "community": 74,
@@ -3767,7 +3767,7 @@
       "label": "isLikelyMobileDevice()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L391",
+      "source_location": "L393",
       "_origin": "ast",
       "id": "src_app_islikelymobiledevice",
       "community": 41,
@@ -3777,7 +3777,7 @@
       "label": "getCappedAnisotropy()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L402",
+      "source_location": "L404",
       "_origin": "ast",
       "id": "src_app_getcappedanisotropy",
       "community": 41,
@@ -3787,7 +3787,7 @@
       "label": "getDefaultPerformanceSettings()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L407",
+      "source_location": "L409",
       "_origin": "ast",
       "id": "src_app_getdefaultperformancesettings",
       "community": 41,
@@ -3797,7 +3797,7 @@
       "label": "loadPerformanceSettings()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L420",
+      "source_location": "L422",
       "_origin": "ast",
       "id": "src_app_loadperformancesettings",
       "community": 41,
@@ -3807,7 +3807,7 @@
       "label": "CAMERA_SETTINGS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L431",
+      "source_location": "L433",
       "_origin": "ast",
       "id": "src_app_camera_settings",
       "community": 0,
@@ -3817,7 +3817,7 @@
       "label": "LEGACY_STARTER_FURNITURE_IDS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L449",
+      "source_location": "L451",
       "_origin": "ast",
       "id": "src_app_legacy_starter_furniture_ids",
       "community": 0,
@@ -3827,7 +3827,7 @@
       "label": "SKIN_STATION_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L450",
+      "source_location": "L452",
       "_origin": "ast",
       "id": "src_app_skin_station_position",
       "community": 0,
@@ -3837,7 +3837,7 @@
       "label": "ENV_STATION_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L451",
+      "source_location": "L453",
       "_origin": "ast",
       "id": "src_app_env_station_position",
       "community": 0,
@@ -3847,7 +3847,7 @@
       "label": "CUSTOM_STATION_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L452",
+      "source_location": "L454",
       "_origin": "ast",
       "id": "src_app_custom_station_position",
       "community": 0,
@@ -3857,7 +3857,7 @@
       "label": "CUSTOM_ROOM_BOUNDS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L454",
+      "source_location": "L456",
       "_origin": "ast",
       "id": "src_app_custom_room_bounds",
       "community": 0,
@@ -3867,7 +3867,7 @@
       "label": "MAIN_ROOM",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L460",
+      "source_location": "L462",
       "_origin": "ast",
       "id": "src_app_main_room",
       "community": 0,
@@ -3877,7 +3877,7 @@
       "label": "ballSkins",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L467",
+      "source_location": "L469",
       "_origin": "ast",
       "id": "src_app_ballskins",
       "community": 0,
@@ -3887,7 +3887,7 @@
       "label": "SKIN_TONE_PALETTE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L475",
+      "source_location": "L477",
       "_origin": "ast",
       "id": "src_app_skin_tone_palette",
       "community": 0,
@@ -3897,7 +3897,7 @@
       "label": "HAIR_COLOR_PALETTE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L476",
+      "source_location": "L478",
       "_origin": "ast",
       "id": "src_app_hair_color_palette",
       "community": 0,
@@ -3907,7 +3907,7 @@
       "label": "EYE_COLOR_PALETTE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L480",
+      "source_location": "L482",
       "_origin": "ast",
       "id": "src_app_eye_color_palette",
       "community": 0,
@@ -3917,7 +3917,7 @@
       "label": "CLOTHING_COLOR_PALETTE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L484",
+      "source_location": "L486",
       "_origin": "ast",
       "id": "src_app_clothing_color_palette",
       "community": 0,
@@ -3927,7 +3927,7 @@
       "label": "CHARACTER_BASE_COLORS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L490",
+      "source_location": "L492",
       "_origin": "ast",
       "id": "src_app_character_base_colors",
       "community": 0,
@@ -3937,7 +3937,7 @@
       "label": "CHARACTER_DEFAULT_APPEARANCE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L502",
+      "source_location": "L504",
       "_origin": "ast",
       "id": "src_app_character_default_appearance",
       "community": 0,
@@ -3947,7 +3947,7 @@
       "label": "QUEST_NPC_PLACEMENTS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L524",
+      "source_location": "L526",
       "_origin": "ast",
       "id": "src_app_quest_npc_placements",
       "community": 0,
@@ -3957,7 +3957,7 @@
       "label": "EDITABLE_TREE_PLACEMENTS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L528",
+      "source_location": "L530",
       "_origin": "ast",
       "id": "src_app_editable_tree_placements",
       "community": 0,
@@ -3967,7 +3967,7 @@
       "label": "MAGIC_SKULL_DISCOVERY_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L540",
+      "source_location": "L542",
       "_origin": "ast",
       "id": "src_app_magic_skull_discovery_position",
       "community": 0,
@@ -3977,7 +3977,7 @@
       "label": "getEditableTreePosition()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L550",
+      "source_location": "L552",
       "_origin": "ast",
       "id": "src_app_geteditabletreeposition",
       "community": 0,
@@ -3987,7 +3987,7 @@
       "label": "getEditableTreeCollisionRadius()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L555",
+      "source_location": "L557",
       "_origin": "ast",
       "id": "src_app_geteditabletreecollisionradius",
       "community": 0,
@@ -3997,7 +3997,7 @@
       "label": "getEditableTreeAreaPriority()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L559",
+      "source_location": "L561",
       "_origin": "ast",
       "id": "src_app_geteditabletreeareapriority",
       "community": 0,
@@ -4007,7 +4007,7 @@
       "label": "getSkeletonTowerHeightWorld()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L566",
+      "source_location": "L568",
       "_origin": "ast",
       "id": "src_app_getskeletontowerheightworld",
       "community": 51,
@@ -4017,7 +4017,7 @@
       "label": "worldToSkeletonTowerLocal()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L571",
+      "source_location": "L573",
       "_origin": "ast",
       "id": "src_app_worldtoskeletontowerlocal",
       "community": 51,
@@ -4027,7 +4027,7 @@
       "label": "skeletonTowerLocalToWorld()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L594",
+      "source_location": "L596",
       "_origin": "ast",
       "id": "src_app_skeletontowerlocaltoworld",
       "community": 51,
@@ -4037,7 +4037,7 @@
       "label": "getSkeletonTowerCameraContext()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L604",
+      "source_location": "L606",
       "_origin": "ast",
       "id": "src_app_getskeletontowercameracontext",
       "community": 51,
@@ -4047,7 +4047,7 @@
       "label": "constrainCameraToSkeletonTower()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L617",
+      "source_location": "L619",
       "_origin": "ast",
       "id": "src_app_constraincameratoskeletontower",
       "community": 51,
@@ -4057,7 +4057,7 @@
       "label": "CHARACTER_MATERIAL_COLOR_KEYS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L638",
+      "source_location": "L640",
       "_origin": "ast",
       "id": "src_app_character_material_color_keys",
       "community": 0,
@@ -4067,7 +4067,7 @@
       "label": "floorSkins",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L648",
+      "source_location": "L650",
       "_origin": "ast",
       "id": "src_app_floorskins",
       "community": 0,
@@ -4077,7 +4077,7 @@
       "label": "wallSkins",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L718",
+      "source_location": "L720",
       "_origin": "ast",
       "id": "src_app_wallskins",
       "community": 0,
@@ -4087,7 +4087,7 @@
       "label": "placementRaycaster",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L783",
+      "source_location": "L785",
       "_origin": "ast",
       "id": "src_app_placementraycaster",
       "community": 0,
@@ -4097,7 +4097,7 @@
       "label": "placementRayOrigin",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L784",
+      "source_location": "L786",
       "_origin": "ast",
       "id": "src_app_placementrayorigin",
       "community": 0,
@@ -4107,7 +4107,7 @@
       "label": "placementRayDirection",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L785",
+      "source_location": "L787",
       "_origin": "ast",
       "id": "src_app_placementraydirection",
       "community": 0,
@@ -4117,7 +4117,7 @@
       "label": "emotes",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L787",
+      "source_location": "L789",
       "_origin": "ast",
       "id": "src_app_emotes",
       "community": 0,
@@ -4127,7 +4127,7 @@
       "label": "snap()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L792",
+      "source_location": "L794",
       "_origin": "ast",
       "id": "src_app_snap",
       "community": 0,
@@ -4137,7 +4137,7 @@
       "label": "clampToCustomRoom()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L796",
+      "source_location": "L798",
       "_origin": "ast",
       "id": "src_app_clamptocustomroom",
       "community": 0,
@@ -4147,7 +4147,7 @@
       "label": "clampToEditableWorld()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L803",
+      "source_location": "L805",
       "_origin": "ast",
       "id": "src_app_clamptoeditableworld",
       "community": 69,
@@ -4157,7 +4157,7 @@
       "label": "normalizeSavedObjectPosition()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L810",
+      "source_location": "L812",
       "_origin": "ast",
       "id": "src_app_normalizesavedobjectposition",
       "community": 69,
@@ -4167,7 +4167,7 @@
       "label": "getRotatedGoalCollider()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L828",
+      "source_location": "L830",
       "_origin": "ast",
       "id": "src_app_getrotatedgoalcollider",
       "community": 72,
@@ -4177,7 +4177,7 @@
       "label": "transformLocalPoint()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L845",
+      "source_location": "L847",
       "_origin": "ast",
       "id": "src_app_transformlocalpoint",
       "community": 73,
@@ -4187,7 +4187,7 @@
       "label": "getSeatWorldData()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L859",
+      "source_location": "L861",
       "_origin": "ast",
       "id": "src_app_getseatworlddata",
       "community": 73,
@@ -4197,7 +4197,7 @@
       "label": "getObjectLabel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L885",
+      "source_location": "L887",
       "_origin": "ast",
       "id": "src_app_getobjectlabel",
       "community": 0,
@@ -4207,7 +4207,7 @@
       "label": "getInventoryCards()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L893",
+      "source_location": "L895",
       "_origin": "ast",
       "id": "src_app_getinventorycards",
       "community": 3,
@@ -4217,7 +4217,7 @@
       "label": "normalizeSocialFriend()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L927",
+      "source_location": "L929",
       "_origin": "ast",
       "id": "src_app_normalizesocialfriend",
       "community": 0,
@@ -4227,7 +4227,7 @@
       "label": "mergeSocialFriends()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L937",
+      "source_location": "L939",
       "_origin": "ast",
       "id": "src_app_mergesocialfriends",
       "community": 0,
@@ -4237,7 +4237,7 @@
       "label": "formatRelativeLastSeen()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L953",
+      "source_location": "L955",
       "_origin": "ast",
       "id": "src_app_formatrelativelastseen",
       "community": 0,
@@ -4247,7 +4247,7 @@
       "label": "getEmoteAngle()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L968",
+      "source_location": "L970",
       "_origin": "ast",
       "id": "src_app_getemoteangle",
       "community": 70,
@@ -4257,7 +4257,7 @@
       "label": "getEmoteSelection()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L974",
+      "source_location": "L976",
       "_origin": "ast",
       "id": "src_app_getemoteselection",
       "community": 70,
@@ -4267,7 +4267,7 @@
       "label": "getHipsRestHeight()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L998",
+      "source_location": "L1000",
       "_origin": "ast",
       "id": "src_app_gethipsrestheight",
       "community": 0,
@@ -4277,7 +4277,7 @@
       "label": "lockEmoteHipsHeight()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1003",
+      "source_location": "L1005",
       "_origin": "ast",
       "id": "src_app_lockemotehipsheight",
       "community": 0,
@@ -4287,7 +4287,7 @@
       "label": "lockHipsPlanarPosition()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1014",
+      "source_location": "L1016",
       "_origin": "ast",
       "id": "src_app_lockhipsplanarposition",
       "community": 0,
@@ -4297,7 +4297,7 @@
       "label": "getObjectHipsRestHeight()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1027",
+      "source_location": "L1029",
       "_origin": "ast",
       "id": "src_app_getobjecthipsrestheight",
       "community": 0,
@@ -4307,7 +4307,7 @@
       "label": "dampAngle()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1041",
+      "source_location": "L1043",
       "_origin": "ast",
       "id": "src_app_dampangle",
       "community": 0,
@@ -4317,7 +4317,7 @@
       "label": "getKeyboardKey()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1048",
+      "source_location": "L1050",
       "_origin": "ast",
       "id": "src_app_getkeyboardkey",
       "community": 0,
@@ -4327,7 +4327,7 @@
       "label": "isTextInputEvent()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1055",
+      "source_location": "L1057",
       "_origin": "ast",
       "id": "src_app_istextinputevent",
       "community": 0,
@@ -4337,7 +4337,7 @@
       "label": "clampCameraInPlayableVolume()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1063",
+      "source_location": "L1065",
       "_origin": "ast",
       "id": "src_app_clampcamerainplayablevolume",
       "community": 0,
@@ -4347,7 +4347,7 @@
       "label": "useCombatActionsAvailability()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1073",
+      "source_location": "L1075",
       "_origin": "ast",
       "id": "src_app_usecombatactionsavailability",
       "community": 3,
@@ -4357,7 +4357,7 @@
       "label": "CombatActionDock()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1091",
+      "source_location": "L1093",
       "_origin": "ast",
       "id": "src_app_combatactiondock",
       "community": 0,
@@ -4367,7 +4367,7 @@
       "label": "SummonCooldownBadge()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1157",
+      "source_location": "L1159",
       "_origin": "ast",
       "id": "src_app_summoncooldownbadge",
       "community": 0,
@@ -4377,7 +4377,7 @@
       "label": "useKeyboardInput()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1172",
+      "source_location": "L1174",
       "_origin": "ast",
       "id": "src_app_usekeyboardinput",
       "community": 27,
@@ -4387,7 +4387,7 @@
       "label": "HouseInterior()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1253",
+      "source_location": "L1255",
       "_origin": "ast",
       "id": "src_app_houseinterior",
       "community": 41,
@@ -4397,17 +4397,17 @@
       "label": "createColoredGeometryCollector()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1352",
+      "source_location": "L1354",
       "_origin": "ast",
       "id": "src_app_createcoloredgeometrycollector",
-      "community": 17,
+      "community": 30,
       "norm_label": "createcoloredgeometrycollector()"
     },
     {
       "label": "pushColoredGeometry()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1360",
+      "source_location": "L1362",
       "_origin": "ast",
       "id": "src_app_pushcoloredgeometry",
       "community": 76,
@@ -4417,7 +4417,7 @@
       "label": "pushColoredBox()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1378",
+      "source_location": "L1380",
       "_origin": "ast",
       "id": "src_app_pushcoloredbox",
       "community": 76,
@@ -4427,7 +4427,7 @@
       "label": "getWallExteriorColor()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1386",
+      "source_location": "L1388",
       "_origin": "ast",
       "id": "src_app_getwallexteriorcolor",
       "community": 0,
@@ -4437,17 +4437,17 @@
       "label": "createPlayerExteriorShellGeometry()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1394",
+      "source_location": "L1396",
       "_origin": "ast",
       "id": "src_app_createplayerexteriorshellgeometry",
-      "community": 17,
+      "community": 30,
       "norm_label": "createplayerexteriorshellgeometry()"
     },
     {
       "label": "MergedPlayerExteriorShell()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1454",
+      "source_location": "L1456",
       "_origin": "ast",
       "id": "src_app_mergedplayerexteriorshell",
       "community": 0,
@@ -4457,7 +4457,7 @@
       "label": "WallBlockMaterial()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1466",
+      "source_location": "L1468",
       "_origin": "ast",
       "id": "src_app_wallblockmaterial",
       "community": 0,
@@ -4467,7 +4467,7 @@
       "label": "getWallMaterialSlots()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1522",
+      "source_location": "L1524",
       "_origin": "ast",
       "id": "src_app_getwallmaterialslots",
       "community": 0,
@@ -4477,37 +4477,37 @@
       "label": "WallVolume()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1538",
+      "source_location": "L1540",
       "_origin": "ast",
       "id": "src_app_wallvolume",
-      "community": 17,
+      "community": 30,
       "norm_label": "wallvolume()"
     },
     {
       "label": "HouseWalls()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1570",
+      "source_location": "L1572",
       "_origin": "ast",
       "id": "src_app_housewalls",
-      "community": 17,
+      "community": 30,
       "norm_label": "housewalls()"
     },
     {
       "label": "HouseOpeningReveals()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1592",
+      "source_location": "L1594",
       "_origin": "ast",
       "id": "src_app_houseopeningreveals",
-      "community": 17,
+      "community": 30,
       "norm_label": "houseopeningreveals()"
     },
     {
       "label": "BASE_SCENE_BACKGROUND",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1630",
+      "source_location": "L1632",
       "_origin": "ast",
       "id": "src_app_base_scene_background",
       "community": 0,
@@ -4517,7 +4517,7 @@
       "label": "BASE_SCENE_FOG",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1631",
+      "source_location": "L1633",
       "_origin": "ast",
       "id": "src_app_base_scene_fog",
       "community": 0,
@@ -4527,7 +4527,7 @@
       "label": "GRAVEYARD_SCENE_BACKGROUND",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1633",
+      "source_location": "L1635",
       "_origin": "ast",
       "id": "src_app_graveyard_scene_background",
       "community": 0,
@@ -4537,7 +4537,7 @@
       "label": "GRAVEYARD_SCENE_FOG",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1634",
+      "source_location": "L1636",
       "_origin": "ast",
       "id": "src_app_graveyard_scene_fog",
       "community": 0,
@@ -4547,17 +4547,17 @@
       "label": "SceneAtmosphere()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1636",
+      "source_location": "L1638",
       "_origin": "ast",
       "id": "src_app_sceneatmosphere",
-      "community": 15,
+      "community": 21,
       "norm_label": "sceneatmosphere()"
     },
     {
       "label": "LayeredSceneRenderer()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1685",
+      "source_location": "L1687",
       "_origin": "ast",
       "id": "src_app_layeredscenerenderer",
       "community": 0,
@@ -4567,7 +4567,7 @@
       "label": "InteriorLighting()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1721",
+      "source_location": "L1723",
       "_origin": "ast",
       "id": "src_app_interiorlighting",
       "community": 0,
@@ -4577,7 +4577,7 @@
       "label": "LIGHT_SWITCH_POS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1739",
+      "source_location": "L1741",
       "_origin": "ast",
       "id": "src_app_light_switch_pos",
       "community": 0,
@@ -4587,7 +4587,7 @@
       "label": "LightSwitchTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1742",
+      "source_location": "L1744",
       "_origin": "ast",
       "id": "src_app_lightswitchtrigger",
       "community": 0,
@@ -4597,7 +4597,7 @@
       "label": "LightSwitch()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1757",
+      "source_location": "L1759",
       "_origin": "ast",
       "id": "src_app_lightswitch",
       "community": 0,
@@ -4607,17 +4607,17 @@
       "label": "PhysicsBounds()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1792",
+      "source_location": "L1794",
       "_origin": "ast",
       "id": "src_app_physicsbounds",
-      "community": 17,
+      "community": 30,
       "norm_label": "physicsbounds()"
     },
     {
       "label": "LightColorWheel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1811",
+      "source_location": "L1813",
       "_origin": "ast",
       "id": "src_app_lightcolorwheel",
       "community": 0,
@@ -4627,7 +4627,7 @@
       "label": "GlassContainmentRoom()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1891",
+      "source_location": "L1893",
       "_origin": "ast",
       "id": "src_app_glasscontainmentroom",
       "community": 0,
@@ -4637,7 +4637,7 @@
       "label": "GlassContainmentColliders()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1954",
+      "source_location": "L1956",
       "_origin": "ast",
       "id": "src_app_glasscontainmentcolliders",
       "community": 0,
@@ -4647,7 +4647,7 @@
       "label": "Ball()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L1968",
+      "source_location": "L1970",
       "_origin": "ast",
       "id": "src_app_ball",
       "community": 41,
@@ -4657,7 +4657,7 @@
       "label": "DRAGON_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2045",
+      "source_location": "L2047",
       "_origin": "ast",
       "id": "src_app_dragon_position",
       "community": 0,
@@ -4667,7 +4667,7 @@
       "label": "DRAGON_RIDE_SADDLE_BONE_NAMES",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2061",
+      "source_location": "L2063",
       "_origin": "ast",
       "id": "src_app_dragon_ride_saddle_bone_names",
       "community": 0,
@@ -4677,7 +4677,7 @@
       "label": "DRAGON_RIDE_SADDLE_LOCAL_POSITION",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2072",
+      "source_location": "L2074",
       "_origin": "ast",
       "id": "src_app_dragon_ride_saddle_local_position",
       "community": 0,
@@ -4687,7 +4687,7 @@
       "label": "MOUNT_CONFIGS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2097",
+      "source_location": "L2099",
       "_origin": "ast",
       "id": "src_app_mount_configs",
       "community": 0,
@@ -4697,7 +4697,7 @@
       "label": "getMountConfig()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2230",
+      "source_location": "L2232",
       "_origin": "ast",
       "id": "src_app_getmountconfig",
       "community": 36,
@@ -4707,7 +4707,7 @@
       "label": "MOUNT_SHOP_ITEMS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2234",
+      "source_location": "L2236",
       "_origin": "ast",
       "id": "src_app_mount_shop_items",
       "community": 0,
@@ -4717,7 +4717,7 @@
       "label": "VALID_MOUNT_IDS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2246",
+      "source_location": "L2248",
       "_origin": "ast",
       "id": "src_app_valid_mount_ids",
       "community": 0,
@@ -4727,7 +4727,7 @@
       "label": "formatMountPrice()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2248",
+      "source_location": "L2250",
       "_origin": "ast",
       "id": "src_app_formatmountprice",
       "community": 0,
@@ -4737,7 +4737,7 @@
       "label": "aimBoneAtWorldPoint()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2252",
+      "source_location": "L2254",
       "_origin": "ast",
       "id": "src_app_aimboneatworldpoint",
       "community": 68,
@@ -4747,7 +4747,7 @@
       "label": "solveMountedArmIk()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2284",
+      "source_location": "L2286",
       "_origin": "ast",
       "id": "src_app_solvemountedarmik",
       "community": 68,
@@ -4757,7 +4757,7 @@
       "label": "getMountedRiderWorldPosition()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2337",
+      "source_location": "L2339",
       "_origin": "ast",
       "id": "src_app_getmountedriderworldposition",
       "community": 0,
@@ -4767,7 +4767,7 @@
       "label": "MountedMount()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2364",
+      "source_location": "L2366",
       "_origin": "ast",
       "id": "src_app_mountedmount",
       "community": 0,
@@ -4777,7 +4777,7 @@
       "label": "Dragon()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2842",
+      "source_location": "L2844",
       "_origin": "ast",
       "id": "src_app_dragon",
       "community": 0,
@@ -4787,7 +4787,7 @@
       "label": "GoalVisual()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2944",
+      "source_location": "L2946",
       "_origin": "ast",
       "id": "src_app_goalvisual",
       "community": 0,
@@ -4797,7 +4797,7 @@
       "label": "Goal()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L2990",
+      "source_location": "L2992",
       "_origin": "ast",
       "id": "src_app_goal",
       "community": 72,
@@ -4807,7 +4807,7 @@
       "label": "GoalNet()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L3069",
+      "source_location": "L3071",
       "_origin": "ast",
       "id": "src_app_goalnet",
       "community": 0,
@@ -4817,7 +4817,7 @@
       "label": "Player()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L3269",
+      "source_location": "L3271",
       "_origin": "ast",
       "id": "src_app_player",
       "community": 27,
@@ -4827,7 +4827,7 @@
       "label": "CharacterAuraGlow()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L4407",
+      "source_location": "L4409",
       "_origin": "ast",
       "id": "src_app_characterauraglow",
       "community": 0,
@@ -4837,7 +4837,7 @@
       "label": "cloneMixamoAnimationClip()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L4602",
+      "source_location": "L4604",
       "_origin": "ast",
       "id": "src_app_clonemixamoanimationclip",
       "community": 34,
@@ -4847,7 +4847,7 @@
       "label": "useMixamoGlbAnimation()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L4617",
+      "source_location": "L4619",
       "_origin": "ast",
       "id": "src_app_usemixamoglbanimation",
       "community": 34,
@@ -4857,7 +4857,7 @@
       "label": "PlayerAvatar()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L4625",
+      "source_location": "L4627",
       "_origin": "ast",
       "id": "src_app_playeravatar",
       "community": 34,
@@ -4867,7 +4867,7 @@
       "label": "MagicBookMesh()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5116",
+      "source_location": "L5118",
       "_origin": "ast",
       "id": "src_app_magicbookmesh",
       "community": 0,
@@ -4877,7 +4877,7 @@
       "label": "FloatingMagicBook()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5131",
+      "source_location": "L5133",
       "_origin": "ast",
       "id": "src_app_floatingmagicbook",
       "community": 0,
@@ -4887,7 +4887,7 @@
       "label": "MagicSkullMesh()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5177",
+      "source_location": "L5179",
       "_origin": "ast",
       "id": "src_app_magicskullmesh",
       "community": 0,
@@ -4897,27 +4897,27 @@
       "label": "FloatingMagicSkull()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5199",
+      "source_location": "L5201",
       "_origin": "ast",
       "id": "src_app_floatingmagicskull",
-      "community": 39,
+      "community": 85,
       "norm_label": "floatingmagicskull()"
     },
     {
       "label": "MagicSkullDiscovery()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5254",
+      "source_location": "L5256",
       "_origin": "ast",
       "id": "src_app_magicskulldiscovery",
-      "community": 39,
+      "community": 85,
       "norm_label": "magicskulldiscovery()"
     },
     {
       "label": "MagicSkullDiscoveryTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5305",
+      "source_location": "L5307",
       "_origin": "ast",
       "id": "src_app_magicskulldiscoverytrigger",
       "community": 0,
@@ -4927,7 +4927,7 @@
       "label": "FIREBALL_GEO_CORE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5330",
+      "source_location": "L5332",
       "_origin": "ast",
       "id": "src_app_fireball_geo_core",
       "community": 0,
@@ -4937,7 +4937,7 @@
       "label": "FIREBALL_GEO_GLOW",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5331",
+      "source_location": "L5333",
       "_origin": "ast",
       "id": "src_app_fireball_geo_glow",
       "community": 0,
@@ -4947,7 +4947,7 @@
       "label": "FIREBALL_GEO_SHELL",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5332",
+      "source_location": "L5334",
       "_origin": "ast",
       "id": "src_app_fireball_geo_shell",
       "community": 0,
@@ -4957,7 +4957,7 @@
       "label": "FIREBALL_GEO_CHARGE_CORE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5333",
+      "source_location": "L5335",
       "_origin": "ast",
       "id": "src_app_fireball_geo_charge_core",
       "community": 0,
@@ -4967,7 +4967,7 @@
       "label": "FIREBALL_GEO_IMPACT_SPHERE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5334",
+      "source_location": "L5336",
       "_origin": "ast",
       "id": "src_app_fireball_geo_impact_sphere",
       "community": 0,
@@ -4977,7 +4977,7 @@
       "label": "FIREBALL_GEO_IMPACT_RING",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5335",
+      "source_location": "L5337",
       "_origin": "ast",
       "id": "src_app_fireball_geo_impact_ring",
       "community": 0,
@@ -4987,7 +4987,7 @@
       "label": "FIREBALL_MAT_CORE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5338",
+      "source_location": "L5340",
       "_origin": "ast",
       "id": "src_app_fireball_mat_core",
       "community": 0,
@@ -4997,7 +4997,7 @@
       "label": "FIREBALL_MAT_GLOW",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5339",
+      "source_location": "L5341",
       "_origin": "ast",
       "id": "src_app_fireball_mat_glow",
       "community": 0,
@@ -5007,7 +5007,7 @@
       "label": "FireballFlameShell()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5563",
+      "source_location": "L5565",
       "_origin": "ast",
       "id": "src_app_fireballflameshell",
       "community": 0,
@@ -5017,7 +5017,7 @@
       "label": "FireballProjectileSlot()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5610",
+      "source_location": "L5612",
       "_origin": "ast",
       "id": "src_app_fireballprojectileslot",
       "community": 0,
@@ -5027,7 +5027,7 @@
       "label": "ChargingFireball()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5648",
+      "source_location": "L5650",
       "_origin": "ast",
       "id": "src_app_chargingfireball",
       "community": 0,
@@ -5037,7 +5037,7 @@
       "label": "FireballImpactSlot()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5715",
+      "source_location": "L5717",
       "_origin": "ast",
       "id": "src_app_fireballimpactslot",
       "community": 0,
@@ -5047,7 +5047,7 @@
       "label": "FireballWarmup()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5739",
+      "source_location": "L5741",
       "_origin": "ast",
       "id": "src_app_fireballwarmup",
       "community": 0,
@@ -5057,7 +5057,7 @@
       "label": "RuntimeWarmupRig()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5790",
+      "source_location": "L5792",
       "_origin": "ast",
       "id": "src_app_runtimewarmuprig",
       "community": 0,
@@ -5067,7 +5067,7 @@
       "label": "FireballManager()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5856",
+      "source_location": "L5858",
       "_origin": "ast",
       "id": "src_app_fireballmanager",
       "community": 0,
@@ -5077,7 +5077,7 @@
       "label": "ChatBubbles()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5920",
+      "source_location": "L5922",
       "_origin": "ast",
       "id": "src_app_chatbubbles",
       "community": 0,
@@ -5087,7 +5087,7 @@
       "label": "PlayerChatAnchor()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5937",
+      "source_location": "L5939",
       "_origin": "ast",
       "id": "src_app_playerchatanchor",
       "community": 0,
@@ -5097,7 +5097,7 @@
       "label": "PlayerNameplateAnchor()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5954",
+      "source_location": "L5956",
       "_origin": "ast",
       "id": "src_app_playernameplateanchor",
       "community": 36,
@@ -5107,7 +5107,7 @@
       "label": "RemotePlayer()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L5983",
+      "source_location": "L5985",
       "_origin": "ast",
       "id": "src_app_remoteplayer",
       "community": 36,
@@ -5117,17 +5117,17 @@
       "label": "NetworkCat()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6292",
+      "source_location": "L6294",
       "_origin": "ast",
       "id": "src_app_networkcat",
-      "community": 14,
+      "community": 83,
       "norm_label": "networkcat()"
     },
     {
       "label": "ControlsOverlay()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6351",
+      "source_location": "L6353",
       "_origin": "ast",
       "id": "src_app_controlsoverlay",
       "community": 0,
@@ -5137,7 +5137,7 @@
       "label": "BAG_ITEM_DEFS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6694",
+      "source_location": "L6696",
       "_origin": "ast",
       "id": "src_app_bag_item_defs",
       "community": 0,
@@ -5147,17 +5147,17 @@
       "label": "BagPanel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6701",
+      "source_location": "L6703",
       "_origin": "ast",
       "id": "src_app_bagpanel",
-      "community": 30,
+      "community": 3,
       "norm_label": "bagpanel()"
     },
     {
       "label": "CoinsOverlay()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6806",
+      "source_location": "L6808",
       "_origin": "ast",
       "id": "src_app_coinsoverlay",
       "community": 0,
@@ -5167,7 +5167,7 @@
       "label": "PlayerHealthOverlay()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6817",
+      "source_location": "L6819",
       "_origin": "ast",
       "id": "src_app_playerhealthoverlay",
       "community": 0,
@@ -5177,7 +5177,7 @@
       "label": "AchievementToast()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6830",
+      "source_location": "L6832",
       "_origin": "ast",
       "id": "src_app_achievementtoast",
       "community": 0,
@@ -5187,7 +5187,7 @@
       "label": "SettingsPanel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6862",
+      "source_location": "L6864",
       "_origin": "ast",
       "id": "src_app_settingspanel",
       "community": 0,
@@ -5197,7 +5197,7 @@
       "label": "GameMenuPanel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L6970",
+      "source_location": "L6972",
       "_origin": "ast",
       "id": "src_app_gamemenupanel",
       "community": 0,
@@ -5207,7 +5207,7 @@
       "label": "AchievementsPanel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7270",
+      "source_location": "L7272",
       "_origin": "ast",
       "id": "src_app_achievementspanel",
       "community": 36,
@@ -5217,7 +5217,7 @@
       "label": "MultiplayerPanel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7355",
+      "source_location": "L7357",
       "_origin": "ast",
       "id": "src_app_multiplayerpanel",
       "community": 0,
@@ -5227,7 +5227,7 @@
       "label": "GameChatPanel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7448",
+      "source_location": "L7450",
       "_origin": "ast",
       "id": "src_app_gamechatpanel",
       "community": 41,
@@ -5237,7 +5237,7 @@
       "label": "roundNetValue()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7511",
+      "source_location": "L7513",
       "_origin": "ast",
       "id": "src_app_roundnetvalue",
       "community": 0,
@@ -5247,7 +5247,7 @@
       "label": "roundNetVector()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7515",
+      "source_location": "L7517",
       "_origin": "ast",
       "id": "src_app_roundnetvector",
       "community": 0,
@@ -5257,7 +5257,7 @@
       "label": "MultiplayerBridge()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7519",
+      "source_location": "L7521",
       "_origin": "ast",
       "id": "src_app_multiplayerbridge",
       "community": 0,
@@ -5267,7 +5267,7 @@
       "label": "InteractionHalo()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7701",
+      "source_location": "L7703",
       "_origin": "ast",
       "id": "src_app_interactionhalo",
       "community": 0,
@@ -5277,7 +5277,7 @@
       "label": "BallStation()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7747",
+      "source_location": "L7749",
       "_origin": "ast",
       "id": "src_app_ballstation",
       "community": 0,
@@ -5287,7 +5287,7 @@
       "label": "EnvironmentStation()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7764",
+      "source_location": "L7766",
       "_origin": "ast",
       "id": "src_app_environmentstation",
       "community": 0,
@@ -5297,7 +5297,7 @@
       "label": "CustomizationStation()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7775",
+      "source_location": "L7777",
       "_origin": "ast",
       "id": "src_app_customizationstation",
       "community": 0,
@@ -5307,7 +5307,7 @@
       "label": "OutdoorDoor()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7786",
+      "source_location": "L7788",
       "_origin": "ast",
       "id": "src_app_outdoordoor",
       "community": 0,
@@ -5317,7 +5317,7 @@
       "label": "OutdoorDoorStation()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7805",
+      "source_location": "L7807",
       "_origin": "ast",
       "id": "src_app_outdoordoorstation",
       "community": 0,
@@ -5327,7 +5327,7 @@
       "label": "OutdoorDoorTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7828",
+      "source_location": "L7830",
       "_origin": "ast",
       "id": "src_app_outdoordoortrigger",
       "community": 0,
@@ -5337,7 +5337,7 @@
       "label": "BallStationTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7844",
+      "source_location": "L7846",
       "_origin": "ast",
       "id": "src_app_ballstationtrigger",
       "community": 0,
@@ -5347,7 +5347,7 @@
       "label": "EnvironmentStationTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7865",
+      "source_location": "L7867",
       "_origin": "ast",
       "id": "src_app_environmentstationtrigger",
       "community": 0,
@@ -5357,7 +5357,7 @@
       "label": "CustomizationStationTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7881",
+      "source_location": "L7883",
       "_origin": "ast",
       "id": "src_app_customizationstationtrigger",
       "community": 0,
@@ -5367,7 +5367,7 @@
       "label": "SeatInteractionTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7905",
+      "source_location": "L7907",
       "_origin": "ast",
       "id": "src_app_seatinteractiontrigger",
       "community": 0,
@@ -5377,7 +5377,7 @@
       "label": "TvInteractionTrigger()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7947",
+      "source_location": "L7949",
       "_origin": "ast",
       "id": "src_app_tvinteractiontrigger",
       "community": 0,
@@ -5387,7 +5387,7 @@
       "label": "SeatTargetMarker()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L7988",
+      "source_location": "L7990",
       "_origin": "ast",
       "id": "src_app_seattargetmarker",
       "community": 0,
@@ -5397,7 +5397,7 @@
       "label": "CustomizationCamera()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8004",
+      "source_location": "L8006",
       "_origin": "ast",
       "id": "src_app_customizationcamera",
       "community": 0,
@@ -5407,7 +5407,7 @@
       "label": "SofaModel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8086",
+      "source_location": "L8088",
       "_origin": "ast",
       "id": "src_app_sofamodel",
       "community": 0,
@@ -5417,7 +5417,7 @@
       "label": "getMergeCompatibilityKey()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8128",
+      "source_location": "L8130",
       "_origin": "ast",
       "id": "src_app_getmergecompatibilitykey",
       "community": 0,
@@ -5427,7 +5427,7 @@
       "label": "mergeStaticModelMeshes()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8146",
+      "source_location": "L8148",
       "_origin": "ast",
       "id": "src_app_mergestaticmodelmeshes",
       "community": 0,
@@ -5437,7 +5437,7 @@
       "label": "GlbPlaceableModel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8184",
+      "source_location": "L8186",
       "_origin": "ast",
       "id": "src_app_glbplaceablemodel",
       "community": 0,
@@ -5447,7 +5447,7 @@
       "label": "getNamedScreenInfo()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8223",
+      "source_location": "L8225",
       "_origin": "ast",
       "id": "src_app_getnamedscreeninfo",
       "community": 0,
@@ -5457,7 +5457,7 @@
       "label": "InteractiveTvModel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8284",
+      "source_location": "L8286",
       "_origin": "ast",
       "id": "src_app_interactivetvmodel",
       "community": 0,
@@ -5467,7 +5467,7 @@
       "label": "RugModel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8338",
+      "source_location": "L8340",
       "_origin": "ast",
       "id": "src_app_rugmodel",
       "community": 0,
@@ -5477,7 +5477,7 @@
       "label": "PlaceableModel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8435",
+      "source_location": "L8437",
       "_origin": "ast",
       "id": "src_app_placeablemodel",
       "community": 0,
@@ -5487,7 +5487,7 @@
       "label": "applyTrainingDummyBendMaterial()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8445",
+      "source_location": "L8447",
       "_origin": "ast",
       "id": "src_app_applytrainingdummybendmaterial",
       "community": 0,
@@ -5497,7 +5497,7 @@
       "label": "TrainingDummyModel()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8471",
+      "source_location": "L8473",
       "_origin": "ast",
       "id": "src_app_trainingdummymodel",
       "community": 0,
@@ -5507,7 +5507,7 @@
       "label": "getDistanceToRotatedFootprint()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8674",
+      "source_location": "L8676",
       "_origin": "ast",
       "id": "src_app_getdistancetorotatedfootprint",
       "community": 0,
@@ -5517,7 +5517,7 @@
       "label": "getDistanceToPlayerHouse()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8688",
+      "source_location": "L8690",
       "_origin": "ast",
       "id": "src_app_getdistancetoplayerhouse",
       "community": 37,
@@ -5527,7 +5527,7 @@
       "label": "getDistanceToNeighborHouses()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8701",
+      "source_location": "L8703",
       "_origin": "ast",
       "id": "src_app_getdistancetoneighborhouses",
       "community": 37,
@@ -5537,7 +5537,7 @@
       "label": "getDistanceToNearestHouse()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8721",
+      "source_location": "L8723",
       "_origin": "ast",
       "id": "src_app_getdistancetonearesthouse",
       "community": 37,
@@ -5547,7 +5547,7 @@
       "label": "getNearbyTreeCount()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8725",
+      "source_location": "L8727",
       "_origin": "ast",
       "id": "src_app_getnearbytreecount",
       "community": 37,
@@ -5557,7 +5557,7 @@
       "label": "isMushroomEnemySpawnCandidateValid()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8732",
+      "source_location": "L8734",
       "_origin": "ast",
       "id": "src_app_ismushroomenemyspawncandidatevalid",
       "community": 37,
@@ -5567,7 +5567,7 @@
       "label": "getMushroomEnemySpawnCandidates()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8757",
+      "source_location": "L8759",
       "_origin": "ast",
       "id": "src_app_getmushroomenemyspawncandidates",
       "community": 58,
@@ -5577,7 +5577,7 @@
       "label": "getMushroomEnemySpawnPositions()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8799",
+      "source_location": "L8801",
       "_origin": "ast",
       "id": "src_app_getmushroomenemyspawnpositions",
       "community": 58,
@@ -5587,7 +5587,7 @@
       "label": "getRandomEnemySpawnPositions()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8822",
+      "source_location": "L8824",
       "_origin": "ast",
       "id": "src_app_getrandomenemyspawnpositions",
       "community": 58,
@@ -5597,7 +5597,7 @@
       "label": "hashSpawnerId()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8851",
+      "source_location": "L8853",
       "_origin": "ast",
       "id": "src_app_hashspawnerid",
       "community": 37,
@@ -5607,7 +5607,7 @@
       "label": "getWeightedSpawnerVariant()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8857",
+      "source_location": "L8859",
       "_origin": "ast",
       "id": "src_app_getweightedspawnervariant",
       "community": 37,
@@ -5617,7 +5617,7 @@
       "label": "getSpawnerSlotPosition()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8873",
+      "source_location": "L8875",
       "_origin": "ast",
       "id": "src_app_getspawnerslotposition",
       "community": 37,
@@ -5627,7 +5627,7 @@
       "label": "getSpawnerMobConfig()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8901",
+      "source_location": "L8903",
       "_origin": "ast",
       "id": "src_app_getspawnermobconfig",
       "community": 0,
@@ -5637,7 +5637,7 @@
       "label": "getMonsterSpawnerSlots()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8912",
+      "source_location": "L8914",
       "_origin": "ast",
       "id": "src_app_getmonsterspawnerslots",
       "community": 0,
@@ -5647,7 +5647,7 @@
       "label": "clampMapPositionForSpawn()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8935",
+      "source_location": "L8937",
       "_origin": "ast",
       "id": "src_app_clampmappositionforspawn",
       "community": 37,
@@ -5657,7 +5657,7 @@
       "label": "getMushroomEnemySpawnPosition()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8942",
+      "source_location": "L8944",
       "_origin": "ast",
       "id": "src_app_getmushroomenemyspawnposition",
       "community": 58,
@@ -5667,7 +5667,7 @@
       "label": "getSeededUnitValue()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8948",
+      "source_location": "L8950",
       "_origin": "ast",
       "id": "src_app_getseededunitvalue",
       "community": 37,
@@ -5677,7 +5677,7 @@
       "label": "getMushroomEnemyWanderPoint()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8957",
+      "source_location": "L8959",
       "_origin": "ast",
       "id": "src_app_getmushroomenemywanderpoint",
       "community": 37,
@@ -5687,7 +5687,7 @@
       "label": "getMobOutdoorFootY()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8979",
+      "source_location": "L8981",
       "_origin": "ast",
       "id": "src_app_getmoboutdoorfooty",
       "community": 27,
@@ -5697,7 +5697,7 @@
       "label": "getMobTargetFootY()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8983",
+      "source_location": "L8985",
       "_origin": "ast",
       "id": "src_app_getmobtargetfooty",
       "community": 71,
@@ -5707,7 +5707,7 @@
       "label": "getWeightedMobTargetDistance()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8989",
+      "source_location": "L8991",
       "_origin": "ast",
       "id": "src_app_getweightedmobtargetdistance",
       "community": 71,
@@ -5717,7 +5717,7 @@
       "label": "AVOIDANCE_ANGLES",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8997",
+      "source_location": "L8999",
       "_origin": "ast",
       "id": "src_app_avoidance_angles",
       "community": 0,
@@ -5727,7 +5727,7 @@
       "label": "tryMoveAt()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L8999",
+      "source_location": "L9001",
       "_origin": "ast",
       "id": "src_app_trymoveat",
       "community": 27,
@@ -5737,7 +5737,7 @@
       "label": "moveMushroomEnemyToward()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L9011",
+      "source_location": "L9013",
       "_origin": "ast",
       "id": "src_app_movemushroomenemytoward",
       "community": 27,
@@ -5747,7 +5747,7 @@
       "label": "canMobSeePlayer()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L9055",
+      "source_location": "L9057",
       "_origin": "ast",
       "id": "src_app_canmobseeplayer",
       "community": 0,
@@ -5757,7 +5757,7 @@
       "label": "RuntimeParticleEffect()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L9069",
+      "source_location": "L9071",
       "_origin": "ast",
       "id": "src_app_runtimeparticleeffect",
       "community": 0,
@@ -5767,7 +5767,7 @@
       "label": "PlayerHealingAura()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L9098",
+      "source_location": "L9100",
       "_origin": "ast",
       "id": "src_app_playerhealingaura",
       "community": 0,
@@ -5777,7 +5777,7 @@
       "label": "SmallMushroomEnemy()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L9134",
+      "source_location": "L9136",
       "_origin": "ast",
       "id": "src_app_smallmushroomenemy",
       "community": 34,
@@ -5787,7 +5787,7 @@
       "label": "SummonedSkeleton()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L9983",
+      "source_location": "L9985",
       "_origin": "ast",
       "id": "src_app_summonedskeleton",
       "community": 34,
@@ -5797,7 +5797,7 @@
       "label": "getTwitchParentHost()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10316",
+      "source_location": "L10318",
       "_origin": "ast",
       "id": "src_app_gettwitchparenthost",
       "community": 45,
@@ -5807,7 +5807,7 @@
       "label": "collidesWithEditableTree()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10321",
+      "source_location": "L10323",
       "_origin": "ast",
       "id": "src_app_collideswitheditabletree",
       "community": 27,
@@ -5817,7 +5817,7 @@
       "label": "collidesWithOutdoorObstacle()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10328",
+      "source_location": "L10330",
       "_origin": "ast",
       "id": "src_app_collideswithoutdoorobstacle",
       "community": 27,
@@ -5827,7 +5827,7 @@
       "label": "getTwitchParentHosts()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10354",
+      "source_location": "L10356",
       "_origin": "ast",
       "id": "src_app_gettwitchparenthosts",
       "community": 45,
@@ -5837,7 +5837,7 @@
       "label": "appendTwitchParents()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10365",
+      "source_location": "L10367",
       "_origin": "ast",
       "id": "src_app_appendtwitchparents",
       "community": 45,
@@ -5847,7 +5847,7 @@
       "label": "getYouTubeEmbedUrl()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10371",
+      "source_location": "L10373",
       "_origin": "ast",
       "id": "src_app_getyoutubeembedurl",
       "community": 45,
@@ -5857,7 +5857,7 @@
       "label": "getTwitchEmbedUrl()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10396",
+      "source_location": "L10398",
       "_origin": "ast",
       "id": "src_app_gettwitchembedurl",
       "community": 45,
@@ -5867,7 +5867,7 @@
       "label": "getTikTokEmbedUrl()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10441",
+      "source_location": "L10443",
       "_origin": "ast",
       "id": "src_app_gettiktokembedurl",
       "community": 45,
@@ -5877,7 +5877,7 @@
       "label": "getOnlineVideoEmbedUrl()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10453",
+      "source_location": "L10455",
       "_origin": "ast",
       "id": "src_app_getonlinevideoembedurl",
       "community": 45,
@@ -5887,7 +5887,7 @@
       "label": "escapeHtmlAttribute()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10466",
+      "source_location": "L10468",
       "_origin": "ast",
       "id": "src_app_escapehtmlattribute",
       "community": 0,
@@ -5897,7 +5897,7 @@
       "label": "InteractiveTvScreen()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L10474",
+      "source_location": "L10476",
       "_origin": "ast",
       "id": "src_app_interactivetvscreen",
       "community": 0,
@@ -5907,7 +5907,7 @@
       "label": "EditableObject()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11573",
+      "source_location": "L11575",
       "_origin": "ast",
       "id": "src_app_editableobject",
       "community": 0,
@@ -5917,7 +5917,7 @@
       "label": "CUSTOMIZE_PAN_BOUNDS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11639",
+      "source_location": "L11641",
       "_origin": "ast",
       "id": "src_app_customize_pan_bounds",
       "community": 0,
@@ -5927,7 +5927,7 @@
       "label": "RoomBorder()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11641",
+      "source_location": "L11643",
       "_origin": "ast",
       "id": "src_app_roomborder",
       "community": 0,
@@ -5937,7 +5937,7 @@
       "label": "EditableFloor()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11659",
+      "source_location": "L11661",
       "_origin": "ast",
       "id": "src_app_editablefloor",
       "community": 0,
@@ -5947,7 +5947,7 @@
       "label": "PlacementPreview()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11751",
+      "source_location": "L11753",
       "_origin": "ast",
       "id": "src_app_placementpreview",
       "community": 0,
@@ -5957,17 +5957,17 @@
       "label": "CustomizationLayer()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11773",
+      "source_location": "L11775",
       "_origin": "ast",
       "id": "src_app_customizationlayer",
-      "community": 14,
+      "community": 83,
       "norm_label": "customizationlayer()"
     },
     {
       "label": "InventoryPreviewIcon()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11909",
+      "source_location": "L11911",
       "_origin": "ast",
       "id": "src_app_inventorypreviewicon",
       "community": 0,
@@ -5977,7 +5977,7 @@
       "label": "InventoryThumbnail()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11924",
+      "source_location": "L11926",
       "_origin": "ast",
       "id": "src_app_inventorythumbnail",
       "community": 0,
@@ -5987,7 +5987,7 @@
       "label": "ObjectInventorySheet()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11941",
+      "source_location": "L11943",
       "_origin": "ast",
       "id": "src_app_objectinventorysheet",
       "community": 0,
@@ -5997,7 +5997,7 @@
       "label": "LegacyThumbnailTool()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L11989",
+      "source_location": "L11991",
       "_origin": "ast",
       "id": "src_app_legacythumbnailtool",
       "community": 5,
@@ -6007,7 +6007,7 @@
       "label": "SkinMenu()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12108",
+      "source_location": "L12110",
       "_origin": "ast",
       "id": "src_app_skinmenu",
       "community": 0,
@@ -6017,7 +6017,7 @@
       "label": "CharacterCustomizationMenu()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12168",
+      "source_location": "L12170",
       "_origin": "ast",
       "id": "src_app_charactercustomizationmenu",
       "community": 0,
@@ -6027,7 +6027,7 @@
       "label": "CustomizationChoiceMenu()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12243",
+      "source_location": "L12245",
       "_origin": "ast",
       "id": "src_app_customizationchoicemenu",
       "community": 0,
@@ -6037,7 +6037,7 @@
       "label": "EnvironmentMenu()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12261",
+      "source_location": "L12263",
       "_origin": "ast",
       "id": "src_app_environmentmenu",
       "community": 0,
@@ -6047,7 +6047,7 @@
       "label": "isPositionInsideHouse()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12654",
+      "source_location": "L12656",
       "_origin": "ast",
       "id": "src_app_ispositioninsidehouse",
       "community": 75,
@@ -6057,7 +6057,7 @@
       "label": "isGoalInsideHouse()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12666",
+      "source_location": "L12668",
       "_origin": "ast",
       "id": "src_app_isgoalinsidehouse",
       "community": 75,
@@ -6067,17 +6067,17 @@
       "label": "BallRespawnGuard()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12670",
+      "source_location": "L12672",
       "_origin": "ast",
       "id": "src_app_ballrespawnguard",
-      "community": 14,
+      "community": 83,
       "norm_label": "ballrespawnguard()"
     },
     {
       "label": "getEvenPixelSize()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12699",
+      "source_location": "L12701",
       "_origin": "ast",
       "id": "src_app_getevenpixelsize",
       "community": 0,
@@ -6087,7 +6087,7 @@
       "label": "getActiveViewportSize()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12704",
+      "source_location": "L12706",
       "_origin": "ast",
       "id": "src_app_getactiveviewportsize",
       "community": 61,
@@ -6097,7 +6097,7 @@
       "label": "getViewportOrientation()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12724",
+      "source_location": "L12726",
       "_origin": "ast",
       "id": "src_app_getviewportorientation",
       "community": 61,
@@ -6107,7 +6107,7 @@
       "label": "useMobileViewportSync()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12729",
+      "source_location": "L12731",
       "_origin": "ast",
       "id": "src_app_usemobileviewportsync",
       "community": 3,
@@ -6117,7 +6117,7 @@
       "label": "useVerticalFrameSize()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12782",
+      "source_location": "L12784",
       "_origin": "ast",
       "id": "src_app_useverticalframesize",
       "community": 3,
@@ -6127,7 +6127,7 @@
       "label": "ScorePopups()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12812",
+      "source_location": "L12814",
       "_origin": "ast",
       "id": "src_app_scorepopups",
       "community": 0,
@@ -6137,7 +6137,7 @@
       "label": "getViewportRenderSettings()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12829",
+      "source_location": "L12831",
       "_origin": "ast",
       "id": "src_app_getviewportrendersettings",
       "community": 61,
@@ -6147,7 +6147,7 @@
       "label": "useViewportRenderSettings()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12851",
+      "source_location": "L12853",
       "_origin": "ast",
       "id": "src_app_useviewportrendersettings",
       "community": 3,
@@ -6157,7 +6157,7 @@
       "label": "RenderQualityGovernor()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12878",
+      "source_location": "L12880",
       "_origin": "ast",
       "id": "src_app_renderqualitygovernor",
       "community": 0,
@@ -6167,7 +6167,7 @@
       "label": "ShaderWarmupGate()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L12916",
+      "source_location": "L12918",
       "_origin": "ast",
       "id": "src_app_shaderwarmupgate",
       "community": 46,
@@ -6177,7 +6177,7 @@
       "label": "getDebugCategory()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13053",
+      "source_location": "L13051",
       "_origin": "ast",
       "id": "src_app_getdebugcategory",
       "community": 0,
@@ -6187,7 +6187,7 @@
       "label": "isObjectVisibleInScene()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13062",
+      "source_location": "L13060",
       "_origin": "ast",
       "id": "src_app_isobjectvisibleinscene",
       "community": 57,
@@ -6197,7 +6197,7 @@
       "label": "getObjectTriangleCount()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13071",
+      "source_location": "L13069",
       "_origin": "ast",
       "id": "src_app_getobjecttrianglecount",
       "community": 57,
@@ -6207,7 +6207,7 @@
       "label": "getMaterialDrawCallCount()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13081",
+      "source_location": "L13079",
       "_origin": "ast",
       "id": "src_app_getmaterialdrawcallcount",
       "community": 57,
@@ -6217,7 +6217,7 @@
       "label": "getObjectDrawCallCount()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13095",
+      "source_location": "L13093",
       "_origin": "ast",
       "id": "src_app_getobjectdrawcallcount",
       "community": 57,
@@ -6227,7 +6227,7 @@
       "label": "getRendererInfo()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13103",
+      "source_location": "L13101",
       "_origin": "ast",
       "id": "src_app_getrendererinfo",
       "community": 0,
@@ -6237,7 +6237,7 @@
       "label": "isWeakRenderer()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13119",
+      "source_location": "L13117",
       "_origin": "ast",
       "id": "src_app_isweakrenderer",
       "community": 3,
@@ -6247,7 +6247,7 @@
       "label": "RenderStatsProbe()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13132",
+      "source_location": "L13130",
       "_origin": "ast",
       "id": "src_app_renderstatsprobe",
       "community": 0,
@@ -6257,7 +6257,7 @@
       "label": "RenderStatsOverlay()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13206",
+      "source_location": "L13204",
       "_origin": "ast",
       "id": "src_app_renderstatsoverlay",
       "community": 0,
@@ -6267,7 +6267,7 @@
       "label": "FpsOverlay()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13315",
+      "source_location": "L13313",
       "_origin": "ast",
       "id": "src_app_fpsoverlay",
       "community": 0,
@@ -6277,7 +6277,7 @@
       "label": "GpuWarning()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13327",
+      "source_location": "L13325",
       "_origin": "ast",
       "id": "src_app_gpuwarning",
       "community": 0,
@@ -6287,7 +6287,7 @@
       "label": "AdaptiveCameraFov()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13343",
+      "source_location": "L13341",
       "_origin": "ast",
       "id": "src_app_adaptivecamerafov",
       "community": 0,
@@ -6297,7 +6297,7 @@
       "label": "FreeCameraController()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13359",
+      "source_location": "L13357",
       "_origin": "ast",
       "id": "src_app_freecameracontroller",
       "community": 0,
@@ -6307,7 +6307,7 @@
       "label": "App()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L13533",
+      "source_location": "L13531",
       "_origin": "ast",
       "id": "src_app_app",
       "community": 3,
@@ -6317,7 +6317,7 @@
       "label": "CatTapDetector()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L17362",
+      "source_location": "L17393",
       "_origin": "ast",
       "id": "src_app_cattapdetector",
       "community": 0,
@@ -6327,7 +6327,7 @@
       "label": "PET_STATE",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L17388",
+      "source_location": "L17419",
       "_origin": "ast",
       "id": "src_app_pet_state",
       "community": 0,
@@ -6337,7 +6337,7 @@
       "label": "CAT_OFFSETS",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L17411",
+      "source_location": "L17442",
       "_origin": "ast",
       "id": "src_app_cat_offsets",
       "community": 0,
@@ -6347,10 +6347,10 @@
       "label": "Cat()",
       "file_type": "code",
       "source_file": "src/App.jsx",
-      "source_location": "L17419",
+      "source_location": "L17450",
       "_origin": "ast",
       "id": "src_app_cat",
-      "community": 14,
+      "community": 83,
       "norm_label": "cat()"
     },
     {
@@ -6830,7 +6830,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "effects_storedparticlepresets_usestoredparticlepreset",
-      "community": 39,
+      "community": 85,
       "norm_label": "usestoredparticlepreset()"
     },
     {
@@ -7270,7 +7270,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "items_itemdefinitions",
-      "community": 30,
+      "community": 3,
       "norm_label": "itemdefinitions.js"
     },
     {
@@ -7280,7 +7280,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "items_itemdefinitions_items",
-      "community": 30,
+      "community": 3,
       "norm_label": "items"
     },
     {
@@ -7290,7 +7290,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "items_itemdefinitions_all_item_ids",
-      "community": 30,
+      "community": 3,
       "norm_label": "all_item_ids"
     },
     {
@@ -7300,7 +7300,7 @@
       "source_location": "L42",
       "_origin": "ast",
       "id": "items_itemdefinitions_getitemdefinition",
-      "community": 30,
+      "community": 3,
       "norm_label": "getitemdefinition()"
     },
     {
@@ -7310,7 +7310,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "items_items_test",
-      "community": 30,
+      "community": 3,
       "norm_label": "items.test.js"
     },
     {
@@ -7320,7 +7320,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "items_items_test_seededrng",
-      "community": 30,
+      "community": 3,
       "norm_label": "seededrng()"
     },
     {
@@ -7330,7 +7330,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "items_loottable",
-      "community": 30,
+      "community": 3,
       "norm_label": "loottable.js"
     },
     {
@@ -7340,7 +7340,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "items_loottable_loot_tables",
-      "community": 30,
+      "community": 3,
       "norm_label": "loot_tables"
     },
     {
@@ -7350,7 +7350,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "items_loottable_rollloot",
-      "community": 30,
+      "community": 3,
       "norm_label": "rollloot()"
     },
     {
@@ -7360,7 +7360,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "items_materialsinventory",
-      "community": 30,
+      "community": 3,
       "norm_label": "materialsinventory.js"
     },
     {
@@ -7370,7 +7370,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "items_materialsinventory_normalizematerials",
-      "community": 30,
+      "community": 3,
       "norm_label": "normalizematerials()"
     },
     {
@@ -7380,7 +7380,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "items_materialsinventory_additems",
-      "community": 30,
+      "community": 3,
       "norm_label": "additems()"
     },
     {
@@ -7390,7 +7390,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "items_materialsinventory_getitemcount",
-      "community": 30,
+      "community": 3,
       "norm_label": "getitemcount()"
     },
     {
@@ -7400,7 +7400,7 @@
       "source_location": "L36",
       "_origin": "ast",
       "id": "items_materialsinventory_sellitem",
-      "community": 30,
+      "community": 3,
       "norm_label": "sellitem()"
     },
     {
@@ -7410,7 +7410,7 @@
       "source_location": "L51",
       "_origin": "ast",
       "id": "items_materialsinventory_sellall",
-      "community": 30,
+      "community": 3,
       "norm_label": "sellall()"
     },
     {
@@ -7420,7 +7420,7 @@
       "source_location": "L61",
       "_origin": "ast",
       "id": "items_materialsinventory_getmaterialentries",
-      "community": 30,
+      "community": 3,
       "norm_label": "getmaterialentries()"
     },
     {
@@ -7494,10 +7494,30 @@
       "norm_label": "initialloadsubscribers"
     },
     {
+      "label": "longTasks",
+      "file_type": "code",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L19",
+      "_origin": "ast",
+      "id": "lib_loadtiming_longtasks",
+      "community": 46,
+      "norm_label": "longtasks"
+    },
+    {
+      "label": "installLongTaskObserver()",
+      "file_type": "code",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L29",
+      "_origin": "ast",
+      "id": "lib_loadtiming_installlongtaskobserver",
+      "community": 46,
+      "norm_label": "installlongtaskobserver()"
+    },
+    {
       "label": "initialAssetBatchForcedPendingUrls",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L24",
+      "source_location": "L51",
       "_origin": "ast",
       "id": "lib_loadtiming_initialassetbatchforcedpendingurls",
       "community": 46,
@@ -7507,7 +7527,7 @@
       "label": "markLoad()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L26",
+      "source_location": "L53",
       "_origin": "ast",
       "id": "lib_loadtiming_markload",
       "community": 46,
@@ -7517,7 +7537,7 @@
       "label": "normalizeAssetUrl()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L33",
+      "source_location": "L60",
       "_origin": "ast",
       "id": "lib_loadtiming_normalizeasseturl",
       "community": 46,
@@ -7527,7 +7547,7 @@
       "label": "getAssetRecord()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L37",
+      "source_location": "L64",
       "_origin": "ast",
       "id": "lib_loadtiming_getassetrecord",
       "community": 46,
@@ -7537,7 +7557,7 @@
       "label": "getActiveAssetStack()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L54",
+      "source_location": "L81",
       "_origin": "ast",
       "id": "lib_loadtiming_getactiveassetstack",
       "community": 46,
@@ -7547,7 +7567,7 @@
       "label": "notifyInitialLoadSubscribers()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L63",
+      "source_location": "L90",
       "_origin": "ast",
       "id": "lib_loadtiming_notifyinitialloadsubscribers",
       "community": 46,
@@ -7557,7 +7577,7 @@
       "label": "isInitialAssetBatchReady()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L69",
+      "source_location": "L96",
       "_origin": "ast",
       "id": "lib_loadtiming_isinitialassetbatchready",
       "community": 46,
@@ -7567,7 +7587,7 @@
       "label": "lockInitialAssetBatch()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L73",
+      "source_location": "L100",
       "_origin": "ast",
       "id": "lib_loadtiming_lockinitialassetbatch",
       "community": 46,
@@ -7577,7 +7597,7 @@
       "label": "forceInitialAssetBatchReady()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L79",
+      "source_location": "L106",
       "_origin": "ast",
       "id": "lib_loadtiming_forceinitialassetbatchready",
       "community": 46,
@@ -7587,7 +7607,7 @@
       "label": "subscribeInitialAssetBatch()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L91",
+      "source_location": "L118",
       "_origin": "ast",
       "id": "lib_loadtiming_subscribeinitialassetbatch",
       "community": 46,
@@ -7597,7 +7617,7 @@
       "label": "getInitialAssetBatchSnapshot()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L98",
+      "source_location": "L125",
       "_origin": "ast",
       "id": "lib_loadtiming_getinitialassetbatchsnapshot",
       "community": 46,
@@ -7607,17 +7627,37 @@
       "label": "installAssetLoadProfiler()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L112",
+      "source_location": "L139",
       "_origin": "ast",
       "id": "lib_loadtiming_installassetloadprofiler",
       "community": 46,
       "norm_label": "installassetloadprofiler()"
     },
     {
+      "label": "renderProfiles",
+      "file_type": "code",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L189",
+      "_origin": "ast",
+      "id": "lib_loadtiming_renderprofiles",
+      "community": 46,
+      "norm_label": "renderprofiles"
+    },
+    {
+      "label": "recordRenderProfile()",
+      "file_type": "code",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L191",
+      "_origin": "ast",
+      "id": "lib_loadtiming_recordrenderprofile",
+      "community": 46,
+      "norm_label": "recordrenderprofile()"
+    },
+    {
       "label": "fmt()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L159",
+      "source_location": "L199",
       "_origin": "ast",
       "id": "lib_loadtiming_fmt",
       "community": 46,
@@ -7627,11 +7667,21 @@
       "label": "reportLoadTiming()",
       "file_type": "code",
       "source_file": "src/lib/loadTiming.js",
-      "source_location": "L165",
+      "source_location": "L205",
       "_origin": "ast",
       "id": "lib_loadtiming_reportloadtiming",
       "community": 46,
       "norm_label": "reportloadtiming()"
+    },
+    {
+      "label": "perfFlags.js",
+      "file_type": "code",
+      "source_file": "src/lib/perfFlags.js",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "lib_perfflags",
+      "community": 14,
+      "norm_label": "perfflags.js"
     },
     {
       "label": "supabase.js",
@@ -7654,13 +7704,103 @@
       "norm_label": "issupabaseconfigured"
     },
     {
+      "label": "useStaggeredReveal.js",
+      "file_type": "code",
+      "source_file": "src/lib/useStaggeredReveal.js",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "lib_usestaggeredreveal",
+      "community": 86,
+      "norm_label": "usestaggeredreveal.js"
+    },
+    {
+      "label": "useStaggeredReveal()",
+      "file_type": "code",
+      "source_file": "src/lib/useStaggeredReveal.js",
+      "source_location": "L24",
+      "_origin": "ast",
+      "id": "lib_usestaggeredreveal_usestaggeredreveal",
+      "community": 86,
+      "norm_label": "usestaggeredreveal()"
+    },
+    {
+      "label": "worldStream.js",
+      "file_type": "code",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "lib_worldstream",
+      "community": 84,
+      "norm_label": "worldstream.js"
+    },
+    {
+      "label": "listeners",
+      "file_type": "code",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L17",
+      "_origin": "ast",
+      "id": "lib_worldstream_listeners",
+      "community": 84,
+      "norm_label": "listeners"
+    },
+    {
+      "label": "tick()",
+      "file_type": "code",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L23",
+      "_origin": "ast",
+      "id": "lib_worldstream_tick",
+      "community": 84,
+      "norm_label": "tick()"
+    },
+    {
+      "label": "startWorldStream()",
+      "file_type": "code",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L36",
+      "_origin": "ast",
+      "id": "lib_worldstream_startworldstream",
+      "community": 84,
+      "norm_label": "startworldstream()"
+    },
+    {
+      "label": "getRevealLevel()",
+      "file_type": "code",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L42",
+      "_origin": "ast",
+      "id": "lib_worldstream_getreveallevel",
+      "community": 84,
+      "norm_label": "getreveallevel()"
+    },
+    {
+      "label": "useRevealLevel()",
+      "file_type": "code",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L46",
+      "_origin": "ast",
+      "id": "lib_worldstream_usereveallevel",
+      "community": 84,
+      "norm_label": "usereveallevel()"
+    },
+    {
+      "label": "Defer()",
+      "file_type": "code",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L59",
+      "_origin": "ast",
+      "id": "lib_worldstream_defer",
+      "community": 84,
+      "norm_label": "defer()"
+    },
+    {
       "label": "main.jsx",
       "file_type": "code",
       "source_file": "src/main.jsx",
       "source_location": "L1",
       "_origin": "ast",
       "id": "src_main",
-      "community": 38,
+      "community": 14,
       "norm_label": "main.jsx"
     },
     {
@@ -7670,7 +7810,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "src_main_params",
-      "community": 38,
+      "community": 14,
       "norm_label": "params"
     },
     {
@@ -7680,7 +7820,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "quests_questdefinitions",
-      "community": 3,
+      "community": 18,
       "norm_label": "questdefinitions.js"
     },
     {
@@ -7690,7 +7830,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "quests_questdefinitions_quests",
-      "community": 3,
+      "community": 18,
       "norm_label": "quests"
     },
     {
@@ -7700,7 +7840,7 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "quests_questdefinitions_all_quest_ids",
-      "community": 3,
+      "community": 18,
       "norm_label": "all_quest_ids"
     },
     {
@@ -7710,7 +7850,7 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "quests_questdefinitions_getquestdefinition",
-      "community": 3,
+      "community": 18,
       "norm_label": "getquestdefinition()"
     },
     {
@@ -7720,7 +7860,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "quests_queststate",
-      "community": 3,
+      "community": 18,
       "norm_label": "queststate.js"
     },
     {
@@ -7730,7 +7870,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "quests_queststate_quest_status",
-      "community": 3,
+      "community": 18,
       "norm_label": "quest_status"
     },
     {
@@ -7740,7 +7880,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "quests_queststate_normalizequestprogress",
-      "community": 3,
+      "community": 18,
       "norm_label": "normalizequestprogress()"
     },
     {
@@ -7750,7 +7890,7 @@
       "source_location": "L39",
       "_origin": "ast",
       "id": "quests_queststate_getquestentry",
-      "community": 3,
+      "community": 18,
       "norm_label": "getquestentry()"
     },
     {
@@ -7760,7 +7900,7 @@
       "source_location": "L44",
       "_origin": "ast",
       "id": "quests_queststate_startquest",
-      "community": 3,
+      "community": 18,
       "norm_label": "startquest()"
     },
     {
@@ -7770,7 +7910,7 @@
       "source_location": "L58",
       "_origin": "ast",
       "id": "quests_queststate_registerkill",
-      "community": 3,
+      "community": 18,
       "norm_label": "registerkill()"
     },
     {
@@ -7780,7 +7920,7 @@
       "source_location": "L76",
       "_origin": "ast",
       "id": "quests_queststate_isreadytocomplete",
-      "community": 3,
+      "community": 18,
       "norm_label": "isreadytocomplete()"
     },
     {
@@ -7790,7 +7930,7 @@
       "source_location": "L85",
       "_origin": "ast",
       "id": "quests_queststate_completequest",
-      "community": 3,
+      "community": 18,
       "norm_label": "completequest()"
     },
     {
@@ -7800,7 +7940,7 @@
       "source_location": "L92",
       "_origin": "ast",
       "id": "quests_queststate_getqueststatus",
-      "community": 3,
+      "community": 18,
       "norm_label": "getqueststatus()"
     },
     {
@@ -7810,7 +7950,7 @@
       "source_location": "L100",
       "_origin": "ast",
       "id": "quests_queststate_getobjectiveprogress",
-      "community": 3,
+      "community": 18,
       "norm_label": "getobjectiveprogress()"
     },
     {
@@ -7820,7 +7960,7 @@
       "source_location": "L117",
       "_origin": "ast",
       "id": "quests_queststate_npc_marker",
-      "community": 3,
+      "community": 18,
       "norm_label": "npc_marker"
     },
     {
@@ -7830,7 +7970,7 @@
       "source_location": "L123",
       "_origin": "ast",
       "id": "quests_queststate_getnpcmarker",
-      "community": 3,
+      "community": 18,
       "norm_label": "getnpcmarker()"
     },
     {
@@ -7840,7 +7980,7 @@
       "source_location": "L133",
       "_origin": "ast",
       "id": "quests_queststate_getjournalquests",
-      "community": 3,
+      "community": 18,
       "norm_label": "getjournalquests()"
     },
     {
@@ -7850,7 +7990,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "quests_queststate_test",
-      "community": 3,
+      "community": 18,
       "norm_label": "queststate.test.js"
     },
     {
@@ -8370,7 +8510,7 @@
       "source_location": "L163",
       "_origin": "ast",
       "id": "tools_editor_createinitialbiomebrush",
-      "community": 29,
+      "community": 22,
       "norm_label": "createinitialbiomebrush()"
     },
     {
@@ -8520,7 +8660,7 @@
       "source_location": "L66",
       "_origin": "ast",
       "id": "tools_mapeditortool_getterrainanchoredposition",
-      "community": 14,
+      "community": 83,
       "norm_label": "getterrainanchoredposition()"
     },
     {
@@ -8560,7 +8700,7 @@
       "source_location": "L117",
       "_origin": "ast",
       "id": "tools_mapeditortool_tosavedplacements",
-      "community": 29,
+      "community": 16,
       "norm_label": "tosavedplacements()"
     },
     {
@@ -8580,7 +8720,7 @@
       "source_location": "L151",
       "_origin": "ast",
       "id": "tools_mapeditortool_tosavedbiomes",
-      "community": 29,
+      "community": 21,
       "norm_label": "tosavedbiomes()"
     },
     {
@@ -8610,7 +8750,7 @@
       "source_location": "L188",
       "_origin": "ast",
       "id": "tools_mapeditortool_monsterspawnermarkers",
-      "community": 14,
+      "community": 83,
       "norm_label": "monsterspawnermarkers()"
     },
     {
@@ -8620,7 +8760,7 @@
       "source_location": "L257",
       "_origin": "ast",
       "id": "tools_mapeditortool_biomeareamarkers",
-      "community": 14,
+      "community": 83,
       "norm_label": "biomeareamarkers()"
     },
     {
@@ -8630,7 +8770,7 @@
       "source_location": "L328",
       "_origin": "ast",
       "id": "tools_mapeditortool_biomebrushpreview",
-      "community": 14,
+      "community": 83,
       "norm_label": "biomebrushpreview()"
     },
     {
@@ -8640,7 +8780,7 @@
       "source_location": "L358",
       "_origin": "ast",
       "id": "tools_mapeditortool_terrainbrushpreview",
-      "community": 14,
+      "community": 83,
       "norm_label": "terrainbrushpreview()"
     },
     {
@@ -8650,7 +8790,7 @@
       "source_location": "L385",
       "_origin": "ast",
       "id": "tools_mapeditortool_pathbrushpreview",
-      "community": 14,
+      "community": 83,
       "norm_label": "pathbrushpreview()"
     },
     {
@@ -8660,7 +8800,7 @@
       "source_location": "L407",
       "_origin": "ast",
       "id": "tools_mapeditortool_createterraingridgeometry",
-      "community": 14,
+      "community": 83,
       "norm_label": "createterraingridgeometry()"
     },
     {
@@ -8980,7 +9120,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tools_treedevtool",
-      "community": 2,
+      "community": 55,
       "norm_label": "treedevtool.jsx"
     },
     {
@@ -8990,7 +9130,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "tools_treedevtool_presets",
-      "community": 2,
+      "community": 55,
       "norm_label": "presets"
     },
     {
@@ -9000,7 +9140,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "tools_treedevtool_tohex",
-      "community": 2,
+      "community": 55,
       "norm_label": "tohex()"
     },
     {
@@ -9010,7 +9150,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "tools_treedevtool_fromhex",
-      "community": 2,
+      "community": 55,
       "norm_label": "fromhex()"
     },
     {
@@ -9020,7 +9160,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "tools_treedevtool_numberfield",
-      "community": 2,
+      "community": 55,
       "norm_label": "numberfield()"
     },
     {
@@ -9030,7 +9170,7 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "tools_treedevtool_sliderfield",
-      "community": 2,
+      "community": 55,
       "norm_label": "sliderfield()"
     },
     {
@@ -9040,7 +9180,7 @@
       "source_location": "L64",
       "_origin": "ast",
       "id": "tools_treedevtool_colorfield",
-      "community": 2,
+      "community": 55,
       "norm_label": "colorfield()"
     },
     {
@@ -9050,7 +9190,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "tools_treedevtool_selectfield",
-      "community": 2,
+      "community": 55,
       "norm_label": "selectfield()"
     },
     {
@@ -9060,7 +9200,7 @@
       "source_location": "L91",
       "_origin": "ast",
       "id": "tools_treedevtool_section",
-      "community": 2,
+      "community": 55,
       "norm_label": "section()"
     },
     {
@@ -9070,7 +9210,7 @@
       "source_location": "L105",
       "_origin": "ast",
       "id": "tools_treedevtool_treedevscene",
-      "community": 22,
+      "community": 55,
       "norm_label": "treedevscene()"
     },
     {
@@ -9080,7 +9220,7 @@
       "source_location": "L110",
       "_origin": "ast",
       "id": "tools_treedevtool_treedevpanel",
-      "community": 22,
+      "community": 55,
       "norm_label": "treedevpanel()"
     },
     {
@@ -9090,7 +9230,7 @@
       "source_location": "L318",
       "_origin": "ast",
       "id": "tools_treedevtool_controlbase",
-      "community": 2,
+      "community": 55,
       "norm_label": "controlbase"
     },
     {
@@ -9100,7 +9240,7 @@
       "source_location": "L324",
       "_origin": "ast",
       "id": "tools_treedevtool_styles",
-      "community": 2,
+      "community": 55,
       "norm_label": "styles"
     },
     {
@@ -9790,7 +9930,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "tools_treeeditorstore",
-      "community": 2,
+      "community": 38,
       "norm_label": "treeeditorstore.js"
     },
     {
@@ -9800,7 +9940,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "tools_treeeditorstore_loadstoredconfig",
-      "community": 2,
+      "community": 38,
       "norm_label": "loadstoredconfig()"
     },
     {
@@ -9810,7 +9950,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "tools_treeeditorstore_loadstoredlibrary",
-      "community": 2,
+      "community": 38,
       "norm_label": "loadstoredlibrary()"
     },
     {
@@ -9820,7 +9960,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "tools_treeeditorstore_state",
-      "community": 2,
+      "community": 38,
       "norm_label": "state"
     },
     {
@@ -9830,7 +9970,7 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "tools_treeeditorstore_listeners",
-      "community": 2,
+      "community": 38,
       "norm_label": "listeners"
     },
     {
@@ -9840,7 +9980,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "tools_treeeditorstore_gettreeeditorstate",
-      "community": 2,
+      "community": 38,
       "norm_label": "gettreeeditorstate()"
     },
     {
@@ -9850,7 +9990,7 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "tools_treeeditorstore_settreeeditorstate",
-      "community": 2,
+      "community": 38,
       "norm_label": "settreeeditorstate()"
     },
     {
@@ -9860,7 +10000,7 @@
       "source_location": "L42",
       "_origin": "ast",
       "id": "tools_treeeditorstore_settreeeditorconfig",
-      "community": 2,
+      "community": 38,
       "norm_label": "settreeeditorconfig()"
     },
     {
@@ -9870,7 +10010,7 @@
       "source_location": "L71",
       "_origin": "ast",
       "id": "tools_treeeditorstore_persistlibrary",
-      "community": 2,
+      "community": 38,
       "norm_label": "persistlibrary()"
     },
     {
@@ -9880,7 +10020,7 @@
       "source_location": "L79",
       "_origin": "ast",
       "id": "tools_treeeditorstore_makelibraryconfig",
-      "community": 2,
+      "community": 38,
       "norm_label": "makelibraryconfig()"
     },
     {
@@ -9890,7 +10030,7 @@
       "source_location": "L88",
       "_origin": "ast",
       "id": "tools_treeeditorstore_addcurrenttreetolibrary",
-      "community": 2,
+      "community": 38,
       "norm_label": "addcurrenttreetolibrary()"
     },
     {
@@ -9900,7 +10040,7 @@
       "source_location": "L101",
       "_origin": "ast",
       "id": "tools_treeeditorstore_savetreelibrarytogame",
-      "community": 2,
+      "community": 38,
       "norm_label": "savetreelibrarytogame()"
     },
     {
@@ -9910,7 +10050,7 @@
       "source_location": "L110",
       "_origin": "ast",
       "id": "tools_treeeditorstore_loadtreefromlibrary",
-      "community": 2,
+      "community": 38,
       "norm_label": "loadtreefromlibrary()"
     },
     {
@@ -9920,7 +10060,7 @@
       "source_location": "L117",
       "_origin": "ast",
       "id": "tools_treeeditorstore_deletetreefromlibrary",
-      "community": 2,
+      "community": 38,
       "norm_label": "deletetreefromlibrary()"
     },
     {
@@ -9930,7 +10070,7 @@
       "source_location": "L123",
       "_origin": "ast",
       "id": "tools_treeeditorstore_usetreeeditorstore",
-      "community": 22,
+      "community": 55,
       "norm_label": "usetreeeditorstore()"
     },
     {
@@ -9940,7 +10080,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "ui_errorboundary",
-      "community": 38,
+      "community": 14,
       "norm_label": "errorboundary.jsx"
     },
     {
@@ -9950,7 +10090,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "ui_errorboundary_errorboundary",
-      "community": 38,
+      "community": 14,
       "norm_label": "errorboundary"
     },
     {
@@ -9960,7 +10100,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "ui_errorboundary_errorboundary_constructor",
-      "community": 38,
+      "community": 14,
       "norm_label": ".constructor()"
     },
     {
@@ -9970,7 +10110,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "ui_errorboundary_errorboundary_getderivedstatefromerror",
-      "community": 38,
+      "community": 14,
       "norm_label": ".getderivedstatefromerror()"
     },
     {
@@ -9980,7 +10120,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "ui_errorboundary_errorboundary_componentdidcatch",
-      "community": 38,
+      "community": 14,
       "norm_label": ".componentdidcatch()"
     },
     {
@@ -9990,7 +10130,7 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "ui_errorboundary_errorboundary_handlereload",
-      "community": 38,
+      "community": 14,
       "norm_label": ".handlereload()"
     },
     {
@@ -10000,7 +10140,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "ui_errorboundary_errorboundary_render",
-      "community": 38,
+      "community": 14,
       "norm_label": ".render()"
     },
     {
@@ -10010,7 +10150,7 @@
       "source_location": "L51",
       "_origin": "ast",
       "id": "ui_errorboundary_styles",
-      "community": 38,
+      "community": 14,
       "norm_label": "styles"
     },
     {
@@ -10020,7 +10160,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "ui_itemicon",
-      "community": 30,
+      "community": 3,
       "norm_label": "itemicon.jsx"
     },
     {
@@ -10030,7 +10170,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "ui_itemicon_itemicon",
-      "community": 30,
+      "community": 3,
       "norm_label": "itemicon()"
     },
     {
@@ -10040,7 +10180,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "ui_questdialog",
-      "community": 3,
+      "community": 18,
       "norm_label": "questdialog.jsx"
     },
     {
@@ -10050,7 +10190,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "ui_questdialog_dialoguetext",
-      "community": 3,
+      "community": 18,
       "norm_label": "dialoguetext()"
     },
     {
@@ -10060,7 +10200,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "ui_questdialog_objectives",
-      "community": 3,
+      "community": 18,
       "norm_label": "objectives()"
     },
     {
@@ -10070,7 +10210,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "ui_questdialog_questdialog",
-      "community": 3,
+      "community": 18,
       "norm_label": "questdialog()"
     },
     {
@@ -10080,7 +10220,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "ui_questjournal",
-      "community": 3,
+      "community": 18,
       "norm_label": "questjournal.jsx"
     },
     {
@@ -10090,7 +10230,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "ui_questjournal_status_label",
-      "community": 3,
+      "community": 18,
       "norm_label": "status_label"
     },
     {
@@ -10100,7 +10240,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "ui_questjournal_questjournal",
-      "community": 3,
+      "community": 18,
       "norm_label": "questjournal()"
     },
     {
@@ -10110,7 +10250,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "ui_questtracker",
-      "community": 3,
+      "community": 18,
       "norm_label": "questtracker.jsx"
     },
     {
@@ -10120,7 +10260,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "ui_questtracker_questtracker",
-      "community": 3,
+      "community": 18,
       "norm_label": "questtracker()"
     },
     {
@@ -10130,7 +10270,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "ui_vendorpanel",
-      "community": 30,
+      "community": 3,
       "norm_label": "vendorpanel.jsx"
     },
     {
@@ -10140,7 +10280,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "ui_vendorpanel_vendorpanel",
-      "community": 30,
+      "community": 3,
       "norm_label": "vendorpanel()"
     },
     {
@@ -10430,7 +10570,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "world_forestring",
-      "community": 14,
+      "community": 19,
       "norm_label": "forestring.jsx"
     },
     {
@@ -10440,7 +10580,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "world_forestring_dummy",
-      "community": 14,
+      "community": 19,
       "norm_label": "dummy"
     },
     {
@@ -10450,7 +10590,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "world_forestring_instancedtrees",
-      "community": 14,
+      "community": 19,
       "norm_label": "instancedtrees()"
     },
     {
@@ -10460,7 +10600,7 @@
       "source_location": "L67",
       "_origin": "ast",
       "id": "world_forestring_forestring",
-      "community": 14,
+      "community": 19,
       "norm_label": "forestring()"
     },
     {
@@ -10580,7 +10720,7 @@
       "source_location": "L138",
       "_origin": "ast",
       "id": "world_mapobjectplaceables_magicskulldiscoverymapmodel",
-      "community": 39,
+      "community": 85,
       "norm_label": "magicskulldiscoverymapmodel()"
     },
     {
@@ -10820,7 +10960,7 @@
       "source_location": "L142",
       "_origin": "ast",
       "id": "world_neighborhouse_pushwallvolumes",
-      "community": 17,
+      "community": 30,
       "norm_label": "pushwallvolumes()"
     },
     {
@@ -10880,7 +11020,7 @@
       "source_location": "L267",
       "_origin": "ast",
       "id": "world_neighborhouse_neighborhouse",
-      "community": 17,
+      "community": 28,
       "norm_label": "neighborhouse()"
     },
     {
@@ -10890,17 +11030,17 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "world_outdoorbounds",
-      "community": 18,
+      "community": 14,
       "norm_label": "outdoorbounds.jsx"
     },
     {
       "label": "OutdoorBounds()",
       "file_type": "code",
       "source_file": "src/world/OutdoorBounds.jsx",
-      "source_location": "L7",
+      "source_location": "L8",
       "_origin": "ast",
       "id": "world_outdoorbounds_outdoorbounds",
-      "community": 18,
+      "community": 14,
       "norm_label": "outdoorbounds()"
     },
     {
@@ -10910,7 +11050,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "world_outdoorground",
-      "community": 25,
+      "community": 14,
       "norm_label": "outdoorground.jsx"
     },
     {
@@ -10920,7 +11060,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "world_outdoorground_outdoorground",
-      "community": 25,
+      "community": 14,
       "norm_label": "outdoorground()"
     },
     {
@@ -11020,7 +11160,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "world_outdoorneighborhood_getgraveyardatmosphereinfluence",
-      "community": 15,
+      "community": 21,
       "norm_label": "getgraveyardatmosphereinfluence()"
     },
     {
@@ -11590,7 +11730,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "world_biomeareas_generated",
-      "community": 25,
+      "community": 21,
       "norm_label": "biomeareas.generated.js"
     },
     {
@@ -11600,7 +11740,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "world_biomeareas_generated_map_biome_areas",
-      "community": 25,
+      "community": 21,
       "norm_label": "map_biome_areas"
     },
     {
@@ -11610,7 +11750,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "world_biomeareas",
-      "community": 25,
+      "community": 21,
       "norm_label": "biomeareas.js"
     },
     {
@@ -11620,7 +11760,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "world_biomeareas_biome_types",
-      "community": 25,
+      "community": 21,
       "norm_label": "biome_types"
     },
     {
@@ -11630,7 +11770,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "world_biomeareas_biome_type_ids",
-      "community": 25,
+      "community": 21,
       "norm_label": "biome_type_ids"
     },
     {
@@ -11640,7 +11780,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "world_biomeareas_default_graveyard_ground_colors",
-      "community": 25,
+      "community": 21,
       "norm_label": "default_graveyard_ground_colors"
     },
     {
@@ -11660,7 +11800,7 @@
       "source_location": "L51",
       "_origin": "ast",
       "id": "world_biomeareas_asfinitenumber",
-      "community": 25,
+      "community": 21,
       "norm_label": "asfinitenumber()"
     },
     {
@@ -11670,7 +11810,7 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "world_biomeareas_clampnumber",
-      "community": 15,
+      "community": 21,
       "norm_label": "clampnumber()"
     },
     {
@@ -11680,7 +11820,7 @@
       "source_location": "L60",
       "_origin": "ast",
       "id": "world_biomeareas_clamp01",
-      "community": 15,
+      "community": 21,
       "norm_label": "clamp01()"
     },
     {
@@ -11690,7 +11830,7 @@
       "source_location": "L64",
       "_origin": "ast",
       "id": "world_biomeareas_smoothstep",
-      "community": 15,
+      "community": 21,
       "norm_label": "smoothstep()"
     },
     {
@@ -11700,7 +11840,7 @@
       "source_location": "L70",
       "_origin": "ast",
       "id": "world_biomeareas_normalizecenter",
-      "community": 25,
+      "community": 21,
       "norm_label": "normalizecenter()"
     },
     {
@@ -11710,7 +11850,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "world_biomeareas_ascolor",
-      "community": 25,
+      "community": 21,
       "norm_label": "ascolor()"
     },
     {
@@ -11720,7 +11860,7 @@
       "source_location": "L82",
       "_origin": "ast",
       "id": "world_biomeareas_normalizegroundcolors",
-      "community": 25,
+      "community": 21,
       "norm_label": "normalizegroundcolors()"
     },
     {
@@ -11730,7 +11870,7 @@
       "source_location": "L92",
       "_origin": "ast",
       "id": "world_biomeareas_normalizebiomearea",
-      "community": 29,
+      "community": 21,
       "norm_label": "normalizebiomearea()"
     },
     {
@@ -11750,7 +11890,7 @@
       "source_location": "L115",
       "_origin": "ast",
       "id": "world_biomeareas_getbiomeinfluence",
-      "community": 15,
+      "community": 21,
       "norm_label": "getbiomeinfluence()"
     },
     {
@@ -11780,7 +11920,7 @@
       "source_location": "L139",
       "_origin": "ast",
       "id": "world_biomeareas_graveyard_shader_ground_intensities",
-      "community": 25,
+      "community": 21,
       "norm_label": "graveyard_shader_ground_intensities"
     },
     {
@@ -11790,7 +11930,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "world_biomeareas_getbiomegroundcolors",
-      "community": 25,
+      "community": 21,
       "norm_label": "getbiomegroundcolors()"
     },
     {
@@ -11850,7 +11990,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "house_housecolliders",
-      "community": 18,
+      "community": 14,
       "norm_label": "housecolliders.jsx"
     },
     {
@@ -11860,7 +12000,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "house_housecolliders_housecolliders",
-      "community": 18,
+      "community": 14,
       "norm_label": "housecolliders()"
     },
     {
@@ -11920,7 +12060,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "house_houselayout",
-      "community": 18,
+      "community": 14,
       "norm_label": "houselayout.js"
     },
     {
@@ -11930,7 +12070,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "house_houselayout_corners",
-      "community": 18,
+      "community": 14,
       "norm_label": "corners"
     },
     {
@@ -11940,7 +12080,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "house_houselayout_rooms",
-      "community": 18,
+      "community": 14,
       "norm_label": "rooms"
     },
     {
@@ -11950,7 +12090,7 @@
       "source_location": "L65",
       "_origin": "ast",
       "id": "house_houselayout_wallsegments",
-      "community": 18,
+      "community": 14,
       "norm_label": "wallsegments"
     },
     {
@@ -11960,7 +12100,7 @@
       "source_location": "L168",
       "_origin": "ast",
       "id": "house_houselayout_cornerbyid",
-      "community": 18,
+      "community": 14,
       "norm_label": "cornerbyid"
     },
     {
@@ -11970,7 +12110,7 @@
       "source_location": "L170",
       "_origin": "ast",
       "id": "house_houselayout_normalizewallsegment",
-      "community": 18,
+      "community": 14,
       "norm_label": "normalizewallsegment()"
     },
     {
@@ -11980,7 +12120,7 @@
       "source_location": "L204",
       "_origin": "ast",
       "id": "house_houselayout_houselayout",
-      "community": 18,
+      "community": 14,
       "norm_label": "houselayout"
     },
     {
@@ -11990,7 +12130,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "house_houselayout_mainroom",
-      "community": 18,
+      "community": 14,
       "norm_label": "mainroom"
     },
     {
@@ -12000,7 +12140,7 @@
       "source_location": "L212",
       "_origin": "ast",
       "id": "house_houselayout_secondroom",
-      "community": 18,
+      "community": 14,
       "norm_label": "secondroom"
     },
     {
@@ -12010,7 +12150,7 @@
       "source_location": "L213",
       "_origin": "ast",
       "id": "house_houselayout_maintosecondopening",
-      "community": 18,
+      "community": 14,
       "norm_label": "maintosecondopening"
     },
     {
@@ -12020,7 +12160,7 @@
       "source_location": "L214",
       "_origin": "ast",
       "id": "house_houselayout_outsidedooropening",
-      "community": 18,
+      "community": 14,
       "norm_label": "outsidedooropening"
     },
     {
@@ -12030,7 +12170,7 @@
       "source_location": "L216",
       "_origin": "ast",
       "id": "house_houselayout_getroomhalfsize",
-      "community": 18,
+      "community": 14,
       "norm_label": "getroomhalfsize()"
     },
     {
@@ -12040,7 +12180,7 @@
       "source_location": "L224",
       "_origin": "ast",
       "id": "house_houselayout_getroombounds",
-      "community": 18,
+      "community": 14,
       "norm_label": "getroombounds()"
     },
     {
@@ -12050,7 +12190,7 @@
       "source_location": "L237",
       "_origin": "ast",
       "id": "house_houselayout_gethousefootprintcolliders",
-      "community": 18,
+      "community": 14,
       "norm_label": "gethousefootprintcolliders()"
     },
     {
@@ -12100,7 +12240,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "house_neighborfloorplan",
-      "community": 17,
+      "community": 28,
       "norm_label": "neighborfloorplan.js"
     },
     {
@@ -12110,7 +12250,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getroomcorners",
-      "community": 17,
+      "community": 28,
       "norm_label": "getroomcorners()"
     },
     {
@@ -12120,7 +12260,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "house_neighborfloorplan_normalizewallsegment",
-      "community": 17,
+      "community": 28,
       "norm_label": "normalizewallsegment()"
     },
     {
@@ -12130,7 +12270,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "house_neighborfloorplan_createroomwalls",
-      "community": 17,
+      "community": 28,
       "norm_label": "createroomwalls()"
     },
     {
@@ -12140,7 +12280,7 @@
       "source_location": "L93",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getroombounds",
-      "community": 17,
+      "community": 28,
       "norm_label": "getroombounds()"
     },
     {
@@ -12150,7 +12290,7 @@
       "source_location": "L104",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getwallcoverageintervals",
-      "community": 17,
+      "community": 28,
       "norm_label": "getwallcoverageintervals()"
     },
     {
@@ -12160,7 +12300,7 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "house_neighborfloorplan_subtractintervals",
-      "community": 17,
+      "community": 28,
       "norm_label": "subtractintervals()"
     },
     {
@@ -12170,7 +12310,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getpointonwall",
-      "community": 17,
+      "community": 28,
       "norm_label": "getpointonwall()"
     },
     {
@@ -12180,7 +12320,7 @@
       "source_location": "L152",
       "_origin": "ast",
       "id": "house_neighborfloorplan_trimwalltoexteriorsegments",
-      "community": 17,
+      "community": 28,
       "norm_label": "trimwalltoexteriorsegments()"
     },
     {
@@ -12190,7 +12330,7 @@
       "source_location": "L182",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getexteriorcontour",
-      "community": 17,
+      "community": 28,
       "norm_label": "getexteriorcontour()"
     },
     {
@@ -12200,7 +12340,7 @@
       "source_location": "L212",
       "_origin": "ast",
       "id": "house_neighborfloorplan_roomstouch",
-      "community": 17,
+      "community": 28,
       "norm_label": "roomstouch()"
     },
     {
@@ -12210,7 +12350,7 @@
       "source_location": "L222",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getgroupbounds",
-      "community": 17,
+      "community": 28,
       "norm_label": "getgroupbounds()"
     },
     {
@@ -12220,7 +12360,7 @@
       "source_location": "L239",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getroofgroups",
-      "community": 17,
+      "community": 28,
       "norm_label": "getroofgroups()"
     },
     {
@@ -12230,7 +12370,7 @@
       "source_location": "L279",
       "_origin": "ast",
       "id": "house_neighborfloorplan_getattachmentside",
-      "community": 17,
+      "community": 28,
       "norm_label": "getattachmentside()"
     },
     {
@@ -12240,7 +12380,7 @@
       "source_location": "L299",
       "_origin": "ast",
       "id": "house_neighborfloorplan_createneighborfloorplan",
-      "community": 17,
+      "community": 28,
       "norm_label": "createneighborfloorplan()"
     },
     {
@@ -12250,7 +12390,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "house_wallutils",
-      "community": 17,
+      "community": 30,
       "norm_label": "wallutils.js"
     },
     {
@@ -12260,7 +12400,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "house_wallutils_getwallopeninglayout",
-      "community": 17,
+      "community": 30,
       "norm_label": "getwallopeninglayout()"
     },
     {
@@ -12270,7 +12410,7 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "house_wallutils_splitwallintosolidrects",
-      "community": 17,
+      "community": 30,
       "norm_label": "splitwallintosolidrects()"
     },
     {
@@ -12280,7 +12420,7 @@
       "source_location": "L109",
       "_origin": "ast",
       "id": "house_wallutils_getwallsidetransform",
-      "community": 17,
+      "community": 30,
       "norm_label": "getwallsidetransform()"
     },
     {
@@ -12290,7 +12430,7 @@
       "source_location": "L132",
       "_origin": "ast",
       "id": "house_wallutils_getwalldirection",
-      "community": 17,
+      "community": 30,
       "norm_label": "getwalldirection()"
     },
     {
@@ -12300,7 +12440,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "house_wallutils_getwallpointat",
-      "community": 17,
+      "community": 30,
       "norm_label": "getwallpointat()"
     },
     {
@@ -12310,7 +12450,7 @@
       "source_location": "L152",
       "_origin": "ast",
       "id": "house_wallutils_getwallcollidertransform",
-      "community": 17,
+      "community": 30,
       "norm_label": "getwallcollidertransform()"
     },
     {
@@ -12320,7 +12460,7 @@
       "source_location": "L173",
       "_origin": "ast",
       "id": "house_wallutils_getwallfootprint",
-      "community": 17,
+      "community": 30,
       "norm_label": "getwallfootprint()"
     },
     {
@@ -12330,7 +12470,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "world_lightinglayers",
-      "community": 15,
+      "community": 22,
       "norm_label": "lightinglayers.js"
     },
     {
@@ -12340,7 +12480,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "loot_lootdrops",
-      "community": 30,
+      "community": 3,
       "norm_label": "lootdrops.jsx"
     },
     {
@@ -12350,7 +12490,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "loot_lootdrops_smoothstep",
-      "community": 30,
+      "community": 3,
       "norm_label": "smoothstep()"
     },
     {
@@ -12360,7 +12500,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "loot_lootdrops_lootdropmodel",
-      "community": 30,
+      "community": 3,
       "norm_label": "lootdropmodel()"
     },
     {
@@ -12370,7 +12510,7 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "loot_lootdrops_lootdropvisual",
-      "community": 30,
+      "community": 3,
       "norm_label": "lootdropvisual()"
     },
     {
@@ -12380,7 +12520,7 @@
       "source_location": "L64",
       "_origin": "ast",
       "id": "loot_lootdrops_lootdrops",
-      "community": 30,
+      "community": 3,
       "norm_label": "lootdrops()"
     },
     {
@@ -12870,7 +13010,7 @@
       "source_location": "L165",
       "_origin": "ast",
       "id": "world_mapobjects_getmapobjectlibrary",
-      "community": 16,
+      "community": 29,
       "norm_label": "getmapobjectlibrary()"
     },
     {
@@ -12900,7 +13040,7 @@
       "source_location": "L172",
       "_origin": "ast",
       "id": "world_mapobjects_monster_spawner_types",
-      "community": 29,
+      "community": 16,
       "norm_label": "monster_spawner_types"
     },
     {
@@ -12910,7 +13050,7 @@
       "source_location": "L191",
       "_origin": "ast",
       "id": "world_mapobjects_monster_spawner_type_ids",
-      "community": 29,
+      "community": 16,
       "norm_label": "monster_spawner_type_ids"
     },
     {
@@ -13020,7 +13160,7 @@
       "source_location": "L344",
       "_origin": "ast",
       "id": "world_mapobjects_map_monster_spawners",
-      "community": 22,
+      "community": 16,
       "norm_label": "map_monster_spawners"
     },
     {
@@ -13030,7 +13170,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "npc_questnpcinteraction",
-      "community": 3,
+      "community": 18,
       "norm_label": "questnpcinteraction.jsx"
     },
     {
@@ -13040,7 +13180,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "npc_questnpcinteraction_marker_glyph",
-      "community": 3,
+      "community": 18,
       "norm_label": "marker_glyph"
     },
     {
@@ -13050,7 +13190,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "npc_questnpcinteraction_marker_class",
-      "community": 3,
+      "community": 18,
       "norm_label": "marker_class"
     },
     {
@@ -13060,7 +13200,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "npc_questnpcinteraction_getplacementy",
-      "community": 3,
+      "community": 18,
       "norm_label": "getplacementy()"
     },
     {
@@ -13070,7 +13210,7 @@
       "source_location": "L24",
       "_origin": "ast",
       "id": "npc_questnpcinteraction_getmarkerheight",
-      "community": 3,
+      "community": 18,
       "norm_label": "getmarkerheight()"
     },
     {
@@ -13080,7 +13220,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "npc_questnpcinteraction_questnpcmarker",
-      "community": 3,
+      "community": 18,
       "norm_label": "questnpcmarker()"
     },
     {
@@ -13090,7 +13230,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "npc_questnpcinteraction_questnpcproximity",
-      "community": 3,
+      "community": 18,
       "norm_label": "questnpcproximity()"
     },
     {
@@ -13100,7 +13240,7 @@
       "source_location": "L87",
       "_origin": "ast",
       "id": "npc_questnpcinteraction_questnpcinteraction",
-      "community": 3,
+      "community": 18,
       "norm_label": "questnpcinteraction()"
     },
     {
@@ -13240,7 +13380,7 @@
       "source_location": "L219",
       "_origin": "ast",
       "id": "world_outdoordata_createwallcollider",
-      "community": 17,
+      "community": 19,
       "norm_label": "createwallcollider()"
     },
     {
@@ -13460,7 +13600,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "terrain_terraingeometry_terrainmodifications",
-      "community": 14,
+      "community": 22,
       "norm_label": "terrainmodifications"
     },
     {
@@ -13480,7 +13620,7 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "terrain_terraingeometry_terrainready",
-      "community": 38,
+      "community": 14,
       "norm_label": "terrainready"
     },
     {
@@ -13630,7 +13770,7 @@
       "source_location": "L243",
       "_origin": "ast",
       "id": "terrain_terraingeometry_gethousecutmask",
-      "community": 18,
+      "community": 14,
       "norm_label": "gethousecutmask()"
     },
     {
@@ -13660,7 +13800,7 @@
       "source_location": "L291",
       "_origin": "ast",
       "id": "terrain_terraingeometry_getterrainheight",
-      "community": 14,
+      "community": 83,
       "norm_label": "getterrainheight()"
     },
     {
@@ -13680,7 +13820,7 @@
       "source_location": "L342",
       "_origin": "ast",
       "id": "terrain_terraingeometry_createterraingeometry",
-      "community": 18,
+      "community": 14,
       "norm_label": "createterraingeometry()"
     },
     {
@@ -13690,7 +13830,7 @@
       "source_location": "L393",
       "_origin": "ast",
       "id": "terrain_terraingeometry_getcachedvisualgeometry",
-      "community": 25,
+      "community": 14,
       "norm_label": "getcachedvisualgeometry()"
     },
     {
@@ -13730,7 +13870,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "trees_instancedtreebatch",
-      "community": 2,
+      "community": 62,
       "norm_label": "instancedtreebatch.jsx"
     },
     {
@@ -13740,7 +13880,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_dummy",
-      "community": 2,
+      "community": 62,
       "norm_label": "dummy"
     },
     {
@@ -13750,7 +13890,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_localmatrix",
-      "community": 2,
+      "community": 62,
       "norm_label": "localmatrix"
     },
     {
@@ -13760,7 +13900,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_cameratoplayer",
-      "community": 2,
+      "community": 62,
       "norm_label": "cameratoplayer"
     },
     {
@@ -13770,7 +13910,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_playertarget",
-      "community": 2,
+      "community": 62,
       "norm_label": "playertarget"
     },
     {
@@ -13780,7 +13920,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_cameraorigin",
-      "community": 2,
+      "community": 62,
       "norm_label": "cameraorigin"
     },
     {
@@ -13790,7 +13930,7 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_tree_lod_thresholds",
-      "community": 2,
+      "community": 62,
       "norm_label": "tree_lod_thresholds"
     },
     {
@@ -13800,7 +13940,7 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_disposetree",
-      "community": 2,
+      "community": 62,
       "norm_label": "disposetree()"
     },
     {
@@ -13810,7 +13950,7 @@
       "source_location": "L39",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_collectrenderableparts",
-      "community": 2,
+      "community": 62,
       "norm_label": "collectrenderableparts()"
     },
     {
@@ -13820,7 +13960,7 @@
       "source_location": "L57",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_makeocclusionmaterial",
-      "community": 2,
+      "community": 62,
       "norm_label": "makeocclusionmaterial()"
     },
     {
@@ -13830,7 +13970,7 @@
       "source_location": "L123",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_instancedtreepart",
-      "community": 2,
+      "community": 62,
       "norm_label": "instancedtreepart()"
     },
     {
@@ -13850,7 +13990,7 @@
       "source_location": "L304",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_getnexttreelod",
-      "community": 2,
+      "community": 62,
       "norm_label": "getnexttreelod()"
     },
     {
@@ -13860,7 +14000,7 @@
       "source_location": "L317",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_treelodvariant",
-      "community": 2,
+      "community": 62,
       "norm_label": "treelodvariant()"
     },
     {
@@ -13870,7 +14010,7 @@
       "source_location": "L378",
       "_origin": "ast",
       "id": "trees_instancedtreebatch_instancedtreebatch",
-      "community": 2,
+      "community": 62,
       "norm_label": "instancedtreebatch()"
     },
     {
@@ -13990,7 +14130,7 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "trees_proceduraltreeconfig_default_tree_config",
-      "community": 2,
+      "community": 38,
       "norm_label": "default_tree_config"
     },
     {
@@ -14110,7 +14250,7 @@
       "source_location": "L405",
       "_origin": "ast",
       "id": "trees_proceduraltreeconfig_estimatetreeheight",
-      "community": 16,
+      "community": 22,
       "norm_label": "estimatetreeheight()"
     },
     {
@@ -14160,7 +14300,7 @@
       "source_location": "L164",
       "_origin": "ast",
       "id": "trees_treelibrary_game_tree_library",
-      "community": 2,
+      "community": 35,
       "norm_label": "game_tree_library"
     },
     {
@@ -14220,7 +14360,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "trees_treelibrary_gettreemapobjectentries",
-      "community": 35,
+      "community": 16,
       "norm_label": "gettreemapobjectentries()"
     },
     {
@@ -20856,9 +20996,20 @@
       "source_file": "src/App.jsx",
       "source_location": "L13",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app",
-      "target": "lib_loadtiming_forceinitialassetbatchready",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_forceinitialassetbatchready"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/App.jsx",
+      "source_location": "L13",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_app",
+      "target": "lib_loadtiming_installassetloadprofiler"
     },
     {
       "relation": "imports",
@@ -20868,7 +21019,7 @@
       "source_location": "L13",
       "weight": 1.0,
       "source": "src_app",
-      "target": "lib_loadtiming_installassetloadprofiler",
+      "target": "lib_loadtiming_installlongtaskobserver",
       "confidence_score": 1.0
     },
     {
@@ -20878,9 +21029,9 @@
       "source_file": "src/App.jsx",
       "source_location": "L13",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app",
-      "target": "lib_loadtiming_isinitialassetbatchready",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_isinitialassetbatchready"
     },
     {
       "relation": "imports",
@@ -20889,9 +21040,9 @@
       "source_file": "src/App.jsx",
       "source_location": "L13",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app",
-      "target": "lib_loadtiming_lockinitialassetbatch",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_lockinitialassetbatch"
     },
     {
       "relation": "imports",
@@ -20911,6 +21062,17 @@
       "source_file": "src/App.jsx",
       "source_location": "L13",
       "weight": 1.0,
+      "source": "src_app",
+      "target": "lib_loadtiming_recordrenderprofile",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/App.jsx",
+      "source_location": "L13",
+      "weight": 1.0,
       "confidence_score": 1.0,
       "source": "src_app",
       "target": "lib_loadtiming_reportloadtiming"
@@ -20922,8 +21084,19 @@
       "source_file": "src/App.jsx",
       "source_location": "L13",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app",
-      "target": "lib_loadtiming_subscribeinitialassetbatch",
+      "target": "lib_loadtiming_subscribeinitialassetbatch"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/App.jsx",
+      "source_location": "L14",
+      "weight": 1.0,
+      "source": "src_app",
+      "target": "lib_perfflags",
       "confidence_score": 1.0
     },
     {
@@ -20947,6 +21120,39 @@
       "confidence_score": 1.0,
       "source": "src_app",
       "target": "lib_supabase_issupabaseconfigured"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/App.jsx",
+      "source_location": "L15",
+      "weight": 1.0,
+      "source": "src_app",
+      "target": "lib_worldstream",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/App.jsx",
+      "source_location": "L15",
+      "weight": 1.0,
+      "source": "src_app",
+      "target": "lib_worldstream_defer",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/App.jsx",
+      "source_location": "L15",
+      "weight": 1.0,
+      "source": "src_app",
+      "target": "lib_worldstream_startworldstream",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -25723,9 +25929,9 @@
       "source_file": "src/App.jsx",
       "source_location": "L12940",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_shaderwarmupgate",
-      "target": "lib_loadtiming_forceinitialassetbatchready",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_forceinitialassetbatchready"
     },
     {
       "relation": "calls",
@@ -25734,9 +25940,9 @@
       "source_file": "src/App.jsx",
       "source_location": "L12918",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_shaderwarmupgate",
-      "target": "lib_loadtiming_isinitialassetbatchready",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_isinitialassetbatchready"
     },
     {
       "relation": "calls",
@@ -25745,9 +25951,9 @@
       "source_file": "src/App.jsx",
       "source_location": "L12934",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_shaderwarmupgate",
-      "target": "lib_loadtiming_lockinitialassetbatch",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_lockinitialassetbatch"
     },
     {
       "relation": "calls",
@@ -25778,9 +25984,9 @@
       "source_file": "src/App.jsx",
       "source_location": "L12931",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_shaderwarmupgate",
-      "target": "lib_loadtiming_subscribeinitialassetbatch",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_subscribeinitialassetbatch"
     },
     {
       "relation": "calls",
@@ -25935,6 +26141,17 @@
       "confidence_score": 1.0,
       "source": "src_app_app",
       "target": "items_materialsinventory_sellitem"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/App.jsx",
+      "source_location": "L16444",
+      "weight": 1.0,
+      "source": "src_app_app",
+      "target": "lib_worldstream_startworldstream",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -28227,9 +28444,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L15",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_activeassetidsbyurl",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_activeassetidsbyurl"
     },
     {
       "relation": "contains",
@@ -28237,9 +28454,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L14",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_assetloads",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_assetloads"
     },
     {
       "relation": "contains",
@@ -28247,9 +28464,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L16",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_asseturlbyloadid",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_asseturlbyloadid"
     },
     {
       "relation": "contains",
@@ -28267,9 +28484,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L79",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_forceinitialassetbatchready",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_forceinitialassetbatchready"
     },
     {
       "relation": "contains",
@@ -28277,9 +28494,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L54",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_getactiveassetstack",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_getactiveassetstack"
     },
     {
       "relation": "contains",
@@ -28287,9 +28504,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L37",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_getassetrecord",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_getassetrecord"
     },
     {
       "relation": "contains",
@@ -28297,9 +28514,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L98",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_getinitialassetbatchsnapshot",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_getinitialassetbatchsnapshot"
     },
     {
       "relation": "contains",
@@ -28307,9 +28524,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L24",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_initialassetbatchforcedpendingurls",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_initialassetbatchforcedpendingurls"
     },
     {
       "relation": "contains",
@@ -28317,9 +28534,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L17",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_initialblockingassetids",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_initialblockingassetids"
     },
     {
       "relation": "contains",
@@ -28327,9 +28544,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L18",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_initialloadsubscribers",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_initialloadsubscribers"
     },
     {
       "relation": "contains",
@@ -28337,8 +28554,18 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L112",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_installassetloadprofiler",
+      "target": "lib_loadtiming_installassetloadprofiler"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L29",
+      "weight": 1.0,
+      "source": "lib_loadtiming",
+      "target": "lib_loadtiming_installlongtaskobserver",
       "confidence_score": 1.0
     },
     {
@@ -28347,9 +28574,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L69",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_isinitialassetbatchready",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_isinitialassetbatchready"
     },
     {
       "relation": "contains",
@@ -28357,8 +28584,18 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L73",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_lockinitialassetbatch",
+      "target": "lib_loadtiming_lockinitialassetbatch"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L19",
+      "weight": 1.0,
+      "source": "lib_loadtiming",
+      "target": "lib_loadtiming_longtasks",
       "confidence_score": 1.0
     },
     {
@@ -28387,9 +28624,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L33",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_normalizeasseturl",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_normalizeasseturl"
     },
     {
       "relation": "contains",
@@ -28397,8 +28634,28 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L63",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_notifyinitialloadsubscribers",
+      "target": "lib_loadtiming_notifyinitialloadsubscribers"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L191",
+      "weight": 1.0,
+      "source": "lib_loadtiming",
+      "target": "lib_loadtiming_recordrenderprofile",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/loadTiming.js",
+      "source_location": "L189",
+      "weight": 1.0,
+      "source": "lib_loadtiming",
+      "target": "lib_loadtiming_renderprofiles",
       "confidence_score": 1.0
     },
     {
@@ -28417,9 +28674,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L91",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming",
-      "target": "lib_loadtiming_subscribeinitialassetbatch",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_subscribeinitialassetbatch"
     },
     {
       "relation": "calls",
@@ -28428,9 +28685,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L38",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming_getassetrecord",
-      "target": "lib_loadtiming_normalizeasseturl",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_normalizeasseturl"
     },
     {
       "relation": "calls",
@@ -28439,9 +28696,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L88",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming_forceinitialassetbatchready",
-      "target": "lib_loadtiming_notifyinitialloadsubscribers",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_notifyinitialloadsubscribers"
     },
     {
       "relation": "calls",
@@ -28450,9 +28707,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L76",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming_lockinitialassetbatch",
-      "target": "lib_loadtiming_notifyinitialloadsubscribers",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_notifyinitialloadsubscribers"
     },
     {
       "relation": "calls",
@@ -28461,9 +28718,9 @@
       "source_file": "src/lib/loadTiming.js",
       "source_location": "L253",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "lib_loadtiming_reportloadtiming",
-      "target": "lib_loadtiming_getinitialassetbatchsnapshot",
-      "confidence_score": 1.0
+      "target": "lib_loadtiming_getinitialassetbatchsnapshot"
     },
     {
       "relation": "calls",
@@ -28475,6 +28732,17 @@
       "confidence_score": 1.0,
       "source": "lib_loadtiming_reportloadtiming",
       "target": "lib_loadtiming_fmt"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/world/OutdoorBounds.jsx",
+      "source_location": "L6",
+      "weight": 1.0,
+      "source": "world_outdoorbounds",
+      "target": "lib_perfflags",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -28529,6 +28797,87 @@
       "confidence_score": 1.0,
       "source": "services_progressservice",
       "target": "lib_supabase_issupabaseconfigured"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/useStaggeredReveal.js",
+      "source_location": "L24",
+      "weight": 1.0,
+      "source": "lib_usestaggeredreveal",
+      "target": "lib_usestaggeredreveal_usestaggeredreveal",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L59",
+      "weight": 1.0,
+      "source": "lib_worldstream",
+      "target": "lib_worldstream_defer",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L42",
+      "weight": 1.0,
+      "source": "lib_worldstream",
+      "target": "lib_worldstream_getreveallevel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L17",
+      "weight": 1.0,
+      "source": "lib_worldstream",
+      "target": "lib_worldstream_listeners",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L36",
+      "weight": 1.0,
+      "source": "lib_worldstream",
+      "target": "lib_worldstream_startworldstream",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L23",
+      "weight": 1.0,
+      "source": "lib_worldstream",
+      "target": "lib_worldstream_tick",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L46",
+      "weight": 1.0,
+      "source": "lib_worldstream",
+      "target": "lib_worldstream_usereveallevel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/lib/worldStream.js",
+      "source_location": "L60",
+      "weight": 1.0,
+      "source": "lib_worldstream_defer",
+      "target": "lib_worldstream_usereveallevel",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -35520,9 +35869,9 @@
       "source_file": "src/world/MapObjectPlaceables.jsx",
       "source_location": "L15",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "world_mapobjectplaceables",
-      "target": "world_mapobjectplaceables_cloneinplaceanimationclip",
-      "confidence_score": 1.0
+      "target": "world_mapobjectplaceables_cloneinplaceanimationclip"
     },
     {
       "relation": "contains",
@@ -43234,5 +43583,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "7df5e9a5299da7ad59acd6295c5385299742f5fe"
+  "built_at_commit": "571d3b7b68d81bdcb62851858a4d3e309fd2325a"
 }

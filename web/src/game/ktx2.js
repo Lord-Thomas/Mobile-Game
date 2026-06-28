@@ -1,5 +1,4 @@
-import { useMemo } from 'react'
-import { useKTX2 } from '@react-three/drei'
+import { useTexture } from '@react-three/drei'
 
 // Transcodeur Basis hébergé localement (public/basis/), copié depuis three.
 export const BASIS_TRANSCODER_PATH = '/basis/'
@@ -11,18 +10,9 @@ export const BASIS_TRANSCODER_PATH = '/basis/'
 export const toKtx2Path = (path) =>
   typeof path === 'string' ? path.replace(/\.(png|jpe?g)$/i, '.ktx2') : path
 
-// Drop-in pour useTexture : charge des .ktx2 (GPU-compressé, reste compressé en
-// VRAM). Accepte un chemin, un tableau ou un objet de chemins, comme useKTX2/useTexture.
-// IMPORTANT : ne l'utiliser que pour des textures effectivement encodées en .ktx2
-// (surfaces). Les masks/textures d'ennemis non encodés restent sur useTexture.
-// NOTE : les .ktx2 sont pré-flippés verticalement (flipY=false) → rendu identique au PNG.
+// Drop-in pour useTexture. Les derniers timings montrent que Basis/KTX2 ajoute un
+// gros transcodage au chargement mobile ; on garde donc les PNG/JPG source pour
+// tester le chemin sans transcode, sans perte de qualité visuelle.
 export function useGameTexture(input) {
-  const remapped = useMemo(() => {
-    if (Array.isArray(input)) return input.map(toKtx2Path)
-    if (input && typeof input === 'object') {
-      return Object.fromEntries(Object.entries(input).map(([k, v]) => [k, toKtx2Path(v)]))
-    }
-    return toKtx2Path(input)
-  }, [input])
-  return useKTX2(remapped, BASIS_TRANSCODER_PATH)
+  return useTexture(input)
 }

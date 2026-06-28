@@ -13,12 +13,12 @@ import { useEffect, useState } from 'react'
 
 let revealLevel = 0
 let running = false
-let rafId = 0
 const listeners = new Set()
 
 // Plafond de sécurité : on arrête de tirer des frames une fois tous les niveaux
 // utilisés révélés. Largement au-dessus du nombre de sous-arbres différés.
 const MAX_LEVEL = 64
+const REVEAL_STEP_DELAY_MS = 320
 
 function tick() {
   revealLevel += 1
@@ -26,7 +26,7 @@ function tick() {
     try { notify(revealLevel) } catch { /* ignore */ }
   })
   if (revealLevel < MAX_LEVEL) {
-    rafId = requestAnimationFrame(tick)
+    window.setTimeout(tick, REVEAL_STEP_DELAY_MS)
   } else {
     running = false
   }
@@ -36,7 +36,7 @@ function tick() {
 export function startWorldStream() {
   if (running || revealLevel >= MAX_LEVEL) return
   running = true
-  rafId = requestAnimationFrame(tick)
+  window.setTimeout(tick, REVEAL_STEP_DELAY_MS)
 }
 
 export function getRevealLevel() {

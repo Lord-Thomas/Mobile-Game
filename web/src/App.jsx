@@ -10,8 +10,8 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
-import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, subscribeInitialAssetBatch } from './lib/loadTiming'
-import { PERF_NO_MAP_COLLIDERS } from './lib/perfFlags'
+import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
+import { PERF_NO_MAP_COLLIDERS, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
 import { Defer, startWorldStream } from './lib/worldStream'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
@@ -4614,6 +4614,17 @@ function cloneMixamoAnimationClip(clip) {
   return next
 }
 
+function filterAnimationClipTracksForObject(clip, object) {
+  if (!clip || !object) return clip
+  clip.tracks = clip.tracks.filter((track) => {
+    const separatorIndex = track.name.lastIndexOf('.')
+    if (separatorIndex <= 0) return true
+    const targetName = track.name.slice(0, separatorIndex)
+    return Boolean(object.getObjectByName?.(targetName))
+  })
+  return clip
+}
+
 // Charge un GLB d'animation Mixamo (converti via FBX2glTF) et renvoie un objet de
 // même forme que l'ancien useFBX ({ animations: [clip] }), pistes renormalisées.
 function useMixamoGlbAnimation(url) {
@@ -4840,9 +4851,9 @@ function PlayerAvatar({
         if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run') {
           lockHipsPlanarPosition(clip)
         }
-        return clip
+        return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [idle.animations, walk.animations, run.animations, kick.animations, punch.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const { actions, mixer } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
@@ -9287,13 +9298,14 @@ function SmallMushroomEnemy({
         clip.name = name
         lockEmoteHipsHeight(clip, enemyHipsRestHeight)
         lockHipsPlanarPosition(clip)
-        return clip
+        return filterAnimationClipTracksForObject(clip, model.object)
       })
   }, [
     cfg.useModelAnimationForAllMotions,
     cfg.useModelIdleAnimation,
     enemyHipsRestHeight,
     idle.animations,
+    model.object,
     modelIdleAnimation,
     punch.animations,
     walk.animations,
@@ -10097,9 +10109,9 @@ function SummonedSkeleton({
         clip.name = name
         lockEmoteHipsHeight(clip, skeletonHipsRestHeight)
         lockHipsPlanarPosition(clip)
-        return clip
+        return filterAnimationClipTracksForObject(clip, model.object)
       })
-  }, [idle.animations, walk.animations, punch.animations, skeletonHipsRestHeight])
+  }, [idle.animations, model.object, walk.animations, punch.animations, skeletonHipsRestHeight])
 
   const { actions, mixer } = useAnimations(animationClips, model.object)
   const currentActionRef = useRef(null)
@@ -12913,17 +12925,19 @@ function RenderQualityGovernor({ onScaleChange }) {
   return null
 }
 
-const INITIAL_ASSET_BATCH_MAX_WAIT_MS = 6500
+const INITIAL_ASSET_BATCH_MAX_WAIT_MS = 1800
 
 function ShaderWarmupGate({ onComplete }) {
   const { gl, scene, camera } = useThree()
   const [initialAssetsReady, setInitialAssetsReady] = useState(() => isInitialAssetBatchReady())
   const completedRef = useRef(false)
+  const gateStartedRef = useRef(false)
 
   useEffect(() => {
+    if (gateStartedRef.current) return undefined
+    gateStartedRef.current = true
+
     let cancelled = false
-    let frameId = 0
-    let secondFrameId = 0
     let timeoutId = 0
 
     // Sonde : QUAND l'effet du gate s'exécute = quand le gate s'est monté. S'il
@@ -12935,13 +12949,9 @@ function ShaderWarmupGate({ onComplete }) {
     }
 
     const unsubscribe = subscribeInitialAssetBatch(refresh)
-    frameId = window.requestAnimationFrame(() => {
-      secondFrameId = window.requestAnimationFrame(() => {
-        markLoad('gate:lock')
-        lockInitialAssetBatch()
-        refresh()
-      })
-    })
+    startInitialAssetBatchCollection()
+    markLoad('gate:lock')
+    lockInitialAssetBatch()
     timeoutId = window.setTimeout(() => {
       if (!isInitialAssetBatchReady()) {
         forceInitialAssetBatchReady(`${INITIAL_ASSET_BATCH_MAX_WAIT_MS}ms max wait`)
@@ -12953,8 +12963,6 @@ function ShaderWarmupGate({ onComplete }) {
     return () => {
       cancelled = true
       unsubscribe()
-      if (frameId) window.cancelAnimationFrame(frameId)
-      if (secondFrameId) window.cancelAnimationFrame(secondFrameId)
       if (timeoutId) window.clearTimeout(timeoutId)
     }
   }, [])
@@ -12982,6 +12990,15 @@ function ShaderWarmupGate({ onComplete }) {
       await waitFrame()
       await waitFrame()
       if (cancelled) return
+
+      if (!PERF_SHADER_WARMUP) {
+        completedRef.current = true
+        markLoad('warmup:skipped')
+        markLoad('warmupEnd')
+        reportLoadTiming()
+        onComplete()
+        return
+      }
 
       const aspect = Math.max(0.1, gl.domElement.clientWidth / Math.max(gl.domElement.clientHeight, 1))
       const customizeCamera = new ThreeOrthographicCamera(-12 * aspect, 12 * aspect, 12, -12, 0.1, 120)
@@ -16530,7 +16547,7 @@ function App() {
         resize={{ debounce: 80 }}
       >
         <ShaderWarmupGate onComplete={completeShaderWarmup} />
-        <RuntimeWarmupRig />
+        {PERF_RUNTIME_WARMUP_RIG && <RuntimeWarmupRig />}
         <LayeredSceneRenderer currentZone={currentZone} />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
@@ -17721,40 +17738,6 @@ installLongTaskObserver()
 // Jalon de chargement : début d'exécution du module App (bundle JS téléchargé+parsé).
 markLoad('jsBoot')
 
-useGLTF.preload('/models/ball/ballon.glb')
-useGLTF.preload('/models/dragon.glb')
-useGLTF.preload('/models/wolf.glb')
-useGLTF.preload('/models/horse.glb')
-useGLTF.preload('/models/cat.glb')
-useGLTF.preload(MAGIC_BOOK_MODEL_URL)
-useGLTF.preload(MAGIC_SKULL_MODEL_URL)
-useFBX.preload(MUSHROOM_ENEMY_MODEL_URL)
-useFBX.preload(SKELETON_ENEMY_MODEL_URL)
-useTexture.preload(SKELETON_ENEMY_TEXTURE_URL)
-useTexture.preload(PLAYER_FACE_DETAILS_MASK_URL)
-useGLTF.preload(PLAYER_MODEL_URL)
-useGLTF.preload('/models/player/anim/idle.glb')
-useGLTF.preload('/models/player/anim/walk.glb')
-useGLTF.preload('/models/player/anim/run.glb')
-useGLTF.preload('/models/player/anim/kick.glb')
-useGLTF.preload('/models/player/anim/punch.glb')
-useGLTF.preload('/models/player/anim/waving.glb')
-useGLTF.preload('/models/player/anim/dance.glb')
-useGLTF.preload('/models/player/anim/pointing-up.glb')
-useGLTF.preload('/models/player/anim/jump-start.glb')
-useGLTF.preload('/models/player/anim/jump-loop.glb')
-useGLTF.preload('/models/player/anim/jump-land.glb')
-useGLTF.preload('/models/player/anim/stand-to-sit.glb')
-useGLTF.preload('/models/player/anim/sitting-idle.glb')
-useGLTF.preload('/models/player/anim/stand-up.glb')
-useFBX.preload('/models/placeables/modular-sofa/modular-sofa.fbx')
-useTexture.preload('/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG')
-useTexture.preload('/textures/outdoor/grass-patchy-basecolor-512.jpg')
-useTexture.preload('/textures/outdoor/dirt-ground-basecolor-512.jpg')
-useTexture.preload('/textures/outdoor/grass-patchy-normal.png')
-useTexture.preload('/textures/outdoor/dirt-ground-normal.jpg')
-useTexture.preload('/textures/outdoor/grass-001-white.png')
-useTexture.preload('/textures/outdoor/asphalt-clean-basecolor-512.jpg')
 // Test de chargement mobile : ne pas bloquer l'affichage initial sur tout le
 // catalogue boutique/maison. Les assets encore nécessaires apparaîtront dans le
 // tableau "Assets Three.js les plus lents" s'ils sont montés par la scène initiale.

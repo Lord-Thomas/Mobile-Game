@@ -45,6 +45,7 @@ export function installLongTaskObserver() {
   }
 }
 let nextAssetLoadId = 1
+let initialAssetBatchCollecting = false
 let initialAssetBatchLocked = false
 let initialAssetBatchForcedReady = false
 let initialAssetBatchForceReason = ''
@@ -97,9 +98,15 @@ export function isInitialAssetBatchReady() {
   return initialAssetBatchLocked && (initialAssetBatchForcedReady || initialBlockingAssetIds.size === 0)
 }
 
+export function startInitialAssetBatchCollection() {
+  if (initialAssetBatchLocked || initialAssetBatchForcedReady) return
+  initialAssetBatchCollecting = true
+}
+
 export function lockInitialAssetBatch() {
   if (initialAssetBatchLocked) return
   initialAssetBatchLocked = true
+  initialAssetBatchCollecting = false
   notifyInitialLoadSubscribers()
 }
 
@@ -153,7 +160,7 @@ export function installAssetLoadProfiler(manager) {
     assetUrlByLoadId.set(id, key)
     record.starts.push(performance.now())
     record.active += 1
-    if (!initialAssetBatchLocked && !initialAssetBatchForcedReady) {
+    if (initialAssetBatchCollecting && !initialAssetBatchLocked && !initialAssetBatchForcedReady) {
       initialBlockingAssetIds.add(id)
       notifyInitialLoadSubscribers()
     }

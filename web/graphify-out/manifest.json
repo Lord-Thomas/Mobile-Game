@@ -120,8 +120,8 @@
     "semantic_hash": "25c0382bc1d6f55cbe40ce5eaf33d81a"
   },
   "src/App.jsx": {
-    "mtime": 1782635350.924992,
-    "ast_hash": "ff67a70a77181807cadd3fed80768644",
+    "mtime": 1782650801.954139,
+    "ast_hash": "5c8a9ddac39b6cbdef9b83937499ed52",
     "semantic_hash": ""
   },
   "src/effects/ParticleEffect.jsx": {
@@ -185,8 +185,8 @@
     "semantic_hash": ""
   },
   "src/lib/loadTiming.js": {
-    "mtime": 1782635405.7929537,
-    "ast_hash": "595c2688cb45fc5eef89d6a3391dee5e",
+    "mtime": 1782643873.7032683,
+    "ast_hash": "458e2fb42a2d2a9cb172acba04af6b80",
     "semantic_hash": ""
   },
   "src/lib/supabase.js": {
@@ -325,9 +325,9 @@
     "semantic_hash": "60d7c9dc3a2df5a09c69d887f660d2e3"
   },
   "src/world/OutdoorBounds.jsx": {
-    "mtime": 1782222662.152097,
-    "ast_hash": "229820a914f316567cb8383b040acec7",
-    "semantic_hash": "229820a914f316567cb8383b040acec7"
+    "mtime": 1782644563.5544724,
+    "ast_hash": "75b583f71e8d35af2b61c9698be6059d",
+    "semantic_hash": ""
   },
   "src/world/OutdoorGround.jsx": {
     "mtime": 1782415667.9882653,
@@ -545,8 +545,8 @@
     "semantic_hash": ""
   },
   ".claude/settings.local.json": {
-    "mtime": 1782574710.4109373,
-    "ast_hash": "79083327e5e9101190d63240a9474218",
+    "mtime": 1782643115.4921644,
+    "ast_hash": "3ff0575ad342ebac62583eb83be8e279",
     "semantic_hash": ""
   },
   "src/items/itemDefinitions.js": {
@@ -617,6 +617,21 @@
   "src/world/npc/QuestNpcInteraction.jsx": {
     "mtime": 1782580990.8540518,
     "ast_hash": "67108e8f294504cd24d3bcb37d676ad3",
+    "semantic_hash": ""
+  },
+  "src/lib/perfFlags.js": {
+    "mtime": 1782644552.9086912,
+    "ast_hash": "5c9596e13a740c435158ffa47222375d",
+    "semantic_hash": ""
+  },
+  "src/lib/useStaggeredReveal.js": {
+    "mtime": 1782643274.454691,
+    "ast_hash": "35df978d20c369516362ec0a3c0a3f40",
+    "semantic_hash": ""
+  },
+  "src/lib/worldStream.js": {
+    "mtime": 1782647394.28679,
+    "ast_hash": "d84fe1d61581332b9be479f5bf159be6",
     "semantic_hash": ""
   }
 }
