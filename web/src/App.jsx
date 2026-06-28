@@ -13994,13 +13994,16 @@ function App() {
   const [selectedSkinId, setSelectedSkinId] = useState('classic')
   const [previewSkinId, setPreviewSkinId] = useState('classic')
   const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false)
-  const [isNearSkinStation, setIsNearSkinStation] = useState(false)
+  const isNearSkinStation = useGameStore((s) => s.near.skinStation ?? false)
   const [roomLightOn, setRoomLightOn] = useState(true)
   const [lightColor, setLightColor] = useState('#ffffff')
   const [lightIntensity, setLightIntensity] = useState(2)
-  // Migré vers le store (slice proximité). L'état ne vit plus dans App() ; on s'y
-  // abonne via un sélecteur fin. Prochaine étape : descendre les lecteurs (prop de
-  // scène + invite d'UI) dans des composants abonnés pour qu'App cesse de re-rendre.
+  // Slice "proximité" migré vers le store : ces flags ne vivent plus dans App(),
+  // on s'y abonne via des sélecteurs fins. `setNear` (action stable) les écrit
+  // depuis les callbacks onNearChange des détecteurs. Prochaine étape : descendre
+  // les lecteurs (props de scène + invites d'UI) dans des composants abonnés pour
+  // qu'App cesse de re-rendre sur ces flags.
+  const setNear = useGameStore((s) => s.setNear)
   const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
@@ -14013,7 +14016,7 @@ function App() {
   const [applyWallToCeiling, setApplyWallToCeiling] = useState(false)
   const [isEnvironmentMenuOpen, setIsEnvironmentMenuOpen] = useState(false)
   const [furnitureCart, setFurnitureCart] = useState([])
-  const [isNearEnvironmentStation, setIsNearEnvironmentStation] = useState(false)
+  const isNearEnvironmentStation = useGameStore((s) => s.near.environmentStation ?? false)
   const [mode, setMode] = useState('play')
   const [currentZone, setCurrentZone] = useState(ZONES.interior)
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
@@ -14029,14 +14032,14 @@ function App() {
   const [placementLocked, setPlacementLocked] = useState(false)
   const [placementPreview, setPlacementPreview] = useState(null)
   const [isObjectInventoryOpen, setIsObjectInventoryOpen] = useState(false)
-  const [isNearCustomizationStation, setIsNearCustomizationStation] = useState(false)
-  const [isNearOutdoorDoor, setIsNearOutdoorDoor] = useState(false)
+  const isNearCustomizationStation = useGameStore((s) => s.near.customizationStation ?? false)
+  const isNearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
   const [ownedCat, setOwnedCat] = useState(false)
   const [catActive, setCatActive] = useState(false)
   const [ownedMagicBook, setOwnedMagicBook] = useState(false)
   const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
   const [magicSkullDiscovered, setMagicSkullDiscovered] = useState(isAdminMode)
-  const [isNearMagicSkullDiscovery, setIsNearMagicSkullDiscovery] = useState(false)
+  const isNearMagicSkullDiscovery = useGameStore((s) => s.near.magicSkullDiscovery ?? false)
   const [isLearningMagicSkull, setIsLearningMagicSkull] = useState(false)
   const [magicSkullLearnProgress, setMagicSkullLearnProgress] = useState(0)
   const summonSlotRefs = useRef(Array.from({ length: SUMMON_SKELETON_COUNT }, () => ({ current: null })))
@@ -14062,8 +14065,8 @@ function App() {
   const chargeYawRef = useRef(0)    // centre du cône = direction du corps joueur
   const chargeAimYawRef = useRef(0) // direction courante clampée dans le cône
   const playerBodyYawRef = useRef(0) // yaw du corps joueur (mis à jour par Player)
-  const [nearbySeat, setNearbySeat] = useState(null)
-  const [nearbyTv, setNearbyTv] = useState(null)
+  const nearbySeat = useGameStore((s) => s.near.seat ?? null)
+  const nearbyTv = useGameStore((s) => s.near.tv ?? null)
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
   const [seatedState, setSeatedState] = useState(null)
   const [authUser, setAuthUser] = useState(null)
@@ -14086,7 +14089,7 @@ function App() {
   // État des quêtes (sérialisable, persisté dans world_settings.quests). Toute la
   // logique est dans src/quests/questState.js — ici on ne stocke que le bag.
   const [questProgress, setQuestProgress] = useState({})
-  const [nearbyQuestNpcId, setNearbyQuestNpcId] = useState(null)
+  const nearbyQuestNpcId = useGameStore((s) => s.near.questNpcId ?? null)
   const [questDialogOpen, setQuestDialogOpen] = useState(false)
   const [questJournalOpen, setQuestJournalOpen] = useState(false)
   // Inventaire de matériaux lootés (persisté dans world_settings.materials).
@@ -14499,14 +14502,14 @@ function App() {
     setPlacementLocked(false)
     setPlacementPreview(null)
     setIsObjectInventoryOpen(false)
-    setNearbySeat(null)
+    setNear('seat', null)
     setSeatedState(null)
     setOwnedCat(false)
     setCatActive(false)
     setOwnedMagicBook(false)
     setOwnedMagicSkull(false)
     setMagicSkullDiscovered(isAdminMode)
-    setIsNearMagicSkullDiscovery(false)
+    setNear('magicSkullDiscovery', false)
     summonSlotRefs.current.forEach((slotRef) => { slotRef.current = null })
     summonGroupPositionsRef.current.clear()
     summonCooldownRef.current = 0
@@ -14518,7 +14521,7 @@ function App() {
     setMaterials({})
     setLootDrops([])
     setVendorOpen(false)
-    setNearbyQuestNpcId(null)
+    setNear('questNpcId', null)
     setQuestDialogOpen(false)
     setQuestJournalOpen(false)
     setOwnedMounts([])
@@ -15887,7 +15890,7 @@ function App() {
     if (magicSkullDiscovered) return
     if (currentZone !== ZONES.outside) return
     setMagicSkullDiscovered(true)
-    setIsNearMagicSkullDiscovery(false)
+    setNear('magicSkullDiscovery', false)
     setIsLearningMagicSkull(false)
     setMagicSkullLearnProgress(0)
     showAchievementToast({
@@ -16131,7 +16134,7 @@ function App() {
   const requestSit = () => {
     if (!nearbySeat || mode !== 'play') return
     setSeatedState({ phase: 'sitDown', seat: nearbySeat })
-    setNearbySeat(null)
+    setNear('seat', null)
   }
 
   const requestStandUp = () => {
@@ -16184,13 +16187,13 @@ function App() {
       setOutdoorTransitionPrimed(true)
       setOutdoorContentStage((stage) => Math.max(stage, 1))
     }
-    setIsNearOutdoorDoor(false)
-    setIsNearSkinStation(false)
-    setIsNearEnvironmentStation(false)
-    setIsNearCustomizationStation(false)
-    setIsNearMagicSkullDiscovery(false)
-    setNearbySeat(null)
-    setNearbyTv(null)
+    setNear('outdoorDoor', false)
+    setNear('skinStation', false)
+    setNear('environmentStation', false)
+    setNear('customizationStation', false)
+    setNear('magicSkullDiscovery', false)
+    setNear('seat', null)
+    setNear('tv', null)
     setSeatedState(null)
     setMode('play')
     setIsSkinMenuOpen(false)
@@ -16295,8 +16298,8 @@ function App() {
     setPlacementLocked(false)
     setPlacementPreview(null)
     setIsObjectInventoryOpen(false)
-    setNearbySeat(null)
-    setNearbyTv(null)
+    setNear('seat', null)
+    setNear('tv', null)
     setSeatedState(null)
   }
 
@@ -16309,7 +16312,7 @@ function App() {
     setPlacementLocked(false)
     setPlacementPreview(null)
     setIsObjectInventoryOpen(false)
-    setIsNearCustomizationStation(false)
+    setNear('customizationStation', false)
   }
 
   const updateEditableObjectPosition = (id, position) => {
@@ -17021,19 +17024,19 @@ function App() {
           <OutdoorDoorTrigger
             playerPositionRef={playerPositionRef}
             currentZone={currentZone}
-            onNearChange={setIsNearOutdoorDoor}
+            onNearChange={(v) => setNear('outdoorDoor', v)}
           />
           <MagicSkullDiscoveryTrigger
             playerPositionRef={playerPositionRef}
             enabled={currentZone === ZONES.outside && mode === 'play' && !magicSkullDiscovered}
-            onNearChange={setIsNearMagicSkullDiscovery}
+            onNearChange={(v) => setNear('magicSkullDiscovery', v)}
           />
           <QuestNpcInteraction
             placements={QUEST_NPC_PLACEMENTS}
             playerPositionRef={playerPositionRef}
             questProgress={questProgress}
             enabled={currentZone === ZONES.outside && mode === 'play'}
-            onNearChange={(id) => { setNearbyQuestNpcId(id); if (!id) setQuestDialogOpen(false) }}
+            onNearChange={(id) => { setNear('questNpcId', id); if (!id) setQuestDialogOpen(false) }}
           />
           <LootDrops
             drops={lootDrops}
@@ -17045,26 +17048,26 @@ function App() {
             playerPositionRef={playerPositionRef}
             objects={placedEditableObjects}
             seatedState={seatedState}
-            onNearbySeatChange={setNearbySeat}
+            onNearbySeatChange={(v) => setNear('seat', v)}
           />
           <TvInteractionTrigger
             playerPositionRef={playerPositionRef}
             objects={placedEditableObjects}
             enabled={mode === 'play'}
-            onNearbyTvChange={setNearbyTv}
+            onNearbyTvChange={(v) => setNear('tv', v)}
           />
           <LightSwitchTrigger
             playerPositionRef={playerPositionRef}
             enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
-            onNearChange={(near) => { useGameStore.getState().setNear('lightSwitch', near); if (!near) setIsLightMenuOpen(false) }}
+            onNearChange={(near) => { setNear('lightSwitch', near); if (!near) setIsLightMenuOpen(false) }}
           />
-          <BallStationTrigger playerPositionRef={playerPositionRef} goalObject={goalObject} onNearChange={setIsNearSkinStation} />
+          <BallStationTrigger playerPositionRef={playerPositionRef} goalObject={goalObject} onNearChange={(v) => setNear('skinStation', v)} />
           {currentZone !== ZONES.outside && (
             <>
-              <EnvironmentStationTrigger playerPositionRef={playerPositionRef} onNearChange={setIsNearEnvironmentStation} />
+              <EnvironmentStationTrigger playerPositionRef={playerPositionRef} onNearChange={(v) => setNear('environmentStation', v)} />
               <CustomizationStationTrigger
                 playerPositionRef={playerPositionRef}
-                onNearChange={setIsNearCustomizationStation}
+                onNearChange={(v) => setNear('customizationStation', v)}
                 enabled={mode === 'play' && canModifyWorld}
               />
             </>
