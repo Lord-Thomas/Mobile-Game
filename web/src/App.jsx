@@ -12934,10 +12934,22 @@ function RenderQualityGovernor({ onScaleChange }) {
 
 const INITIAL_ASSET_BATCH_MAX_WAIT_MS = 1800
 const STABLE_INITIAL_ASSET_MAX_WAIT_MS = 9000
-const WORLD_STREAM_INITIAL_READY_LEVEL = 2
-const WORLD_STREAM_INITIAL_MAX_WAIT_MS = 2500
+// Niveau de révélation atteint avant de lever l'écran de chargement. On attend
+// désormais le niveau 6 (= ennemis niv.2, squelettes niv.4 ET objets placés niv.6)
+// au lieu de 2 : le rideau reste baissé un peu plus longtemps pour que le pop-in
+// de ces sous-arbres se fasse DERRIÈRE l'overlay. Le PROCESSUS de chargement est
+// inchangé — on ne fait que retarder le moment où on découvre la scène.
+const WORLD_STREAM_INITIAL_READY_LEVEL = 6
+// Plafond de sécurité élargi en conséquence (atteindre le niveau 6 reste < ~1 s
+// avec le cadencement rAF, mais on laisse de la marge si un commit lourd ralentit
+// les ticks ; si ça expire, le gate lève quand même l'overlay).
+const WORLD_STREAM_INITIAL_MAX_WAIT_MS = 4000
 const OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS = 420
-const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 320
+// Durée pendant laquelle le voile reste après le switch de zone. Allongée pour
+// couvrir tout le staging extérieur (jusqu'à l'étape ennemis à ~920 ms) ET la
+// première frame extérieure (flash blanc possible) — le pop-in se fait sous le
+// voile. Là encore : aucune modif du chargement, juste le voile tenu plus longtemps.
+const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 650
 const OUTDOOR_CONTENT_STAGES = [
   { level: 1, delay: 0 },
   { level: 2, delay: 140 },
