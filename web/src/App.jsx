@@ -13994,7 +13994,7 @@ function App() {
   const [ownedSkins, setOwnedSkins] = useState(['classic'])
   const [selectedSkinId, setSelectedSkinId] = useState('classic')
   const [previewSkinId, setPreviewSkinId] = useState('classic')
-  const [isSkinMenuOpen, setIsSkinMenuOpen] = useState(false)
+  const isSkinMenuOpen = useGameStore((s) => s.menus.skin ?? false)
   const isNearSkinStation = useGameStore((s) => s.near.skinStation ?? false)
   const [roomLightOn, setRoomLightOn] = useState(true)
   const [lightColor, setLightColor] = useState('#ffffff')
@@ -14005,6 +14005,9 @@ function App() {
   // les lecteurs (props de scène + invites d'UI) dans des composants abonnés pour
   // qu'App cesse de re-rendre sur ces flags.
   const setNear = useGameStore((s) => s.setNear)
+  // Slice "menus" migré vers le store (relocalisation fidèle : 4 booléens). Écriture
+  // via l'action `setMenuOpen(key, value)`. Lecture par sélecteurs fins ci-dessous.
+  const setMenuOpen = useGameStore((s) => s.setMenuOpen)
   const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
@@ -14015,7 +14018,7 @@ function App() {
   const [previewFloorSkinId, setPreviewFloorSkinId] = useState('floor-classic')
   const [previewWallSkinId, setPreviewWallSkinId] = useState('wall-classic')
   const [applyWallToCeiling, setApplyWallToCeiling] = useState(false)
-  const [isEnvironmentMenuOpen, setIsEnvironmentMenuOpen] = useState(false)
+  const isEnvironmentMenuOpen = useGameStore((s) => s.menus.environment ?? false)
   const [furnitureCart, setFurnitureCart] = useState([])
   const isNearEnvironmentStation = useGameStore((s) => s.near.environmentStation ?? false)
   const [mode, setMode] = useState('play')
@@ -14051,8 +14054,8 @@ function App() {
   const [equippedWeapon, setEquippedWeapon] = useState(null)
   const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
   const [characterAppearance, setCharacterAppearance] = useState(CHARACTER_DEFAULT_APPEARANCE)
-  const [isCharacterMenuOpen, setIsCharacterMenuOpen] = useState(false)
-  const [isCustomizationChoiceOpen, setIsCustomizationChoiceOpen] = useState(false)
+  const isCharacterMenuOpen = useGameStore((s) => s.menus.character ?? false)
+  const isCustomizationChoiceOpen = useGameStore((s) => s.menus.customizationChoice ?? false)
   const projectilesRef = useRef([])
   const remoteProjectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
@@ -14955,8 +14958,8 @@ function App() {
           setMultiplayerSession(response.session)
           setMultiplayerRole('guest')
           setMode('play')
-          setIsSkinMenuOpen(false)
-          setIsEnvironmentMenuOpen(false)
+          setMenuOpen('skin', false)
+          setMenuOpen('environment', false)
           setIsObjectInventoryOpen(false)
           setSelectedObjectId(null)
           setMultiplayerMessage('Mode visite active: tu peux te balader et jouer au foot.')
@@ -15702,27 +15705,27 @@ function App() {
 
   const openSkinMenu = () => {
     setPreviewSkinId(selectedSkinId)
-    setIsCharacterMenuOpen(false)
-    setIsCustomizationChoiceOpen(false)
-    setIsSkinMenuOpen(true)
+    setMenuOpen('character', false)
+    setMenuOpen('customizationChoice', false)
+    setMenuOpen('skin', true)
   }
 
   const closeSkinMenu = () => {
     setPreviewSkinId(selectedSkinId)
-    setIsSkinMenuOpen(false)
+    setMenuOpen('skin', false)
   }
   const openEnvironmentMenu = () => {
     setEnvironmentTab('floor')
     setPreviewFloorSkinId(selectedFloorSkinId)
     setPreviewWallSkinId(selectedWallSkinId)
-    setIsCharacterMenuOpen(false)
-    setIsCustomizationChoiceOpen(false)
-    setIsEnvironmentMenuOpen(true)
+    setMenuOpen('character', false)
+    setMenuOpen('customizationChoice', false)
+    setMenuOpen('environment', true)
   }
   const closeEnvironmentMenu = () => {
     setPreviewFloorSkinId(selectedFloorSkinId)
     setPreviewWallSkinId(selectedWallSkinId)
-    setIsEnvironmentMenuOpen(false)
+    setMenuOpen('environment', false)
   }
 
   const addFurnitureToCart = (objectId) => {
@@ -15802,16 +15805,16 @@ function App() {
 
   const openCustomizationChoice = () => {
     if (!canModifyWorld) return
-    setIsSkinMenuOpen(false)
-    setIsEnvironmentMenuOpen(false)
-    setIsCharacterMenuOpen(false)
-    setIsCustomizationChoiceOpen(true)
+    setMenuOpen('skin', false)
+    setMenuOpen('environment', false)
+    setMenuOpen('character', false)
+    setMenuOpen('customizationChoice', true)
   }
 
   const openCharacterCustomizationFromBag = () => {
     if (!PUBLIC_BUILD_FLAGS.showCharacterCustomization) return
     setIsWeaponMenuOpen(false)
-    setIsCharacterMenuOpen(true)
+    setMenuOpen('character', true)
   }
 
   const goPreview = (direction) => {
@@ -15844,7 +15847,7 @@ function App() {
     const skin = ballSkins[previewIndex]
     if (!ownedSkins.includes(skin.id)) return
     setSelectedSkinId(skin.id)
-    setIsSkinMenuOpen(false)
+    setMenuOpen('skin', false)
   }
   const buyPreviewEnvironmentSkin = async () => {
     const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : availableWallSkins[previewWallIndex]
@@ -16198,10 +16201,10 @@ function App() {
     setNear('tv', null)
     setSeatedState(null)
     setMode('play')
-    setIsSkinMenuOpen(false)
-    setIsEnvironmentMenuOpen(false)
-    setIsCharacterMenuOpen(false)
-    setIsCustomizationChoiceOpen(false)
+    setMenuOpen('skin', false)
+    setMenuOpen('environment', false)
+    setMenuOpen('character', false)
+    setMenuOpen('customizationChoice', false)
     setSelectedObjectId(null)
     setDraggingObjectId(null)
     setPlacingObjectId(null)
@@ -16289,10 +16292,10 @@ function App() {
 
   const openCustomizationMode = () => {
     if (!canModifyWorld) return
-    setIsSkinMenuOpen(false)
-    setIsEnvironmentMenuOpen(false)
-    setIsCharacterMenuOpen(false)
-    setIsCustomizationChoiceOpen(false)
+    setMenuOpen('skin', false)
+    setMenuOpen('environment', false)
+    setMenuOpen('character', false)
+    setMenuOpen('customizationChoice', false)
     setMode('customize')
     setSelectedObjectId(placedEditableObjects[0]?.id ?? null)
     setDraggingObjectId(null)
@@ -16307,7 +16310,7 @@ function App() {
 
   const closeCustomizationMode = () => {
     setMode('play')
-    setIsCustomizationChoiceOpen(false)
+    setMenuOpen('customizationChoice', false)
     setSelectedObjectId(null)
     setDraggingObjectId(null)
     setPlacingObjectId(null)
@@ -16461,8 +16464,8 @@ function App() {
     setMultiplayerSession(session)
     setMultiplayerRole('host')
     setMode('play')
-    setIsSkinMenuOpen(false)
-    setIsEnvironmentMenuOpen(false)
+    setMenuOpen('skin', false)
+    setMenuOpen('environment', false)
     setSelectedObjectId(null)
     setDraggingObjectId(null)
     setPlacingObjectId(null)
@@ -17164,14 +17167,14 @@ function App() {
           open={PUBLIC_BUILD_FLAGS.showCharacterCustomization && isCharacterMenuOpen}
           appearance={characterAppearance}
           onApply={setCharacterAppearance}
-          onClose={() => setIsCharacterMenuOpen(false)}
+          onClose={() => setMenuOpen('character', false)}
         />
       )}
       {showCaptureUi && canModifyWorld && (
         <CustomizationChoiceMenu
           open={isCustomizationChoiceOpen}
           onChooseRoom={openCustomizationMode}
-          onClose={() => setIsCustomizationChoiceOpen(false)}
+          onClose={() => setMenuOpen('customizationChoice', false)}
         />
       )}
       {showCaptureUi && (

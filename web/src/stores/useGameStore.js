@@ -45,4 +45,18 @@ export const useGameStore = create((set) => ({
     return { near: { ...state.near, [key]: value } }
   }),
   resetNear: () => set({ near: {} }),
+
+  // --- Slice "menus" -----------------------------------------------------
+  // Quel(s) menu(s) d'UI sont ouverts (skin, environment, character,
+  // customizationChoice). Événementiel (ouvre/ferme sur action). Relocalisé
+  // fidèlement depuis App() : 4 booléens indépendants. NB : en pratique ces menus
+  // sont mutuellement exclusifs — une consolidation ultérieure en `activeMenu`
+  // (+ action métier `openMenu`) est possible, mais ce serait un resserrement de
+  // sémantique, donc traité à part de cette relocalisation fidèle.
+  menus: {},
+  setMenuOpen: (key, value) => set((state) => {
+    if (state.menus[key] === value) return state
+    return { menus: { ...state.menus, [key]: value } }
+  }),
+  closeAllMenus: () => set((state) => (Object.keys(state.menus).length === 0 ? state : { menus: {} })),
 }))

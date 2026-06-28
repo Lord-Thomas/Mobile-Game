@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useGameStore } from './useGameStore'
 
-// Réinitialise le slice de proximité avant chaque test (le store est un singleton).
+// Réinitialise les slices avant chaque test (le store est un singleton).
 beforeEach(() => {
   useGameStore.getState().resetNear()
+  useGameStore.getState().closeAllMenus()
 })
 
 describe('gameStore — slice proximité', () => {
@@ -42,5 +43,43 @@ describe('gameStore — slice proximité', () => {
     setNear('lightSwitch', true)
     resetNear()
     expect(useGameStore.getState().near).toEqual({})
+  })
+})
+
+describe('gameStore — slice menus', () => {
+  it('menus est vide au départ et un menu absent est falsy', () => {
+    expect(useGameStore.getState().menus).toEqual({})
+    expect(useGameStore.getState().menus.skin).toBeUndefined()
+  })
+
+  it('setMenuOpen ouvre puis ferme un menu', () => {
+    const { setMenuOpen } = useGameStore.getState()
+    setMenuOpen('skin', true)
+    expect(useGameStore.getState().menus.skin).toBe(true)
+    setMenuOpen('skin', false)
+    expect(useGameStore.getState().menus.skin).toBe(false)
+  })
+
+  it('les menus sont indépendants (relocalisation fidèle, pas d\'exclusivité imposée)', () => {
+    const { setMenuOpen } = useGameStore.getState()
+    setMenuOpen('skin', true)
+    setMenuOpen('environment', true)
+    expect(useGameStore.getState().menus).toEqual({ skin: true, environment: true })
+  })
+
+  it('setMenuOpen avec valeur identique ne crée pas un nouvel objet', () => {
+    const { setMenuOpen } = useGameStore.getState()
+    setMenuOpen('skin', true)
+    const before = useGameStore.getState().menus
+    setMenuOpen('skin', true)
+    expect(useGameStore.getState().menus).toBe(before)
+  })
+
+  it('closeAllMenus vide tous les menus', () => {
+    const { setMenuOpen, closeAllMenus } = useGameStore.getState()
+    setMenuOpen('skin', true)
+    setMenuOpen('character', true)
+    closeAllMenus()
+    expect(useGameStore.getState().menus).toEqual({})
   })
 })
