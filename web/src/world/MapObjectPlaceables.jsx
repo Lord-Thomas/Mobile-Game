@@ -286,6 +286,15 @@ export default function MapObjectPlaceables({
   onStartDragging = null,
   registerRef = null,
 }) {
+  useEffect(() => {
+    objects.forEach((placement) => {
+      const item = MAP_OBJECT_CATALOG[placement.objectId]
+      if (!item?.modelUrl) return
+      if (getModelExtension(item.modelUrl) === 'fbx') useFBX.preload(item.modelUrl)
+      else useGLTF.preload(item.modelUrl)
+    })
+  }, [objects])
+
   return (
     <group userData={{ debugCategory: 'map-placeables' }}>
       {objects.map((placement) => (
@@ -310,9 +319,3 @@ export default function MapObjectPlaceables({
     </group>
   )
 }
-
-Object.values(MAP_OBJECT_CATALOG).forEach((item) => {
-  if (!item.modelUrl) return
-  if (getModelExtension(item.modelUrl) === 'fbx') useFBX.preload(item.modelUrl)
-  else useGLTF.preload(item.modelUrl)
-})

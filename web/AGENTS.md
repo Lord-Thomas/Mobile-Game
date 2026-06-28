@@ -5,6 +5,14 @@ On Windows, do not call `graphify` directly.
 Use:
 uv tool run --from graphifyy graphify ...
 
+N’essaie pas de trouver un autre Python pour lancer graphify.exe.
+
+Le launcher Windows graphify.exe pointe vers un ancien Python supprimé, donc utilise cette forme à la place :
+
+uv tool run --from graphifyy graphify query "chargement lent warmup runtime customize OutdoorNeighborhood main thread long tasks player.glb ballon.glb" --budget 2000
+
+Si cette commande échoue aussi, continue sans Graphify et lis seulement les zones de code liées à loadTiming, ShaderWarmupGate, OutdoorNeighborhood et aux chargements GLB/FBX.
+
 Examples:
 uv tool run --from graphifyy graphify query "question" --budget 2000
 uv tool run --from graphifyy graphify explain "SymbolName"

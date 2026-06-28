@@ -43,12 +43,35 @@ export function getRevealLevel() {
   return revealLevel
 }
 
+export function waitForRevealLevel(targetLevel, timeoutMs = 6000) {
+  if (revealLevel >= targetLevel) return Promise.resolve({ ready: true })
+
+  return new Promise((resolve) => {
+    let settled = false
+    let timeoutId = 0
+
+    const finish = (ready) => {
+      if (settled) return
+      settled = true
+      listeners.delete(notify)
+      if (timeoutId) window.clearTimeout(timeoutId)
+      resolve({ ready })
+    }
+
+    const notify = (value) => {
+      if (value >= targetLevel) finish(true)
+    }
+
+    listeners.add(notify)
+    timeoutId = window.setTimeout(() => finish(false), timeoutMs)
+  })
+}
+
 function useRevealLevel() {
   const [level, setLevel] = useState(revealLevel)
   useEffect(() => {
     const notify = (value) => setLevel(value)
     listeners.add(notify)
-    setLevel(revealLevel)
     return () => listeners.delete(notify)
   }, [])
   return level

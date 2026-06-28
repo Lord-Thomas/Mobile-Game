@@ -28,11 +28,11 @@ const grassPlacementSettings = {
 const GRASS_SCALE_RANGE = grassPlacementSettings.maxScale - grassPlacementSettings.minScale
 const GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
-const GRASS_GRID_STEP = 0.15
-const GRASS_DENSITY_MULTIPLIER = 9.5
+const GRASS_GRID_STEP = 0.22
+const GRASS_DENSITY_MULTIPLIER = 7.5
 const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 1
-const GRASS_ACTIVE_CHUNK_RADIUS = 9
+const GRASS_ACTIVE_CHUNK_RADIUS = 3
 // Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
 // frustum-culls entire quadrants when they fall outside the camera view.
 const QUADRANTS = [
@@ -41,8 +41,8 @@ const QUADRANTS = [
   { id: 'se', minX: 0,               maxX: TERRAIN_HALF_SIZE,  minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
   { id: 'sw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
 ]
-const MAX_QUADRANT_INSTANCES = 350_000
-const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 2
+const MAX_QUADRANT_INSTANCES = 140_000
+const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 1
 const GRASS_BUFFER_COMPACTION_RATIO = 1.75
 const GRASS_DEBUG_ESTIMATE_INTERVAL_MS = 600
 const GRASS_DEBUG_MAX_SAMPLES = 60_000
@@ -66,10 +66,11 @@ const GRASS_CHUNK_REVEAL_STAGGER = 0.35
 const GRASS_FAR_WIDTH_SCALE = 1.65
 const GRASS_FAR_HEIGHT_SCALE = 1.08
 const GLOBAL_GRASS_GRID_STEP = 0.9
+const GLOBAL_GRASS_START_DELAY_SECONDS = 4
 const GLOBAL_GRASS_WIDTH_SCALE = 2.15
 const GLOBAL_GRASS_HEIGHT_SCALE = 1.12
 const MAX_GLOBAL_GRASS_INSTANCES_PER_QUADRANT = 100_000
-const GLOBAL_GRASS_BUILD_TIME_BUDGET_MS = 1.5
+const GLOBAL_GRASS_BUILD_TIME_BUDGET_MS = 0.6
 const grassWindSettings = {
   strength: 0.13,
   speed: 1.05,
@@ -1048,7 +1049,15 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
       }
     }
 
-    if (globalGrassChunkQueueRef.current.length > 0) {
+    const localGrassBusy = (
+      pendingGPUWriteRef.current.length > 0
+      || grassChunkQueueRef.current.length > 0
+      || activeGrassBuildJobRef.current
+    )
+
+    const globalGrassReady = grassElapsedTimeRef.current >= GLOBAL_GRASS_START_DELAY_SECONDS
+
+    if (globalGrassReady && !localGrassBusy && globalGrassChunkQueueRef.current.length > 0) {
       if (playerPosition && globalGrassWrittenKeysRef.current.size === 0) {
         const centerChunkX = getGrassChunkIndex(playerPosition.x)
         const centerChunkZ = getGrassChunkIndex(playerPosition.z)
@@ -1061,11 +1070,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     }
 
     // Écriture GPU + construction progressive — s'exécute chaque frame tant qu'il y a du travail
-    if (
-      pendingGPUWriteRef.current.length > 0
-      || grassChunkQueueRef.current.length > 0
-      || activeGrassBuildJobRef.current
-    ) {
+    if (localGrassBusy) {
       processGrassChunkBatch()
     }
   })

@@ -12,7 +12,7 @@ import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchC
 import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { PERF_NO_MAP_COLLIDERS, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
-import { Defer, startWorldStream } from './lib/worldStream'
+import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -4611,6 +4611,7 @@ function cloneMixamoAnimationClip(clip) {
       }
     }
   })
+  next.tracks = next.tracks.filter((track) => !track.name.includes('Pinky'))
   return next
 }
 
@@ -12926,6 +12927,56 @@ function RenderQualityGovernor({ onScaleChange }) {
 }
 
 const INITIAL_ASSET_BATCH_MAX_WAIT_MS = 1800
+const STABLE_INITIAL_ASSET_MAX_WAIT_MS = 9000
+const WORLD_STREAM_INITIAL_READY_LEVEL = 2
+const WORLD_STREAM_INITIAL_MAX_WAIT_MS = 2500
+
+const STABLE_INITIAL_ASSET_PRELOADS = [
+  () => useGLTF.preload(PLAYER_MODEL_URL),
+  () => useTexture.preload(PLAYER_FACE_DETAILS_MASK_URL),
+  () => useGLTF.preload('/models/player/anim/idle.glb'),
+  () => useGLTF.preload('/models/player/anim/walk.glb'),
+  () => useGLTF.preload('/models/player/anim/run.glb'),
+  () => useGLTF.preload('/models/player/anim/kick.glb'),
+  () => useGLTF.preload('/models/player/anim/punch.glb'),
+  () => useGLTF.preload('/models/player/anim/waving.glb'),
+  () => useGLTF.preload('/models/player/anim/dance.glb'),
+  () => useGLTF.preload('/models/player/anim/pointing-up.glb'),
+  () => useGLTF.preload('/models/player/anim/jump-start.glb'),
+  () => useGLTF.preload('/models/player/anim/jump-loop.glb'),
+  () => useGLTF.preload('/models/player/anim/jump-land.glb'),
+  () => useGLTF.preload('/models/player/anim/stand-to-sit.glb'),
+  () => useGLTF.preload('/models/player/anim/sitting-idle.glb'),
+  () => useGLTF.preload('/models/player/anim/stand-up.glb'),
+  () => useGLTF.preload('/models/ball/ballon.glb'),
+  () => useGLTF.preload('/models/dragon.glb'),
+  () => useGLTF.preload(MAGIC_BOOK_MODEL_URL),
+  () => useGLTF.preload(MAGIC_SKULL_MODEL_URL),
+]
+
+let stableInitialAssetPreloadPromise = null
+
+function startStableInitialAssetPreloads() {
+  if (!stableInitialAssetPreloadPromise) {
+    stableInitialAssetPreloadPromise = Promise.allSettled(
+      STABLE_INITIAL_ASSET_PRELOADS.map((preload) => Promise.resolve().then(preload)),
+    )
+  }
+  return stableInitialAssetPreloadPromise
+}
+
+function waitForPromiseWithTimeout(promise, timeoutMs) {
+  let timeoutId = 0
+  const timeout = new Promise((resolve) => {
+    timeoutId = window.setTimeout(() => resolve({ timedOut: true }), timeoutMs)
+  })
+  return Promise.race([
+    promise.then((result) => ({ timedOut: false, result })),
+    timeout,
+  ]).finally(() => {
+    if (timeoutId) window.clearTimeout(timeoutId)
+  })
+}
 
 function ShaderWarmupGate({ onComplete }) {
   const { gl, scene, camera } = useThree()
@@ -12981,24 +13032,28 @@ function ShaderWarmupGate({ onComplete }) {
     const runWarmup = async () => {
       // Jalon : le lot initial est prêt ou libéré par le garde-fou. Les assets
       // démarrés ensuite ne peuvent plus garder l'overlay ouvert.
+      const preloadResult = await waitForPromiseWithTimeout(
+        startStableInitialAssetPreloads(),
+        STABLE_INITIAL_ASSET_MAX_WAIT_MS,
+      )
+      if (preloadResult.timedOut) {
+        console.warn(`[loadTiming] Stable initial asset preloads timed out after ${STABLE_INITIAL_ASSET_MAX_WAIT_MS}ms`)
+      }
       markLoad('assetsLoaded')
       // Garantit que la collision binaire est chargée avant de masquer l'écran de
       // chargement (le fetch a démarré à l'import, donc déjà résolu en pratique).
       await collisionReady
       markLoad('collisionReady')
+      startWorldStream()
+      const streamResult = await waitForRevealLevel(WORLD_STREAM_INITIAL_READY_LEVEL, WORLD_STREAM_INITIAL_MAX_WAIT_MS)
+      if (!streamResult.ready) {
+        console.warn(`[loadTiming] World stream level ${WORLD_STREAM_INITIAL_READY_LEVEL} timed out after ${WORLD_STREAM_INITIAL_MAX_WAIT_MS}ms`)
+      }
+      markLoad('streamReady')
       // Let the loading overlay and the initial scene commit before WebGL shader work starts.
       await waitFrame()
       await waitFrame()
       if (cancelled) return
-
-      if (!PERF_SHADER_WARMUP) {
-        completedRef.current = true
-        markLoad('warmup:skipped')
-        markLoad('warmupEnd')
-        reportLoadTiming()
-        onComplete()
-        return
-      }
 
       const aspect = Math.max(0.1, gl.domElement.clientWidth / Math.max(gl.domElement.clientHeight, 1))
       const customizeCamera = new ThreeOrthographicCamera(-12 * aspect, 12 * aspect, 12, -12, 0.1, 120)
@@ -13015,33 +13070,30 @@ function ShaderWarmupGate({ onComplete }) {
       outsideCamera.updateMatrixWorld(true)
 
       const changedCulling = []
-      scene.traverse((object) => {
-        if (!(object.isMesh || object.isLine || object.isPoints || object.isSprite)) return
-        changedCulling.push([object, object.frustumCulled])
-        object.frustumCulled = false
-      })
+      if (PERF_SHADER_WARMUP) {
+        scene.traverse((object) => {
+          if (!(object.isMesh || object.isLine || object.isPoints || object.isSprite)) return
+          changedCulling.push([object, object.frustumCulled])
+          object.frustumCulled = false
+        })
+      }
 
       const compileAndRender = async (warmupCamera) => {
         const originalLayerMask = warmupCamera.layers.mask
         for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
           warmupCamera.layers.set(layer)
-          if (typeof gl.compileAsync === 'function') {
-            await gl.compileAsync(scene, warmupCamera)
-          } else {
-            gl.compile(scene, warmupCamera)
-          }
+          gl.compile(scene, warmupCamera)
           gl.render(scene, warmupCamera)
         }
         warmupCamera.layers.mask = originalLayerMask
       }
 
       try {
-        // Compile from the runtime camera, the first customization camera, and
-        // the first outdoor camera. The first-click freezes happened because
-        // camera/frustum-specific visibility could leave shaders cold until
-        // those modes were used for real.
-        const warmupLabels = ['warmup:runtime', 'warmup:customize', 'warmup:outside']
-        const warmupCameras = [camera, customizeCamera, outsideCamera]
+        await compileAndRender(camera)
+        markLoad('warmup:runtime')
+
+        const warmupLabels = ['warmup:customize', 'warmup:outside']
+        const warmupCameras = PERF_SHADER_WARMUP ? [customizeCamera, outsideCamera] : []
         for (let i = 0; i < warmupCameras.length; i += 1) {
           if (cancelled) break
           await compileAndRender(warmupCameras[i])
@@ -16465,9 +16517,6 @@ function App() {
 
   const completeShaderWarmup = useCallback(() => {
     setShaderWarmupComplete(true)
-    // L'overlay tombe : on commence à monter les sous-arbres lourds différés,
-    // un par frame, pour ne plus jamais geler le commit initial ni le jeu.
-    startWorldStream()
   }, [])
 
   const requestAccountSubmit = async (event) => {
@@ -16678,12 +16727,14 @@ function App() {
             viewerOutside={isOutsideZone}
             playerPositionRef={playerPositionRef}
             ballRef={ballRef}
-            showGrass={performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
-            showTrees={performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
+            showGrass={isOutsideZone && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+            showTrees={isOutsideZone && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
             showTerrain
-            showRoad
-            showNeighborHouses
-            showSky={performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
+            showRoad={isOutsideZone}
+            showNeighborHouses={isOutsideZone}
+            showMapObjects={isOutsideZone}
+            showBiomeEffects={isOutsideZone}
+            showSky={isOutsideZone && performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
             castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
             showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
             debugStats={isDebugMode}
@@ -16758,29 +16809,31 @@ function App() {
             />
           </Suspense>
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
-          <Defer level={2}>
-          <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
-          {monsterSpawnSlots.map((slot, index) => (
-            <SmallMushroomEnemy
-              key={slot.id}
-              enemyId={slot.id}
-              spawnIndex={index}
-              spawnPositionOverride={slot.spawnPosition}
-              active={currentZone === ZONES.outside}
-              playerPositionRef={playerPositionRef}
-              registerCombatTarget={registerCombatTarget}
-              onDefeated={handleSmallEnemyDefeated}
-              onHitPlayer={handlePlayerHit}
-              config={slot.config}
-              monsterType={slot.monsterType}
-              aggressive={slot.aggressive}
-              patrol={slot.patrol}
-              mobGroupRef={mobGroupRef}
-              allyTargetsRef={allyTargetsRef}
-            />
-          ))}
-          </Profiler>
-          </Defer>
+          {currentZone === ZONES.outside && (
+            <Defer level={2}>
+            <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
+            {monsterSpawnSlots.map((slot, index) => (
+              <SmallMushroomEnemy
+                key={slot.id}
+                enemyId={slot.id}
+                spawnIndex={index}
+                spawnPositionOverride={slot.spawnPosition}
+                active
+                playerPositionRef={playerPositionRef}
+                registerCombatTarget={registerCombatTarget}
+                onDefeated={handleSmallEnemyDefeated}
+                onHitPlayer={handlePlayerHit}
+                config={slot.config}
+                monsterType={slot.monsterType}
+                aggressive={slot.aggressive}
+                patrol={slot.patrol}
+                mobGroupRef={mobGroupRef}
+                allyTargetsRef={allyTargetsRef}
+              />
+            ))}
+            </Profiler>
+            </Defer>
+          )}
           <FireballManager
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
@@ -16792,24 +16845,26 @@ function App() {
           />
           {/* Pool de squelettes invoqués : monté dès le chargement du monde
               pour précharger modèle/animations/GPU et éviter tout freeze au sort. */}
-          <Defer level={4}>
-          <Profiler id="SummonSkeletonPool" onRender={recordRenderProfile}>
-          {Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => (
-            <Suspense key={`summon_slot_${index}`} fallback={null}>
-              <SummonedSkeleton
-                index={index}
-                slotRef={summonSlotRefs.current[index]}
-                playerPositionRef={playerPositionRef}
-                combatTargetsRef={combatTargetsRef}
-                groupPositionsRef={summonGroupPositionsRef}
-                allyTargetsRef={allyTargetsRef}
-                playerTargetIdRef={playerTargetIdRef}
-                onExpire={handleSummonExpire}
-              />
-            </Suspense>
-          ))}
-          </Profiler>
-          </Defer>
+          {ownedMagicSkull && (
+            <Defer level={4}>
+            <Profiler id="SummonSkeletonPool" onRender={recordRenderProfile}>
+            {Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => (
+              <Suspense key={`summon_slot_${index}`} fallback={null}>
+                <SummonedSkeleton
+                  index={index}
+                  slotRef={summonSlotRefs.current[index]}
+                  playerPositionRef={playerPositionRef}
+                  combatTargetsRef={combatTargetsRef}
+                  groupPositionsRef={summonGroupPositionsRef}
+                  allyTargetsRef={allyTargetsRef}
+                  playerTargetIdRef={playerTargetIdRef}
+                  onExpire={handleSummonExpire}
+                />
+              </Suspense>
+            ))}
+            </Profiler>
+            </Defer>
+          )}
           <PlayerHealingAura
             active={playerHealing}
             playerPositionRef={playerPositionRef}

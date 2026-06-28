@@ -14,4 +14,4 @@ const params = typeof window !== 'undefined'
 export const PERF_NO_TERRAIN_TRIMESH = params.has('nophys') || params.has('noterrain')
 export const PERF_NO_MAP_COLLIDERS = params.has('nophys') || params.has('nomapcol')
 export const PERF_SHADER_WARMUP = params.has('shaderwarmup')
-export const PERF_RUNTIME_WARMUP_RIG = params.has('warmuprig')
+export const PERF_RUNTIME_WARMUP_RIG = !params.has('nowarmuprig')
