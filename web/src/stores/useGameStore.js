@@ -59,4 +59,34 @@ export const useGameStore = create((set) => ({
     return { menus: { ...state.menus, [key]: value } }
   }),
   closeAllMenus: () => set((state) => (Object.keys(state.menus).length === 0 ? state : { menus: {} })),
+
+  // --- Slice "inventory" (cosmétiques) -----------------------------------
+  // Skins ballon/sol/mur (possédés / sélectionné / aperçu), option mur->plafond,
+  // chat (possédé / actif). PERSISTÉ : ces champs sont lus par App (via sélecteurs)
+  // donc l'effet de sauvegarde de progressService continue de se déclencher tout
+  // seul ; le chargement écrit ici via setInventory. Valeurs par défaut =
+  // anciennes valeurs initiales des useState (compatibilité descendante préservée).
+  //
+  // setInventory(key, value) accepte une valeur OU une fonction updater
+  // (prev => next), pour remplacer 1:1 les setX(...) et setX(prev => ...) d'App.
+  inventory: {
+    ownedSkins: ['classic'],
+    selectedSkinId: 'classic',
+    previewSkinId: 'classic',
+    ownedFloorSkins: ['floor-classic'],
+    ownedWallSkins: ['wall-classic'],
+    selectedFloorSkinId: 'floor-classic',
+    selectedWallSkinId: 'wall-classic',
+    previewFloorSkinId: 'floor-classic',
+    previewWallSkinId: 'wall-classic',
+    applyWallToCeiling: false,
+    ownedCat: false,
+    catActive: false,
+  },
+  setInventory: (key, value) => set((state) => {
+    const prev = state.inventory[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state // no-op : pas de rendu inutile
+    return { inventory: { ...state.inventory, [key]: next } }
+  }),
 }))

@@ -13992,9 +13992,9 @@ function App() {
   const playerRespawnTimerRef = useRef(null)
   const playerRegenDelayRef = useRef(null)
   const playerRegenIntervalRef = useRef(null)
-  const [ownedSkins, setOwnedSkins] = useState(['classic'])
-  const [selectedSkinId, setSelectedSkinId] = useState('classic')
-  const [previewSkinId, setPreviewSkinId] = useState('classic')
+  const ownedSkins = useGameStore((s) => s.inventory.ownedSkins)
+  const selectedSkinId = useGameStore((s) => s.inventory.selectedSkinId)
+  const previewSkinId = useGameStore((s) => s.inventory.previewSkinId)
   const isSkinMenuOpen = useGameStore((s) => s.menus.skin ?? false)
   const isNearSkinStation = useGameStore((s) => s.near.skinStation ?? false)
   const [roomLightOn, setRoomLightOn] = useState(true)
@@ -14009,16 +14009,18 @@ function App() {
   // Slice "menus" migré vers le store (relocalisation fidèle : 4 booléens). Écriture
   // via l'action `setMenuOpen(key, value)`. Lecture par sélecteurs fins ci-dessous.
   const setMenuOpen = useGameStore((s) => s.setMenuOpen)
+  // Slice "inventory" (cosmétiques) migré vers le store. Écriture via setInventory(key, value|updater).
+  const setInventory = useGameStore((s) => s.setInventory)
   const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
-  const [ownedFloorSkins, setOwnedFloorSkins] = useState(['floor-classic'])
-  const [ownedWallSkins, setOwnedWallSkins] = useState(['wall-classic'])
-  const [selectedFloorSkinId, setSelectedFloorSkinId] = useState('floor-classic')
-  const [selectedWallSkinId, setSelectedWallSkinId] = useState('wall-classic')
-  const [previewFloorSkinId, setPreviewFloorSkinId] = useState('floor-classic')
-  const [previewWallSkinId, setPreviewWallSkinId] = useState('wall-classic')
-  const [applyWallToCeiling, setApplyWallToCeiling] = useState(false)
+  const ownedFloorSkins = useGameStore((s) => s.inventory.ownedFloorSkins)
+  const ownedWallSkins = useGameStore((s) => s.inventory.ownedWallSkins)
+  const selectedFloorSkinId = useGameStore((s) => s.inventory.selectedFloorSkinId)
+  const selectedWallSkinId = useGameStore((s) => s.inventory.selectedWallSkinId)
+  const previewFloorSkinId = useGameStore((s) => s.inventory.previewFloorSkinId)
+  const previewWallSkinId = useGameStore((s) => s.inventory.previewWallSkinId)
+  const applyWallToCeiling = useGameStore((s) => s.inventory.applyWallToCeiling)
   const isEnvironmentMenuOpen = useGameStore((s) => s.menus.environment ?? false)
   const [furnitureCart, setFurnitureCart] = useState([])
   const isNearEnvironmentStation = useGameStore((s) => s.near.environmentStation ?? false)
@@ -14039,8 +14041,8 @@ function App() {
   const [isObjectInventoryOpen, setIsObjectInventoryOpen] = useState(false)
   const isNearCustomizationStation = useGameStore((s) => s.near.customizationStation ?? false)
   const isNearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
-  const [ownedCat, setOwnedCat] = useState(false)
-  const [catActive, setCatActive] = useState(false)
+  const ownedCat = useGameStore((s) => s.inventory.ownedCat)
+  const catActive = useGameStore((s) => s.inventory.catActive)
   const [ownedMagicBook, setOwnedMagicBook] = useState(false)
   const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
   const [magicSkullDiscovered, setMagicSkullDiscovered] = useState(isAdminMode)
@@ -14488,19 +14490,19 @@ function App() {
 
   const resetGuestProgress = () => {
     setCoins(isAdminMode ? 850 : 0)
-    setOwnedSkins(['classic'])
-    setSelectedSkinId('classic')
-    setPreviewSkinId('classic')
+    setInventory('ownedSkins',['classic'])
+    setInventory('selectedSkinId','classic')
+    setInventory('previewSkinId','classic')
     setRoomLightOn(true)
     setLightColor('#ffffff')
     setLightIntensity(2)
-    setOwnedFloorSkins(['floor-classic'])
-    setOwnedWallSkins(['wall-classic'])
-    setSelectedFloorSkinId('floor-classic')
-    setSelectedWallSkinId('wall-classic')
-    setPreviewFloorSkinId('floor-classic')
-    setPreviewWallSkinId('wall-classic')
-    setApplyWallToCeiling(false)
+    setInventory('ownedFloorSkins',['floor-classic'])
+    setInventory('ownedWallSkins',['wall-classic'])
+    setInventory('selectedFloorSkinId','floor-classic')
+    setInventory('selectedWallSkinId','wall-classic')
+    setInventory('previewFloorSkinId','floor-classic')
+    setInventory('previewWallSkinId','wall-classic')
+    setInventory('applyWallToCeiling',false)
     setEditableObjects(defaultEditableObjects)
     setSelectedObjectId(null)
     setDraggingObjectId(null)
@@ -14510,8 +14512,8 @@ function App() {
     setIsObjectInventoryOpen(false)
     setNear('seat', null)
     setSeatedState(null)
-    setOwnedCat(false)
-    setCatActive(false)
+    setInventory('ownedCat',false)
+    setInventory('catActive',false)
     setOwnedMagicBook(false)
     setOwnedMagicSkull(false)
     setMagicSkullDiscovered(isAdminMode)
@@ -14553,10 +14555,10 @@ function App() {
     // Personal inventory (owned skins) must never be taken from a visited
     // player's snapshot — otherwise visiting someone would show their purchases
     // as yours. Gated behind includeInventory (false during a visit).
-    if (includeInventory && Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setOwnedSkins(parsed.ownedSkins)
+    if (includeInventory && Array.isArray(parsed.ownedSkins) && parsed.ownedSkins.length) setInventory('ownedSkins',parsed.ownedSkins)
     if (includeIdentity && typeof parsed.selectedSkinId === 'string') {
-      setSelectedSkinId(parsed.selectedSkinId)
-      setPreviewSkinId(parsed.selectedSkinId)
+      setInventory('selectedSkinId',parsed.selectedSkinId)
+      setInventory('previewSkinId',parsed.selectedSkinId)
     }
     // House appearance (lighting). includeWorld is false when reloading our own
     // progress while we are rejoining someone else's world as a guest, so our
@@ -14582,20 +14584,20 @@ function App() {
     // Owned floor/wall skins are inventory (keep the visitor's own); the
     // selected ones below are the host's house appearance (apply always).
     if (includeInventory) {
-      setOwnedFloorSkins(ownedFloorSkinIds)
-      setOwnedWallSkins(ownedWallSkinIds)
+      setInventory('ownedFloorSkins',ownedFloorSkinIds)
+      setInventory('ownedWallSkins',ownedWallSkinIds)
     }
 
     if (includeWorld && typeof parsed.selectedFloorSkinId === 'string' && validFloorSkinIds.has(parsed.selectedFloorSkinId)) {
-      setSelectedFloorSkinId(parsed.selectedFloorSkinId)
-      setPreviewFloorSkinId(parsed.selectedFloorSkinId)
+      setInventory('selectedFloorSkinId',parsed.selectedFloorSkinId)
+      setInventory('previewFloorSkinId',parsed.selectedFloorSkinId)
     }
     if (includeWorld && typeof parsed.selectedWallSkinId === 'string' && validWallSkinIds.has(parsed.selectedWallSkinId)) {
-      setSelectedWallSkinId(parsed.selectedWallSkinId)
-      setPreviewWallSkinId(parsed.selectedWallSkinId)
+      setInventory('selectedWallSkinId',parsed.selectedWallSkinId)
+      setInventory('previewWallSkinId',parsed.selectedWallSkinId)
     }
     if (includeWorld && typeof parsed.applyWallToCeiling === 'boolean') {
-      setApplyWallToCeiling(parsed.applyWallToCeiling)
+      setInventory('applyWallToCeiling',parsed.applyWallToCeiling)
     }
 
     if (includeWorld && Array.isArray(parsed.editableObjects)) {
@@ -14643,8 +14645,8 @@ function App() {
     // Pets, mounts, weapons are personal inventory: never apply them from a
     // visited player's snapshot (that would show their animals/mounts as yours).
     if (includeInventory) {
-      if (typeof parsed.ownedCat === 'boolean') setOwnedCat(parsed.ownedCat)
-      if (typeof parsed.catActive === 'boolean') setCatActive(parsed.catActive)
+      if (typeof parsed.ownedCat === 'boolean') setInventory('ownedCat',parsed.ownedCat)
+      if (typeof parsed.catActive === 'boolean') setInventory('catActive',parsed.catActive)
       // Hauts faits locaux : on charge le set sauvegardé (les hauts faits
       // événementiels ne sont pas redérivables, il faut les conserver).
       const parsedAchievements = Array.isArray(parsed.unlockedAchievements)
@@ -15705,27 +15707,27 @@ function App() {
   }, {})
 
   const openSkinMenu = () => {
-    setPreviewSkinId(selectedSkinId)
+    setInventory('previewSkinId',selectedSkinId)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
     setMenuOpen('skin', true)
   }
 
   const closeSkinMenu = () => {
-    setPreviewSkinId(selectedSkinId)
+    setInventory('previewSkinId',selectedSkinId)
     setMenuOpen('skin', false)
   }
   const openEnvironmentMenu = () => {
     setEnvironmentTab('floor')
-    setPreviewFloorSkinId(selectedFloorSkinId)
-    setPreviewWallSkinId(selectedWallSkinId)
+    setInventory('previewFloorSkinId',selectedFloorSkinId)
+    setInventory('previewWallSkinId',selectedWallSkinId)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
     setMenuOpen('environment', true)
   }
   const closeEnvironmentMenu = () => {
-    setPreviewFloorSkinId(selectedFloorSkinId)
-    setPreviewWallSkinId(selectedWallSkinId)
+    setInventory('previewFloorSkinId',selectedFloorSkinId)
+    setInventory('previewWallSkinId',selectedWallSkinId)
     setMenuOpen('environment', false)
   }
 
@@ -15821,18 +15823,18 @@ function App() {
   const goPreview = (direction) => {
     const current = Math.max(0, ballSkins.findIndex((skin) => skin.id === previewSkinId))
     const next = (current + direction + ballSkins.length) % ballSkins.length
-    setPreviewSkinId(ballSkins[next].id)
+    setInventory('previewSkinId',ballSkins[next].id)
   }
   const goEnvironmentPreview = (direction) => {
     if (environmentTab === 'floor') {
       const current = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
       const next = (current + direction + floorSkins.length) % floorSkins.length
-      setPreviewFloorSkinId(floorSkins[next].id)
+      setInventory('previewFloorSkinId',floorSkins[next].id)
       return
     }
     const current = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
     const next = (current + direction + availableWallSkins.length) % availableWallSkins.length
-    setPreviewWallSkinId(availableWallSkins[next].id)
+    setInventory('previewWallSkinId',availableWallSkins[next].id)
   }
 
   const buyPreviewSkin = async () => {
@@ -15841,13 +15843,13 @@ function App() {
     if (!isAdminMode && coins < skin.price) return
     const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
     if (!paid) return
-    setOwnedSkins((current) => [...current, skin.id])
+    setInventory('ownedSkins',(current) => [...current, skin.id])
   }
 
   const selectPreviewSkin = () => {
     const skin = ballSkins[previewIndex]
     if (!ownedSkins.includes(skin.id)) return
-    setSelectedSkinId(skin.id)
+    setInventory('selectedSkinId',skin.id)
     setMenuOpen('skin', false)
   }
   const buyPreviewEnvironmentSkin = async () => {
@@ -15858,9 +15860,9 @@ function App() {
     const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
     if (!paid) return
     if (environmentTab === 'floor') {
-      setOwnedFloorSkins((current) => [...current, skin.id])
+      setInventory('ownedFloorSkins',(current) => [...current, skin.id])
     } else {
-      setOwnedWallSkins((current) => [...current, skin.id])
+      setInventory('ownedWallSkins',(current) => [...current, skin.id])
     }
   }
   const selectPreviewEnvironmentSkin = () => {
@@ -15868,12 +15870,12 @@ function App() {
     if (environmentTab === 'floor') {
       const skin = floorSkins[previewFloorIndex]
       if (!ownedFloorSkins.includes(skin.id)) return
-      setSelectedFloorSkinId(skin.id)
+      setInventory('selectedFloorSkinId',skin.id)
       return
     }
     const skin = availableWallSkins[previewWallIndex]
     if (!ownedWallSkins.includes(skin.id)) return
-    setSelectedWallSkinId(skin.id)
+    setInventory('selectedWallSkinId',skin.id)
   }
 
   const buyCat = async () => {
@@ -15881,7 +15883,7 @@ function App() {
     if (!isAdminMode && coins < 500) return
     const paid = isAdminMode ? true : await applyCoinDelta(-500)
     if (!paid) return
-    setOwnedCat(true)
+    setInventory('ownedCat',true)
   }
 
   const buyMagicBook = async () => {
@@ -16085,7 +16087,7 @@ function App() {
     // allowed while visiting too — the other player sees it via networked state.
     if (mode !== 'play') return
     if (!ownedCat) return
-    setCatActive((v) => !v)
+    setInventory('catActive',(v) => !v)
   }
 
   const toggleMount = (mountId) => {
@@ -17455,7 +17457,7 @@ function App() {
         ownedWallSkinIds={ownedWallSkins}
         applyWallToCeiling={applyWallToCeiling}
         canApplyWorldSkins={canModifyWorld}
-        onApplyWallToCeilingChange={setApplyWallToCeiling}
+        onApplyWallToCeilingChange={(v) => setInventory('applyWallToCeiling', v)}
         onClose={closeEnvironmentMenu}
         onPrevious={() => goEnvironmentPreview(-1)}
         onNext={() => goEnvironmentPreview(1)}

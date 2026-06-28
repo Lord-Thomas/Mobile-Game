@@ -5,6 +5,10 @@ import { useGameStore } from './useGameStore'
 beforeEach(() => {
   useGameStore.getState().resetNear()
   useGameStore.getState().closeAllMenus()
+  const { setInventory } = useGameStore.getState()
+  setInventory('ownedSkins', ['classic'])
+  setInventory('selectedSkinId', 'classic')
+  setInventory('catActive', false)
 })
 
 describe('gameStore — slice proximité', () => {
@@ -81,5 +85,32 @@ describe('gameStore — slice menus', () => {
     setMenuOpen('character', true)
     closeAllMenus()
     expect(useGameStore.getState().menus).toEqual({})
+  })
+})
+
+describe('gameStore — slice inventory', () => {
+  it('setInventory pose une valeur simple', () => {
+    useGameStore.getState().setInventory('selectedSkinId', 'lunar')
+    expect(useGameStore.getState().inventory.selectedSkinId).toBe('lunar')
+  })
+
+  it('setInventory accepte une fonction updater (prev => next)', () => {
+    const { setInventory } = useGameStore.getState()
+    setInventory('ownedSkins', (current) => [...current, 'lunar'])
+    expect(useGameStore.getState().inventory.ownedSkins).toEqual(['classic', 'lunar'])
+  })
+
+  it('setInventory updater togglé (booléen)', () => {
+    const { setInventory } = useGameStore.getState()
+    setInventory('catActive', (v) => !v)
+    expect(useGameStore.getState().inventory.catActive).toBe(true)
+  })
+
+  it('setInventory avec valeur identique ne crée pas un nouvel objet', () => {
+    const { setInventory } = useGameStore.getState()
+    setInventory('selectedSkinId', 'classic')
+    const before = useGameStore.getState().inventory
+    setInventory('selectedSkinId', 'classic')
+    expect(useGameStore.getState().inventory).toBe(before)
   })
 })
