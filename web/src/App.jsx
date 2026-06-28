@@ -35,6 +35,7 @@ import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATAL
 import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
 import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
+import QuestTalkPrompt from './ui/QuestTalkPrompt'
 import QuestJournal from './ui/QuestJournal'
 import QuestTracker from './ui/QuestTracker'
 import VendorPanel from './ui/VendorPanel'
@@ -14089,7 +14090,8 @@ function App() {
   // État des quêtes (sérialisable, persisté dans world_settings.quests). Toute la
   // logique est dans src/quests/questState.js — ici on ne stocke que le bag.
   const [questProgress, setQuestProgress] = useState({})
-  const nearbyQuestNpcId = useGameStore((s) => s.near.questNpcId ?? null)
+  // nearbyQuestNpcId : entièrement détaché d'App — lu directement dans QuestTalkPrompt
+  // (abonné au store). App ne re-rend donc plus quand on approche le PNJ de quête.
   const [questDialogOpen, setQuestDialogOpen] = useState(false)
   const [questJournalOpen, setQuestJournalOpen] = useState(false)
   // Inventaire de matériaux lootés (persisté dans world_settings.materials).
@@ -17285,11 +17287,10 @@ function App() {
           {isLearningMagicSkull ? 'Apprentissage...' : 'Apprendre'}
         </button>
       )}
-      {showCaptureUi && nearbyQuestNpcId && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={() => setQuestDialogOpen(true)}>
-          Parler
-        </button>
-      )}
+      <QuestTalkPrompt
+        canShow={showCaptureUi && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen}
+        onTalk={() => setQuestDialogOpen(true)}
+      />
       {questDialogOpen && (
         <QuestDialog
           questId={FIRST_QUEST_ID}
