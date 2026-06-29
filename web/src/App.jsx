@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
+import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
@@ -496,31 +497,8 @@ const CLOTHING_COLOR_PALETTE = [
 ]
 // Couleurs moyennes réelles du modèle — extraites programmatiquement de la texture (player.glb)
 // skin H=28° S=0.40 L=0.63 | hair H=37° S=0.63 L=0.54 | shirt H=5° S=0.59 L=0.44 | pants H=45° S=0.06 L=0.14
-const CHARACTER_BASE_COLORS = {
-  skin:          '#c79e7b',
-  hair:          '#d39b3f',
-  eyes:          '#3B82C4',
-  eyebrows:      '#d39b3f',
-  shirt:         '#b4392e',
-  pants:         '#252421',
-  pants_details: '#252421',
-  pants_detail_yellow: '#d39b3f',
-  shoes:         '#F0F0F0',
-  socks:         '#F0F0F0',
-}
-const CHARACTER_DEFAULT_APPEARANCE = {
-  skinColor:        CHARACTER_BASE_COLORS.skin,
-  hairColor:        CHARACTER_BASE_COLORS.hair,
-  eyeColor:         CHARACTER_BASE_COLORS.eyes,
-  eyebrowsColor:    CHARACTER_BASE_COLORS.eyebrows,
-  shirtColor:       CHARACTER_BASE_COLORS.shirt,
-  pantsColor:       CHARACTER_BASE_COLORS.pants,
-  pantsDetailsColor: CHARACTER_BASE_COLORS.pants_detail_yellow,
-  shoesColor:       CHARACTER_BASE_COLORS.shoes,
-  socksColor:       CHARACTER_BASE_COLORS.socks,
-  goldCoat: false,
-  auraEquipped: false,
-}
+// CHARACTER_BASE_COLORS / CHARACTER_DEFAULT_APPEARANCE déplacés dans
+// ./game/characterAppearance.js (partagés avec le store).
 
 const PLAYER_MODEL_URL = '/models/player/player.glb'
 const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png'
@@ -14015,6 +13993,8 @@ function App() {
   const setMenuOpen = useGameStore((s) => s.setMenuOpen)
   // Slice "inventory" (cosmétiques) migré vers le store. Écriture via setInventory(key, value|updater).
   const setInventory = useGameStore((s) => s.setInventory)
+  // Slice "equipment" (équipement/identité) migré vers le store. Écriture via setEquipment(key, value|updater).
+  const setEquipment = useGameStore((s) => s.setEquipment)
   const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
@@ -14047,8 +14027,8 @@ function App() {
   const isNearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
   const ownedCat = useGameStore((s) => s.inventory.ownedCat)
   const catActive = useGameStore((s) => s.inventory.catActive)
-  const [ownedMagicBook, setOwnedMagicBook] = useState(false)
-  const [ownedMagicSkull, setOwnedMagicSkull] = useState(false)
+  const ownedMagicBook = useGameStore((s) => s.equipment.ownedMagicBook)
+  const ownedMagicSkull = useGameStore((s) => s.equipment.ownedMagicSkull)
   const [magicSkullDiscovered, setMagicSkullDiscovered] = useState(isAdminMode)
   const isNearMagicSkullDiscovery = useGameStore((s) => s.near.magicSkullDiscovery ?? false)
   const [isLearningMagicSkull, setIsLearningMagicSkull] = useState(false)
@@ -14057,10 +14037,10 @@ function App() {
   const summonGroupPositionsRef = useRef(new Map())
   const summonCooldownRef = useRef(0)
   const [summonCooldownUntil, setSummonCooldownUntil] = useState(0)
-  const [ownedMounts, setOwnedMounts] = useState([])
-  const [equippedWeapon, setEquippedWeapon] = useState(null)
+  const ownedMounts = useGameStore((s) => s.equipment.ownedMounts)
+  const equippedWeapon = useGameStore((s) => s.equipment.equippedWeapon)
   const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
-  const [characterAppearance, setCharacterAppearance] = useState(CHARACTER_DEFAULT_APPEARANCE)
+  const characterAppearance = useGameStore((s) => s.equipment.characterAppearance)
   const isCharacterMenuOpen = useGameStore((s) => s.menus.character ?? false)
   const isCustomizationChoiceOpen = useGameStore((s) => s.menus.customizationChoice ?? false)
   const projectilesRef = useRef([])
@@ -14089,8 +14069,8 @@ function App() {
   const [authMessage, setAuthMessage] = useState('')
   const [cloudSaveState, setCloudSaveState] = useState(isSupabaseConfigured ? 'offline' : 'local')
   const [mainMenuTab, setMainMenuTab] = useState('account')
-  const [ownedTitleIds, setOwnedTitleIds] = useState([])
-  const [equippedTitleId, setEquippedTitleId] = useState(null)
+  const ownedTitleIds = useGameStore((s) => s.equipment.ownedTitleIds)
+  const equippedTitleId = useGameStore((s) => s.equipment.equippedTitleId)
   const [titleActionState, setTitleActionState] = useState(null)
   const [achievementToast, setAchievementToast] = useState(null)
   // Hauts faits locaux (débloqués pour tout le monde, persistés dans la progression)
@@ -14518,8 +14498,8 @@ function App() {
     setSeatedState(null)
     setInventory('ownedCat',false)
     setInventory('catActive',false)
-    setOwnedMagicBook(false)
-    setOwnedMagicSkull(false)
+    setEquipment('ownedMagicBook',false)
+    setEquipment('ownedMagicSkull',false)
     setMagicSkullDiscovered(isAdminMode)
     setNear('magicSkullDiscovery', false)
     summonSlotRefs.current.forEach((slotRef) => { slotRef.current = null })
@@ -14536,14 +14516,14 @@ function App() {
     setNear('questNpcId', null)
     setQuestDialogOpen(false)
     setQuestJournalOpen(false)
-    setOwnedMounts([])
+    setEquipment('ownedMounts',[])
     setMountedMountId(null)
-    setEquippedWeapon(null)
+    setEquipment('equippedWeapon',null)
     setIsWeaponMenuOpen(false)
-    setCharacterAppearance(CHARACTER_DEFAULT_APPEARANCE)
+    setEquipment('characterAppearance',CHARACTER_DEFAULT_APPEARANCE)
     projectilesRef.current = []
-    setOwnedTitleIds([])
-    setEquippedTitleId(null)
+    setEquipment('ownedTitleIds',[])
+    setEquipment('equippedTitleId',null)
     setAchievementToast(null)
     setPlayerHp(PLAYER_MAX_HP)
   }
@@ -14573,7 +14553,7 @@ function App() {
       setLightIntensity(MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
     }
     if (includeIdentity && parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
-      setCharacterAppearance({ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
+      setEquipment('characterAppearance',{ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
     }
 
     const validFloorSkinIds = new Set(floorSkins.map((skin) => skin.id))
@@ -14666,20 +14646,20 @@ function App() {
       const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
       const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
-      setOwnedMagicBook(hasMagicBook)
-      setOwnedMagicSkull(hasMagicSkull)
+      setEquipment('ownedMagicBook',hasMagicBook)
+      setEquipment('ownedMagicSkull',hasMagicSkull)
       setMagicSkullDiscovered(Boolean(isAdminMode || parsed.magicSkullDiscovered || hasMagicSkull))
       const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
         ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
         : []
-      setOwnedMounts(Array.from(new Set(parsedOwnedMounts)))
+      setEquipment('ownedMounts',Array.from(new Set(parsedOwnedMounts)))
       const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
       const equippedIsValid =
         (savedEquipped === 'magic_book' && hasMagicBook) ||
         (savedEquipped === 'magic_skull' && hasMagicSkull)
-      setEquippedWeapon(equippedIsValid ? savedEquipped : null)
+      setEquipment('equippedWeapon',equippedIsValid ? savedEquipped : null)
     }
-    if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquippedTitleId(parsed.equippedTitleId)
+    if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquipment('equippedTitleId',parsed.equippedTitleId)
     if (includeIdentity && Array.isArray(parsed.friends)) {
       setFriends((current) => mergeSocialFriends(current, parsed.friends))
     }
@@ -14777,15 +14757,15 @@ function App() {
 
   const refreshPlayerTitles = async () => {
     if (!isSupabaseConfigured || !authUserRef.current) {
-      setOwnedTitleIds([])
-      setEquippedTitleId(null)
+      setEquipment('ownedTitleIds',[])
+      setEquipment('equippedTitleId',null)
       return null
     }
 
     const titleState = await loadPlayerTitles({ scope: progressScope })
     const ownedTitles = Array.isArray(titleState?.ownedTitles) ? titleState.ownedTitles : []
-    setOwnedTitleIds(ownedTitles.map((title) => title.titleId).filter(Boolean))
-    setEquippedTitleId(titleState?.equippedTitleId ?? null)
+    setEquipment('ownedTitleIds',ownedTitles.map((title) => title.titleId).filter(Boolean))
+    setEquipment('equippedTitleId',titleState?.equippedTitleId ?? null)
     return titleState
   }
 
@@ -14855,7 +14835,7 @@ function App() {
     setTitleActionState(titleId)
     try {
       await equipPlayerTitle(nextTitleId, { scope: progressScope })
-      setEquippedTitleId(nextTitleId)
+      setEquipment('equippedTitleId',nextTitleId)
       setCloudSaveState('synced')
       await refreshPlayerTitles()
     } catch {
@@ -15220,8 +15200,8 @@ function App() {
       if (!user) {
         hasLoadedCloudProgressRef.current = false
         setCloudSaveState('offline')
-        setOwnedTitleIds([])
-        setEquippedTitleId(null)
+        setEquipment('ownedTitleIds',[])
+        setEquipment('equippedTitleId',null)
         return
       }
       setDisplayName((current) => current || getUserDisplayName(user))
@@ -15254,8 +15234,8 @@ function App() {
         authUserRef.current = user
         if (!user) {
           setCloudSaveState('offline')
-          setOwnedTitleIds([])
-          setEquippedTitleId(null)
+          setEquipment('ownedTitleIds',[])
+          setEquipment('equippedTitleId',null)
           return null
         }
         setDisplayName((current) => current || getUserDisplayName(user))
@@ -15895,7 +15875,7 @@ function App() {
     if (!isAdminMode && coins < MAGIC_BOOK_PRICE) return
     const paid = isAdminMode ? true : await applyCoinDelta(-MAGIC_BOOK_PRICE)
     if (!paid) return
-    setOwnedMagicBook(true)
+    setEquipment('ownedMagicBook',true)
   }
 
   const completeMagicSkullLearning = useCallback(() => {
@@ -15965,7 +15945,7 @@ function App() {
     const paid = isAdminMode ? true : await applyCoinDelta(-MAGIC_SKULL_PRICE)
     if (!paid) return
     setMagicSkullDiscovered(true)
-    setOwnedMagicSkull(true)
+    setEquipment('ownedMagicSkull',true)
   }
 
   const handleSummonExpire = useCallback((index) => {
@@ -16012,7 +15992,7 @@ function App() {
     const paid = isAdminMode ? true : await applyCoinDelta(-mount.price)
     if (!paid) return
     preloadMountModel(mount.id)
-    setOwnedMounts((current) => (
+    setEquipment('ownedMounts',(current) => (
       current.includes(mount.id) ? current : [...current, mount.id]
     ))
   }
@@ -17174,7 +17154,7 @@ function App() {
         <CharacterCustomizationMenu
           open={PUBLIC_BUILD_FLAGS.showCharacterCustomization && isCharacterMenuOpen}
           appearance={characterAppearance}
-          onApply={setCharacterAppearance}
+          onApply={(v) => setEquipment('characterAppearance', v)}
           onClose={() => setMenuOpen('character', false)}
         />
       )}
@@ -17196,7 +17176,7 @@ function App() {
               thumbnail: objectCatalog[def.id]?.thumbnail ?? def.thumbnail,
             }))}
           equippedWeapon={equippedWeapon}
-          onEquip={(weapon) => { setEquippedWeapon(weapon) }}
+          onEquip={(weapon) => { setEquipment('equippedWeapon',weapon) }}
           onCustomizeCharacter={
             PUBLIC_BUILD_FLAGS.showCharacterCustomization
               ? openCharacterCustomizationFromBag

@@ -5,10 +5,13 @@ import { useGameStore } from './useGameStore'
 beforeEach(() => {
   useGameStore.getState().resetNear()
   useGameStore.getState().closeAllMenus()
-  const { setInventory } = useGameStore.getState()
+  const { setInventory, setEquipment } = useGameStore.getState()
   setInventory('ownedSkins', ['classic'])
   setInventory('selectedSkinId', 'classic')
   setInventory('catActive', false)
+  setEquipment('ownedMounts', [])
+  setEquipment('equippedWeapon', null)
+  setEquipment('ownedTitleIds', [])
 })
 
 describe('gameStore — slice proximité', () => {
@@ -112,5 +115,30 @@ describe('gameStore — slice inventory', () => {
     const before = useGameStore.getState().inventory
     setInventory('selectedSkinId', 'classic')
     expect(useGameStore.getState().inventory).toBe(before)
+  })
+})
+
+describe('gameStore — slice equipment', () => {
+  it('setEquipment pose une valeur simple', () => {
+    useGameStore.getState().setEquipment('equippedWeapon', 'magic_book')
+    expect(useGameStore.getState().equipment.equippedWeapon).toBe('magic_book')
+  })
+
+  it('setEquipment accepte une fonction updater (ajout de monture)', () => {
+    const { setEquipment } = useGameStore.getState()
+    setEquipment('ownedMounts', (current) => [...current, 'dragon'])
+    expect(useGameStore.getState().equipment.ownedMounts).toEqual(['dragon'])
+  })
+
+  it('characterAppearance a une valeur par défaut non vide', () => {
+    expect(useGameStore.getState().equipment.characterAppearance).toHaveProperty('skinColor')
+  })
+
+  it('setEquipment avec valeur identique ne crée pas un nouvel objet', () => {
+    const { setEquipment } = useGameStore.getState()
+    setEquipment('equippedWeapon', null)
+    const before = useGameStore.getState().equipment
+    setEquipment('equippedWeapon', null)
+    expect(useGameStore.getState().equipment).toBe(before)
   })
 })

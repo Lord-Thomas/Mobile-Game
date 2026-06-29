@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { CHARACTER_DEFAULT_APPEARANCE } from '../game/characterAppearance'
 
 // Store d'état de jeu (Zustand) — chantier de décomposition d'`App.jsx`.
 //
@@ -88,5 +89,27 @@ export const useGameStore = create((set) => ({
     const next = typeof value === 'function' ? value(prev) : value
     if (next === prev) return state // no-op : pas de rendu inutile
     return { inventory: { ...state.inventory, [key]: next } }
+  }),
+
+  // --- Slice "equipment" (équipement / identité) -------------------------
+  // Montures possédées, arme équipée, livre/crâne magiques possédés, titres
+  // (possédés / équipé), apparence du personnage. PERSISTÉ (même principe que
+  // inventory : App lit via sélecteurs, progressService sauve tout seul ; le
+  // chargement écrit via setEquipment). Défauts = anciennes valeurs initiales.
+  // setEquipment(key, value|updater) : remplace 1:1 les setX(...) et setX(prev => ...).
+  equipment: {
+    ownedMounts: [],
+    equippedWeapon: null,
+    ownedMagicBook: false,
+    ownedMagicSkull: false,
+    ownedTitleIds: [],
+    equippedTitleId: null,
+    characterAppearance: CHARACTER_DEFAULT_APPEARANCE,
+  },
+  setEquipment: (key, value) => set((state) => {
+    const prev = state.equipment[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { equipment: { ...state.equipment, [key]: next } }
   }),
 }))
