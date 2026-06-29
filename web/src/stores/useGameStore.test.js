@@ -19,6 +19,9 @@ beforeEach(() => {
   setQuest('dialogOpen', false)
   setQuest('journalOpen', false)
   setQuest('vendorOpen', false)
+  const { setView } = useGameStore.getState()
+  setView('zone', 'interior')
+  setView('mode', 'play')
 })
 
 describe('gameStore — slice proximité', () => {
@@ -187,5 +190,19 @@ describe('gameStore — slice quests', () => {
     const { setQuest } = useGameStore.getState()
     setQuest('journalOpen', (v) => !v)
     expect(useGameStore.getState().quests.journalOpen).toBe(true)
+  })
+})
+
+describe('gameStore — slice view', () => {
+  it('valeurs par défaut : intérieur + play', () => {
+    expect(useGameStore.getState().view.zone).toBe('interior')
+    expect(useGameStore.getState().view.mode).toBe('play')
+  })
+
+  it('setView change zone et mode indépendamment', () => {
+    const { setView } = useGameStore.getState()
+    setView('zone', 'outside')
+    setView('mode', 'customize')
+    expect(useGameStore.getState().view).toEqual({ zone: 'outside', mode: 'customize' })
   })
 })

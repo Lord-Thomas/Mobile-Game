@@ -14014,8 +14014,10 @@ function App() {
   const isEnvironmentMenuOpen = useGameStore((s) => s.menus.environment ?? false)
   const [furnitureCart, setFurnitureCart] = useState([])
   const isNearEnvironmentStation = useGameStore((s) => s.near.environmentStation ?? false)
-  const [mode, setMode] = useState('play')
-  const [currentZone, setCurrentZone] = useState(ZONES.interior)
+  // Slice "view" migré vers le store (zone + mode). setView(key, value).
+  const setView = useGameStore((s) => s.setView)
+  const mode = useGameStore((s) => s.view.mode)
+  const currentZone = useGameStore((s) => s.view.zone)
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
   const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
@@ -14722,7 +14724,7 @@ function App() {
       if (cancelled) return
       setMultiplayerSession(saved.session)
       setMultiplayerRole(saved.role)
-      setMode('play')
+      setView('mode','play')
       setMultiplayerMessage('Reconnexion a la session...')
       // The give-up countdown is armed only once the channel is actually
       // connected (see effect below) so the long initial world load doesn't eat
@@ -14948,7 +14950,7 @@ function App() {
           applyProgressSnapshot(hostWorld, { includeCoins: false })
           setMultiplayerSession(response.session)
           setMultiplayerRole('guest')
-          setMode('play')
+          setView('mode','play')
           setMenuOpen('skin', false)
           setMenuOpen('environment', false)
           setIsObjectInventoryOpen(false)
@@ -16191,7 +16193,7 @@ function App() {
     setNear('seat', null)
     setNear('tv', null)
     setSeatedState(null)
-    setMode('play')
+    setView('mode','play')
     setMenuOpen('skin', false)
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
@@ -16203,7 +16205,7 @@ function App() {
     setPlacementPreview(null)
     window.setTimeout(() => {
       const spawn = PLAYER_SPAWNS[nextZone] ?? PLAYER_SPAWNS.interior
-      setCurrentZone(nextZone)
+      setView('zone',nextZone)
       if (!goingOutside) {
         setOutdoorTransitionPrimed(false)
         setOutdoorContentStage(0)
@@ -16287,7 +16289,7 @@ function App() {
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
-    setMode('customize')
+    setView('mode','customize')
     setSelectedObjectId(placedEditableObjects[0]?.id ?? null)
     setDraggingObjectId(null)
     setPlacingObjectId(null)
@@ -16300,7 +16302,7 @@ function App() {
   }
 
   const closeCustomizationMode = () => {
-    setMode('play')
+    setView('mode','play')
     setMenuOpen('customizationChoice', false)
     setSelectedObjectId(null)
     setDraggingObjectId(null)
@@ -16454,7 +16456,7 @@ function App() {
     setIncomingVisitRequest(null)
     setMultiplayerSession(session)
     setMultiplayerRole('host')
-    setMode('play')
+    setView('mode','play')
     setMenuOpen('skin', false)
     setMenuOpen('environment', false)
     setSelectedObjectId(null)

@@ -172,4 +172,20 @@ export const useGameStore = create((set) => ({
     if (next === prev) return state
     return { quests: { ...state.quests, [key]: next } }
   }),
+
+  // --- Slice "view" (contexte courant) -----------------------------------
+  // zone = aire courante ('interior' | 'secondRoom' | 'outside', = ZONES dans App).
+  // mode = 'play' | 'customize'. Ce sont les états les PLUS lus du jeu (~90 et ~68
+  // sites) mais très peu écrits (zone : 1 writer via transitionToZone ; mode : ~6).
+  // Éphémère, non persisté (la zone de spawn/le mode sont recalculés au chargement).
+  view: {
+    zone: 'interior',
+    mode: 'play',
+  },
+  setView: (key, value) => set((state) => {
+    const prev = state.view[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { view: { ...state.view, [key]: next } }
+  }),
 }))
