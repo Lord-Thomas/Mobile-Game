@@ -28,6 +28,10 @@ beforeEach(() => {
   const { setEditor } = useGameStore.getState()
   setEditor('selectedObjectId', null)
   setEditor('placingObjectId', null)
+  const { setAccount } = useGameStore.getState()
+  setAccount('user', null)
+  setAccount('displayName', '')
+  setAccount('friends', [])
 })
 
 describe('gameStore — slice proximité', () => {
@@ -247,5 +251,25 @@ describe('gameStore — slice editor', () => {
 
   it('editableObjects a un défaut non vide (objets par défaut)', () => {
     expect(Array.isArray(useGameStore.getState().editor.editableObjects)).toBe(true)
+  })
+})
+
+describe('gameStore — slice account', () => {
+  it('setAccount pose user et displayName', () => {
+    const { setAccount } = useGameStore.getState()
+    setAccount('user', { id: 'u1' })
+    setAccount('displayName', 'Thomas')
+    expect(useGameStore.getState().account.user).toEqual({ id: 'u1' })
+    expect(useGameStore.getState().account.displayName).toBe('Thomas')
+  })
+
+  it('friends accepte un updater', () => {
+    const { setAccount } = useGameStore.getState()
+    setAccount('friends', (current) => [...current, { id: 'f1' }])
+    expect(useGameStore.getState().account.friends).toEqual([{ id: 'f1' }])
+  })
+
+  it('cloudSaveState a un défaut valide (offline/local selon config Supabase)', () => {
+    expect(['offline', 'local']).toContain(useGameStore.getState().account.cloudSaveState)
   })
 })

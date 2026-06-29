@@ -2,6 +2,17 @@ import { create } from 'zustand'
 import { CHARACTER_DEFAULT_APPEARANCE } from '../game/characterAppearance'
 import { defaultEditableObjects } from '../gameObjects/placeableObjects'
 
+// Même check que lib/supabase.isSupabaseConfigured, mais inliné pour NE PAS
+// importer le client Supabase (createClient touche window au chargement → casse
+// les tests Vitest en env node). Sert uniquement au défaut de cloudSaveState.
+const SUPABASE_CONFIGURED_INIT = (() => {
+  try {
+    return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
+  } catch {
+    return false
+  }
+})()
+
 // Mode admin (param d'URL ?mode=admin), lu une seule fois — sert uniquement à
 // reproduire l'ancien défaut de coins (useState(isAdminMode ? 850 : 0)).
 const ECONOMY_ADMIN_INIT = (() => {
@@ -227,5 +238,27 @@ export const useGameStore = create((set) => ({
     const next = typeof value === 'function' ? value(prev) : value
     if (next === prev) return state
     return { editor: { ...state.editor, [key]: next } }
+  }),
+
+  // --- Slice "account" (auth / compte / social) --------------------------
+  // user/displayName/friends persistés ; mode/email/password/message = état de
+  // formulaire éphémère ; cloudSaveState = état de sync (défaut selon Supabase).
+  // La logique d'auth/sync reste dans App (progressService) ; setAccount est un
+  // setter neutre. setAccount(key, value|updater).
+  account: {
+    user: null,
+    mode: 'signup',
+    email: '',
+    password: '',
+    displayName: '',
+    message: '',
+    cloudSaveState: SUPABASE_CONFIGURED_INIT ? 'offline' : 'local',
+    friends: [],
+  },
+  setAccount: (key, value) => set((state) => {
+    const prev = state.account[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { account: { ...state.account, [key]: next } }
   }),
 }))

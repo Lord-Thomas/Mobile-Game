@@ -14028,6 +14028,8 @@ function App() {
   const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
   // Slice "editor" migré vers le store. setEditor(key, value|updater).
   const setEditor = useGameStore((s) => s.setEditor)
+  // Slice "account" (auth/compte/social) migré vers le store. setAccount(key, value|updater).
+  const setAccount = useGameStore((s) => s.setAccount)
   const editableObjects = useGameStore((s) => s.editor.editableObjects)
   const selectedObjectId = useGameStore((s) => s.editor.selectedObjectId)
   const draggingObjectId = useGameStore((s) => s.editor.draggingObjectId)
@@ -14072,14 +14074,14 @@ function App() {
   const nearbyTv = useGameStore((s) => s.near.tv ?? null)
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
   const [seatedState, setSeatedState] = useState(null)
-  const [authUser, setAuthUser] = useState(null)
+  const authUser = useGameStore((s) => s.account.user)
   const isAccountOpen = useGameStore((s) => s.ui.accountOpen)
-  const [authMode, setAuthMode] = useState('signup')
-  const [authEmail, setAuthEmail] = useState('')
-  const [authPassword, setAuthPassword] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [authMessage, setAuthMessage] = useState('')
-  const [cloudSaveState, setCloudSaveState] = useState(isSupabaseConfigured ? 'offline' : 'local')
+  const authMode = useGameStore((s) => s.account.mode)
+  const authEmail = useGameStore((s) => s.account.email)
+  const authPassword = useGameStore((s) => s.account.password)
+  const displayName = useGameStore((s) => s.account.displayName)
+  const authMessage = useGameStore((s) => s.account.message)
+  const cloudSaveState = useGameStore((s) => s.account.cloudSaveState)
   const mainMenuTab = useGameStore((s) => s.ui.mainMenuTab)
   const ownedTitleIds = useGameStore((s) => s.equipment.ownedTitleIds)
   const equippedTitleId = useGameStore((s) => s.equipment.equippedTitleId)
@@ -14146,7 +14148,7 @@ function App() {
   const rejoinTimerRef = useRef(null)
   const [visitRequestNow, setVisitRequestNow] = useState(Date.now())
   const [selectedSocialPlayerId, setSelectedSocialPlayerId] = useState(null)
-  const [friends, setFriends] = useState([])
+  const friends = useGameStore((s) => s.account.friends)
   const [incomingFriendRequests, setIncomingFriendRequests] = useState([])
   const [pendingFriendRequests, setPendingFriendRequests] = useState([])
   const [multiplayerRole, setMultiplayerRole] = useState('solo')
@@ -14283,7 +14285,7 @@ function App() {
 
   useEffect(() => {
     if (!authUser?.id) {
-      setFriends([])
+      setAccount('friends',[])
       setIncomingFriendRequests([])
       setPendingFriendRequests([])
       return
@@ -14291,9 +14293,9 @@ function App() {
 
     try {
       const raw = localStorage.getItem(`lab_friends_v1:${authUser.id}`)
-      setFriends(raw ? mergeSocialFriends(JSON.parse(raw)) : [])
+      setAccount('friends',raw ? mergeSocialFriends(JSON.parse(raw)) : [])
     } catch {
-      setFriends([])
+      setAccount('friends',[])
     }
   }, [authUser?.id])
 
@@ -14311,7 +14313,7 @@ function App() {
   useEffect(() => {
     onlinePlayersRef.current = onlinePlayers
     if (!onlinePlayers.length) return
-    setFriends((current) => {
+    setAccount('friends',(current) => {
       let changed = false
       const next = current.map((friend) => {
         const online = onlinePlayers.find((player) => player.userId === friend.userId)
@@ -14540,7 +14542,7 @@ function App() {
 
   const applyProgressSnapshot = (parsed, { includeCoins = true, includeIdentity = includeCoins, includeInventory = includeCoins, includeWorld = true } = {}) => {
     if (!parsed) return
-    if (includeIdentity && typeof parsed.displayName === 'string') setDisplayName(parsed.displayName)
+    if (includeIdentity && typeof parsed.displayName === 'string') setAccount('displayName',parsed.displayName)
     if (includeCoins && typeof parsed.coins === 'number') {
       setEconomy('coins',isAdminMode ? 850 : Math.max(0, parsed.coins))
     } else if (includeCoins) {
@@ -14671,7 +14673,7 @@ function App() {
     }
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquipment('equippedTitleId',parsed.equippedTitleId)
     if (includeIdentity && Array.isArray(parsed.friends)) {
-      setFriends((current) => mergeSocialFriends(current, parsed.friends))
+      setAccount('friends',(current) => mergeSocialFriends(current, parsed.friends))
     }
   }
 
@@ -14781,17 +14783,17 @@ function App() {
 
   const saveCurrentProgressToCloud = async () => {
     if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return false
-    setCloudSaveState('saving')
+    setAccount('cloudSaveState','saving')
     try {
       const snapshot = isGuestVisit
         ? createPersonalProgressSnapshot()
         : latestProgressRef.current ?? createCurrentProgressSnapshot()
       await savePlayerProgress(snapshot, { scope: progressScope })
       if (isGuestVisit) rememberPersonalProgress(snapshot)
-      setCloudSaveState('synced')
+      setAccount('cloudSaveState','synced')
       return true
     } catch {
-      setCloudSaveState('error')
+      setAccount('cloudSaveState','error')
       return false
     }
   }
@@ -14828,13 +14830,13 @@ function App() {
             ...fallbackSnapshot,
             coins: Math.max(0, previousCoins + delta),
           }, { includeCoins: true, scope: progressScope })
-          setCloudSaveState('synced')
+          setAccount('cloudSaveState','synced')
           shareGain()
           return true
         } catch {}
       }
       setEconomy('coins',previousCoins)
-      setCloudSaveState('error')
+      setAccount('cloudSaveState','error')
       return false
     }
   }
@@ -14846,10 +14848,10 @@ function App() {
     try {
       await equipPlayerTitle(nextTitleId, { scope: progressScope })
       setEquipment('equippedTitleId',nextTitleId)
-      setCloudSaveState('synced')
+      setAccount('cloudSaveState','synced')
       await refreshPlayerTitles()
     } catch {
-      setCloudSaveState('error')
+      setAccount('cloudSaveState','error')
     } finally {
       setTitleActionState(null)
     }
@@ -14888,7 +14890,7 @@ function App() {
 
   const addFriend = useCallback((friend) => {
     if (!friend?.userId) return
-    setFriends((current) => {
+    setAccount('friends',(current) => {
       if (current.some((item) => item.userId === friend.userId)) return current
       return mergeSocialFriends(current, [{
         userId: friend.userId,
@@ -15205,18 +15207,18 @@ function App() {
     let cancelled = false
 
     const loadCloudProgress = async (user) => {
-      setAuthUser(user)
+      setAccount('user',user)
       authUserRef.current = user
       if (!user) {
         hasLoadedCloudProgressRef.current = false
-        setCloudSaveState('offline')
+        setAccount('cloudSaveState','offline')
         setEquipment('ownedTitleIds',[])
         setEquipment('equippedTitleId',null)
         return
       }
-      setDisplayName((current) => current || getUserDisplayName(user))
+      setAccount('displayName',(current) => current || getUserDisplayName(user))
 
-      setCloudSaveState('loading')
+      setAccount('cloudSaveState','loading')
       try {
         const cloudProgress = await loadPlayerProgress({ scope: progressScope })
         if (cancelled) return
@@ -15231,25 +15233,25 @@ function App() {
         }
         await refreshPlayerTitles()
         hasLoadedCloudProgressRef.current = true
-        setCloudSaveState('synced')
+        setAccount('cloudSaveState','synced')
       } catch {
-        if (!cancelled) setCloudSaveState('error')
+        if (!cancelled) setAccount('cloudSaveState','error')
       }
     }
 
     getCurrentUser()
       .then(async (user) => {
         if (cancelled) return
-        setAuthUser(user)
+        setAccount('user',user)
         authUserRef.current = user
         if (!user) {
-          setCloudSaveState('offline')
+          setAccount('cloudSaveState','offline')
           setEquipment('ownedTitleIds',[])
           setEquipment('equippedTitleId',null)
           return null
         }
-        setDisplayName((current) => current || getUserDisplayName(user))
-        setCloudSaveState('loading')
+        setAccount('displayName',(current) => current || getUserDisplayName(user))
+        setAccount('cloudSaveState','loading')
         const cloudProgress = await loadPlayerProgress({ scope: progressScope })
         if (cloudProgress) {
           rememberPersonalProgress(cloudProgress)
@@ -15262,11 +15264,11 @@ function App() {
         }
         await refreshPlayerTitles()
         hasLoadedCloudProgressRef.current = true
-        setCloudSaveState('synced')
+        setAccount('cloudSaveState','synced')
         return cloudProgress
       })
       .catch(() => {
-        if (!cancelled) setCloudSaveState('offline')
+        if (!cancelled) setAccount('cloudSaveState','offline')
       })
 
     const unsubscribe = onAuthStateChange(loadCloudProgress)
@@ -15284,7 +15286,7 @@ function App() {
     }
 
     if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
-    setCloudSaveState('saving')
+    setAccount('cloudSaveState','saving')
     cloudSaveTimeoutRef.current = window.setTimeout(() => {
       const snapshot = isGuestVisit
         ? createPersonalProgressSnapshot()
@@ -15292,9 +15294,9 @@ function App() {
       savePlayerProgress(snapshot, { scope: progressScope })
         .then(() => {
           if (isGuestVisit) rememberPersonalProgress(snapshot)
-          setCloudSaveState('synced')
+          setAccount('cloudSaveState','synced')
         })
-        .catch(() => setCloudSaveState('error'))
+        .catch(() => setAccount('cloudSaveState','error'))
     }, 800)
 
     return () => {
@@ -15472,28 +15474,28 @@ function App() {
         if (rewardResult?.titleUnlocked) {
           const title = getTitleDefinition('first_mob_slayer_founder')
           await refreshPlayerTitles()
-          setAuthMessage(`Titre rare obtenu: ${title?.name ?? 'Chasseur Originel'} #${rewardResult.claimNumber}.`)
+          setAccount('message',`Titre rare obtenu: ${title?.name ?? 'Chasseur Originel'} #${rewardResult.claimNumber}.`)
           showAchievementToast({
             titleName: title?.name ?? 'Chasseur Originel',
             claimNumber: rewardResult.claimNumber,
           })
         } else if (rewardResult?.reason === 'limit_reached') {
-          setAuthMessage('Premier monstre vaincu. Les 50 titres limites ont deja ete attribues.')
+          setAccount('message','Premier monstre vaincu. Les 50 titres limites ont deja ete attribues.')
         } else if (rewardResult?.reason === 'already_claimed') {
           await refreshPlayerTitles()
         }
       } catch (error) {
-        setCloudSaveState('error')
+        setAccount('cloudSaveState','error')
         const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`
         const readableMessage = message.trim() || 'erreur inconnue'
-        setAuthMessage(
+        setAccount('message',
           message.includes('claim_first_mob_defeat_rewards') || message.includes('Could not find the function')
             ? 'Haut fait indisponible: lance le SQL Supabase mis a jour.'
             : `Haut fait indisponible: ${readableMessage}`,
         )
       }
     } else if (!isAdminMode && !isGuestVisit && !authUserRef.current) {
-      setAuthMessage('Connecte ton compte pour debloquer les hauts faits limites.')
+      setAccount('message','Connecte ton compte pour debloquer les hauts faits limites.')
     }
 
     setScorePopups((previous) => [
@@ -15786,10 +15788,10 @@ function App() {
         localStorage.setItem(progressStorageKey, JSON.stringify(nextPersonal))
         if (isSupabaseConfigured && authUserRef.current && hasLoadedCloudProgressRef.current) {
           await savePlayerProgress(nextPersonal, { scope: progressScope })
-          setCloudSaveState('synced')
+          setAccount('cloudSaveState','synced')
         }
       } catch {
-        setCloudSaveState('error')
+        setAccount('cloudSaveState','error')
       }
       setFurnitureCart([])
       setUi('environmentTab','furniture')
@@ -16612,21 +16614,21 @@ function App() {
     const password = authPassword
     const pseudo = displayName.trim()
     if (!email) {
-      setAuthMessage('Entre une adresse email valide.')
+      setAccount('message','Entre une adresse email valide.')
       return
     }
     if (authMode === 'signup' && pseudo.length < 2) {
-      setAuthMessage("Choisis un pseudo d'au moins 2 caracteres.")
+      setAccount('message',"Choisis un pseudo d'au moins 2 caracteres.")
       return
     }
     if (password.length < 8) {
-      setAuthMessage('Le mot de passe doit contenir au moins 8 caracteres.')
+      setAccount('message','Le mot de passe doit contenir au moins 8 caracteres.')
       return
     }
     const result = authMode === 'signup'
       ? await signUpWithPassword({ email, password, displayName: pseudo })
       : await signInWithPassword({ email, password })
-    setAuthMessage(result.ok
+    setAccount('message',result.ok
       ? authMode === 'signup'
         ? result.needsEmailConfirmation
           ? 'Compte cree. Confirme ton email, ou desactive la confirmation dans Supabase pour le prototype.'
@@ -16638,10 +16640,10 @@ function App() {
   const requestSignOut = async () => {
     await saveCurrentProgressToCloud()
     await signOut()
-    setAuthUser(null)
-    setAuthPassword('')
-    setAuthMessage('')
-    setCloudSaveState('offline')
+    setAccount('user',null)
+    setAccount('password','')
+    setAccount('message','')
+    setAccount('cloudSaveState','offline')
     hasLoadedCloudProgressRef.current = false
     skipNextCloudSaveRef.current = false
     authUserRef.current = null
@@ -17248,12 +17250,12 @@ function App() {
           fullscreenActive={fullscreenActive}
           onToggle={() => setUi('accountOpen',(current) => !current)}
           onTabChange={(v) => setUi('mainMenuTab', v)}
-          onEmailChange={setAuthEmail}
-          onPasswordChange={setAuthPassword}
-          onDisplayNameChange={setDisplayName}
+          onEmailChange={(v) => setAccount('email', v)}
+          onPasswordChange={(v) => setAccount('password', v)}
+          onDisplayNameChange={(v) => setAccount('displayName', v)}
           onModeChange={(nextMode) => {
-            setAuthMode(nextMode)
-            setAuthMessage('')
+            setAccount('mode',nextMode)
+            setAccount('message','')
           }}
           onSubmit={requestAccountSubmit}
           onSignOut={requestSignOut}
