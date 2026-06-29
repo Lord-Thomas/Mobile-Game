@@ -14,6 +14,11 @@ beforeEach(() => {
   setEquipment('ownedTitleIds', [])
   setEconomy('coins', 0)
   setEconomy('materials', {})
+  const { setQuest } = useGameStore.getState()
+  setQuest('progress', {})
+  setQuest('dialogOpen', false)
+  setQuest('journalOpen', false)
+  setQuest('vendorOpen', false)
 })
 
 describe('gameStore — slice proximité', () => {
@@ -162,5 +167,25 @@ describe('gameStore — slice economy', () => {
     const { setEconomy } = useGameStore.getState()
     setEconomy('materials', (prev) => ({ ...prev, wood: (prev.wood ?? 0) + 2 }))
     expect(useGameStore.getState().economy.materials.wood).toBe(2)
+  })
+})
+
+describe('gameStore — slice quests', () => {
+  it('setQuest ouvre/ferme le dialogue', () => {
+    const { setQuest } = useGameStore.getState()
+    setQuest('dialogOpen', true)
+    expect(useGameStore.getState().quests.dialogOpen).toBe(true)
+  })
+
+  it('setQuest progress accepte un updater (logique pure questState)', () => {
+    const { setQuest } = useGameStore.getState()
+    setQuest('progress', (prev) => ({ ...prev, q1: { status: 'in_progress' } }))
+    expect(useGameStore.getState().quests.progress.q1.status).toBe('in_progress')
+  })
+
+  it('toggle journalOpen via updater', () => {
+    const { setQuest } = useGameStore.getState()
+    setQuest('journalOpen', (v) => !v)
+    expect(useGameStore.getState().quests.journalOpen).toBe(true)
   })
 })

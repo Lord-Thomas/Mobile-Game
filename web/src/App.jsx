@@ -13998,6 +13998,9 @@ function App() {
   // Slice "economy" migré vers le store. setEconomy = setter neutre ; la mutation
   // métier des coins reste applyCoinDelta (réseau/persistance) ci-dessous.
   const setEconomy = useGameStore((s) => s.setEconomy)
+  // Slice "quests" migré vers le store. setQuest(key, value|updater) ; la logique
+  // pure des quêtes reste dans src/quests/questState.js (appliquée via updater).
+  const setQuest = useGameStore((s) => s.setQuest)
   const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
@@ -14082,21 +14085,19 @@ function App() {
   const [mobKillCount, setMobKillCount] = useState(0)
   // État des quêtes (sérialisable, persisté dans world_settings.quests). Toute la
   // logique est dans src/quests/questState.js — ici on ne stocke que le bag.
-  const [questProgress, setQuestProgress] = useState({})
+  const questProgress = useGameStore((s) => s.quests.progress)
   // nearbyQuestNpcId : entièrement détaché d'App — lu directement dans QuestTalkPrompt
   // (abonné au store). App ne re-rend donc plus quand on approche le PNJ de quête.
-  const [questDialogOpen, setQuestDialogOpen] = useState(false)
-  const [questJournalOpen, setQuestJournalOpen] = useState(false)
+  const questDialogOpen = useGameStore((s) => s.quests.dialogOpen)
+  const questJournalOpen = useGameStore((s) => s.quests.journalOpen)
   // Inventaire de matériaux lootés (persisté dans world_settings.materials).
   const materials = useGameStore((s) => s.economy.materials)
-  const [vendorOpen, setVendorOpen] = useState(false)
+  const vendorOpen = useGameStore((s) => s.quests.vendorOpen)
   // Objets lootés au sol en attente d'absorption (transitoire, non persisté).
   const [lootDrops, setLootDrops] = useState([])
   // Quête épinglée (mini-tracker). Préférence d'UI : persistée en localStorage,
   // pas dans la sauvegarde de progression.
-  const [pinnedQuestId, setPinnedQuestId] = useState(() => {
-    try { return window.localStorage.getItem('questPinnedId') || null } catch { return null }
-  })
+  const pinnedQuestId = useGameStore((s) => s.quests.pinnedId)
   useEffect(() => {
     try {
       if (pinnedQuestId) window.localStorage.setItem('questPinnedId', pinnedQuestId)
@@ -14512,13 +14513,13 @@ function App() {
     unlockedAchievementsRef.current = []
     setUnlockedAchievements([])
     setMobKillCount(0)
-    setQuestProgress({})
+    setQuest('progress',{})
     setEconomy('materials',{})
     setLootDrops([])
-    setVendorOpen(false)
+    setQuest('vendorOpen',false)
     setNear('questNpcId', null)
-    setQuestDialogOpen(false)
-    setQuestJournalOpen(false)
+    setQuest('dialogOpen',false)
+    setQuest('journalOpen',false)
     setEquipment('ownedMounts',[])
     setMountedMountId(null)
     setEquipment('equippedWeapon',null)
@@ -14644,7 +14645,7 @@ function App() {
       if (typeof parsed.mobKillCount === 'number' && parsed.mobKillCount >= 0) {
         setMobKillCount(parsed.mobKillCount)
       }
-      setQuestProgress(normalizeQuestProgress(parsed.quests))
+      setQuest('progress',normalizeQuestProgress(parsed.quests))
       setEconomy('materials',normalizeMaterials(parsed.materials))
       const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
       const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
@@ -15433,7 +15434,7 @@ function App() {
     if (typeof enemyId === 'string' && enemyId.includes('skeleton')) unlockAchievement('kill_skeleton')
 
     // Progression des quêtes : avance les objectifs "tuer N <type>" actifs.
-    if (mobType) setQuestProgress((prev) => registerKill(prev, mobType))
+    if (mobType) setQuest('progress',(prev) => registerKill(prev, mobType))
 
     // Loot : tirage par type de monstre. Les objets tombent au sol (LootDrops)
     // puis sont aimantés/absorbés par le joueur, où ils rejoignent l'inventaire.
@@ -15505,7 +15506,7 @@ function App() {
 
   // --- Quêtes : accepter / terminer (logique pure dans src/quests/questState.js)
   const acceptQuest = (questId) => {
-    setQuestProgress((prev) => startQuest(prev, questId))
+    setQuest('progress',(prev) => startQuest(prev, questId))
   }
 
   const completeQuest = async (questId) => {
@@ -15521,8 +15522,8 @@ function App() {
         position: p ? [p.x, p.y + 1.4, p.z] : undefined,
       })
     }
-    setQuestProgress((prev) => completeQuestState(prev, questId))
-    setQuestDialogOpen(false)
+    setQuest('progress',(prev) => completeQuestState(prev, questId))
+    setQuest('dialogOpen',false)
   }
 
   // --- Marchand : revente des matériaux lootés (logique pure dans materialsInventory)
@@ -17032,7 +17033,7 @@ function App() {
             playerPositionRef={playerPositionRef}
             questProgress={questProgress}
             enabled={currentZone === ZONES.outside && mode === 'play'}
-            onNearChange={(id) => { setNear('questNpcId', id); if (!id) setQuestDialogOpen(false) }}
+            onNearChange={(id) => { setNear('questNpcId', id); if (!id) setQuest('dialogOpen',false) }}
           />
           <LootDrops
             drops={lootDrops}
@@ -17123,7 +17124,7 @@ function App() {
         <button
           className="quest-journal-btn"
           type="button"
-          onClick={() => setQuestJournalOpen((v) => !v)}
+          onClick={() => setQuest('journalOpen',(v) => !v)}
           aria-label="Journal de quêtes"
         >
           📜
@@ -17290,7 +17291,7 @@ function App() {
       />
       <QuestTalkPrompt
         canShow={showCaptureUi && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen}
-        onTalk={() => setQuestDialogOpen(true)}
+        onTalk={() => setQuest('dialogOpen',true)}
       />
       {questDialogOpen && (
         <QuestDialog
@@ -17298,8 +17299,8 @@ function App() {
           questProgress={questProgress}
           onAccept={acceptQuest}
           onComplete={completeQuest}
-          onClose={() => setQuestDialogOpen(false)}
-          onOpenVendor={() => { setQuestDialogOpen(false); setVendorOpen(true) }}
+          onClose={() => setQuest('dialogOpen',false)}
+          onOpenVendor={() => { setQuest('dialogOpen',false); setQuest('vendorOpen',true) }}
         />
       )}
       {vendorOpen && (
@@ -17307,7 +17308,7 @@ function App() {
           materials={materials}
           onSell={handleSellItem}
           onSellAll={handleSellAll}
-          onClose={() => setVendorOpen(false)}
+          onClose={() => setQuest('vendorOpen',false)}
         />
       )}
       {showCaptureUi && mode === 'play' && pinnedQuestId && !questJournalOpen && (
@@ -17317,8 +17318,8 @@ function App() {
         <QuestJournal
           questProgress={questProgress}
           pinnedQuestId={pinnedQuestId}
-          onPin={setPinnedQuestId}
-          onClose={() => setQuestJournalOpen(false)}
+          onPin={(v) => setQuest('pinnedId', v)}
+          onClose={() => setQuest('journalOpen',false)}
         />
       )}
       {/* Invites stations/porte/crâne/tv/siège déplacées dans <InteractionPrompts> (abonné au store). */}

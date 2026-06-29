@@ -11,6 +11,17 @@ const ECONOMY_ADMIN_INIT = (() => {
   }
 })()
 
+// pinnedId persisté dans son propre localStorage (clé 'questPinnedId'). On
+// reproduit l'ancien initialiseur lazy du useState ; l'effet de re-sync vers
+// localStorage reste dans App (il dépend du sélecteur).
+const QUEST_PINNED_INIT = (() => {
+  try {
+    return window.localStorage.getItem('questPinnedId') || null
+  } catch {
+    return null
+  }
+})()
+
 // Store d'état de jeu (Zustand) — chantier de décomposition d'`App.jsx`.
 //
 // POURQUOI : `App()` concentre ~96 useState et fait ~17 000 lignes. Un setState
@@ -141,5 +152,24 @@ export const useGameStore = create((set) => ({
     const next = typeof value === 'function' ? value(prev) : value
     if (next === prev) return state
     return { economy: { ...state.economy, [key]: next } }
+  }),
+
+  // --- Slice "quests" ----------------------------------------------------
+  // progress = le "bag" de quêtes (persisté via progressService ; la logique pure
+  // est dans src/quests/questState.js, appliquée via setQuest('progress', prev => ...)).
+  // dialogOpen/journalOpen/vendorOpen = UI éphémère. pinnedId = quête épinglée
+  // (persistée dans son propre localStorage, cf. QUEST_PINNED_INIT + effet côté App).
+  quests: {
+    progress: {},
+    dialogOpen: false,
+    journalOpen: false,
+    vendorOpen: false,
+    pinnedId: QUEST_PINNED_INIT,
+  },
+  setQuest: (key, value) => set((state) => {
+    const prev = state.quests[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { quests: { ...state.quests, [key]: next } }
   }),
 }))
