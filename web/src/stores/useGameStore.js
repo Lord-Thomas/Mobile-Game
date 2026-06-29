@@ -188,4 +188,23 @@ export const useGameStore = create((set) => ({
     if (next === prev) return state
     return { view: { ...state.view, [key]: next } }
   }),
+
+  // --- Slice "ui" (overlays/onglets éphémères) ---------------------------
+  // Ouverture des menus lumière/arme/inventaire-objets/compte + onglets actifs.
+  // Éphémère, non persisté. (soloNameplateVisible reste dans App : couplé à son
+  // propre localStorage, comme quests.pinnedId.)
+  ui: {
+    lightMenuOpen: false,
+    weaponMenuOpen: false,
+    objectInventoryOpen: false,
+    accountOpen: false,
+    mainMenuTab: 'account',
+    environmentTab: 'floor',
+  },
+  setUi: (key, value) => set((state) => {
+    const prev = state.ui[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { ui: { ...state.ui, [key]: next } }
+  }),
 }))

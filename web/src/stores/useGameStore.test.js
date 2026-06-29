@@ -22,6 +22,9 @@ beforeEach(() => {
   const { setView } = useGameStore.getState()
   setView('zone', 'interior')
   setView('mode', 'play')
+  const { setUi } = useGameStore.getState()
+  setUi('mainMenuTab', 'account')
+  setUi('weaponMenuOpen', false)
 })
 
 describe('gameStore — slice proximité', () => {
@@ -204,5 +207,21 @@ describe('gameStore — slice view', () => {
     setView('zone', 'outside')
     setView('mode', 'customize')
     expect(useGameStore.getState().view).toEqual({ zone: 'outside', mode: 'customize' })
+  })
+})
+
+describe('gameStore — slice ui', () => {
+  it('setUi ouvre un menu et change un onglet', () => {
+    const { setUi } = useGameStore.getState()
+    setUi('weaponMenuOpen', true)
+    setUi('mainMenuTab', 'social')
+    expect(useGameStore.getState().ui.weaponMenuOpen).toBe(true)
+    expect(useGameStore.getState().ui.mainMenuTab).toBe('social')
+  })
+
+  it('setUi toggle via updater', () => {
+    const { setUi } = useGameStore.getState()
+    setUi('accountOpen', (v) => !v)
+    expect(useGameStore.getState().ui.accountOpen).toBe(true)
   })
 })

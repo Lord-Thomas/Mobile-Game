@@ -14002,8 +14002,8 @@ function App() {
   // pure des quêtes reste dans src/quests/questState.js (appliquée via updater).
   const setQuest = useGameStore((s) => s.setQuest)
   const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
-  const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
-  const [environmentTab, setEnvironmentTab] = useState('floor')
+  const isLightMenuOpen = useGameStore((s) => s.ui.lightMenuOpen)
+  const environmentTab = useGameStore((s) => s.ui.environmentTab)
   const ownedFloorSkins = useGameStore((s) => s.inventory.ownedFloorSkins)
   const ownedWallSkins = useGameStore((s) => s.inventory.ownedWallSkins)
   const selectedFloorSkinId = useGameStore((s) => s.inventory.selectedFloorSkinId)
@@ -14016,6 +14016,8 @@ function App() {
   const isNearEnvironmentStation = useGameStore((s) => s.near.environmentStation ?? false)
   // Slice "view" migré vers le store (zone + mode). setView(key, value).
   const setView = useGameStore((s) => s.setView)
+  // Slice "ui" (overlays/onglets éphémères) migré vers le store. setUi(key, value|updater).
+  const setUi = useGameStore((s) => s.setUi)
   const mode = useGameStore((s) => s.view.mode)
   const currentZone = useGameStore((s) => s.view.zone)
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
@@ -14030,7 +14032,7 @@ function App() {
   const [placingObjectId, setPlacingObjectId] = useState(null)
   const [placementLocked, setPlacementLocked] = useState(false)
   const [placementPreview, setPlacementPreview] = useState(null)
-  const [isObjectInventoryOpen, setIsObjectInventoryOpen] = useState(false)
+  const isObjectInventoryOpen = useGameStore((s) => s.ui.objectInventoryOpen)
   const isNearCustomizationStation = useGameStore((s) => s.near.customizationStation ?? false)
   const isNearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
   const ownedCat = useGameStore((s) => s.inventory.ownedCat)
@@ -14047,7 +14049,7 @@ function App() {
   const [summonCooldownUntil, setSummonCooldownUntil] = useState(0)
   const ownedMounts = useGameStore((s) => s.equipment.ownedMounts)
   const equippedWeapon = useGameStore((s) => s.equipment.equippedWeapon)
-  const [isWeaponMenuOpen, setIsWeaponMenuOpen] = useState(false)
+  const isWeaponMenuOpen = useGameStore((s) => s.ui.weaponMenuOpen)
   const characterAppearance = useGameStore((s) => s.equipment.characterAppearance)
   const isCharacterMenuOpen = useGameStore((s) => s.menus.character ?? false)
   const isCustomizationChoiceOpen = useGameStore((s) => s.menus.customizationChoice ?? false)
@@ -14069,14 +14071,14 @@ function App() {
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
   const [seatedState, setSeatedState] = useState(null)
   const [authUser, setAuthUser] = useState(null)
-  const [isAccountOpen, setIsAccountOpen] = useState(false)
+  const isAccountOpen = useGameStore((s) => s.ui.accountOpen)
   const [authMode, setAuthMode] = useState('signup')
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [cloudSaveState, setCloudSaveState] = useState(isSupabaseConfigured ? 'offline' : 'local')
-  const [mainMenuTab, setMainMenuTab] = useState('account')
+  const mainMenuTab = useGameStore((s) => s.ui.mainMenuTab)
   const ownedTitleIds = useGameStore((s) => s.equipment.ownedTitleIds)
   const equippedTitleId = useGameStore((s) => s.equipment.equippedTitleId)
   const [titleActionState, setTitleActionState] = useState(null)
@@ -14499,7 +14501,7 @@ function App() {
     setPlacingObjectId(null)
     setPlacementLocked(false)
     setPlacementPreview(null)
-    setIsObjectInventoryOpen(false)
+    setUi('objectInventoryOpen',false)
     setNear('seat', null)
     setSeatedState(null)
     setInventory('ownedCat',false)
@@ -14525,7 +14527,7 @@ function App() {
     setEquipment('ownedMounts',[])
     setMountedMountId(null)
     setEquipment('equippedWeapon',null)
-    setIsWeaponMenuOpen(false)
+    setUi('weaponMenuOpen',false)
     setEquipment('characterAppearance',CHARACTER_DEFAULT_APPEARANCE)
     projectilesRef.current = []
     setEquipment('ownedTitleIds',[])
@@ -14915,8 +14917,8 @@ function App() {
         setIncomingVisitRequest(request)
         setVisitRequestNow(Date.now())
         setIsMultiplayerOpen(true)
-        setIsAccountOpen(true)
-        setMainMenuTab('social')
+        setUi('accountOpen',true)
+        setUi('mainMenuTab','social')
         setMultiplayerMessage(`${request.fromDisplayName} veut visiter ton monde.`)
       },
       onVisitCancel: (payload) => {
@@ -14953,7 +14955,7 @@ function App() {
           setView('mode','play')
           setMenuOpen('skin', false)
           setMenuOpen('environment', false)
-          setIsObjectInventoryOpen(false)
+          setUi('objectInventoryOpen',false)
           setSelectedObjectId(null)
           setMultiplayerMessage('Mode visite active: tu peux te balader et jouer au foot.')
         } catch {
@@ -14967,8 +14969,8 @@ function App() {
             ? current
             : [...current, request]
         ))
-        setIsAccountOpen(true)
-        setMainMenuTab('friends')
+        setUi('accountOpen',true)
+        setUi('mainMenuTab','friends')
         setMultiplayerMessage(`${request.fromDisplayName} veut t'ajouter en ami.`)
       },
       onFriendResponse: (response) => {
@@ -15708,7 +15710,7 @@ function App() {
     setMenuOpen('skin', false)
   }
   const openEnvironmentMenu = () => {
-    setEnvironmentTab('floor')
+    setUi('environmentTab','floor')
     setInventory('previewFloorSkinId',selectedFloorSkinId)
     setInventory('previewWallSkinId',selectedWallSkinId)
     setMenuOpen('character', false)
@@ -15788,12 +15790,12 @@ function App() {
         setCloudSaveState('error')
       }
       setFurnitureCart([])
-      setEnvironmentTab('furniture')
+      setUi('environmentTab','furniture')
       return
     }
     setEditableObjects((current) => [...current, ...instances])
     setFurnitureCart([])
-    setEnvironmentTab('furniture')
+    setUi('environmentTab','furniture')
   }
 
   const openCustomizationChoice = () => {
@@ -15806,7 +15808,7 @@ function App() {
 
   const openCharacterCustomizationFromBag = () => {
     if (!PUBLIC_BUILD_FLAGS.showCharacterCustomization) return
-    setIsWeaponMenuOpen(false)
+    setUi('weaponMenuOpen',false)
     setMenuOpen('character', true)
   }
 
@@ -16295,7 +16297,7 @@ function App() {
     setPlacingObjectId(null)
     setPlacementLocked(false)
     setPlacementPreview(null)
-    setIsObjectInventoryOpen(false)
+    setUi('objectInventoryOpen',false)
     setNear('seat', null)
     setNear('tv', null)
     setSeatedState(null)
@@ -16309,7 +16311,7 @@ function App() {
     setPlacingObjectId(null)
     setPlacementLocked(false)
     setPlacementPreview(null)
-    setIsObjectInventoryOpen(false)
+    setUi('objectInventoryOpen',false)
     setNear('customizationStation', false)
   }
 
@@ -16347,7 +16349,7 @@ function App() {
       rotationY: object.rotationY ?? 0,
       isValid: true,
     })
-    setIsObjectInventoryOpen(false)
+    setUi('objectInventoryOpen',false)
   }
 
   const updatePlacementPreview = (position) => {
@@ -16463,7 +16465,7 @@ function App() {
     setDraggingObjectId(null)
     setPlacingObjectId(null)
     setPlacementPreview(null)
-    setIsObjectInventoryOpen(false)
+    setUi('objectInventoryOpen',false)
     setMultiplayerMessage(`${session.guestDisplayName} rejoint ton monde.`)
     await onlinePresenceRef.current?.sendVisitResponse(response)
   }
@@ -16483,7 +16485,7 @@ function App() {
   const selectSocialPlayer = (player) => {
     if (!player?.userId) return
     setSelectedSocialPlayerId(player.userId)
-    setMainMenuTab('social')
+    setUi('mainMenuTab','social')
   }
 
   const requestFriend = async (player) => {
@@ -16734,7 +16736,7 @@ function App() {
                 <LightSwitch
                   isOn={roomLightOn}
                   isNear={isNearLightSwitch && canModifyWorld}
-                  onOpen={() => canModifyWorld && setIsLightMenuOpen(true)}
+                  onOpen={() => canModifyWorld && setUi('lightMenuOpen',true)}
                   mode={mode}
                 />
                 <Dragon playerPositionRef={playerPositionRef} visible={showInteriorHouseDetails} />
@@ -17058,7 +17060,7 @@ function App() {
           <LightSwitchTrigger
             playerPositionRef={playerPositionRef}
             enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
-            onNearChange={(near) => { setNear('lightSwitch', near); if (!near) setIsLightMenuOpen(false) }}
+            onNearChange={(near) => { setNear('lightSwitch', near); if (!near) setUi('lightMenuOpen',false) }}
           />
           <BallStationTrigger playerPositionRef={playerPositionRef} goalObject={goalObject} onNearChange={(v) => setNear('skinStation', v)} />
           {currentZone !== ZONES.outside && (
@@ -17116,7 +17118,7 @@ function App() {
         <button
           className="weapon-inventory-btn"
           type="button"
-          onClick={() => setIsWeaponMenuOpen((v) => !v)}
+          onClick={() => setUi('weaponMenuOpen',(v) => !v)}
           aria-label="Sac"
         >
           🎒
@@ -17191,7 +17193,7 @@ function App() {
           ownedMountIds={ownedMounts}
           mountedMountId={mountedMountId}
           onToggleMount={mode === 'play' ? toggleMount : undefined}
-          onClose={() => setIsWeaponMenuOpen(false)}
+          onClose={() => setUi('weaponMenuOpen',false)}
           materials={materials}
         />
       )}
@@ -17242,8 +17244,8 @@ function App() {
           showLocalCoinButton={showLocalCoinButton}
           fullscreenSupported={fullscreenSupported}
           fullscreenActive={fullscreenActive}
-          onToggle={() => setIsAccountOpen((current) => !current)}
-          onTabChange={setMainMenuTab}
+          onToggle={() => setUi('accountOpen',(current) => !current)}
+          onTabChange={(v) => setUi('mainMenuTab', v)}
           onEmailChange={setAuthEmail}
           onPasswordChange={setAuthPassword}
           onDisplayNameChange={setDisplayName}
@@ -17354,7 +17356,7 @@ function App() {
               <LightColorWheel onChange={setLightColor} />
             </>
           )}
-          <button className="light-panel-close" type="button" onClick={() => setIsLightMenuOpen(false)}>
+          <button className="light-panel-close" type="button" onClick={() => setUi('lightMenuOpen',false)}>
             Fermer
           </button>
         </div>
@@ -17412,7 +17414,7 @@ function App() {
           open={isObjectInventoryOpen}
           cards={inventoryCards}
           placingObjectId={placingObjectId}
-          onToggle={() => setIsObjectInventoryOpen((current) => !current)}
+          onToggle={() => setUi('objectInventoryOpen',(current) => !current)}
           onSelect={beginPlaceObject}
         />
       )}
@@ -17435,7 +17437,7 @@ function App() {
         coins={coins}
         hasUnlimitedCoins={isAdminMode}
         activeTab={environmentTab}
-        onTabChange={setEnvironmentTab}
+        onTabChange={(v) => setUi('environmentTab', v)}
         floorSkins={floorSkins}
         wallSkins={availableWallSkins}
         furnitureItems={furnitureShopItems}
