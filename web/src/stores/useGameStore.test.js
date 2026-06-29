@@ -5,13 +5,15 @@ import { useGameStore } from './useGameStore'
 beforeEach(() => {
   useGameStore.getState().resetNear()
   useGameStore.getState().closeAllMenus()
-  const { setInventory, setEquipment } = useGameStore.getState()
+  const { setInventory, setEquipment, setEconomy } = useGameStore.getState()
   setInventory('ownedSkins', ['classic'])
   setInventory('selectedSkinId', 'classic')
   setInventory('catActive', false)
   setEquipment('ownedMounts', [])
   setEquipment('equippedWeapon', null)
   setEquipment('ownedTitleIds', [])
+  setEconomy('coins', 0)
+  setEconomy('materials', {})
 })
 
 describe('gameStore — slice proximité', () => {
@@ -140,5 +142,25 @@ describe('gameStore — slice equipment', () => {
     const before = useGameStore.getState().equipment
     setEquipment('equippedWeapon', null)
     expect(useGameStore.getState().equipment).toBe(before)
+  })
+})
+
+describe('gameStore — slice economy', () => {
+  it('setEconomy pose les coins', () => {
+    useGameStore.getState().setEconomy('coins', 500)
+    expect(useGameStore.getState().economy.coins).toBe(500)
+  })
+
+  it('setEconomy updater (delta) clampé comme applyCoinDelta', () => {
+    const { setEconomy } = useGameStore.getState()
+    setEconomy('coins', 100)
+    setEconomy('coins', (c) => Math.max(0, c - 250)) // dépense > solde -> 0
+    expect(useGameStore.getState().economy.coins).toBe(0)
+  })
+
+  it('setEconomy materials accepte un updater (ajout)', () => {
+    const { setEconomy } = useGameStore.getState()
+    setEconomy('materials', (prev) => ({ ...prev, wood: (prev.wood ?? 0) + 2 }))
+    expect(useGameStore.getState().economy.materials.wood).toBe(2)
   })
 })

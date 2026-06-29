@@ -1,6 +1,16 @@
 import { create } from 'zustand'
 import { CHARACTER_DEFAULT_APPEARANCE } from '../game/characterAppearance'
 
+// Mode admin (param d'URL ?mode=admin), lu une seule fois — sert uniquement à
+// reproduire l'ancien défaut de coins (useState(isAdminMode ? 850 : 0)).
+const ECONOMY_ADMIN_INIT = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get('mode') === 'admin'
+  } catch {
+    return false
+  }
+})()
+
 // Store d'état de jeu (Zustand) — chantier de décomposition d'`App.jsx`.
 //
 // POURQUOI : `App()` concentre ~96 useState et fait ~17 000 lignes. Un setState
@@ -111,5 +121,25 @@ export const useGameStore = create((set) => ({
     const next = typeof value === 'function' ? value(prev) : value
     if (next === prev) return state
     return { equipment: { ...state.equipment, [key]: next } }
+  }),
+
+  // --- Slice "economy" ---------------------------------------------------
+  // coins + materials (sac de matériaux de craft/vente). PERSISTÉ. Le défaut de
+  // coins reproduit l'ancien initialiseur useState(isAdminMode ? 850 : 0) — calculé
+  // ici à l'init via l'URL (comme perfFlags), pour rester fidèle sans flash.
+  //
+  // IMPORTANT : la MUTATION métier des coins (applyCoinDelta) reste dans App car
+  // elle est couplée au réseau/persistance (addPlayerCoins, savePlayerProgress,
+  // partage multijoueur) — conformément à la règle "persistance hors store". Le
+  // store ne fait que stocker la valeur ; setEconomy est un setter neutre.
+  economy: {
+    coins: ECONOMY_ADMIN_INIT ? 850 : 0,
+    materials: {},
+  },
+  setEconomy: (key, value) => set((state) => {
+    const prev = state.economy[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { economy: { ...state.economy, [key]: next } }
   }),
 }))

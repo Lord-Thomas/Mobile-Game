@@ -13966,7 +13966,7 @@ function App() {
   const respawnTimerRef = useRef(null)
   const outRespawnCooldownRef = useRef(false)
   const [scorePopups, setScorePopups] = useState([])
-  const [coins, setCoins] = useState(isAdminMode ? 850 : 0)
+  const coins = useGameStore((s) => s.economy.coins)
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP)
   const [playerHealing, setPlayerHealing] = useState(false)
   const playerHpRef = useRef(PLAYER_MAX_HP)
@@ -13995,6 +13995,9 @@ function App() {
   const setInventory = useGameStore((s) => s.setInventory)
   // Slice "equipment" (équipement/identité) migré vers le store. Écriture via setEquipment(key, value|updater).
   const setEquipment = useGameStore((s) => s.setEquipment)
+  // Slice "economy" migré vers le store. setEconomy = setter neutre ; la mutation
+  // métier des coins reste applyCoinDelta (réseau/persistance) ci-dessous.
+  const setEconomy = useGameStore((s) => s.setEconomy)
   const isNearLightSwitch = useGameStore((s) => s.near.lightSwitch ?? false)
   const [isLightMenuOpen, setIsLightMenuOpen] = useState(false)
   const [environmentTab, setEnvironmentTab] = useState('floor')
@@ -14085,7 +14088,7 @@ function App() {
   const [questDialogOpen, setQuestDialogOpen] = useState(false)
   const [questJournalOpen, setQuestJournalOpen] = useState(false)
   // Inventaire de matériaux lootés (persisté dans world_settings.materials).
-  const [materials, setMaterials] = useState({})
+  const materials = useGameStore((s) => s.economy.materials)
   const [vendorOpen, setVendorOpen] = useState(false)
   // Objets lootés au sol en attente d'absorption (transitoire, non persisté).
   const [lootDrops, setLootDrops] = useState([])
@@ -14473,7 +14476,7 @@ function App() {
   }
 
   const resetGuestProgress = () => {
-    setCoins(isAdminMode ? 850 : 0)
+    setEconomy('coins',isAdminMode ? 850 : 0)
     setInventory('ownedSkins',['classic'])
     setInventory('selectedSkinId','classic')
     setInventory('previewSkinId','classic')
@@ -14510,7 +14513,7 @@ function App() {
     setUnlockedAchievements([])
     setMobKillCount(0)
     setQuestProgress({})
-    setMaterials({})
+    setEconomy('materials',{})
     setLootDrops([])
     setVendorOpen(false)
     setNear('questNpcId', null)
@@ -14532,9 +14535,9 @@ function App() {
     if (!parsed) return
     if (includeIdentity && typeof parsed.displayName === 'string') setDisplayName(parsed.displayName)
     if (includeCoins && typeof parsed.coins === 'number') {
-      setCoins(isAdminMode ? 850 : Math.max(0, parsed.coins))
+      setEconomy('coins',isAdminMode ? 850 : Math.max(0, parsed.coins))
     } else if (includeCoins) {
-      setCoins(isAdminMode ? 850 : 0)
+      setEconomy('coins',isAdminMode ? 850 : 0)
     }
     // Personal inventory (owned skins) must never be taken from a visited
     // player's snapshot — otherwise visiting someone would show their purchases
@@ -14642,7 +14645,7 @@ function App() {
         setMobKillCount(parsed.mobKillCount)
       }
       setQuestProgress(normalizeQuestProgress(parsed.quests))
-      setMaterials(normalizeMaterials(parsed.materials))
+      setEconomy('materials',normalizeMaterials(parsed.materials))
       const parsedOwnedWeapons = Array.isArray(parsed.ownedWeapons) ? parsed.ownedWeapons : []
       const hasMagicBook = Boolean(parsed.ownedMagicBook || parsedOwnedWeapons.includes('magic_book'))
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
@@ -14788,7 +14791,7 @@ function App() {
 
   const applyCoinDelta = async (delta, { share = delta > 0, reason = 'reward', position = null } = {}) => {
     const previousCoins = latestProgressRef.current?.coins ?? coins
-    setCoins((current) => Math.max(0, current + delta))
+    setEconomy('coins',(current) => Math.max(0, current + delta))
     const shareGain = () => {
       if (!share || delta <= 0 || !isMultiplayerSession) return
       multiplayerChannelRef.current?.sendCoinGain?.({
@@ -14805,7 +14808,7 @@ function App() {
 
     try {
       const nextCoins = await addPlayerCoins(delta, { scope: progressScope })
-      if (typeof nextCoins === 'number') setCoins(Math.max(0, nextCoins))
+      if (typeof nextCoins === 'number') setEconomy('coins',Math.max(0, nextCoins))
       shareGain()
       return true
     } catch {
@@ -14823,7 +14826,7 @@ function App() {
           return true
         } catch {}
       }
-      setCoins(previousCoins)
+      setEconomy('coins',previousCoins)
       setCloudSaveState('error')
       return false
     }
@@ -15531,7 +15534,7 @@ function App() {
       position: p ? [p.x, p.y + 1.4, p.z] : undefined,
     })
     if (!rewarded) return // on ne retire pas les objets si le crédit a échoué
-    setMaterials(result.materials)
+    setEconomy('materials',result.materials)
   }
 
   const handleSellItem = (itemId, quantity) => sellMaterialsForCoins(sellItem(materials, itemId, quantity))
@@ -15545,7 +15548,7 @@ function App() {
   // Le joueur absorbe un objet au sol : il rejoint l'inventaire + petit popup.
   const absorbLootDrop = (dropId, itemId) => {
     setLootDrops((prev) => prev.filter((drop) => drop.id !== dropId))
-    setMaterials((prev) => addItems(prev, [itemId]))
+    setEconomy('materials',(prev) => addItems(prev, [itemId]))
     const p = playerPositionRef.current
     setScorePopups((previous) => [
       ...previous,
