@@ -25,6 +25,9 @@ beforeEach(() => {
   const { setUi } = useGameStore.getState()
   setUi('mainMenuTab', 'account')
   setUi('weaponMenuOpen', false)
+  const { setEditor } = useGameStore.getState()
+  setEditor('selectedObjectId', null)
+  setEditor('placingObjectId', null)
 })
 
 describe('gameStore — slice proximité', () => {
@@ -223,5 +226,26 @@ describe('gameStore — slice ui', () => {
     const { setUi } = useGameStore.getState()
     setUi('accountOpen', (v) => !v)
     expect(useGameStore.getState().ui.accountOpen).toBe(true)
+  })
+})
+
+describe('gameStore — slice editor', () => {
+  it('sélection / placement simples', () => {
+    const { setEditor } = useGameStore.getState()
+    setEditor('selectedObjectId', 'obj-1')
+    setEditor('placingObjectId', 'obj-2')
+    expect(useGameStore.getState().editor.selectedObjectId).toBe('obj-1')
+    expect(useGameStore.getState().editor.placingObjectId).toBe('obj-2')
+  })
+
+  it('editableObjects accepte un updater (ajout)', () => {
+    const { setEditor } = useGameStore.getState()
+    const before = useGameStore.getState().editor.editableObjects.length
+    setEditor('editableObjects', (current) => [...current, { id: 'new', objectId: 'x' }])
+    expect(useGameStore.getState().editor.editableObjects.length).toBe(before + 1)
+  })
+
+  it('editableObjects a un défaut non vide (objets par défaut)', () => {
+    expect(Array.isArray(useGameStore.getState().editor.editableObjects)).toBe(true)
   })
 })

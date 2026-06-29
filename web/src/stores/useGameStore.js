@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { CHARACTER_DEFAULT_APPEARANCE } from '../game/characterAppearance'
+import { defaultEditableObjects } from '../gameObjects/placeableObjects'
 
 // Mode admin (param d'URL ?mode=admin), lu une seule fois — sert uniquement à
 // reproduire l'ancien défaut de coins (useState(isAdminMode ? 850 : 0)).
@@ -206,5 +207,25 @@ export const useGameStore = create((set) => ({
     const next = typeof value === 'function' ? value(prev) : value
     if (next === prev) return state
     return { ui: { ...state.ui, [key]: next } }
+  }),
+
+  // --- Slice "editor" (monde / placement d'objets) -----------------------
+  // editableObjects = objets placés par le joueur (PERSISTÉ ; défaut importé de
+  // placeableObjects). Le reste = état d'édition éphémère (sélection, drag,
+  // placement en cours, aperçu). setEditor(key, value|updater) remplace 1:1 les
+  // setX(...) et setX(prev => ...).
+  editor: {
+    editableObjects: defaultEditableObjects,
+    selectedObjectId: null,
+    draggingObjectId: null,
+    placingObjectId: null,
+    placementLocked: false,
+    placementPreview: null,
+  },
+  setEditor: (key, value) => set((state) => {
+    const prev = state.editor[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { editor: { ...state.editor, [key]: next } }
   }),
 }))

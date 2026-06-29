@@ -14026,12 +14026,14 @@ function App() {
   const [spawnRequest, setSpawnRequest] = useState(null)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
   const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
-  const [editableObjects, setEditableObjects] = useState(defaultEditableObjects)
-  const [selectedObjectId, setSelectedObjectId] = useState(null)
-  const [draggingObjectId, setDraggingObjectId] = useState(null)
-  const [placingObjectId, setPlacingObjectId] = useState(null)
-  const [placementLocked, setPlacementLocked] = useState(false)
-  const [placementPreview, setPlacementPreview] = useState(null)
+  // Slice "editor" migré vers le store. setEditor(key, value|updater).
+  const setEditor = useGameStore((s) => s.setEditor)
+  const editableObjects = useGameStore((s) => s.editor.editableObjects)
+  const selectedObjectId = useGameStore((s) => s.editor.selectedObjectId)
+  const draggingObjectId = useGameStore((s) => s.editor.draggingObjectId)
+  const placingObjectId = useGameStore((s) => s.editor.placingObjectId)
+  const placementLocked = useGameStore((s) => s.editor.placementLocked)
+  const placementPreview = useGameStore((s) => s.editor.placementPreview)
   const isObjectInventoryOpen = useGameStore((s) => s.ui.objectInventoryOpen)
   const isNearCustomizationStation = useGameStore((s) => s.near.customizationStation ?? false)
   const isNearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
@@ -14495,12 +14497,12 @@ function App() {
     setInventory('previewFloorSkinId','floor-classic')
     setInventory('previewWallSkinId','wall-classic')
     setInventory('applyWallToCeiling',false)
-    setEditableObjects(defaultEditableObjects)
-    setSelectedObjectId(null)
-    setDraggingObjectId(null)
-    setPlacingObjectId(null)
-    setPlacementLocked(false)
-    setPlacementPreview(null)
+    setEditor('editableObjects',defaultEditableObjects)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
     setUi('objectInventoryOpen',false)
     setNear('seat', null)
     setSeatedState(null)
@@ -14632,7 +14634,7 @@ function App() {
         })
         .filter(Boolean)
 
-      setEditableObjects([...mergedObjects, ...savedShopObjects])
+      setEditor('editableObjects',[...mergedObjects, ...savedShopObjects])
     }
     // Pets, mounts, weapons are personal inventory: never apply them from a
     // visited player's snapshot (that would show their animals/mounts as yours).
@@ -14956,7 +14958,7 @@ function App() {
           setMenuOpen('skin', false)
           setMenuOpen('environment', false)
           setUi('objectInventoryOpen',false)
-          setSelectedObjectId(null)
+          setEditor('selectedObjectId',null)
           setMultiplayerMessage('Mode visite active: tu peux te balader et jouer au foot.')
         } catch {
           setMultiplayerMessage('Lecture du monde impossible. Lance le SQL Supabase mis a jour.')
@@ -15793,7 +15795,7 @@ function App() {
       setUi('environmentTab','furniture')
       return
     }
-    setEditableObjects((current) => [...current, ...instances])
+    setEditor('editableObjects',(current) => [...current, ...instances])
     setFurnitureCart([])
     setUi('environmentTab','furniture')
   }
@@ -16200,11 +16202,11 @@ function App() {
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
-    setSelectedObjectId(null)
-    setDraggingObjectId(null)
-    setPlacingObjectId(null)
-    setPlacementLocked(false)
-    setPlacementPreview(null)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
     window.setTimeout(() => {
       const spawn = PLAYER_SPAWNS[nextZone] ?? PLAYER_SPAWNS.interior
       setView('zone',nextZone)
@@ -16292,11 +16294,11 @@ function App() {
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
     setView('mode','customize')
-    setSelectedObjectId(placedEditableObjects[0]?.id ?? null)
-    setDraggingObjectId(null)
-    setPlacingObjectId(null)
-    setPlacementLocked(false)
-    setPlacementPreview(null)
+    setEditor('selectedObjectId',placedEditableObjects[0]?.id ?? null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
     setUi('objectInventoryOpen',false)
     setNear('seat', null)
     setNear('tv', null)
@@ -16306,18 +16308,18 @@ function App() {
   const closeCustomizationMode = () => {
     setView('mode','play')
     setMenuOpen('customizationChoice', false)
-    setSelectedObjectId(null)
-    setDraggingObjectId(null)
-    setPlacingObjectId(null)
-    setPlacementLocked(false)
-    setPlacementPreview(null)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
     setUi('objectInventoryOpen',false)
     setNear('customizationStation', false)
   }
 
   const updateEditableObjectPosition = (id, position) => {
     if (!canModifyWorld) return
-    setEditableObjects((current) =>
+    setEditor('editableObjects',(current) =>
       current.map((object) => (object.id === id ? { ...object, position } : object)),
     )
   }
@@ -16325,26 +16327,26 @@ function App() {
   const storeSelectedObject = () => {
     if (!canModifyWorld) return
     if (!selectedObject?.canStore) return
-    setEditableObjects((current) =>
+    setEditor('editableObjects',(current) =>
       current.map((object) =>
         object.id === selectedObject.id
           ? { ...object, status: 'stored', position: null }
           : object,
       ),
     )
-    setSelectedObjectId(null)
-    setDraggingObjectId(null)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
   }
 
   const beginPlaceObject = (id) => {
     if (!canModifyWorld) return
     const object = editableObjects.find((nextObject) => nextObject.id === id)
     if (!object || object.status !== 'stored') return
-    setSelectedObjectId(null)
-    setDraggingObjectId(null)
-    setPlacingObjectId(id)
-    setPlacementLocked(false)
-    setPlacementPreview({
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',id)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',{
       position: [0, 0, 0],
       rotationY: object.rotationY ?? 0,
       isValid: true,
@@ -16354,7 +16356,7 @@ function App() {
 
   const updatePlacementPreview = (position) => {
     if (!canModifyWorld) return
-    setPlacementPreview((current) => {
+    setEditor('placementPreview',(current) => {
       if (!current) return current
       const [x, z] = clampToCustomRoom(position[0], position[2])
       return {
@@ -16368,7 +16370,7 @@ function App() {
   const confirmPlacement = () => {
     if (!canModifyWorld) return
     if (!placingObjectId || !placementPreview?.isValid) return
-    setEditableObjects((current) =>
+    setEditor('editableObjects',(current) =>
       current.map((object) =>
         object.id === placingObjectId
           ? {
@@ -16380,29 +16382,29 @@ function App() {
           : object,
       ),
     )
-    setSelectedObjectId(placingObjectId)
-    setPlacingObjectId(null)
-    setPlacementLocked(false)
-    setPlacementPreview(null)
+    setEditor('selectedObjectId',placingObjectId)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
   }
 
   const cancelPlacement = () => {
-    setPlacingObjectId(null)
-    setPlacementLocked(false)
-    setPlacementPreview(null)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
   }
 
   const rotateSelectedObject = (direction) => {
     if (!canModifyWorld) return
     const angle = Math.PI / 4
     if (placingObjectId) {
-      setPlacementPreview((current) => (
+      setEditor('placementPreview',(current) => (
         current ? { ...current, rotationY: current.rotationY + direction * angle } : current
       ))
       return
     }
     if (!selectedObjectId) return
-    setEditableObjects((current) =>
+    setEditor('editableObjects',(current) =>
       current.map((object) => {
         if (object.id !== selectedObjectId || !object.canRotate) return object
         return { ...object, rotationY: object.rotationY + direction * angle }
@@ -16461,10 +16463,10 @@ function App() {
     setView('mode','play')
     setMenuOpen('skin', false)
     setMenuOpen('environment', false)
-    setSelectedObjectId(null)
-    setDraggingObjectId(null)
-    setPlacingObjectId(null)
-    setPlacementPreview(null)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',null)
+    setEditor('placementPreview',null)
     setUi('objectInventoryOpen',false)
     setMultiplayerMessage(`${session.guestDisplayName} rejoint ton monde.`)
     await onlinePresenceRef.current?.sendVisitResponse(response)
@@ -16797,12 +16799,12 @@ function App() {
             placingObjectId={placingObjectId}
             placementLocked={placementLocked}
             placementPreview={placementPreview}
-            onSelect={setSelectedObjectId}
-            onStartDragging={setDraggingObjectId}
-            onStopDragging={() => setDraggingObjectId(null)}
+            onSelect={(id) => setEditor('selectedObjectId', id)}
+            onStartDragging={(id) => setEditor('draggingObjectId', id)}
+            onStopDragging={() => setEditor('draggingObjectId',null)}
             onUpdatePosition={updateEditableObjectPosition}
             onUpdatePlacementPreview={updatePlacementPreview}
-            onLockPlacement={() => setPlacementLocked(true)}
+            onLockPlacement={() => setEditor('placementLocked',true)}
             registerCombatTarget={registerCombatTarget}
             onTrainingDummyDefeated={handleTrainingDummyDefeated}
           />
@@ -16876,8 +16878,8 @@ function App() {
             object={goalObject}
             mode={canModifyWorld ? mode : 'play'}
             selected={selectedObjectId === goalObject.id}
-            onSelect={setSelectedObjectId}
-            onStartDragging={setDraggingObjectId}
+            onSelect={(id) => setEditor('selectedObjectId', id)}
+            onStartDragging={(id) => setEditor('draggingObjectId', id)}
             onBallZoneEnter={handleBallZoneEnter}
             onBallZoneExit={handleBallZoneExit}
             ballRef={ballRef}
