@@ -66,7 +66,8 @@ function OutdoorSun({ castShadows, intensity, active, viewerOutside, playerPosit
         position={OUTDOOR_SUN_DIRECTION.map((value) => value * 32)}
         intensity={intensity}
         color="#fffaf0"
-        castShadow={castShadows}
+        castShadow={active}
+        shadow-intensity={castShadows ? 1 : 0}
         shadow-mapSize={[512, 512]}
         shadow-camera-left={-28}
         shadow-camera-right={28}
@@ -122,7 +123,7 @@ export function OutdoorLighting({
       )}
       <hemisphereLight ref={hemiRef} args={['#ffffff', '#a8d87b', hemiIntensity]} />
       <OutdoorSun
-        castShadows={castShadows && active}
+        castShadows={castShadows}
         intensity={sunIntensity}
         active={active}
         viewerOutside={viewerOutside}

@@ -415,7 +415,7 @@ function getDefaultPerformanceSettings() {
     autoQuality: true,
     lowResolution: mobile,
     showFps: false,
-    shadows: !mobile,
+    disableShadows: false,
     grass: true,
     trees: true,
     sky: true,
@@ -427,7 +427,11 @@ function loadPerformanceSettings() {
   if (typeof window === 'undefined') return defaults
   try {
     const stored = JSON.parse(localStorage.getItem(PERFORMANCE_SETTINGS_STORAGE_KEY) || '{}')
-    return { ...defaults, ...stored }
+    const { shadows, ...storedSettings } = stored
+    if (typeof stored.disableShadows !== 'boolean' && typeof shadows === 'boolean') {
+      storedSettings.disableShadows = !shadows
+    }
+    return { ...defaults, ...storedSettings }
   } catch {
     return defaults
   }
@@ -6901,7 +6905,7 @@ function SettingsPanel({
     ['showFps', 'Afficher les FPS', 'Montre un compteur pendant le jeu.'],
     ['autoQuality', 'Qualite auto', 'Ajuste la resolution si le telephone rame.'],
     ['lowResolution', 'Basse resolution', 'Reduit fortement le nombre de pixels a calculer.'],
-    ['shadows', 'Ombres', 'Plus joli, mais couteux sur mobile.'],
+    ['disableShadows', 'Desactiver les ombres', 'Coupe les ombres dynamiques sans masquer le terrain.'],
     ['grass', 'Herbe', "Desactive les brins d'herbe dehors."],
   ]
 
@@ -16662,6 +16666,7 @@ function App() {
   const outdoorObjectsReady = outdoorContentMounted && outdoorContentStage >= 3
   const outdoorGrassReady = isOutsideZone && outdoorContentStage >= 4
   const outdoorEnemiesReady = isOutsideZone && outdoorContentStage >= 5
+  const shadowsEnabled = !performanceSettings.disableShadows && (!isDebugMode || debugToggles.shadows)
   const showInteriorHouseDetails = !isOutsideZone
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
     isNearOutdoorDoor ||
@@ -16679,7 +16684,7 @@ function App() {
       <Canvas
         dpr={renderSettings.dpr}
         camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 420 }}
-        shadows={{ enabled: performanceSettings.shadows && (!isDebugMode || debugToggles.shadows), type: PCFShadowMap }}
+        shadows={{ enabled: true, type: PCFShadowMap }}
         gl={{
           antialias: renderSettings.antialias && !performanceSettings.lowResolution,
           powerPreference: 'high-performance',
@@ -16835,7 +16840,7 @@ function App() {
             preloadMapObjects={outdoorContentStage >= 3}
             showBiomeEffects={outdoorVegetationReady}
             showSky={outdoorStaticReady && performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
-            castShadows={performanceSettings.shadows && (!isDebugMode || debugToggles.shadows)}
+            castShadows={shadowsEnabled}
             showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
             debugStats={isDebugMode}
           />
