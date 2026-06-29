@@ -13979,9 +13979,9 @@ function App() {
   const previewSkinId = useGameStore((s) => s.inventory.previewSkinId)
   const isSkinMenuOpen = useGameStore((s) => s.menus.skin ?? false)
   const isNearSkinStation = useGameStore((s) => s.near.skinStation ?? false)
-  const [roomLightOn, setRoomLightOn] = useState(true)
-  const [lightColor, setLightColor] = useState('#ffffff')
-  const [lightIntensity, setLightIntensity] = useState(2)
+  const roomLightOn = useGameStore((s) => s.house.roomLightOn)
+  const lightColor = useGameStore((s) => s.house.lightColor)
+  const lightIntensity = useGameStore((s) => s.house.lightIntensity)
   // Slice "proximité" migré vers le store : ces flags ne vivent plus dans App(),
   // on s'y abonne via des sélecteurs fins. `setNear` (action stable) les écrit
   // depuis les callbacks onNearChange des détecteurs. Prochaine étape : descendre
@@ -14030,6 +14030,9 @@ function App() {
   const setEditor = useGameStore((s) => s.setEditor)
   // Slice "account" (auth/compte/social) migré vers le store. setAccount(key, value|updater).
   const setAccount = useGameStore((s) => s.setAccount)
+  // Slices "progress" (achievements) + "house" (lumières) migrés vers le store.
+  const setProgress = useGameStore((s) => s.setProgress)
+  const setHouse = useGameStore((s) => s.setHouse)
   const editableObjects = useGameStore((s) => s.editor.editableObjects)
   const selectedObjectId = useGameStore((s) => s.editor.selectedObjectId)
   const draggingObjectId = useGameStore((s) => s.editor.draggingObjectId)
@@ -14043,7 +14046,7 @@ function App() {
   const catActive = useGameStore((s) => s.inventory.catActive)
   const ownedMagicBook = useGameStore((s) => s.equipment.ownedMagicBook)
   const ownedMagicSkull = useGameStore((s) => s.equipment.ownedMagicSkull)
-  const [magicSkullDiscovered, setMagicSkullDiscovered] = useState(isAdminMode)
+  const magicSkullDiscovered = useGameStore((s) => s.progress.magicSkullDiscovered)
   const isNearMagicSkullDiscovery = useGameStore((s) => s.near.magicSkullDiscovery ?? false)
   const [isLearningMagicSkull, setIsLearningMagicSkull] = useState(false)
   const [magicSkullLearnProgress, setMagicSkullLearnProgress] = useState(0)
@@ -14086,11 +14089,11 @@ function App() {
   const ownedTitleIds = useGameStore((s) => s.equipment.ownedTitleIds)
   const equippedTitleId = useGameStore((s) => s.equipment.equippedTitleId)
   const [titleActionState, setTitleActionState] = useState(null)
-  const [achievementToast, setAchievementToast] = useState(null)
+  const achievementToast = useGameStore((s) => s.progress.achievementToast)
   // Hauts faits locaux (débloqués pour tout le monde, persistés dans la progression)
-  const [unlockedAchievements, setUnlockedAchievements] = useState([])
+  const unlockedAchievements = useGameStore((s) => s.progress.unlockedAchievements)
   const unlockedAchievementsRef = useRef([])
-  const [mobKillCount, setMobKillCount] = useState(0)
+  const mobKillCount = useGameStore((s) => s.progress.mobKillCount)
   // État des quêtes (sérialisable, persisté dans world_settings.quests). Toute la
   // logique est dans src/quests/questState.js — ici on ne stocke que le bag.
   const questProgress = useGameStore((s) => s.quests.progress)
@@ -14205,11 +14208,11 @@ function App() {
   }, [])
 
   const showAchievementToast = useCallback((toast) => {
-    setAchievementToast(toast)
+    setProgress('achievementToast',toast)
     if (achievementToastTimerRef.current) window.clearTimeout(achievementToastTimerRef.current)
     achievementToastTimerRef.current = window.setTimeout(() => {
       achievementToastTimerRef.current = null
-      setAchievementToast(null)
+      setProgress('achievementToast',null)
     }, 4200)
   }, [])
 
@@ -14220,7 +14223,7 @@ function App() {
     const def = getLocalAchievement(id)
     if (!def) return
     unlockedAchievementsRef.current = [...unlockedAchievementsRef.current, id]
-    setUnlockedAchievements(unlockedAchievementsRef.current)
+    setProgress('unlockedAchievements',unlockedAchievementsRef.current)
     if (!suppressAchievementToastsRef.current) {
       showAchievementToast({ kind: 'local', name: def.name, icon: def.icon, description: def.description })
     }
@@ -14301,7 +14304,7 @@ function App() {
 
   useEffect(() => {
     if (ownedMagicSkull && !magicSkullDiscovered) {
-      setMagicSkullDiscovered(true)
+      setProgress('magicSkullDiscovered',true)
     }
   }, [ownedMagicSkull, magicSkullDiscovered])
 
@@ -14489,9 +14492,9 @@ function App() {
     setInventory('ownedSkins',['classic'])
     setInventory('selectedSkinId','classic')
     setInventory('previewSkinId','classic')
-    setRoomLightOn(true)
-    setLightColor('#ffffff')
-    setLightIntensity(2)
+    setHouse('roomLightOn',true)
+    setHouse('lightColor','#ffffff')
+    setHouse('lightIntensity',2)
     setInventory('ownedFloorSkins',['floor-classic'])
     setInventory('ownedWallSkins',['wall-classic'])
     setInventory('selectedFloorSkinId','floor-classic')
@@ -14512,15 +14515,15 @@ function App() {
     setInventory('catActive',false)
     setEquipment('ownedMagicBook',false)
     setEquipment('ownedMagicSkull',false)
-    setMagicSkullDiscovered(isAdminMode)
+    setProgress('magicSkullDiscovered',isAdminMode)
     setNear('magicSkullDiscovery', false)
     summonSlotRefs.current.forEach((slotRef) => { slotRef.current = null })
     summonGroupPositionsRef.current.clear()
     summonCooldownRef.current = 0
     setSummonCooldownUntil(0)
     unlockedAchievementsRef.current = []
-    setUnlockedAchievements([])
-    setMobKillCount(0)
+    setProgress('unlockedAchievements',[])
+    setProgress('mobKillCount',0)
     setQuest('progress',{})
     setEconomy('materials',{})
     setLootDrops([])
@@ -14536,7 +14539,7 @@ function App() {
     projectilesRef.current = []
     setEquipment('ownedTitleIds',[])
     setEquipment('equippedTitleId',null)
-    setAchievementToast(null)
+    setProgress('achievementToast',null)
     setPlayerHp(PLAYER_MAX_HP)
   }
 
@@ -14559,10 +14562,10 @@ function App() {
     // House appearance (lighting). includeWorld is false when reloading our own
     // progress while we are rejoining someone else's world as a guest, so our
     // own house doesn't overwrite the host's.
-    if (includeWorld && typeof parsed.roomLightOn === 'boolean') setRoomLightOn(parsed.roomLightOn)
-    if (includeWorld && typeof parsed.lightColor === 'string') setLightColor(parsed.lightColor)
+    if (includeWorld && typeof parsed.roomLightOn === 'boolean') setHouse('roomLightOn',parsed.roomLightOn)
+    if (includeWorld && typeof parsed.lightColor === 'string') setHouse('lightColor',parsed.lightColor)
     if (includeWorld && typeof parsed.lightIntensity === 'number') {
-      setLightIntensity(MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
+      setHouse('lightIntensity',MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
     }
     if (includeIdentity && parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
       setEquipment('characterAppearance',{ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
@@ -14649,9 +14652,9 @@ function App() {
         ? parsed.unlockedAchievements.filter((id) => getLocalAchievement(id))
         : []
       unlockedAchievementsRef.current = parsedAchievements
-      setUnlockedAchievements(parsedAchievements)
+      setProgress('unlockedAchievements',parsedAchievements)
       if (typeof parsed.mobKillCount === 'number' && parsed.mobKillCount >= 0) {
-        setMobKillCount(parsed.mobKillCount)
+        setProgress('mobKillCount',parsed.mobKillCount)
       }
       setQuest('progress',normalizeQuestProgress(parsed.quests))
       setEconomy('materials',normalizeMaterials(parsed.materials))
@@ -14660,7 +14663,7 @@ function App() {
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
       setEquipment('ownedMagicBook',hasMagicBook)
       setEquipment('ownedMagicSkull',hasMagicSkull)
-      setMagicSkullDiscovered(Boolean(isAdminMode || parsed.magicSkullDiscovered || hasMagicSkull))
+      setProgress('magicSkullDiscovered',Boolean(isAdminMode || parsed.magicSkullDiscovered || hasMagicSkull))
       const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
         ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
         : []
@@ -15438,7 +15441,7 @@ function App() {
     if (!rewarded) return
 
     // Hauts faits : compteur de kills + type de monstre
-    setMobKillCount((current) => current + 1)
+    setProgress('mobKillCount',(current) => current + 1)
     if (typeof enemyId === 'string' && enemyId.includes('skeleton')) unlockAchievement('kill_skeleton')
 
     // Progression des quêtes : avance les objectifs "tuer N <type>" actifs.
@@ -15893,7 +15896,7 @@ function App() {
   const completeMagicSkullLearning = useCallback(() => {
     if (magicSkullDiscovered) return
     if (currentZone !== ZONES.outside) return
-    setMagicSkullDiscovered(true)
+    setProgress('magicSkullDiscovered',true)
     setNear('magicSkullDiscovery', false)
     setIsLearningMagicSkull(false)
     setMagicSkullLearnProgress(0)
@@ -15956,7 +15959,7 @@ function App() {
     if (!isAdminMode && coins < MAGIC_SKULL_PRICE) return
     const paid = isAdminMode ? true : await applyCoinDelta(-MAGIC_SKULL_PRICE)
     if (!paid) return
-    setMagicSkullDiscovered(true)
+    setProgress('magicSkullDiscovered',true)
     setEquipment('ownedMagicSkull',true)
   }
 
@@ -17336,7 +17339,7 @@ function App() {
           <button
             className={`light-panel-toggle ${roomLightOn ? 'on' : 'off'}`}
             type="button"
-            onClick={() => setRoomLightOn((v) => !v)}
+            onClick={() => setHouse('roomLightOn',(v) => !v)}
           >
             {roomLightOn ? 'Lumière ON' : 'Lumière OFF'}
           </button>
@@ -17353,11 +17356,11 @@ function App() {
                   max="150"
                   step="5"
                   value={Math.round(lightIntensity * 50)}
-                  onChange={(event) => setLightIntensity(Number(event.target.value) / 50)}
+                  onChange={(event) => setHouse('lightIntensity',Number(event.target.value) / 50)}
                   aria-label="Intensité de la lumière"
                 />
               </label>
-              <LightColorWheel onChange={setLightColor} />
+              <LightColorWheel onChange={(v) => setHouse('lightColor', v)} />
             </>
           )}
           <button className="light-panel-close" type="button" onClick={() => setUi('lightMenuOpen',false)}>

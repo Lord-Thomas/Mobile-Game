@@ -13,9 +13,9 @@ const SUPABASE_CONFIGURED_INIT = (() => {
   }
 })()
 
-// Mode admin (param d'URL ?mode=admin), lu une seule fois — sert uniquement à
-// reproduire l'ancien défaut de coins (useState(isAdminMode ? 850 : 0)).
-const ECONOMY_ADMIN_INIT = (() => {
+// Mode admin (param d'URL ?mode=admin), lu une seule fois — reproduit les anciens
+// défauts qui dépendaient d'isAdminMode (coins 850, magicSkullDiscovered true).
+const ADMIN_INIT = (() => {
   try {
     return new URLSearchParams(window.location.search).get('mode') === 'admin'
   } catch {
@@ -156,7 +156,7 @@ export const useGameStore = create((set) => ({
   // partage multijoueur) — conformément à la règle "persistance hors store". Le
   // store ne fait que stocker la valeur ; setEconomy est un setter neutre.
   economy: {
-    coins: ECONOMY_ADMIN_INIT ? 850 : 0,
+    coins: ADMIN_INIT ? 850 : 0,
     materials: {},
   },
   setEconomy: (key, value) => set((state) => {
@@ -260,5 +260,35 @@ export const useGameStore = create((set) => ({
     const next = typeof value === 'function' ? value(prev) : value
     if (next === prev) return state
     return { account: { ...state.account, [key]: next } }
+  }),
+
+  // --- Slice "progress" (achievements / progression) ---------------------
+  // unlockedAchievements + mobKillCount + magicSkullDiscovered persistés ;
+  // achievementToast = UI éphémère. magicSkullDiscovered défaut = isAdminMode.
+  progress: {
+    unlockedAchievements: [],
+    mobKillCount: 0,
+    magicSkullDiscovered: ADMIN_INIT,
+    achievementToast: null,
+  },
+  setProgress: (key, value) => set((state) => {
+    const prev = state.progress[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { progress: { ...state.progress, [key]: next } }
+  }),
+
+  // --- Slice "house" (éclairage intérieur) -------------------------------
+  // roomLightOn / lightColor / lightIntensity. PERSISTÉ (réglages de la maison).
+  house: {
+    roomLightOn: true,
+    lightColor: '#ffffff',
+    lightIntensity: 2,
+  },
+  setHouse: (key, value) => set((state) => {
+    const prev = state.house[key]
+    const next = typeof value === 'function' ? value(prev) : value
+    if (next === prev) return state
+    return { house: { ...state.house, [key]: next } }
   }),
 }))

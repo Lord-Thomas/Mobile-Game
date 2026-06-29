@@ -32,6 +32,10 @@ beforeEach(() => {
   setAccount('user', null)
   setAccount('displayName', '')
   setAccount('friends', [])
+  const { setProgress, setHouse } = useGameStore.getState()
+  setProgress('mobKillCount', 0)
+  setProgress('unlockedAchievements', [])
+  setHouse('roomLightOn', true)
 })
 
 describe('gameStore — slice proximité', () => {
@@ -271,5 +275,27 @@ describe('gameStore — slice account', () => {
 
   it('cloudSaveState a un défaut valide (offline/local selon config Supabase)', () => {
     expect(['offline', 'local']).toContain(useGameStore.getState().account.cloudSaveState)
+  })
+})
+
+describe('gameStore — slices progress + house', () => {
+  it('mobKillCount via updater incrémente', () => {
+    const { setProgress } = useGameStore.getState()
+    setProgress('mobKillCount', (n) => n + 1)
+    setProgress('mobKillCount', (n) => n + 1)
+    expect(useGameStore.getState().progress.mobKillCount).toBe(2)
+  })
+
+  it('unlockedAchievements pose une liste', () => {
+    useGameStore.getState().setProgress('unlockedAchievements', ['rich_1000'])
+    expect(useGameStore.getState().progress.unlockedAchievements).toEqual(['rich_1000'])
+  })
+
+  it('house : toggle lumière + couleur', () => {
+    const { setHouse } = useGameStore.getState()
+    setHouse('roomLightOn', (v) => !v)
+    setHouse('lightColor', '#ff0000')
+    expect(useGameStore.getState().house.roomLightOn).toBe(false)
+    expect(useGameStore.getState().house.lightColor).toBe('#ff0000')
   })
 })
