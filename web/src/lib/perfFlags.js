@@ -4,6 +4,7 @@
 //   ?nophys      → désactive le cooking physique lourd (trimesh terrain + colliders d'objets)
 //   ?noterrain   → remplace le TrimeshCollider du terrain par un sol plat
 //   ?nomapcol    → désactive MapObjectPhysicsColliders
+//   ?noprewarm   → désactive le pré-warm shader extérieur déclenché pendant la transition
 //
 // But : si le chargement s'effondre avec ?nophys, le cooking Rapier (BVH trimesh
 // en WASM synchrone) est le coupable des ~11 s invisibles au Profiler React.
@@ -15,3 +16,4 @@ export const PERF_NO_TERRAIN_TRIMESH = params.has('nophys') || params.has('noter
 export const PERF_NO_MAP_COLLIDERS = params.has('nophys') || params.has('nomapcol')
 export const PERF_SHADER_WARMUP = params.has('shaderwarmup')
 export const PERF_RUNTIME_WARMUP_RIG = !params.has('nowarmuprig')
+export const PERF_NO_OUTDOOR_PREWARM = params.has('noprewarm')

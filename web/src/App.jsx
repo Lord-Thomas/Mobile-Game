@@ -1,9 +1,10 @@
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMixer, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { FBXLoader, GLTFLoader } from 'three-stdlib'
 import { Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
@@ -12,7 +13,7 @@ import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS,
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
-import { PERF_NO_MAP_COLLIDERS, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
+import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
 import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
 import { useGameStore } from './stores/useGameStore'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
@@ -132,6 +133,7 @@ const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const SOFA_WIDTH_METERS = 1.5
 const MAGIC_SKULL_LEARN_INTERACTION_DISTANCE = 1.65
 const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
+const MUSHROOM_ENEMY_MODEL_GLB_URL = '/models/enemies/mushroom_man/model.glb'
 const MUSHROOM_ENEMY_COUNT = 4
 const MUSHROOM_ENEMY_MAX_HP = 30
 const MUSHROOM_ENEMY_REWARD_COINS = 10  // 0.33 pièce/PV
@@ -167,6 +169,7 @@ const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
 const MUSHROOM_ENEMY_ATTACK_DURATION = 0.82
 const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
 const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'
+const SKELETON_ENEMY_MODEL_GLB_URL = '/models/enemies/skeleton/model.glb'
 const SKELETON_ENEMY_TEXTURE_URL = '/models/enemies/skeleton/skeleton.fbm'
 const SKELETON_ENEMY_MAX_HP = 80          // réduit (150 était abusé)
 const SKELETON_ENEMY_REWARD_COINS = 30    // réduit (40 était trop rentable)
@@ -178,8 +181,11 @@ const MOB_TARGET_VERTICAL_WEIGHT = 1.1
 // Ajouter un nouveau type de mob = créer une nouvelle entrée ici.
 const MOB_CONFIGS = {
   mushroom: {
-    modelFormat: 'fbx',
-    modelUrl: MUSHROOM_ENEMY_MODEL_URL,
+    // Pilote GLB : le mushroom passe en GLB (rig + anim + texture embarqués via
+    // scripts/convert-enemies-glb.mjs). Pour revenir au FBX : modelFormat 'fbx' +
+    // modelUrl MUSHROOM_ENEMY_MODEL_URL. Le squelette reste en FBX pour l'instant.
+    modelFormat: 'glb',
+    modelUrl: MUSHROOM_ENEMY_MODEL_GLB_URL,
     maxHp: MUSHROOM_ENEMY_MAX_HP,
     rewardCoins: MUSHROOM_ENEMY_REWARD_COINS,
     respawnMs: MUSHROOM_ENEMY_RESPAWN_MS,
@@ -208,14 +214,17 @@ const MOB_CONFIGS = {
     attackCooldown: MUSHROOM_ENEMY_ATTACK_COOLDOWN,
     attackDuration: MUSHROOM_ENEMY_ATTACK_DURATION,
     attackContactDelay: MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY,
-    modelTargetHeight: 1.15,
+    modelTargetHeight: 1.15 / 1.5, // ~0.767 : réduit d'un facteur 1.5 (taille voulue)
     targetRadius: 0.48,
     targetHeight: 1.2,
     hudHeight: 2.0,
   },
   skeleton: {
-    modelFormat: 'fbx',
-    modelUrl: SKELETON_ENEMY_MODEL_URL,
+    // GLB : rig + anim + texture embarqués (scripts/convert-enemies-glb.mjs). La texture
+    // étant dans le GLB, plus besoin de la .fbm forcée. Revert : modelFormat 'fbx' +
+    // modelUrl SKELETON_ENEMY_MODEL_URL. Hérité par skeleton_archer / skeleton_mage.
+    modelFormat: 'glb',
+    modelUrl: SKELETON_ENEMY_MODEL_GLB_URL,
     textureUrl: SKELETON_ENEMY_TEXTURE_URL,
     maxHp: SKELETON_ENEMY_MAX_HP,
     rewardCoins: SKELETON_ENEMY_REWARD_COINS,
@@ -1701,6 +1710,48 @@ function LayeredSceneRenderer({ currentZone }) {
     camera.layers.mask = previousLayerMask
     gl.autoClear = previousAutoClear
   }, 1)
+
+  return null
+}
+
+// SONDE DIAGNOSTIC (temporaire) — logge, au passage en extérieur, les frames
+// lentes (= compilation de shader bloquante) et l'état de scene.background
+// (= ciel noir si null). Lecture seule, ne modifie rien. À retirer après diag.
+const TRANSITION_DIAG_ENABLED = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('transitiondiag')
+
+function TransitionDiagProbe({ currentZone }) {
+  const { scene, gl } = useThree()
+  const prevZoneRef = useRef(currentZone)
+  const watchRef = useRef(0)
+  const lastTimeRef = useRef(0)
+  const frameNoRef = useRef(0)
+
+  useFrame(() => {
+    if (!TRANSITION_DIAG_ENABLED) return
+    const now = performance.now()
+    if (prevZoneRef.current !== currentZone) {
+      prevZoneRef.current = currentZone
+      if (currentZone === ZONES.outside) {
+        watchRef.current = 45
+        frameNoRef.current = 0
+        lastTimeRef.current = now
+        const info = gl.info?.programs?.length
+        console.log(`%c[diag] → EXTÉRIEUR (programmes shaders en cache : ${info ?? '?'})`, 'color:#0a0;font-weight:bold')
+      }
+    }
+    if (watchRef.current > 0) {
+      const dt = now - lastTimeRef.current
+      const bg = scene.background
+      const bgDesc = bg ? (bg.isColor ? `#${bg.getHexString()}` : (bg.type || 'objet')) : 'NULL(noir)'
+      const slow = dt > 24
+      if (slow || frameNoRef.current < 3) {
+        console.log(`[diag] frame ${frameNoRef.current} : ${dt.toFixed(0)}ms${slow ? ' ⚠️LENTE' : ''} | bg=${bgDesc} | progs=${gl.info?.programs?.length ?? '?'}`)
+      }
+      frameNoRef.current += 1
+      watchRef.current -= 1
+    }
+    lastTimeRef.current = now
+  })
 
   return null
 }
@@ -4591,14 +4642,20 @@ const MIXAMO_GLB_POSITION_SCALE = 100
 // Anim issue d'un GLB Mixamo (converti depuis FBX via FBX2glTF, cf. scripts/convert-anims-glb.mjs) :
 // - renormalise les noms de pistes (mixamorig:Hips.position -> mixamorigHips.position)
 //   pour qu'ils correspondent aux os de l'avatar (cf. normalizeMixamoObjectName) ;
-// - remet les translations à l'échelle cm (cf. MIXAMO_GLB_POSITION_SCALE).
-function cloneMixamoAnimationClip(clip) {
+// - met les translations à l'échelle du RIG cible (positionScale).
+//
+// `positionScale` : le GLB d'anim exporte les translations en mètres. Le modèle JOUEUR
+// (player.glb) est en cm (Armature 0.01) → il faut ×100 (MIXAMO_GLB_POSITION_SCALE).
+// Mais les GLB d'ennemis fraîchement convertis sont déjà en mètres (rig à l'échelle 1)
+// → pour eux positionScale = 1, sinon les translations du bassin sont 100x trop grandes
+// (le mob se téléporte pendant punch/idle). Voir SmallMushroomEnemy.
+function cloneMixamoAnimationClip(clip, positionScale = MIXAMO_GLB_POSITION_SCALE) {
   const next = clip.clone()
   next.tracks.forEach((track) => {
     track.name = normalizeMixamoObjectName(track.name)
-    if (track.name.endsWith('.position')) {
+    if (positionScale !== 1 && track.name.endsWith('.position')) {
       for (let i = 0; i < track.values.length; i += 1) {
-        track.values[i] *= MIXAMO_GLB_POSITION_SCALE
+        track.values[i] *= positionScale
       }
     }
   })
@@ -4619,11 +4676,11 @@ function filterAnimationClipTracksForObject(clip, object) {
 
 // Charge un GLB d'animation Mixamo (converti via FBX2glTF) et renvoie un objet de
 // même forme que l'ancien useFBX ({ animations: [clip] }), pistes renormalisées.
-function useMixamoGlbAnimation(url) {
+function useMixamoGlbAnimation(url, positionScale = MIXAMO_GLB_POSITION_SCALE) {
   const glb = useGLTF(url)
   return useMemo(
-    () => ({ animations: glb.animations.map(cloneMixamoAnimationClip) }),
-    [glb],
+    () => ({ animations: glb.animations.map((clip) => cloneMixamoAnimationClip(clip, positionScale)) }),
+    [glb, positionScale],
   )
 }
 
@@ -5856,6 +5913,95 @@ function RuntimeWarmupRig() {
       <pointLight color="#ff5a00" intensity={1.35} distance={2.7} />
     </group>
   )
+}
+
+// Pré-compile les shaders des familles EXTÉRIEURES pendant la transition. Le warmup
+// du boot (ShaderWarmupGate) ne peut compiler que ce qui est monté au démarrage : le
+// contenu lourd extérieur (arbres, herbe, objets de map, maisons voisines) n'est monté
+// qu'au moment de sortir (OUTDOOR_CONTENT_STAGES), donc ses programmes GLSL se
+// compilaient au PREMIER rendu après le franchissement → freeze. On compile sous le
+// fondu de transition, en deux temps :
+//   - Passe 1 (stage >= 3, encore à l'intérieur) : statique + végétation + objets de
+//     map, avec une caméra synthétique placée au spawn extérieur → compilés AVANT de
+//     franchir la porte.
+//   - Passe 2 (stage >= 5, désormais dehors) : herbe + ennemis, qui ne se montent
+//     qu'une fois dehors (gate isOutsideZone) ; compilés avec la caméra réelle.
+// `readyRef` ne passe à true qu'APRÈS la passe finale atteignable : le fondu (cf.
+// transitionToZone) ne se lève donc pas pendant qu'une famille compile encore.
+// Compilés une fois, les programmes restent en cache GPU pour la session — d'où les
+// verrous `pass1Ref`/`pass2Ref` qui ne se réarment jamais.
+function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
+  const { gl, scene, camera } = useThree()
+  const pass1Ref = useRef(false)
+  const pass2Ref = useRef(false)
+
+  const compileWith = useCallback((cam) => {
+    try {
+      // Deux couches (extérieure + défaut), comme compileAndRender du gate : on
+      // couvre les matériaux quelle que soit leur couche de rendu.
+      const originalMask = cam.layers.mask
+      for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
+        cam.layers.set(layer)
+        gl.compile(scene, cam)
+      }
+      cam.layers.mask = originalMask
+    } catch (error) {
+      console.warn('[loadTiming] Outdoor shader prewarm failed', error)
+    }
+  }, [gl, scene])
+
+  // On défère la compilation de 2 frames après le commit React (comme le warmup de
+  // boot) : laisse la scène se committer et les refs des matériaux se rattacher
+  // AVANT de traverser. Compiler en plein milieu de la réconciliation tombait sur
+  // des refs transitoirement null (cf. NaturalTerrainMaterial). Le déclencheur est
+  // un booléen → l'effet ne se relance pas à chaque incrément de stage.
+
+  // Passe 1 — encore à l'intérieur, contenu statique/végétation/objets monté.
+  const pass1Active = stage >= 3
+  useEffect(() => {
+    if (!pass1Active || pass1Ref.current) return undefined
+    pass1Ref.current = true
+    let raf1 = 0
+    let raf2 = 0
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
+        const aspect = Math.max(0.1, gl.domElement.clientWidth / Math.max(gl.domElement.clientHeight, 1))
+        const cam = new PerspectiveCamera(BASE_CAMERA_VERTICAL_FOV, aspect, 0.1, 420)
+        cam.position.set(spawn[0], spawn[1] + 2.4, spawn[2] + 6)
+        cam.lookAt(spawn[0], spawn[1] + 1.1, spawn[2])
+        cam.updateProjectionMatrix()
+        cam.updateMatrixWorld(true)
+        compileWith(cam)
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(raf1)
+      window.cancelAnimationFrame(raf2)
+    }
+  }, [pass1Active, gl, compileWith])
+
+  // Passe 2 — désormais dehors, herbe + ennemis montés (gate isOutsideZone) :
+  // compile avec la caméra réelle, puis signale au fondu qu'il peut se lever.
+  const pass2Active = isOutside && stage >= 5
+  useEffect(() => {
+    if (!pass2Active || pass2Ref.current) return undefined
+    pass2Ref.current = true
+    let raf1 = 0
+    let raf2 = 0
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        compileWith(camera)
+        if (readyRef) readyRef.current = true
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(raf1)
+      window.cancelAnimationFrame(raf2)
+    }
+  }, [pass2Active, camera, compileWith, readyRef])
+
+  return null
 }
 
 function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef = null }) {
@@ -9136,6 +9282,71 @@ function PlayerHealingAura({ active, playerPositionRef, layer }) {
   )
 }
 
+// Charge le modèle source d'un ennemi selon son format (GLB ou FBX) sans casser
+// l'ordre des hooks : on appelle toujours useLoader, seule la classe de loader change
+// (stable pour une instance donnée). Renvoie { scene, animations } dans les deux cas.
+function useEnemySourceModel(cfg) {
+  const isGlb = cfg.modelFormat === 'glb'
+  const loaded = useLoader(isGlb ? GLTFLoader : FBXLoader, cfg.modelUrl)
+  return useMemo(() => (
+    isGlb
+      ? { scene: loaded.scene, animations: loaded.animations ?? [] }
+      : { scene: loaded, animations: loaded.animations ?? [] }
+  ), [isGlb, loaded])
+}
+
+// Applique aux modèles d'ennemis GLB (FBX2glTF) les MÊMES corrections que PlayerAvatar
+// applique au joueur — c'est ce qui manquait aux tentatives passées :
+//   - renormalise les noms d'os (mixamorig:Hips -> mixamorigHips) pour que le retarget
+//     des animations joueur matche les os (sinon : anims perdues) ;
+//   - réinitialise le nœud Armature (rotation +90° X et échelle 0.01 hérités de Mixamo)
+//     sinon le monstre est couché et/ou mal taillé. La taille finale est gérée ensuite
+//     par la normalisation bounding-box (scale = targetHeight / size.y), inchangée.
+// À appeler AVANT toute mesure de bounding box. No-op pour le FBX (déjà géré par
+// FBXLoader au runtime).
+function prepareEnemyGlbTransforms(source) {
+  source.traverse((object) => {
+    object.name = normalizeMixamoObjectName(object.name)
+    if (object.name === 'Armature') {
+      object.rotation.set(0, 0, 0)
+      object.scale.set(1, 1, 1)
+    }
+  })
+}
+
+// Mesure la bounding box d'un modèle d'ennemi GLB en pose idle, SUR L'ORIGINAL (le
+// modèle chargé partagé), PAS sur un clone. Raison : SkeletonUtils.clone d'un rig à
+// nœud Armature (squelette) produit une bbox skinnée fausse (×71 ici) → échelle
+// ridicule → mob invisible, alors que le clone se REND pourtant correctement. L'original,
+// lui, mesure juste. On pose idle (la pose bind diffère de l'idle rendue, jusqu'à ~10 %
+// sur le squelette), avec le même verrou de bassin que le rendu, puis precise=true pour
+// tenir compte du skinning. L'original étant partagé, on sauvegarde/restaure les
+// transforms des os autour de la mesure (exécution synchrone dans un useMemo → pas
+// d'entrelacement avec d'autres instances).
+function measureEnemyGlbIdleBounds(original, idleClip) {
+  original.traverse((object) => { object.name = normalizeMixamoObjectName(object.name) })
+  const snapshot = []
+  original.traverse((object) => { snapshot.push([object, object.position.clone(), object.quaternion.clone()]) })
+
+  if (idleClip) {
+    const poseClip = idleClip.clone()
+    lockHipsPlanarPosition(poseClip)
+    lockEmoteHipsHeight(poseClip, getObjectHipsRestHeight(original))
+    const poseMixer = new AnimationMixer(original)
+    poseMixer.clipAction(poseClip).play()
+    poseMixer.update(0)
+  }
+  original.updateWorldMatrix(true, true)
+  const box = new Box3().setFromObject(original, true)
+
+  for (const [object, position, quaternion] of snapshot) {
+    object.position.copy(position)
+    object.quaternion.copy(quaternion)
+  }
+  original.updateWorldMatrix(true, true)
+  return box
+}
+
 function SmallMushroomEnemy({
   enemyId,
   spawnIndex = 0,
@@ -9154,12 +9365,19 @@ function SmallMushroomEnemy({
   allyTargetsRef = null,
 }) {
   const cfg = config
-  const sourceModel = useFBX(cfg.modelUrl)
-  const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
-  const sourceAnimations = sourceModel.animations ?? []
-  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb')
-  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb')
-  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
+  const isGlbModel = cfg.modelFormat === 'glb'
+  const { scene: sourceModel, animations: sourceAnimations } = useEnemySourceModel(cfg)
+  // forcedTexture : si le config a une `textureUrl` (squelette), on la charge — en GLB
+  // aussi, car FBX2glTF embarque sa texture .fbm en `image/unknown` (illisible) → on la
+  // force à la place (mob invisible sinon). Sinon, en GLB la texture est embarquée et
+  // lisible → on pointe une texture DÉJÀ chargée (masque visage) pour ne rien charger en
+  // plus. En FBX sans textureUrl, repli sur la texture squelette.
+  const forcedTexture = useTexture(cfg.textureUrl ?? (isGlbModel ? PLAYER_FACE_DETAILS_MASK_URL : SKELETON_ENEMY_TEXTURE_URL))
+  // Rig FBX = cm (×100) ; rig GLB fraîchement converti = mètres (×1). Cf. cloneMixamoAnimationClip.
+  const animPositionScale = isGlbModel ? 1 : MIXAMO_GLB_POSITION_SCALE
+  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb', animPositionScale)
+  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb', animPositionScale)
+  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb', animPositionScale)
   const groupRef = useRef()
   const [hp, setHp] = useState(cfg.maxHp)
   const [damageNumbers, setDamageNumbers] = useState([])
@@ -9209,12 +9427,22 @@ function SmallMushroomEnemy({
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
-    if (cfg.textureUrl) {
+    if (isGlbModel) {
+      // Corrections Mixamo (noms d'os + Armature) AVANT la mesure de bounding box.
+      prepareEnemyGlbTransforms(source)
+    } else if (cfg.textureUrl) {
       forcedTexture.colorSpace = SRGBColorSpace
       forcedTexture.needsUpdate = true
     }
-    source.updateWorldMatrix(true, true)
-    const box = new Box3().setFromObject(source)
+    // GLB : on mesure taille/sol en pose idle SUR L'ORIGINAL (cf. measureEnemyGlbIdleBounds —
+    // le clone du squelette donne une bbox fausse → invisible). FBX : mesure du clone (ok).
+    let box
+    if (isGlbModel) {
+      box = measureEnemyGlbIdleBounds(sourceModel, idle?.animations?.[0])
+    } else {
+      source.updateWorldMatrix(true, true)
+      box = new Box3().setFromObject(source)
+    }
     const size = box.getSize(new Vector3())
     const center = box.getCenter(new Vector3())
     const targetHeight = (cfg.modelTargetHeight ?? 1.15) * WORLD_UNITS_PER_METER
@@ -9225,7 +9453,37 @@ function SmallMushroomEnemy({
         child.castShadow = true
         child.receiveShadow = true
         child.frustumCulled = false
-        if (cfg.textureUrl && forcedTexture) {
+        if (isGlbModel) {
+          // GLB : force DoubleSide. materialColor (archer/mage) = couleur unie ;
+          // sinon textureUrl (squelette, texture embarquée illisible) = on force la .fbm ;
+          // sinon (mushroom) on garde le matériau/texture embarqué (valide).
+          const materials = Array.isArray(child.material) ? child.material : [child.material]
+          const patchedMaterials = materials.map((material) => {
+            if (!material) return material
+            const nextMaterial = material.clone()
+            nextMaterial.side = DoubleSide
+            if (cfg.materialColor) {
+              nextMaterial.map = null
+              nextMaterial.alphaMap = null
+              nextMaterial.transparent = false
+              nextMaterial.opacity = 1
+              nextMaterial.depthWrite = true
+              nextMaterial.color?.set(cfg.materialColor)
+            } else if (cfg.textureUrl && forcedTexture) {
+              forcedTexture.colorSpace = SRGBColorSpace
+              forcedTexture.needsUpdate = true
+              nextMaterial.map = forcedTexture
+              nextMaterial.alphaMap = null
+              nextMaterial.transparent = false
+              nextMaterial.opacity = 1
+              nextMaterial.depthWrite = true
+              nextMaterial.color?.set('#ffffff')
+            }
+            nextMaterial.needsUpdate = true
+            return nextMaterial
+          })
+          child.material = Array.isArray(child.material) ? patchedMaterials : patchedMaterials[0]
+        } else if (cfg.textureUrl && forcedTexture) {
           const materials = Array.isArray(child.material) ? child.material : [child.material]
           const patchedMaterials = materials.map((material) => {
             if (!material) return material
@@ -9241,8 +9499,7 @@ function SmallMushroomEnemy({
             return nextMaterial
           })
           child.material = Array.isArray(child.material) ? patchedMaterials : patchedMaterials[0]
-        }
-        if (cfg.materialColor) {
+        } else if (cfg.materialColor) {
           const materials = Array.isArray(child.material) ? child.material : [child.material]
           const patchedMaterials = materials.map((material) => {
             if (!material) return material
@@ -9266,7 +9523,7 @@ function SmallMushroomEnemy({
       offset: [-center.x, -box.min.y, -center.z],
       scale,
     }
-  }, [cfg.materialColor, cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, sourceModel])
+  }, [cfg.materialColor, cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, idle, isGlbModel, sourceModel])
 
   const enemyHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
   const modelIdleAnimation = useMemo(() => (
@@ -9998,11 +10255,19 @@ function SummonedSkeleton({
 }) {
   const cfg = MOB_CONFIGS.skeleton
   const allyId = `summon_${index}`
-  const sourceModel = useFBX(cfg.modelUrl)
-  const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
-  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb')
-  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb')
-  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
+  const isGlbModel = cfg.modelFormat === 'glb'
+  const { scene: sourceModel } = useEnemySourceModel(cfg)
+  // forcedTexture : si le config a une `textureUrl` (squelette), on la charge — en GLB
+  // aussi, car FBX2glTF embarque sa texture .fbm en `image/unknown` (illisible) → on la
+  // force à la place (mob invisible sinon). Sinon, en GLB la texture est embarquée et
+  // lisible → on pointe une texture DÉJÀ chargée (masque visage) pour ne rien charger en
+  // plus. En FBX sans textureUrl, repli sur la texture squelette.
+  const forcedTexture = useTexture(cfg.textureUrl ?? (isGlbModel ? PLAYER_FACE_DETAILS_MASK_URL : SKELETON_ENEMY_TEXTURE_URL))
+  // Rig FBX = cm (×100) ; rig GLB = mètres (×1). Cf. cloneMixamoAnimationClip.
+  const animPositionScale = isGlbModel ? 1 : MIXAMO_GLB_POSITION_SCALE
+  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb', animPositionScale)
+  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb', animPositionScale)
+  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb', animPositionScale)
 
   const groupRef = useRef()
   const [hp, setHp] = useState(SUMMON_SKELETON_MAX_HP)
@@ -10048,12 +10313,21 @@ function SummonedSkeleton({
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
-    if (cfg.textureUrl) {
+    if (isGlbModel) {
+      prepareEnemyGlbTransforms(source)
+    } else if (cfg.textureUrl) {
       forcedTexture.colorSpace = SRGBColorSpace
       forcedTexture.needsUpdate = true
     }
-    source.updateWorldMatrix(true, true)
-    const box = new Box3().setFromObject(source)
+    // GLB : mesure taille/sol en pose idle SUR L'ORIGINAL (le clone du squelette donne
+    // une bbox fausse → invisible, cf. measureEnemyGlbIdleBounds). FBX : mesure du clone.
+    let box
+    if (isGlbModel) {
+      box = measureEnemyGlbIdleBounds(sourceModel, idle?.animations?.[0])
+    } else {
+      source.updateWorldMatrix(true, true)
+      box = new Box3().setFromObject(source)
+    }
     const size = box.getSize(new Vector3())
     const center = box.getCenter(new Vector3())
     const targetHeight = (cfg.modelTargetHeight ?? 0.85) * WORLD_UNITS_PER_METER
@@ -10063,7 +10337,31 @@ function SummonedSkeleton({
       if (child instanceof Mesh) {
         child.castShadow = true
         child.frustumCulled = false
-        if (cfg.textureUrl && forcedTexture) {
+        if (isGlbModel) {
+          // GLB : la texture embarquée du squelette est illisible (image/unknown) → on
+          // force la .fbm (comme le FBX), puis teinte spectrale bleutée (color/emissive)
+          // qui distingue l'allié de l'ennemi.
+          const materials = Array.isArray(child.material) ? child.material : [child.material]
+          const patched = materials.map((material) => {
+            if (!material) return material
+            const next = material.clone()
+            next.side = DoubleSide
+            if (cfg.textureUrl && forcedTexture) {
+              forcedTexture.colorSpace = SRGBColorSpace
+              forcedTexture.needsUpdate = true
+              next.map = forcedTexture
+              next.alphaMap = null
+              next.transparent = false
+              next.opacity = 1
+              next.depthWrite = true
+            }
+            next.color?.set('#acd6ff')
+            next.emissive?.set('#1b3a6b')
+            next.needsUpdate = true
+            return next
+          })
+          child.material = Array.isArray(child.material) ? patched : patched[0]
+        } else if (cfg.textureUrl && forcedTexture) {
           const materials = Array.isArray(child.material) ? child.material : [child.material]
           const patched = materials.map((material) => {
             if (!material) return material
@@ -10086,7 +10384,7 @@ function SummonedSkeleton({
     })
 
     return { object: source, offset: [-center.x, -box.min.y, -center.z], scale }
-  }, [cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, sourceModel])
+  }, [cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, idle, isGlbModel, sourceModel])
 
   const skeletonHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
   const animationClips = useMemo(() => {
@@ -12929,12 +13227,20 @@ const WORLD_STREAM_INITIAL_READY_LEVEL = 6
 // avec le cadencement rAF, mais on laisse de la marge si un commit lourd ralentit
 // les ticks ; si ça expire, le gate lève quand même l'overlay).
 const WORLD_STREAM_INITIAL_MAX_WAIT_MS = 4000
+// Let the fade overlay paint before mounting outdoor subtrees; otherwise the
+// heavy outdoor commit can block the first fade frame and make the transition jerk.
+const OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS = 180
 const OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS = 420
 // Durée pendant laquelle le voile reste après le switch de zone. Allongée pour
 // couvrir tout le staging extérieur (jusqu'à l'étape ennemis à ~920 ms) ET la
 // première frame extérieure (flash blanc possible) — le pop-in se fait sous le
 // voile. Là encore : aucune modif du chargement, juste le voile tenu plus longtemps.
 const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 650
+// Plafond dur : le voile attend le signal de pré-warm shader (outdoorPrewarmReadyRef)
+// après le délai minimal ci-dessus, mais ne le retient JAMAIS au-delà de cette borne,
+// même si la compilation traîne ou échoue (sécurité anti-blocage, comme le garde-fou
+// du gate de boot). Au-delà : on rend la main quoi qu'il arrive.
+const OUTDOOR_EXIT_FADE_MAX_HOLD_MS = 2500
 const OUTDOOR_CONTENT_STAGES = [
   { level: 1, delay: 0 },
   { level: 2, delay: 140 },
@@ -12977,6 +13283,41 @@ function startStableInitialAssetPreloads() {
     )
   }
   return stableInitialAssetPreloadPromise
+}
+
+// Assets EXTÉRIEURS lourds qui, sans préchargement, ne se chargent qu'au franchissement
+// de la porte (le diag `?transitiondiag` les montre finir à ~7,3–7,7 s, en plein pic de
+// transition) : surtout les squelettes/champignons FBX (parse + skinning coûteux). On
+// les précharge en `requestIdleCallback` APRÈS la chute de l'overlay, pendant que le
+// joueur explore l'intérieur → leur coût réseau + parse sort du pic « sortie dehors ».
+// Ce sont des preloads de cache loader (drei) : AUCUN montage, donc aucun changement
+// visuel ni de scène. Le montage/skinning GPU reste fait au passage (cf. note perf),
+// mais sur des données déjà parsées en mémoire.
+const OUTDOOR_IDLE_PRELOADS = [
+  () => useLoader.preload(GLTFLoader, SKELETON_ENEMY_MODEL_GLB_URL),
+  () => useTexture.preload(SKELETON_ENEMY_TEXTURE_URL),
+  () => useLoader.preload(GLTFLoader, MUSHROOM_ENEMY_MODEL_GLB_URL),
+  () => useGLTF.preload('/models/cat.glb'),
+]
+
+let outdoorIdlePreloadStarted = false
+
+// Lance les préchargements extérieurs au prochain temps mort du navigateur (repli
+// setTimeout si requestIdleCallback indisponible). Idempotent.
+function startOutdoorIdlePreloads() {
+  if (outdoorIdlePreloadStarted || typeof window === 'undefined') return
+  outdoorIdlePreloadStarted = true
+  const run = () => {
+    OUTDOOR_IDLE_PRELOADS.forEach((preload) => {
+      // Sérialisé sur des microtâches pour ne pas empiler tous les parse en une frame.
+      Promise.resolve().then(preload).catch(() => { /* preload best-effort */ })
+    })
+  }
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(run, { timeout: 4000 })
+  } else {
+    window.setTimeout(run, 1200)
+  }
 }
 
 function waitForPromiseWithTimeout(promise, timeoutMs) {
@@ -14023,6 +14364,11 @@ function App() {
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
   const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
+  // Passe à true quand OutdoorShaderPrewarm a fini de compiler les shaders
+  // extérieurs : le fondu de transition attend ce signal avant de se lever
+  // (plafonné par OUTDOOR_EXIT_FADE_MAX_HOLD_MS). Jamais remis à false : une fois
+  // les programmes en cache GPU, les sorties suivantes n'attendent plus.
+  const outdoorPrewarmReadyRef = useRef(false)
   const [spawnRequest, setSpawnRequest] = useState(null)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
   const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
@@ -16190,9 +16536,15 @@ function App() {
     if (zoneFadeActive || currentZone === nextZone) return
     const goingOutside = nextZone === ZONES.outside
     setZoneFadeActive(true)
+    const outdoorFadeSettleDelay = goingOutside ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS : 0
+    const zoneSwitchDelay = goingOutside
+      ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS + OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS
+      : 180
     if (goingOutside) {
-      setOutdoorTransitionPrimed(true)
-      setOutdoorContentStage((stage) => Math.max(stage, 1))
+      window.setTimeout(() => {
+        setOutdoorTransitionPrimed(true)
+        setOutdoorContentStage((stage) => Math.max(stage, 1))
+      }, outdoorFadeSettleDelay)
     }
     setNear('outdoorDoor', false)
     setNear('skinStation', false)
@@ -16226,10 +16578,36 @@ function App() {
       touchRef.current.lookY = 0
       touchRef.current.cameraDistance = CAMERA_SETTINGS[nextZone]?.distance ?? CAMERA_DISTANCE
       window.setTimeout(() => {
-        setZoneFadeActive(false)
-        if (goingOutside) setOutdoorTransitionPrimed(false)
+        if (!goingOutside) {
+          setZoneFadeActive(false)
+          return
+        }
+        // Sortie : on ne lève le voile (= on ne rend la main) qu'une fois les
+        // shaders extérieurs pré-compilés, pour que la 1re frame jouable dehors
+        // ne tombe pas en plein freeze de compilation. Plafonné par
+        // OUTDOOR_EXIT_FADE_MAX_HOLD_MS pour ne jamais coincer le joueur.
+        const releaseFade = () => {
+          setZoneFadeActive(false)
+          setOutdoorTransitionPrimed(false)
+        }
+        if (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current) {
+          releaseFade()
+          return
+        }
+        const holdStartedAt = Date.now()
+        const pollPrewarm = () => {
+          if (
+            outdoorPrewarmReadyRef.current ||
+            Date.now() - holdStartedAt >= OUTDOOR_EXIT_FADE_MAX_HOLD_MS
+          ) {
+            releaseFade()
+            return
+          }
+          window.setTimeout(pollPrewarm, 60)
+        }
+        pollPrewarm()
       }, goingOutside ? OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS : 180)
-    }, goingOutside ? OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS : 180)
+    }, zoneSwitchDelay)
   }
 
   const requestOutdoorTransition = () => {
@@ -16609,6 +16987,9 @@ function App() {
 
   const completeShaderWarmup = useCallback(() => {
     setShaderWarmupComplete(true)
+    // L'overlay est tombé : on profite du temps mort pour précharger les assets
+    // extérieurs lourds avant que le joueur n'atteigne la porte (cf. note perf).
+    startOutdoorIdlePreloads()
   }, [])
 
   const requestAccountSubmit = async (event) => {
@@ -16696,6 +17077,14 @@ function App() {
       >
         <ShaderWarmupGate onComplete={completeShaderWarmup} />
         {PERF_RUNTIME_WARMUP_RIG && <RuntimeWarmupRig />}
+        {!PERF_NO_OUTDOOR_PREWARM && (
+          <OutdoorShaderPrewarm
+            stage={outdoorContentMounted ? outdoorContentStage : 0}
+            isOutside={isOutsideZone}
+            readyRef={outdoorPrewarmReadyRef}
+          />
+        )}
+        {TRANSITION_DIAG_ENABLED && <TransitionDiagProbe currentZone={currentZone} />}
         <LayeredSceneRenderer currentZone={currentZone} />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
