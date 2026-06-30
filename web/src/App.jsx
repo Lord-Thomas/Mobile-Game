@@ -9471,6 +9471,9 @@ function SmallMushroomEnemy({
               nextMaterial.color?.set(cfg.materialColor)
             } else if (cfg.textureUrl && forcedTexture) {
               forcedTexture.colorSpace = SRGBColorSpace
+              // UV glTF (V inversé) vs useTexture (flipY=true par défaut) → texture
+              // échantillonnée à l'envers (tachetée). flipY=false rétablit l'alignement.
+              forcedTexture.flipY = false
               forcedTexture.needsUpdate = true
               nextMaterial.map = forcedTexture
               nextMaterial.alphaMap = null
@@ -10348,6 +10351,7 @@ function SummonedSkeleton({
             next.side = DoubleSide
             if (cfg.textureUrl && forcedTexture) {
               forcedTexture.colorSpace = SRGBColorSpace
+              forcedTexture.flipY = false // UV glTF : sinon texture tachetée (cf. ennemi)
               forcedTexture.needsUpdate = true
               next.map = forcedTexture
               next.alphaMap = null
