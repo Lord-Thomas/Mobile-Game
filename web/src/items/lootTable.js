@@ -25,12 +25,17 @@ export const LOOT_TABLES = {
 // Renvoie la liste des itemId lootés à la mort d'un monstre `mobType`.
 // rng() doit renvoyer un nombre dans [0, 1[ (Math.random par défaut ; injectable
 // pour les tests).
-export function rollLoot(mobType, rng = Math.random) {
-  const table = LOOT_TABLES[mobType]
+function getRollTable(mobType, overrideTable) {
+  return Array.isArray(overrideTable) && overrideTable.length ? overrideTable : LOOT_TABLES[mobType]
+}
+
+export function rollLoot(mobType, rng = Math.random, overrideTable = null) {
+  const table = getRollTable(mobType, overrideTable)
   if (!table) return []
   const drops = []
   for (const entry of table) {
-    if (rng() < entry.chance) drops.push(entry.itemId)
+    const chance = Number(entry?.chance)
+    if (entry?.itemId && Number.isFinite(chance) && rng() < chance) drops.push(entry.itemId)
   }
   return drops
 }

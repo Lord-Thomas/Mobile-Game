@@ -35,6 +35,14 @@ describe('lootTable', () => {
     expect(rollLoot('skeleton_mage', seededRng([0, 1]))).toEqual(['bone'])
   })
 
+  it('accepte une table de loot personnalisee', () => {
+    const table = [
+      { itemId: 'red_crystal', chance: 0.75 },
+      { itemId: 'bone', chance: 0.25 },
+    ]
+    expect(rollLoot('skeleton', seededRng([0.7, 0.3]), table)).toEqual(['red_crystal'])
+  })
+
   it('drop rare des cristaux (4%)', () => {
     // 1er tirage = objet commun (raté), 2e tirage = cristal (réussi sous 0.04).
     expect(rollLoot('skeleton', seededRng([0.9, 0.02]))).toEqual(['blue_crystal'])

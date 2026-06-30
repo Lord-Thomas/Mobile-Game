@@ -1,11 +1,26 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { Buffer } from 'node:buffer'
-import { writeFile, mkdir, readdir } from 'node:fs/promises'
+import { writeFile, readFile, mkdir, readdir } from 'node:fs/promises'
 import { basename, extname, join, relative, sep } from 'node:path'
 
 const MAP_MODEL_EXTENSIONS = new Set(['.glb', '.gltf', '.fbx'])
+const LOOT_MODEL_EXTENSIONS = new Set(['.glb', '.gltf'])
+const LOOT_ICON_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'])
 const RESERVED_MAP_OBJECT_IDS = new Set(['skeleton_tower', 'magic_skull_necromancer'])
+const RESERVED_ENEMY_IDS = new Set(['mushroom', 'mushroom_man', 'skeleton', 'skeleton_archer', 'skeleton_mage'])
+const RESERVED_ENEMY_MODEL_URLS = new Set([
+  '/models/enemies/mushroom_man/model.fbx',
+  '/models/enemies/mushroom_man/model.glb',
+  '/models/enemies/skeleton/model.fbx',
+  '/models/enemies/skeleton/model.glb',
+])
+const RESERVED_LOOT_MODEL_URLS = new Set([
+  '/items/blue+crystal+cluster+3d+model.glb',
+  '/items/bone+3d+model.glb',
+  '/items/red+crystal+3d+model.glb',
+  '/items/red+mushroom+3d+model.glb',
+])
 
 function sanitizeGeneratedObjectId(value) {
   return String(value ?? 'map_object')
@@ -52,6 +67,49 @@ async function findMapModelFiles(dir) {
   return files
 }
 
+async function findFilesByExtension(dir, extensions) {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const files = []
+
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...await findFilesByExtension(fullPath, extensions))
+    } else if (entry.isFile() && extensions.has(extname(entry.name).toLowerCase())) {
+      files.push(fullPath)
+    }
+  }
+
+  return files
+}
+
+async function findEnemyModelFiles(dir) {
+  return findFilesByExtension(dir, MAP_MODEL_EXTENSIONS)
+}
+
+async function findLootModelFiles(dir) {
+  return findFilesByExtension(dir, LOOT_MODEL_EXTENSIONS)
+}
+
+async function findLootIconFiles(dir) {
+  return findFilesByExtension(dir, LOOT_ICON_EXTENSIONS)
+}
+
+async function readGeneratedArray(filePath, exportName) {
+  try {
+    const source = await readFile(filePath, 'utf8')
+    const start = source.indexOf(`export const ${exportName} = `)
+    if (start < 0) return []
+    const jsonStart = source.indexOf('[', start)
+    const jsonEnd = source.lastIndexOf(']')
+    if (jsonStart < 0 || jsonEnd < jsonStart) return []
+    const parsed = JSON.parse(source.slice(jsonStart, jsonEnd + 1))
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 function createMapObjectDefinitionsFromFiles(files, mapModelsDir) {
   const usedIds = new Set()
 
@@ -82,6 +140,129 @@ function createMapObjectDefinitionsFromFiles(files, mapModelsDir) {
         hitHeightMeters: 1.5,
         defaultScale: 1,
         thumbnailLabel: 'Objet',
+      }
+    })
+    .filter(Boolean)
+}
+
+function preferGeneratedModel(current, next) {
+  if (!current) return next
+  if (current.modelFormat !== 'glb' && next.modelFormat === 'glb') return next
+  return current
+}
+
+function createEnemyDefinitionsFromFiles(files, enemiesDir) {
+  const definitions = new Map()
+
+  files
+    .sort((a, b) => a.localeCompare(b))
+    .forEach((file) => {
+      const relativePath = relative(enemiesDir, file)
+      const publicPath = encodeURI(`/models/enemies/${relativePath.split(sep).join('/')}`)
+      if (RESERVED_ENEMY_MODEL_URLS.has(publicPath)) return
+
+      const id = getMapObjectIdFromRelativePath(relativePath)
+      if (RESERVED_ENEMY_IDS.has(id)) return
+
+      const modelFormat = extname(file).toLowerCase() === '.fbx' ? 'fbx' : 'glb'
+      definitions.set(id, preferGeneratedModel(definitions.get(id), {
+        id,
+        name: titleFromObjectId(id),
+        modelFormat,
+        modelUrl: publicPath,
+        maxHp: 30,
+        rewardCoins: 10,
+        attackDamage: 10,
+        sizeScale: 1,
+        modelTargetHeight: 0.77,
+        targetRadius: 0.48,
+        targetHeight: 1.2,
+        hudHeight: 2,
+        defaultLootTable: [],
+      }))
+    })
+
+  return Array.from(definitions.values())
+}
+
+function createLootItemDefinitionsFromFiles(files, itemsDir, iconFiles = [], existingDefinitions = []) {
+  const definitions = new Map()
+  const existingById = new Map(existingDefinitions.map((definition) => [definition?.id, definition]))
+  const iconOptions = iconFiles
+    .sort((a, b) => a.localeCompare(b))
+    .map((file) => encodeURI(`/items/${relative(itemsDir, file).split(sep).join('/')}`))
+  const modelOptions = files
+    .sort((a, b) => a.localeCompare(b))
+    .map((file) => encodeURI(`/items/${relative(itemsDir, file).split(sep).join('/')}`))
+    .filter((model) => !RESERVED_LOOT_MODEL_URLS.has(model))
+
+  files
+    .sort((a, b) => a.localeCompare(b))
+    .forEach((file) => {
+      const relativePath = relative(itemsDir, file)
+      const publicPath = encodeURI(`/items/${relativePath.split(sep).join('/')}`)
+      if (RESERVED_LOOT_MODEL_URLS.has(publicPath)) return
+
+      const id = getMapObjectIdFromRelativePath(relativePath)
+      const existing = existingById.get(id) ?? {}
+      const modelDir = relativePath.split(sep).slice(0, -1).join('/')
+      const sameDirIcon = iconOptions.find((icon) => (
+        modelDir ? icon.startsWith(encodeURI(`/items/${modelDir}/`)) : icon.split('/').length === 3
+      ))
+      const model = modelOptions.includes(existing.model) ? existing.model : publicPath
+      const icon = iconOptions.includes(existing.icon) ? existing.icon : sameDirIcon ?? ''
+      definitions.set(id, {
+        id,
+        name: typeof existing.name === 'string' && existing.name.trim() ? existing.name.trim() : titleFromObjectId(id),
+        model,
+        modelOptions,
+        icon,
+        iconOptions,
+        emoji: '📦',
+        sellPrice: Number.isFinite(Number(existing.sellPrice))
+          ? Math.max(0, Math.round(Number(existing.sellPrice)))
+          : 10,
+      })
+    })
+
+  return Array.from(definitions.values())
+}
+
+function sanitizeLootDefinitions(definitions) {
+  return definitions
+    .map((definition) => {
+      const id = typeof definition?.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(definition.id)
+        ? definition.id
+        : null
+      const modelOptions = Array.isArray(definition.modelOptions)
+        ? definition.modelOptions.filter((model) => typeof model === 'string' && model.startsWith('/items/'))
+        : []
+      const model = typeof definition?.model === 'string' && modelOptions.includes(definition.model)
+        ? definition.model
+        : modelOptions[0] ?? null
+      if (!id || !model) return null
+      const iconOptions = Array.isArray(definition.iconOptions)
+        ? definition.iconOptions.filter((icon) => typeof icon === 'string' && icon.startsWith('/items/'))
+        : []
+      const icon = typeof definition.icon === 'string' && iconOptions.includes(definition.icon)
+        ? definition.icon
+        : ''
+
+      return {
+        id,
+        name: typeof definition.name === 'string' && definition.name.trim()
+          ? definition.name.trim().slice(0, 80)
+          : titleFromObjectId(id),
+        model,
+        modelOptions,
+        icon,
+        iconOptions,
+        emoji: typeof definition.emoji === 'string' && definition.emoji.trim()
+          ? definition.emoji.trim().slice(0, 8)
+          : '📦',
+        sellPrice: Number.isFinite(Number(definition.sellPrice))
+          ? Math.min(100000, Math.max(0, Math.round(Number(definition.sellPrice))))
+          : 10,
       }
     })
     .filter(Boolean)
@@ -169,6 +350,74 @@ function saveThumbnailPlugin() {
         }
       })
 
+      server.middlewares.use('/dev/import-enemy-models', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        try {
+          const enemiesDir = join(process.cwd(), 'public', 'models', 'enemies')
+          await mkdir(enemiesDir, { recursive: true })
+          const files = await findEnemyModelFiles(enemiesDir)
+          const definitions = createEnemyDefinitionsFromFiles(files, enemiesDir)
+          const source = [
+            `export const GENERATED_ENEMY_DEFINITIONS = ${JSON.stringify(definitions, null, 2)}`,
+            '',
+          ].join('\n')
+          await writeFile(join(process.cwd(), 'src', 'enemies', 'enemyDefinitions.generated.js'), source)
+          res.setHeader('content-type', 'application/json')
+          res.statusCode = 200
+          res.end(JSON.stringify({ imported: definitions.length }))
+        } catch (err) {
+          res.statusCode = 500
+          res.end(err.message)
+        }
+      })
+
+      server.middlewares.use('/dev/import-loot-models', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        try {
+          const itemsDir = join(process.cwd(), 'public', 'items')
+          await mkdir(itemsDir, { recursive: true })
+          const files = await findLootModelFiles(itemsDir)
+          const iconFiles = await findLootIconFiles(itemsDir)
+          const generatedPath = join(process.cwd(), 'src', 'items', 'itemDefinitions.generated.js')
+          const existingDefinitions = await readGeneratedArray(generatedPath, 'GENERATED_ITEM_DEFINITIONS')
+          const definitions = createLootItemDefinitionsFromFiles(files, itemsDir, iconFiles, existingDefinitions)
+          const source = [
+            `export const GENERATED_ITEM_DEFINITIONS = ${JSON.stringify(definitions, null, 2)}`,
+            '',
+          ].join('\n')
+          await writeFile(generatedPath, source)
+          res.setHeader('content-type', 'application/json')
+          res.statusCode = 200
+          res.end(JSON.stringify({ imported: definitions.length }))
+        } catch (err) {
+          res.statusCode = 500
+          res.end(err.message)
+        }
+      })
+
+      server.middlewares.use('/dev/save-loot-definitions', async (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
+        const chunks = []
+        req.on('data', (chunk) => chunks.push(chunk))
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+            const definitions = sanitizeLootDefinitions(Array.isArray(payload.definitions) ? payload.definitions : [])
+            const source = [
+              `export const GENERATED_ITEM_DEFINITIONS = ${JSON.stringify(definitions, null, 2)}`,
+              '',
+            ].join('\n')
+            await writeFile(join(process.cwd(), 'src', 'items', 'itemDefinitions.generated.js'), source)
+            res.setHeader('content-type', 'application/json')
+            res.statusCode = 200
+            res.end(JSON.stringify({ saved: definitions.length }))
+          } catch (err) {
+            res.statusCode = 500
+            res.end(err.message)
+          }
+        })
+      })
+
       server.middlewares.use('/dev/save-map-objects', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         const chunks = []
@@ -234,7 +483,61 @@ function saveThumbnailPlugin() {
                 scale: Number.isFinite(Number(placement.scale)) ? Math.max(0.2, Number(placement.scale)) : 1,
               }
             })
-            const allowedMonsterTypes = new Set(['skeleton', 'mushroom', 'skeleton_archer', 'skeleton_mage'])
+            const enemiesDir = join(process.cwd(), 'public', 'models', 'enemies')
+            const itemsDir = join(process.cwd(), 'public', 'items')
+            await mkdir(enemiesDir, { recursive: true })
+            await mkdir(itemsDir, { recursive: true })
+            const generatedEnemyDefinitions = createEnemyDefinitionsFromFiles(await findEnemyModelFiles(enemiesDir), enemiesDir)
+            const generatedItemDefinitions = createLootItemDefinitionsFromFiles(await findLootModelFiles(itemsDir), itemsDir)
+            const allowedMonsterTypes = new Set([
+              'skeleton',
+              'mushroom',
+              'skeleton_archer',
+              'skeleton_mage',
+              ...generatedEnemyDefinitions.map((definition) => definition.id),
+            ])
+            const allowedLootItemIds = new Set([
+              'bone',
+              'mushroom',
+              'red_crystal',
+              'blue_crystal',
+              ...generatedItemDefinitions.map((definition) => definition.id),
+            ])
+            const defaultSpawnerStats = {
+              mushroom: { maxHp: 30, rewardCoins: 10, attackDamage: 10, sizeScale: 1 },
+              skeleton: { maxHp: 80, rewardCoins: 30, attackDamage: 25, sizeScale: 1 },
+              skeleton_archer: { maxHp: 60, rewardCoins: 35, attackDamage: 18, sizeScale: 1 },
+              skeleton_mage: { maxHp: 55, rewardCoins: 45, attackDamage: 30, sizeScale: 1 },
+            }
+            generatedEnemyDefinitions.forEach((definition) => {
+              defaultSpawnerStats[definition.id] = {
+                maxHp: definition.maxHp,
+                rewardCoins: definition.rewardCoins,
+                attackDamage: definition.attackDamage,
+                sizeScale: definition.sizeScale,
+              }
+            })
+            const defaultLootTables = {
+              skeleton: [
+                { itemId: 'bone', chance: 0.5 },
+                { itemId: 'blue_crystal', chance: 0.06 },
+              ],
+              skeleton_archer: [
+                { itemId: 'bone', chance: 0.5 },
+                { itemId: 'blue_crystal', chance: 0.06 },
+              ],
+              skeleton_mage: [
+                { itemId: 'bone', chance: 0.5 },
+                { itemId: 'blue_crystal', chance: 0.06 },
+              ],
+              mushroom: [
+                { itemId: 'mushroom', chance: 0.5 },
+                { itemId: 'red_crystal', chance: 0.06 },
+              ],
+            }
+            generatedEnemyDefinitions.forEach((definition) => {
+              defaultLootTables[definition.id] = Array.isArray(definition.defaultLootTable) ? definition.defaultLootTable : []
+            })
             const sanitizedSpawners = spawners.map((spawner, index) => {
               const monsterType = allowedMonsterTypes.has(spawner.monsterType)
                 ? spawner.monsterType
@@ -256,6 +559,21 @@ function saveThumbnailPlugin() {
                     : 0,
                 }))
                 .filter((variant) => variant.monsterType && variant.weight > 0)
+              const stats = defaultSpawnerStats[monsterType] ?? defaultSpawnerStats.mushroom
+              const rawLootTable = Array.isArray(spawner.lootTable) && spawner.lootTable.length
+                ? spawner.lootTable
+                : defaultLootTables[monsterType] ?? defaultLootTables.mushroom
+              const lootByItem = new Map()
+              rawLootTable.forEach((entry) => {
+                if (!allowedLootItemIds.has(entry?.itemId)) return
+                const chance = Number(entry.chance)
+                if (!Number.isFinite(chance) || chance <= 0) return
+                lootByItem.set(entry.itemId, Math.max(lootByItem.get(entry.itemId) ?? 0, Math.min(1, chance)))
+              })
+              const lootTable = Array.from(lootByItem.entries()).map(([itemId, chance]) => ({
+                itemId,
+                chance: Math.round(chance * 1000) / 1000,
+              }))
 
               return {
                 id,
@@ -282,6 +600,19 @@ function saveThumbnailPlugin() {
                 minDistance: Number.isFinite(Number(spawner.minDistance))
                   ? Math.min(40, Math.max(0, Number(spawner.minDistance)))
                   : 5,
+                maxHp: Number.isFinite(Number(spawner.maxHp))
+                  ? Math.min(10000, Math.max(1, Math.round(Number(spawner.maxHp))))
+                  : stats.maxHp,
+                rewardCoins: Number.isFinite(Number(spawner.rewardCoins))
+                  ? Math.min(100000, Math.max(0, Math.round(Number(spawner.rewardCoins))))
+                  : stats.rewardCoins,
+                attackDamage: Number.isFinite(Number(spawner.attackDamage))
+                  ? Math.min(10000, Math.max(0, Math.round(Number(spawner.attackDamage))))
+                  : stats.attackDamage,
+                sizeScale: Number.isFinite(Number(spawner.sizeScale))
+                  ? Math.min(4, Math.max(0.25, Number(spawner.sizeScale)))
+                  : stats.sizeScale,
+                lootTable: lootTable.length ? lootTable : defaultLootTables[monsterType] ?? defaultLootTables.mushroom,
                 patrol: spawner.patrol === false ? false : true,
                 aggressive: spawner.aggressive === false ? false : true,
                 variants: variants.length ? variants : [{ monsterType, weight: 100 }],

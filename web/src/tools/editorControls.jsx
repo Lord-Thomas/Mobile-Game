@@ -18,6 +18,21 @@ export function NumberField({ label, value, min, max, step = 1, onChange }) {
   )
 }
 
+export function TextField({ label, value, onChange, placeholder = '' }) {
+  return (
+    <label style={styles.blockField}>
+      <span style={styles.label}>{label}</span>
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        style={styles.textInput}
+      />
+    </label>
+  )
+}
+
 export function SliderField({ label, value, min, max, step = 1, onChange }) {
   const precision = step < 0.01 ? 3 : step < 1 ? 2 : 0
   return (

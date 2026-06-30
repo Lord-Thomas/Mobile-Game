@@ -6,6 +6,13 @@ import MapObjectPlaceables from '../world/MapObjectPlaceables'
 import PaintedPaths from '../world/PaintedPaths'
 import { PATH_TYPES, PATH_TYPE_IDS, normalizePathStamp } from '../world/paths'
 import {
+  ALL_ITEM_IDS,
+  getItemDefinition,
+} from '../items/itemDefinitions'
+import { GENERATED_ITEM_DEFINITIONS } from '../items/itemDefinitions.generated'
+import {
+  getDefaultMonsterLootTable,
+  getMonsterSpawnerDefaultStats,
   MONSTER_SPAWNER_TYPE_IDS,
   MONSTER_SPAWNER_TYPES,
   getMapObjectCatalogItem,
@@ -21,7 +28,7 @@ import {
 import { OUTDOOR_HALF_SIZE } from '../world/outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import { getTerrainHeight, terrainModifications } from '../world/terrain/terrainGeometry'
-import { CheckboxField, ColorField, NumberField, Section, SelectField, SliderField } from './editorControls'
+import { CheckboxField, ColorField, NumberField, Section, SelectField, SliderField, TextField } from './editorControls'
 import { styles } from './editorStyles'
 
 const MAP_GRID_SIZE = 0.25
@@ -58,6 +65,33 @@ function createEditorId(prefix) {
   return `${prefix}_${Date.now().toString(36)}`
 }
 
+function normalizeEditableLootDefinition(definition) {
+  const id = typeof definition?.id === 'string' ? definition.id : ''
+  const iconOptions = Array.isArray(definition?.iconOptions)
+    ? definition.iconOptions.filter((icon) => typeof icon === 'string' && icon.startsWith('/items/'))
+    : []
+  const modelOptions = Array.isArray(definition?.modelOptions)
+    ? definition.modelOptions.filter((model) => typeof model === 'string' && model.startsWith('/items/'))
+    : (typeof definition?.model === 'string' && definition.model.startsWith('/items/') ? [definition.model] : [])
+  const model = typeof definition?.model === 'string' && modelOptions.includes(definition.model)
+    ? definition.model
+    : modelOptions[0] ?? (typeof definition?.model === 'string' ? definition.model : '')
+  const icon = typeof definition?.icon === 'string' && iconOptions.includes(definition.icon)
+    ? definition.icon
+    : ''
+
+  return {
+    id,
+    name: typeof definition?.name === 'string' ? definition.name : id,
+    model,
+    modelOptions,
+    icon,
+    iconOptions,
+    emoji: typeof definition?.emoji === 'string' && definition.emoji.trim() ? definition.emoji : '📦',
+    sellPrice: Math.max(0, Math.round(Number.isFinite(Number(definition?.sellPrice)) ? Number(definition.sellPrice) : 10)),
+  }
+}
+
 function getPlacementHeightOffset(placement) {
   const [x = 0, y = getTerrainHeight(x, 0), z = 0] = placement?.position ?? []
   return y - getTerrainHeight(x, z)
@@ -83,6 +117,7 @@ function createPlacement(objectId, existingCount, placementPoint = null) {
 
 function createMonsterSpawner(monsterType, existingCount) {
   const [x, z] = clampMapPosition(existingCount * 3, -4)
+  const stats = getMonsterSpawnerDefaultStats(monsterType)
 
   return normalizeMonsterSpawner({
     id: createEditorId('monster_spawner'),
@@ -93,6 +128,11 @@ function createMonsterSpawner(monsterType, existingCount) {
     populationMax: 8,
     respawnSeconds: 45,
     minDistance: 5,
+    maxHp: stats.maxHp,
+    rewardCoins: stats.rewardCoins,
+    attackDamage: stats.attackDamage,
+    sizeScale: stats.sizeScale,
+    lootTable: getDefaultMonsterLootTable(monsterType),
     patrol: true,
     aggressive: true,
     variants: [{ monsterType, weight: 100 }],
@@ -141,6 +181,11 @@ function toSavedSpawners(spawners) {
       populationMax: normalized.populationMax,
       respawnSeconds: normalized.respawnSeconds,
       minDistance: normalized.minDistance,
+      maxHp: normalized.maxHp,
+      rewardCoins: normalized.rewardCoins,
+      attackDamage: normalized.attackDamage,
+      sizeScale: normalized.sizeScale,
+      lootTable: normalized.lootTable,
       patrol: normalized.patrol,
       aggressive: normalized.aggressive,
       variants: normalized.variants,
@@ -1073,6 +1118,12 @@ export function MapEditorPanel({
   const [biomeType, setBiomeType] = useState(BIOME_TYPE_IDS[0])
   const [saving, setSaving] = useState(false)
   const [importingModels, setImportingModels] = useState(false)
+  const [importingEnemies, setImportingEnemies] = useState(false)
+  const [importingLoot, setImportingLoot] = useState(false)
+  const [savingLootDefinitions, setSavingLootDefinitions] = useState(false)
+  const [lootDefinitions, setLootDefinitions] = useState(() => (
+    GENERATED_ITEM_DEFINITIONS.map(normalizeEditableLootDefinition)
+  ))
   const [message, setMessage] = useState('')
   const selected = objects.find((object) => object.id === selectedId) ?? null
   const selectedSpawner = spawners.find((spawner) => spawner.id === selectedSpawnerId) ?? null
@@ -1089,6 +1140,10 @@ export function MapEditorPanel({
   const spawnerTypeOptions = useMemo(() => MONSTER_SPAWNER_TYPE_IDS.map((id) => ({
     value: id,
     label: MONSTER_SPAWNER_TYPES[id]?.name ?? id,
+  })), [])
+  const lootItemOptions = useMemo(() => ALL_ITEM_IDS.map((id) => ({
+    value: id,
+    label: getItemDefinition(id)?.name ?? id,
   })), [])
   const biomeTypeOptions = useMemo(() => BIOME_TYPE_IDS.map((id) => ({
     value: id,
@@ -1119,6 +1174,18 @@ export function MapEditorPanel({
       }
     }).filter((variant) => variant.weight > 0)
     patchSelectedSpawner({ variants: nextVariants })
+  }
+
+  const patchSelectedSpawnerLoot = (itemId, chancePercent) => {
+    if (!selectedSpawner) return
+    const nextLootTable = ALL_ITEM_IDS.map((id) => {
+      const existing = selectedSpawner.lootTable.find((entry) => entry.itemId === id)
+      return {
+        itemId: id,
+        chance: id === itemId ? chancePercent / 100 : existing?.chance ?? 0,
+      }
+    }).filter((entry) => entry.chance > 0)
+    patchSelectedSpawner({ lootTable: nextLootTable })
   }
 
   const patchSelectedBiome = (patch) => {
@@ -1272,6 +1339,82 @@ export function MapEditorPanel({
     }
   }
 
+  const importEnemyModels = async () => {
+    setImportingEnemies(true)
+    setMessage('')
+    try {
+      const response = await fetch('/dev/import-enemy-models', { method: 'POST' })
+      const raw = await response.text()
+      let payload = null
+      try {
+        payload = raw ? JSON.parse(raw) : null
+      } catch {
+        payload = null
+      }
+      if (!response.ok) throw new Error(payload?.message ?? raw)
+      setMessage(`${payload?.imported ?? 0} monstre(s) importe(s). Rechargement de l'editeur...`)
+      window.setTimeout(() => window.location.reload(), 350)
+    } catch (error) {
+      setMessage(`Import monstres impossible: ${error.message}`)
+    } finally {
+      setImportingEnemies(false)
+    }
+  }
+
+  const importLootModels = async () => {
+    setImportingLoot(true)
+    setMessage('')
+    try {
+      const response = await fetch('/dev/import-loot-models', { method: 'POST' })
+      const raw = await response.text()
+      let payload = null
+      try {
+        payload = raw ? JSON.parse(raw) : null
+      } catch {
+        payload = null
+      }
+      if (!response.ok) throw new Error(payload?.message ?? raw)
+      setMessage(`${payload?.imported ?? 0} loot(s) importe(s). Rechargement de l'editeur...`)
+      window.setTimeout(() => window.location.reload(), 350)
+    } catch (error) {
+      setMessage(`Import loots impossible: ${error.message}`)
+    } finally {
+      setImportingLoot(false)
+    }
+  }
+
+  const patchLootDefinition = (id, patch) => {
+    setLootDefinitions((current) => current.map((definition) => (
+      definition.id === id ? normalizeEditableLootDefinition({ ...definition, ...patch }) : definition
+    )))
+  }
+
+  const saveLootDefinitions = async () => {
+    setSavingLootDefinitions(true)
+    setMessage('')
+    try {
+      const response = await fetch('/dev/save-loot-definitions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ definitions: lootDefinitions.map(normalizeEditableLootDefinition) }),
+      })
+      const raw = await response.text()
+      let payload = null
+      try {
+        payload = raw ? JSON.parse(raw) : null
+      } catch {
+        payload = null
+      }
+      if (!response.ok) throw new Error(payload?.message ?? raw)
+      setMessage(`${payload?.saved ?? 0} loot(s) sauvegarde(s). Rechargement de l'editeur...`)
+      window.setTimeout(() => window.location.reload(), 350)
+    } catch (error) {
+      setMessage(`Sauvegarde loots impossible: ${error.message}`)
+    } finally {
+      setSavingLootDefinitions(false)
+    }
+  }
+
   return (
     <aside style={styles.panel}>
       <div style={styles.header}>
@@ -1296,6 +1439,11 @@ export function MapEditorPanel({
         <button type="button" style={styles.primaryButton} onClick={addSpawner}>
           Ajouter spawner
         </button>
+        <div style={styles.actions}>
+          <button type="button" style={styles.secondaryButton} onClick={importEnemyModels} disabled={importingEnemies}>
+            {importingEnemies ? 'Import...' : 'Importer monstres'}
+          </button>
+        </div>
         {spawners.length ? (
           <div style={styles.libraryList}>
             {spawners.map((spawner, index) => {
@@ -1319,7 +1467,10 @@ export function MapEditorPanel({
                 >
                   <strong>Spawner {typeLabel} #{index + 1}</strong>
                   <span style={{ color: '#9fb3ac', fontSize: 11 }}>
-                    pop. {spawner.populationMax} / rayon {spawner.radius.toFixed(0)}m / respawn {spawner.respawnSeconds}s
+                    pop. {spawner.populationMax} / PV {spawner.maxHp} / {spawner.rewardCoins} pieces
+                  </span>
+                  <span style={{ color: '#7f918c', fontSize: 11 }}>
+                    rayon {spawner.radius.toFixed(0)}m / taille x{spawner.sizeScale.toFixed(2)} / respawn {spawner.respawnSeconds}s
                   </span>
                 </button>
               )
@@ -1327,6 +1478,69 @@ export function MapEditorPanel({
           </div>
         ) : (
           <div style={styles.libraryEmpty}>Aucun spawner place.</div>
+        )}
+      </Section>
+
+      <Section title="Objets lootables">
+        <div style={styles.actions}>
+          <button type="button" style={styles.secondaryButton} onClick={importLootModels} disabled={importingLoot}>
+            {importingLoot ? 'Import...' : 'Importer loots'}
+          </button>
+          <button
+            type="button"
+            style={styles.primaryButton}
+            onClick={saveLootDefinitions}
+            disabled={savingLootDefinitions || lootDefinitions.length === 0}
+          >
+            {savingLootDefinitions ? 'Sauvegarde...' : 'Sauver loots'}
+          </button>
+        </div>
+        {lootDefinitions.length ? (
+          <div style={styles.libraryList}>
+            {lootDefinitions.map((definition) => (
+              <div key={definition.id} style={styles.subcard}>
+                <strong>{definition.name || definition.id}</strong>
+                <span style={styles.subtitle}>{definition.model}</span>
+                <TextField
+                  label="Nom"
+                  value={definition.name}
+                  onChange={(name) => patchLootDefinition(definition.id, { name })}
+                />
+                <SelectField
+                  label="Objet 3D au sol"
+                  value={definition.model}
+                  options={definition.modelOptions.map((model) => ({ value: model, label: model.split('/').pop() ?? model }))}
+                  onChange={(model) => patchLootDefinition(definition.id, { model })}
+                />
+                <SelectField
+                  label="Image inventaire"
+                  value={definition.icon}
+                  options={[
+                    { value: '', label: 'Aucune image' },
+                    ...definition.iconOptions.map((icon) => ({ value: icon, label: icon.split('/').pop() ?? icon })),
+                  ]}
+                  onChange={(icon) => patchLootDefinition(definition.id, { icon })}
+                />
+                {definition.icon && (
+                  <img
+                    src={definition.icon}
+                    alt=""
+                    style={{ width: 42, height: 42, objectFit: 'contain', borderRadius: 6, background: 'rgba(255,255,255,0.08)' }}
+                  />
+                )}
+                <NumberField
+                  label="Prix vente"
+                  value={definition.sellPrice}
+                  min={0}
+                  max={100000}
+                  step={1}
+                  onChange={(sellPrice) => patchLootDefinition(definition.id, { sellPrice })}
+                />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={styles.libraryEmpty}>Aucun loot importe. Place un modele dans public/items puis importe les loots.</div>
         )}
       </Section>
 
@@ -1652,6 +1866,8 @@ export function MapEditorPanel({
                 onChange={(monsterType) => patchSelectedSpawner({
                   monsterType,
                   variants: [{ monsterType, weight: 100 }],
+                  ...getMonsterSpawnerDefaultStats(monsterType),
+                  lootTable: getDefaultMonsterLootTable(monsterType),
                 })}
               />
               <NumberField label="X" value={selectedSpawner.position[0]} step={0.5} onChange={(value) => {
@@ -1705,6 +1921,38 @@ export function MapEditorPanel({
                 step={0.5}
                 onChange={(minDistance) => patchSelectedSpawner({ minDistance })}
               />
+              <NumberField
+                label="PV"
+                value={selectedSpawner.maxHp}
+                min={1}
+                max={10000}
+                step={1}
+                onChange={(maxHp) => patchSelectedSpawner({ maxHp })}
+              />
+              <SliderField
+                label="Taille"
+                value={selectedSpawner.sizeScale}
+                min={0.25}
+                max={4}
+                step={0.05}
+                onChange={(sizeScale) => patchSelectedSpawner({ sizeScale })}
+              />
+              <NumberField
+                label="Degats"
+                value={selectedSpawner.attackDamage}
+                min={0}
+                max={10000}
+                step={1}
+                onChange={(attackDamage) => patchSelectedSpawner({ attackDamage })}
+              />
+              <NumberField
+                label="Pieces"
+                value={selectedSpawner.rewardCoins}
+                min={0}
+                max={100000}
+                step={1}
+                onChange={(rewardCoins) => patchSelectedSpawner({ rewardCoins })}
+              />
               <CheckboxField
                 label="Patrouille"
                 checked={selectedSpawner.patrol}
@@ -1729,6 +1977,23 @@ export function MapEditorPanel({
                     max={100}
                     step={5}
                     onChange={(weight) => patchSelectedSpawnerVariant(monsterType, weight)}
+                  />
+                )
+              })}
+            </div>
+            <div style={styles.subcard}>
+              <strong>Loot</strong>
+              {lootItemOptions.map((option) => {
+                const entry = selectedSpawner.lootTable.find((item) => item.itemId === option.value)
+                return (
+                  <NumberField
+                    key={option.value}
+                    label={`${option.label} %`}
+                    value={(entry?.chance ?? 0) * 100}
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    onChange={(chancePercent) => patchSelectedSpawnerLoot(option.value, chancePercent)}
                   />
                 )
               })}

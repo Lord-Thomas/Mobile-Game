@@ -1,4 +1,7 @@
 import * as generatedMapObjects from './mapObjects.generated'
+import { GENERATED_ENEMY_DEFINITIONS } from '../enemies/enemyDefinitions.generated'
+import { ALL_ITEM_IDS } from '../items/itemDefinitions'
+import { LOOT_TABLES } from '../items/lootTable'
 import { MAP_OBJECT_DEFINITIONS } from './mapObjectLibrary'
 import { AUTHORED_TREES } from './outdoorData'
 import { getTerrainHeight } from './terrain/terrainGeometry'
@@ -21,6 +24,7 @@ const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
 const MAGIC_SKULL_DISCOVERY_TOWER_Y_OFFSET = 0.14
 export const MAGIC_SKULL_DISCOVERY_OBJECT_ID = 'magic_skull_discovery'
+const LOOT_ITEM_IDS = new Set(ALL_ITEM_IDS)
 
 const BASE_MAP_OBJECT_CATALOG = {
   skeleton_tower: {
@@ -169,23 +173,71 @@ export function getMapObjectLibrary() {
 export const MAP_OBJECT_CATALOG = getMapObjectCatalog()
 export const MAP_OBJECT_LIBRARY = getMapObjectLibrary()
 
-export const MONSTER_SPAWNER_TYPES = {
+const BASE_MONSTER_SPAWNER_TYPES = {
   mushroom: {
     id: 'mushroom',
     name: 'Champignon',
+    maxHp: 30,
+    rewardCoins: 10,
+    attackDamage: 10,
+    sizeScale: 1,
   },
   skeleton: {
     id: 'skeleton',
     name: 'Squelette',
+    maxHp: 80,
+    rewardCoins: 30,
+    attackDamage: 25,
+    sizeScale: 1,
   },
   skeleton_archer: {
     id: 'skeleton_archer',
     name: 'Archer squelette',
+    maxHp: 60,
+    rewardCoins: 35,
+    attackDamage: 18,
+    sizeScale: 1,
   },
   skeleton_mage: {
     id: 'skeleton_mage',
     name: 'Mage squelette',
+    maxHp: 55,
+    rewardCoins: 45,
+    attackDamage: 30,
+    sizeScale: 1,
   },
+}
+
+function normalizeGeneratedMonsterType(definition) {
+  const id = typeof definition?.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(definition.id)
+    ? definition.id
+    : null
+  if (!id || BASE_MONSTER_SPAWNER_TYPES[id]) return null
+
+  return {
+    id,
+    name: typeof definition.name === 'string' && definition.name.trim()
+      ? definition.name.trim()
+      : id,
+    maxHp: Math.max(1, Math.round(asFiniteNumber(definition.maxHp, 30))),
+    rewardCoins: Math.max(0, Math.round(asFiniteNumber(definition.rewardCoins, 10))),
+    attackDamage: Math.max(0, Math.round(asFiniteNumber(definition.attackDamage, 10))),
+    sizeScale: clampNumber(asFiniteNumber(definition.sizeScale, 1), 0.25, 4),
+    defaultLootTable: Array.isArray(definition.defaultLootTable) && definition.defaultLootTable.length
+      ? normalizeSpawnerLootTable(definition.defaultLootTable, 'mushroom')
+      : [],
+  }
+}
+
+const generatedMonsterTypes = GENERATED_ENEMY_DEFINITIONS.reduce((types, definition) => {
+  const type = normalizeGeneratedMonsterType(definition)
+  if (type) types[type.id] = type
+  return types
+}, {})
+
+export const MONSTER_SPAWNER_TYPES = {
+  ...BASE_MONSTER_SPAWNER_TYPES,
+  ...generatedMonsterTypes,
 }
 
 export const MONSTER_SPAWNER_TYPE_IDS = Object.keys(MONSTER_SPAWNER_TYPES)
@@ -193,6 +245,7 @@ const DEFAULT_SPAWNER_POPULATION_MAX = 6
 const DEFAULT_SPAWNER_RESPAWN_SECONDS = 30
 const DEFAULT_SPAWNER_MIN_DISTANCE = 5
 const DEFAULT_SPAWNER_HEIGHT_OFFSET = 0
+const DEFAULT_SPAWNER_SIZE_SCALE = 1
 
 function asFiniteNumber(value, fallback = 0) {
   const number = Number(value)
@@ -236,6 +289,49 @@ function normalizeSpawnerVariants(variants, fallbackMonsterType) {
   return [...merged.entries()].map(([monsterType, weight]) => ({
     monsterType,
     weight: Math.round(weight),
+  }))
+}
+
+export function getMonsterSpawnerDefaultStats(monsterType) {
+  const defaults = MONSTER_SPAWNER_TYPES[monsterType] ?? MONSTER_SPAWNER_TYPES.mushroom
+  return {
+    maxHp: defaults.maxHp,
+    rewardCoins: defaults.rewardCoins,
+    attackDamage: defaults.attackDamage,
+    sizeScale: defaults.sizeScale,
+  }
+}
+
+export function getDefaultMonsterLootTable(monsterType) {
+  const table = MONSTER_SPAWNER_TYPES[monsterType]?.defaultLootTable
+    ?? LOOT_TABLES[monsterType]
+    ?? LOOT_TABLES.mushroom
+    ?? []
+  return table.map((entry) => ({
+    itemId: entry.itemId,
+    chance: entry.chance,
+  }))
+}
+
+function normalizeSpawnerLootTable(lootTable, monsterType) {
+  const source = Array.isArray(lootTable) && lootTable.length
+    ? lootTable
+    : getDefaultMonsterLootTable(monsterType)
+  const merged = new Map()
+
+  source.forEach((entry) => {
+    const itemId = typeof entry?.itemId === 'string' && LOOT_ITEM_IDS.has(entry.itemId)
+      ? entry.itemId
+      : null
+    if (!itemId) return
+    const chance = clampNumber(asFiniteNumber(entry?.chance, 0), 0, 1)
+    if (chance <= 0) return
+    merged.set(itemId, Math.max(merged.get(itemId) ?? 0, chance))
+  })
+
+  return [...merged.entries()].map(([itemId, chance]) => ({
+    itemId,
+    chance: Math.round(chance * 1000) / 1000,
   }))
 }
 
@@ -310,6 +406,7 @@ export const MAP_OBJECT_PLACEMENTS = getInitialMapObjectPlacements().map(normali
 
 export function normalizeMonsterSpawner(spawner, index = 0) {
   const monsterType = MONSTER_SPAWNER_TYPES[spawner?.monsterType]?.id ?? 'mushroom'
+  const defaultStats = getMonsterSpawnerDefaultStats(monsterType)
   const position = normalizePosition(spawner?.position)
   const heightOffset = clampNumber(
     asFiniteNumber(spawner?.heightOffset, position[1] - getTerrainHeight(position[0], position[2]) || DEFAULT_SPAWNER_HEIGHT_OFFSET),
@@ -335,6 +432,11 @@ export function normalizeMonsterSpawner(spawner, index = 0) {
     populationMax: Math.round(clampNumber(asFiniteNumber(spawner?.populationMax, DEFAULT_SPAWNER_POPULATION_MAX), 1, 50)),
     respawnSeconds: Math.round(clampNumber(asFiniteNumber(spawner?.respawnSeconds, DEFAULT_SPAWNER_RESPAWN_SECONDS), 1, 600)),
     minDistance: clampNumber(asFiniteNumber(spawner?.minDistance, DEFAULT_SPAWNER_MIN_DISTANCE), 0, 40),
+    maxHp: Math.round(clampNumber(asFiniteNumber(spawner?.maxHp, defaultStats.maxHp), 1, 10000)),
+    rewardCoins: Math.round(clampNumber(asFiniteNumber(spawner?.rewardCoins, defaultStats.rewardCoins), 0, 100000)),
+    attackDamage: Math.round(clampNumber(asFiniteNumber(spawner?.attackDamage, defaultStats.attackDamage), 0, 10000)),
+    sizeScale: clampNumber(asFiniteNumber(spawner?.sizeScale, defaultStats.sizeScale ?? DEFAULT_SPAWNER_SIZE_SCALE), 0.25, 4),
+    lootTable: normalizeSpawnerLootTable(spawner?.lootTable, monsterType),
     patrol: spawner?.patrol === undefined ? true : spawner.patrol !== false,
     aggressive: spawner?.aggressive === undefined ? true : spawner.aggressive !== false,
     variants,

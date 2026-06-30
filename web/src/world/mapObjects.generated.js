@@ -756,6 +756,20 @@ export const MAP_MONSTER_SPAWNERS = [
     "populationMax": 4,
     "respawnSeconds": 95,
     "minDistance": 5,
+    "maxHp": 80,
+    "rewardCoins": 30,
+    "attackDamage": 25,
+    "sizeScale": 1,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.5
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.06
+      }
+    ],
     "patrol": true,
     "aggressive": true,
     "variants": [
@@ -778,6 +792,20 @@ export const MAP_MONSTER_SPAWNERS = [
     "populationMax": 6,
     "respawnSeconds": 30,
     "minDistance": 5,
+    "maxHp": 80,
+    "rewardCoins": 30,
+    "attackDamage": 25,
+    "sizeScale": 1,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.5
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.06
+      }
+    ],
     "patrol": true,
     "aggressive": true,
     "variants": [
@@ -800,6 +828,20 @@ export const MAP_MONSTER_SPAWNERS = [
     "populationMax": 6,
     "respawnSeconds": 30,
     "minDistance": 5,
+    "maxHp": 80,
+    "rewardCoins": 30,
+    "attackDamage": 25,
+    "sizeScale": 1,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.5
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.06
+      }
+    ],
     "patrol": true,
     "aggressive": true,
     "variants": [
@@ -822,6 +864,20 @@ export const MAP_MONSTER_SPAWNERS = [
     "populationMax": 6,
     "respawnSeconds": 30,
     "minDistance": 5,
+    "maxHp": 80,
+    "rewardCoins": 30,
+    "attackDamage": 25,
+    "sizeScale": 1,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.5
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.06
+      }
+    ],
     "patrol": true,
     "aggressive": true,
     "variants": [
@@ -844,6 +900,20 @@ export const MAP_MONSTER_SPAWNERS = [
     "populationMax": 10,
     "respawnSeconds": 45,
     "minDistance": 5,
+    "maxHp": 30,
+    "rewardCoins": 10,
+    "attackDamage": 10,
+    "sizeScale": 1,
+    "lootTable": [
+      {
+        "itemId": "mushroom",
+        "chance": 0.5
+      },
+      {
+        "itemId": "red_crystal",
+        "chance": 0.06
+      }
+    ],
     "patrol": true,
     "aggressive": true,
     "variants": [
@@ -866,6 +936,20 @@ export const MAP_MONSTER_SPAWNERS = [
     "populationMax": 1,
     "respawnSeconds": 145,
     "minDistance": 5,
+    "maxHp": 80,
+    "rewardCoins": 30,
+    "attackDamage": 25,
+    "sizeScale": 1,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.5
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.06
+      }
+    ],
     "patrol": true,
     "aggressive": true,
     "variants": [
@@ -888,11 +972,52 @@ export const MAP_MONSTER_SPAWNERS = [
     "populationMax": 8,
     "respawnSeconds": 45,
     "minDistance": 5,
+    "maxHp": 30,
+    "rewardCoins": 10,
+    "attackDamage": 10,
+    "sizeScale": 1,
+    "lootTable": [
+      {
+        "itemId": "mushroom",
+        "chance": 0.5
+      },
+      {
+        "itemId": "red_crystal",
+        "chance": 0.06
+      }
+    ],
     "patrol": true,
     "aggressive": true,
     "variants": [
       {
         "monsterType": "mushroom",
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "id": "monster_spawner_mr15ay4c",
+    "monsterType": "cute_slime",
+    "heightOffset": 0,
+    "position": [
+      -21.25,
+      -0.14695209141025983,
+      -0.75
+    ],
+    "radius": 4,
+    "populationMax": 1,
+    "respawnSeconds": 45,
+    "minDistance": 5,
+    "maxHp": 15,
+    "rewardCoins": 5,
+    "attackDamage": 10,
+    "sizeScale": 0.3,
+    "lootTable": [],
+    "patrol": false,
+    "aggressive": false,
+    "variants": [
+      {
+        "monsterType": "cute_slime",
         "weight": 100
       }
     ]

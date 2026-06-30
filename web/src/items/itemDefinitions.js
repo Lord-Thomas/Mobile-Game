@@ -6,7 +6,9 @@
 // `emoji`     : repli visuel (inventaire/marchand + drop si pas de modèle).
 // `sellPrice` : prix de revente unitaire au PNJ (en pièces). Ajustable librement.
 
-export const ITEMS = {
+import { GENERATED_ITEM_DEFINITIONS } from './itemDefinitions.generated'
+
+const BASE_ITEMS = {
   bone: {
     id: 'bone',
     name: 'Os',
@@ -35,6 +37,44 @@ export const ITEMS = {
     emoji: '🔷',
     sellPrice: 181,
   },
+}
+
+function normalizeGeneratedItem(definition) {
+  const id = typeof definition?.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(definition.id)
+    ? definition.id
+    : null
+  const model = typeof definition?.model === 'string' && definition.model.trim()
+    ? definition.model.trim()
+    : null
+  if (!id || !model || BASE_ITEMS[id]) return null
+
+  return {
+    id,
+    name: typeof definition.name === 'string' && definition.name.trim()
+      ? definition.name.trim()
+      : id,
+    model,
+    icon: typeof definition.icon === 'string' && definition.icon.trim()
+      ? definition.icon.trim()
+      : '',
+    emoji: typeof definition.emoji === 'string' && definition.emoji.trim()
+      ? definition.emoji.trim()
+      : '📦',
+    sellPrice: Number.isFinite(Number(definition.sellPrice))
+      ? Math.max(0, Math.round(Number(definition.sellPrice)))
+      : 10,
+  }
+}
+
+const generatedItems = GENERATED_ITEM_DEFINITIONS.reduce((items, definition) => {
+  const item = normalizeGeneratedItem(definition)
+  if (item) items[item.id] = item
+  return items
+}, {})
+
+export const ITEMS = {
+  ...BASE_ITEMS,
+  ...generatedItems,
 }
 
 export const ALL_ITEM_IDS = Object.keys(ITEMS)

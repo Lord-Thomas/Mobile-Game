@@ -49,6 +49,7 @@ export const styles = {
   select: { ...controlBase, width: '100%', borderRadius: 6, padding: '7px 8px' },
   inlineControls: { display: 'flex', alignItems: 'center', gap: 8 },
   numberInput: { ...controlBase, width: 86, borderRadius: 6, padding: '6px 7px' },
+  textInput: { ...controlBase, width: '100%', borderRadius: 6, padding: '7px 8px' },
   smallButton: { ...controlBase, borderRadius: 6, padding: '7px 9px', cursor: 'pointer' },
   sliderLabel: { display: 'flex', justifyContent: 'space-between', gap: 10, color: '#b9c8c3' },
   slider: { width: '100%', accentColor: '#88c7a8' },

@@ -16,6 +16,7 @@ import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskO
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
 import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
 import { useGameStore } from './stores/useGameStore'
+import { GENERATED_ENEMY_DEFINITIONS } from './enemies/enemyDefinitions.generated'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
@@ -284,6 +285,32 @@ MOB_CONFIGS.skeleton_mage = {
 }
 
 // ── Séparation des monstres (anti-chevauchement) ────────────────────────────────
+function registerGeneratedMobConfigs() {
+  GENERATED_ENEMY_DEFINITIONS.forEach((definition) => {
+    const id = typeof definition?.id === 'string' ? definition.id : ''
+    const modelUrl = typeof definition?.modelUrl === 'string' ? definition.modelUrl : ''
+    if (!id || MOB_CONFIGS[id] || !modelUrl) return
+
+    const modelFormat = definition.modelFormat === 'fbx' ? 'fbx' : 'glb'
+    const baseConfig = MOB_CONFIGS.mushroom
+    MOB_CONFIGS[id] = {
+      ...baseConfig,
+      modelFormat,
+      modelUrl,
+      textureUrl: typeof definition.textureUrl === 'string' && definition.textureUrl ? definition.textureUrl : undefined,
+      maxHp: Math.max(1, Math.round(Number.isFinite(Number(definition.maxHp)) ? Number(definition.maxHp) : 30)),
+      rewardCoins: Math.max(0, Math.round(Number.isFinite(Number(definition.rewardCoins)) ? Number(definition.rewardCoins) : 10)),
+      attackDamage: Math.max(0, Math.round(Number.isFinite(Number(definition.attackDamage)) ? Number(definition.attackDamage) : 10)),
+      modelTargetHeight: Math.max(0.05, Number.isFinite(Number(definition.modelTargetHeight)) ? Number(definition.modelTargetHeight) : baseConfig.modelTargetHeight),
+      targetRadius: Math.max(0.1, Number.isFinite(Number(definition.targetRadius)) ? Number(definition.targetRadius) : baseConfig.targetRadius),
+      targetHeight: Math.max(0.1, Number.isFinite(Number(definition.targetHeight)) ? Number(definition.targetHeight) : baseConfig.targetHeight),
+      hudHeight: Math.max(0.25, Number.isFinite(Number(definition.hudHeight)) ? Number(definition.hudHeight) : baseConfig.hudHeight),
+    }
+  })
+}
+
+registerGeneratedMobConfigs()
+
 const MOB_SEPARATION_DISTANCE = 0.95 // distance min entre deux monstres
 const MOB_SEPARATION_STRENGTH = 4.0  // force de répulsion mutuelle
 
@@ -9052,8 +9079,17 @@ function getSpawnerSlotPosition(spawner, slotIndex, selectedSlots) {
 function getSpawnerMobConfig(monsterType, spawner) {
   const baseConfig = MOB_CONFIGS[monsterType] ?? MOB_CONFIGS[spawner.monsterType] ?? MOB_CONFIGS.mushroom
   const radius = Math.max(1, spawner.radius ?? spawner.diameter * 0.5)
+  const sizeScale = MathUtils.clamp(Number.isFinite(spawner.sizeScale) ? spawner.sizeScale : 1, 0.25, 4)
   return {
     ...baseConfig,
+    maxHp: Math.max(1, Math.round(Number.isFinite(spawner.maxHp) ? spawner.maxHp : baseConfig.maxHp)),
+    rewardCoins: Math.max(0, Math.round(Number.isFinite(spawner.rewardCoins) ? spawner.rewardCoins : baseConfig.rewardCoins)),
+    attackDamage: Math.max(0, Math.round(Number.isFinite(spawner.attackDamage) ? spawner.attackDamage : baseConfig.attackDamage)),
+    modelTargetHeight: Math.max(0.05, (baseConfig.modelTargetHeight ?? 1.15) * sizeScale),
+    targetRadius: Math.max(0.1, (baseConfig.targetRadius ?? 0.48) * Math.max(0.6, sizeScale)),
+    targetHeight: Math.max(0.1, (baseConfig.targetHeight ?? 1.2) * sizeScale),
+    hudHeight: Math.max(0.25, (baseConfig.hudHeight ?? 1.55) * sizeScale),
+    lootTable: Array.isArray(spawner.lootTable) ? spawner.lootTable : null,
     respawnMs: Math.max(1, spawner.respawnSeconds ?? 30) * 1000,
     wanderRadius: spawner.patrol ? Math.max(0.8, Math.min(baseConfig.wanderRadius ?? 3.8, radius * 0.35)) : 0,
     leashRange: Math.max(baseConfig.leashRange ?? 18, radius + 6),
@@ -9716,6 +9752,7 @@ function SmallMushroomEnemy({
           ],
           reward: cfg.rewardCoins,
           mobType: monsterType,
+          lootTable: cfg.lootTable,
         })
         if (respawnTimerRef.current) window.clearTimeout(respawnTimerRef.current)
         const tryRespawn = () => {
@@ -15785,7 +15822,7 @@ function App() {
     ])
   }
 
-  const handleSmallEnemyDefeated = async ({ enemyId, position, reward = MUSHROOM_ENEMY_REWARD_COINS, mobType = null }) => {
+  const handleSmallEnemyDefeated = async ({ enemyId, position, reward = MUSHROOM_ENEMY_REWARD_COINS, mobType = null, lootTable = null }) => {
     const popupPosition = [position?.[0] ?? 0, (position?.[1] ?? 0) + 1.05, position?.[2] ?? 0]
     const rewarded = await applyCoinDelta(reward, { reason: 'enemy_defeat', position: popupPosition })
     if (!rewarded) return
@@ -15800,7 +15837,7 @@ function App() {
     // Loot : tirage par type de monstre. Les objets tombent au sol (LootDrops)
     // puis sont aimantés/absorbés par le joueur, où ils rejoignent l'inventaire.
     if (mobType) {
-      const drops = rollLoot(mobType)
+      const drops = rollLoot(mobType, Math.random, lootTable)
       if (drops.length) {
         const base = [position?.[0] ?? 0, position?.[1] ?? 0, position?.[2] ?? 0]
         const born = performance.now()
