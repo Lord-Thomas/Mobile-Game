@@ -293,10 +293,16 @@ function registerGeneratedMobConfigs() {
 
     const modelFormat = definition.modelFormat === 'fbx' ? 'fbx' : 'glb'
     const baseConfig = MOB_CONFIGS.mushroom
+    // Ennemis « slime » (mesh statique sans rig) : animation procédurale squash & stretch
+    // au lieu des anims squelette (cf. SquashStretchModel).
+    const squashStretch = Boolean(definition.squashStretch)
+      || /slime/i.test(id)
+      || /slime/i.test(typeof definition.name === 'string' ? definition.name : '')
     MOB_CONFIGS[id] = {
       ...baseConfig,
       modelFormat,
       modelUrl,
+      squashStretch,
       textureUrl: typeof definition.textureUrl === 'string' && definition.textureUrl ? definition.textureUrl : undefined,
       maxHp: Math.max(1, Math.round(Number.isFinite(Number(definition.maxHp)) ? Number(definition.maxHp) : 30)),
       rewardCoins: Math.max(0, Math.round(Number.isFinite(Number(definition.rewardCoins)) ? Number(definition.rewardCoins) : 10)),
@@ -9383,6 +9389,114 @@ function measureEnemyGlbIdleBounds(original, idleClip) {
   return box
 }
 
+// Animation procédurale « slime mou » (squash & stretch) pour les ennemis sans rig
+// (ex. cute_slime = mesh statique). Aucune anim squelette : on module l'échelle du
+// groupe par frame. Piloté par REFS (pas de setState/frame, cf. règles perf) :
+//   - respiration permanente (sin) → effet gélatineux vivant ;
+//   - rebond quand le mob se DÉPLACE (vitesse calculée depuis la position, fiable même
+//     sans actions d'anim) ;
+//   - impulsion quand il prend un coup (hitSquashRef, posé dans takeDamage).
+// L'échelle se fait autour de l'origine du groupe = les pieds (offset met box.min.y à 0),
+// donc le slime s'écrase vers le sol et s'élargit — squash classique.
+// ATTAQUE : « coup de tête sauté » procédural — anticipation (s'accroupit) → bond vers le
+// joueur (saut + avancée, local +Z pointe vers la cible car l'IA oriente le mob) → impact
+// → réception (s'écrase). Visuel uniquement : les dégâts restent gérés par l'IA au contact.
+const SLIME_SQUASH = { idle: 0.04, move: 0.12, hit: 0.34 }
+const SLIME_ATTACK_JUMP = 0.35  // hauteur du bond (unités monde)
+const SLIME_ATTACK_LUNGE = 0.30 // avancée vers le joueur pendant le coup de tête
+
+function slimeAttackPose(p) {
+  // p ∈ [0,1] sur toute la durée de l'attaque. squash>0 = écrasé, squash<0 = étiré.
+  const jumpArc = Math.sin(Math.PI * Math.min(1, p / 0.9))
+  const jumpY = jumpArc * jumpArc * SLIME_ATTACK_JUMP // bond sec
+  const lungeZ = Math.sin(Math.PI * Math.min(1, p)) * SLIME_ATTACK_LUNGE
+  let squash
+  if (p < 0.16) squash = (p / 0.16) * 0.28                              // anticipation : s'accroupit
+  else if (p < 0.5) squash = MathUtils.lerp(0.28, -0.18, (p - 0.16) / 0.34) // détente : s'étire en montant
+  else if (p < 0.85) squash = MathUtils.lerp(-0.18, 0, (p - 0.5) / 0.35)    // redescend
+  else squash = Math.sin(((p - 0.85) / 0.15) * Math.PI) * 0.34          // réception : s'écrase
+  return { jumpY, lungeZ, squash }
+}
+
+function SquashStretchModel({ object, offset, scale, renderOrder = 0, positionRef, hitSquashRef, attackRef }) {
+  const offsetGroupRef = useRef()
+  const innerRef = useRef()
+  const squashRef = useRef(0)
+  const movingRef = useRef(0)
+  const lastPosRef = useRef(null)
+  const attackAnimRef = useRef(null)
+  const seenAttackRef = useRef(0)
+
+  useFrame((state, delta) => {
+    const inner = innerRef.current
+    const offsetGroup = offsetGroupRef.current
+    if (!inner || !offsetGroup) return
+    const t = state.clock.elapsedTime
+    const dt = Math.min(Math.max(delta, 1 / 240), 1 / 20)
+
+    // Vitesse planaire réelle (indépendante des anims : le slime est un mesh statique).
+    const pos = positionRef?.current
+    let speed = 0
+    if (pos) {
+      const last = lastPosRef.current
+      if (last) { speed = Math.hypot(pos.x - last.x, pos.z - last.z) / dt; last.x = pos.x; last.z = pos.z }
+      else lastPosRef.current = { x: pos.x, z: pos.z }
+    }
+    movingRef.current = MathUtils.lerp(movingRef.current, speed > 0.3 ? 1 : 0, 1 - Math.exp(-10 * dt))
+
+    // Détecte une NOUVELLE attaque (attackRef vidé au contact par l'IA → on capture sa
+    // durée et on joue la séquence complète, saut + réception inclus).
+    const atk = attackRef?.current
+    if (atk && atk.endsAt !== seenAttackRef.current) {
+      seenAttackRef.current = atk.endsAt
+      attackAnimRef.current = { start: t, duration: Math.max(0.25, atk.endsAt - t) }
+    }
+
+    let jumpY = 0
+    let lungeZ = 0
+    let attackSquash = 0
+    let attacking = false
+    const anim = attackAnimRef.current
+    if (anim) {
+      const p = (t - anim.start) / anim.duration
+      if (p >= 1) attackAnimRef.current = null
+      else {
+        attacking = true
+        const pose = slimeAttackPose(p)
+        jumpY = pose.jumpY
+        lungeZ = pose.lungeZ
+        attackSquash = pose.squash
+      }
+    }
+    offsetGroup.position.set(0, jumpY, lungeZ)
+
+    // Squash : pendant l'attaque la pose domine ; sinon respiration + déplacement + coup.
+    const ambient = Math.sin(t * 3) * SLIME_SQUASH.idle
+      + movingRef.current * Math.abs(Math.sin(t * 9)) * SLIME_SQUASH.move
+      + (hitSquashRef?.current ?? 0) * SLIME_SQUASH.hit
+    const target = attacking ? attackSquash + ambient * 0.3 : ambient
+
+    squashRef.current = MathUtils.lerp(squashRef.current, target, 1 - Math.exp(-(attacking ? 22 : 14) * dt))
+    const s = squashRef.current
+    inner.scale.set(1 + s * 0.7, 1 - s, 1 + s * 0.7)
+    inner.rotation.z = Math.sin(t * 5) * 0.03 * (0.35 + movingRef.current)
+
+    if (hitSquashRef && hitSquashRef.current > 0) {
+      hitSquashRef.current = Math.max(0, hitSquashRef.current - dt * 3.5)
+    }
+  })
+
+  return (
+    <group ref={offsetGroupRef}>
+      <group scale={scale} renderOrder={renderOrder}>
+      <group ref={innerRef}>
+        <primitive object={object} position={offset} />
+      </group>
+      </group>
+    </group>
+  )
+}
+
 function SmallMushroomEnemy({
   enemyId,
   spawnIndex = 0,
@@ -9445,6 +9559,7 @@ function SmallMushroomEnemy({
   const flashTimerRef = useRef(null)
   const recoilRef = useRef({ x: 0, z: 0, y: 0 })
   const recoilVelocityRef = useRef({ x: 0, z: 0, y: 0 })
+  const hitSquashRef = useRef(0) // impulsion squash slime sur coup reçu (cf. SquashStretchModel)
   const spawnPosition = useMemo(() => spawnPositionOverride ?? getMushroomEnemySpawnPosition(spawnIndex), [spawnIndex, spawnPositionOverride])
   useEffect(() => {
     currentPositionRef.current.x = spawnPosition[0]
@@ -9686,6 +9801,7 @@ function SmallMushroomEnemy({
     recoilVelocityRef.current.x -= direction.x * 2.4
     recoilVelocityRef.current.z -= direction.z * 2.4
     recoilVelocityRef.current.y += 1.2
+    hitSquashRef.current = 1 // déclenche le squash slime (no-op si pas de squashStretch)
 
     setHudVisible(true)
     setHitFlash(true)
@@ -10215,9 +10331,21 @@ function SmallMushroomEnemy({
     <group ref={groupRef} position={active ? spawnPosition : [0, -500, 0]} rotation={[0, cfg.spawnYaw, 0]}>
       {!defeated && (
         <>
-          <group scale={model.scale} renderOrder={isEvading ? 1 : 0}>
-            <primitive object={model.object} position={model.offset} />
-          </group>
+          {cfg.squashStretch ? (
+            <SquashStretchModel
+              object={model.object}
+              offset={model.offset}
+              scale={model.scale}
+              renderOrder={isEvading ? 1 : 0}
+              positionRef={currentPositionRef}
+              hitSquashRef={hitSquashRef}
+              attackRef={attackRef}
+            />
+          ) : (
+            <group scale={model.scale} renderOrder={isEvading ? 1 : 0}>
+              <primitive object={model.object} position={model.offset} />
+            </group>
+          )}
           {isEvading && (
             <>
               {/* Anneau bleu pulsant au sol = mob en fuite invincible */}

@@ -1004,20 +1004,145 @@ export const MAP_MONSTER_SPAWNERS = [
       -0.14695209141025983,
       -0.75
     ],
-    "radius": 4,
-    "populationMax": 1,
+    "radius": 7,
+    "populationMax": 7,
     "respawnSeconds": 45,
     "minDistance": 5,
     "maxHp": 15,
     "rewardCoins": 5,
     "attackDamage": 10,
-    "sizeScale": 0.3,
-    "lootTable": [],
-    "patrol": false,
+    "sizeScale": 0.6,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.05
+      },
+      {
+        "itemId": "mushroom",
+        "chance": 0.1
+      },
+      {
+        "itemId": "red_crystal",
+        "chance": 0.01
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.008
+      },
+      {
+        "itemId": "cute_slime",
+        "chance": 0.001
+      }
+    ],
+    "patrol": true,
     "aggressive": false,
     "variants": [
       {
+        "monsterType": "mushroom",
+        "weight": 5
+      },
+      {
+        "monsterType": "skeleton",
+        "weight": 10
+      },
+      {
         "monsterType": "cute_slime",
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "id": "monster_spawner_mr177y2h",
+    "monsterType": "blue_slime",
+    "heightOffset": 0,
+    "position": [
+      -23.75,
+      -0.15420786595598904,
+      -0.5
+    ],
+    "radius": 11,
+    "populationMax": 4,
+    "respawnSeconds": 45,
+    "minDistance": 5,
+    "maxHp": 60,
+    "rewardCoins": 25,
+    "attackDamage": 25,
+    "sizeScale": 0.95,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.05
+      },
+      {
+        "itemId": "mushroom",
+        "chance": 0.1
+      },
+      {
+        "itemId": "red_crystal",
+        "chance": 0.02
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.01
+      },
+      {
+        "itemId": "blue_slime",
+        "chance": 1
+      }
+    ],
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "blue_slime",
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "id": "monster_spawner_mr17a1m1",
+    "monsterType": "red_slime",
+    "heightOffset": 0,
+    "position": [
+      -28,
+      -0.14947030272602316,
+      1.25
+    ],
+    "radius": 25,
+    "populationMax": 2,
+    "respawnSeconds": 45,
+    "minDistance": 5,
+    "maxHp": 120,
+    "rewardCoins": 90,
+    "attackDamage": 50,
+    "sizeScale": 2.05,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 0.2
+      },
+      {
+        "itemId": "mushroom",
+        "chance": 0.4
+      },
+      {
+        "itemId": "red_crystal",
+        "chance": 0.05
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 0.03
+      },
+      {
+        "itemId": "red_slime",
+        "chance": 1
+      }
+    ],
+    "patrol": true,
+    "aggressive": true,
+    "variants": [
+      {
+        "monsterType": "red_slime",
         "weight": 100
       }
     ]
