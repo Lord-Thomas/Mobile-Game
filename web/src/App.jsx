@@ -169,6 +169,7 @@ const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
 const MUSHROOM_ENEMY_ATTACK_DURATION = 0.82
 const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
 const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'
+const SKELETON_ENEMY_MODEL_GLB_URL = '/models/enemies/skeleton/model.glb'
 const SKELETON_ENEMY_TEXTURE_URL = '/models/enemies/skeleton/skeleton.fbm'
 const SKELETON_ENEMY_MAX_HP = 80          // réduit (150 était abusé)
 const SKELETON_ENEMY_REWARD_COINS = 30    // réduit (40 était trop rentable)
@@ -219,8 +220,11 @@ const MOB_CONFIGS = {
     hudHeight: 2.0,
   },
   skeleton: {
-    modelFormat: 'fbx',
-    modelUrl: SKELETON_ENEMY_MODEL_URL,
+    // GLB : rig + anim + texture embarqués (scripts/convert-enemies-glb.mjs). La texture
+    // étant dans le GLB, plus besoin de la .fbm forcée. Revert : modelFormat 'fbx' +
+    // modelUrl SKELETON_ENEMY_MODEL_URL. Hérité par skeleton_archer / skeleton_mage.
+    modelFormat: 'glb',
+    modelUrl: SKELETON_ENEMY_MODEL_GLB_URL,
     textureUrl: SKELETON_ENEMY_TEXTURE_URL,
     maxHp: SKELETON_ENEMY_MAX_HP,
     rewardCoins: SKELETON_ENEMY_REWARD_COINS,
@@ -9310,6 +9314,39 @@ function prepareEnemyGlbTransforms(source) {
   })
 }
 
+// Mesure la bounding box d'un modèle d'ennemi GLB en pose idle, SUR L'ORIGINAL (le
+// modèle chargé partagé), PAS sur un clone. Raison : SkeletonUtils.clone d'un rig à
+// nœud Armature (squelette) produit une bbox skinnée fausse (×71 ici) → échelle
+// ridicule → mob invisible, alors que le clone se REND pourtant correctement. L'original,
+// lui, mesure juste. On pose idle (la pose bind diffère de l'idle rendue, jusqu'à ~10 %
+// sur le squelette), avec le même verrou de bassin que le rendu, puis precise=true pour
+// tenir compte du skinning. L'original étant partagé, on sauvegarde/restaure les
+// transforms des os autour de la mesure (exécution synchrone dans un useMemo → pas
+// d'entrelacement avec d'autres instances).
+function measureEnemyGlbIdleBounds(original, idleClip) {
+  original.traverse((object) => { object.name = normalizeMixamoObjectName(object.name) })
+  const snapshot = []
+  original.traverse((object) => { snapshot.push([object, object.position.clone(), object.quaternion.clone()]) })
+
+  if (idleClip) {
+    const poseClip = idleClip.clone()
+    lockHipsPlanarPosition(poseClip)
+    lockEmoteHipsHeight(poseClip, getObjectHipsRestHeight(original))
+    const poseMixer = new AnimationMixer(original)
+    poseMixer.clipAction(poseClip).play()
+    poseMixer.update(0)
+  }
+  original.updateWorldMatrix(true, true)
+  const box = new Box3().setFromObject(original, true)
+
+  for (const [object, position, quaternion] of snapshot) {
+    object.position.copy(position)
+    object.quaternion.copy(quaternion)
+  }
+  original.updateWorldMatrix(true, true)
+  return box
+}
+
 function SmallMushroomEnemy({
   enemyId,
   spawnIndex = 0,
@@ -9330,7 +9367,12 @@ function SmallMushroomEnemy({
   const cfg = config
   const isGlbModel = cfg.modelFormat === 'glb'
   const { scene: sourceModel, animations: sourceAnimations } = useEnemySourceModel(cfg)
-  const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
+  // forcedTexture : si le config a une `textureUrl` (squelette), on la charge — en GLB
+  // aussi, car FBX2glTF embarque sa texture .fbm en `image/unknown` (illisible) → on la
+  // force à la place (mob invisible sinon). Sinon, en GLB la texture est embarquée et
+  // lisible → on pointe une texture DÉJÀ chargée (masque visage) pour ne rien charger en
+  // plus. En FBX sans textureUrl, repli sur la texture squelette.
+  const forcedTexture = useTexture(cfg.textureUrl ?? (isGlbModel ? PLAYER_FACE_DETAILS_MASK_URL : SKELETON_ENEMY_TEXTURE_URL))
   // Rig FBX = cm (×100) ; rig GLB fraîchement converti = mètres (×1). Cf. cloneMixamoAnimationClip.
   const animPositionScale = isGlbModel ? 1 : MIXAMO_GLB_POSITION_SCALE
   const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb', animPositionScale)
@@ -9392,25 +9434,15 @@ function SmallMushroomEnemy({
       forcedTexture.colorSpace = SRGBColorSpace
       forcedTexture.needsUpdate = true
     }
-    // Pour un rig GLB, la pose BIND (au repos) peut différer de la pose réellement
-    // RENDUE (idle, bassin verrouillé) — re-bind par fbx2gltf/Tripo. Or on mesure la
-    // bbox pour calculer l'échelle ET le décalage au sol. Si on mesure le bind alors
-    // que le mob s'affiche en idle, il ressort légèrement trop grand et enfoncé.
-    // → on pose la frame 0 d'idle (avec le MÊME verrou de bassin que le rendu) avant
-    // de mesurer, pour que taille/sol collent à ce qui s'affiche vraiment.
-    if (isGlbModel && idle?.animations?.[0]) {
-      const restHeight = getObjectHipsRestHeight(source)
-      const poseClip = idle.animations[0].clone()
-      lockHipsPlanarPosition(poseClip)
-      lockEmoteHipsHeight(poseClip, restHeight)
-      const poseMixer = new AnimationMixer(source)
-      poseMixer.clipAction(poseClip).play()
-      poseMixer.update(0)
+    // GLB : on mesure taille/sol en pose idle SUR L'ORIGINAL (cf. measureEnemyGlbIdleBounds —
+    // le clone du squelette donne une bbox fausse → invisible). FBX : mesure du clone (ok).
+    let box
+    if (isGlbModel) {
+      box = measureEnemyGlbIdleBounds(sourceModel, idle?.animations?.[0])
+    } else {
+      source.updateWorldMatrix(true, true)
+      box = new Box3().setFromObject(source)
     }
-    source.updateWorldMatrix(true, true)
-    // precise=true pour le GLB : sur un skinned mesh, la bbox brute ignore le skinning ;
-    // precise applique applyBoneTransform → extent réel de la pose courante (idle ci-dessus).
-    const box = new Box3().setFromObject(source, isGlbModel)
     const size = box.getSize(new Vector3())
     const center = box.getCenter(new Vector3())
     const targetHeight = (cfg.modelTargetHeight ?? 1.15) * WORLD_UNITS_PER_METER
@@ -9422,13 +9454,31 @@ function SmallMushroomEnemy({
         child.receiveShadow = true
         child.frustumCulled = false
         if (isGlbModel) {
-          // GLB : on conserve le matériau/texture embarqué par FBX2glTF ; on force
-          // juste DoubleSide (les meshes peuvent avoir des faces simples).
+          // GLB : force DoubleSide. materialColor (archer/mage) = couleur unie ;
+          // sinon textureUrl (squelette, texture embarquée illisible) = on force la .fbm ;
+          // sinon (mushroom) on garde le matériau/texture embarqué (valide).
           const materials = Array.isArray(child.material) ? child.material : [child.material]
           const patchedMaterials = materials.map((material) => {
             if (!material) return material
             const nextMaterial = material.clone()
             nextMaterial.side = DoubleSide
+            if (cfg.materialColor) {
+              nextMaterial.map = null
+              nextMaterial.alphaMap = null
+              nextMaterial.transparent = false
+              nextMaterial.opacity = 1
+              nextMaterial.depthWrite = true
+              nextMaterial.color?.set(cfg.materialColor)
+            } else if (cfg.textureUrl && forcedTexture) {
+              forcedTexture.colorSpace = SRGBColorSpace
+              forcedTexture.needsUpdate = true
+              nextMaterial.map = forcedTexture
+              nextMaterial.alphaMap = null
+              nextMaterial.transparent = false
+              nextMaterial.opacity = 1
+              nextMaterial.depthWrite = true
+              nextMaterial.color?.set('#ffffff')
+            }
             nextMaterial.needsUpdate = true
             return nextMaterial
           })
@@ -10205,11 +10255,19 @@ function SummonedSkeleton({
 }) {
   const cfg = MOB_CONFIGS.skeleton
   const allyId = `summon_${index}`
-  const sourceModel = useFBX(cfg.modelUrl)
-  const forcedTexture = useTexture(cfg.textureUrl ?? SKELETON_ENEMY_TEXTURE_URL)
-  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb')
-  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb')
-  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
+  const isGlbModel = cfg.modelFormat === 'glb'
+  const { scene: sourceModel } = useEnemySourceModel(cfg)
+  // forcedTexture : si le config a une `textureUrl` (squelette), on la charge — en GLB
+  // aussi, car FBX2glTF embarque sa texture .fbm en `image/unknown` (illisible) → on la
+  // force à la place (mob invisible sinon). Sinon, en GLB la texture est embarquée et
+  // lisible → on pointe une texture DÉJÀ chargée (masque visage) pour ne rien charger en
+  // plus. En FBX sans textureUrl, repli sur la texture squelette.
+  const forcedTexture = useTexture(cfg.textureUrl ?? (isGlbModel ? PLAYER_FACE_DETAILS_MASK_URL : SKELETON_ENEMY_TEXTURE_URL))
+  // Rig FBX = cm (×100) ; rig GLB = mètres (×1). Cf. cloneMixamoAnimationClip.
+  const animPositionScale = isGlbModel ? 1 : MIXAMO_GLB_POSITION_SCALE
+  const idle = useMixamoGlbAnimation('/models/player/anim/idle.glb', animPositionScale)
+  const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb', animPositionScale)
+  const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb', animPositionScale)
 
   const groupRef = useRef()
   const [hp, setHp] = useState(SUMMON_SKELETON_MAX_HP)
@@ -10255,12 +10313,21 @@ function SummonedSkeleton({
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
-    if (cfg.textureUrl) {
+    if (isGlbModel) {
+      prepareEnemyGlbTransforms(source)
+    } else if (cfg.textureUrl) {
       forcedTexture.colorSpace = SRGBColorSpace
       forcedTexture.needsUpdate = true
     }
-    source.updateWorldMatrix(true, true)
-    const box = new Box3().setFromObject(source)
+    // GLB : mesure taille/sol en pose idle SUR L'ORIGINAL (le clone du squelette donne
+    // une bbox fausse → invisible, cf. measureEnemyGlbIdleBounds). FBX : mesure du clone.
+    let box
+    if (isGlbModel) {
+      box = measureEnemyGlbIdleBounds(sourceModel, idle?.animations?.[0])
+    } else {
+      source.updateWorldMatrix(true, true)
+      box = new Box3().setFromObject(source)
+    }
     const size = box.getSize(new Vector3())
     const center = box.getCenter(new Vector3())
     const targetHeight = (cfg.modelTargetHeight ?? 0.85) * WORLD_UNITS_PER_METER
@@ -10270,7 +10337,31 @@ function SummonedSkeleton({
       if (child instanceof Mesh) {
         child.castShadow = true
         child.frustumCulled = false
-        if (cfg.textureUrl && forcedTexture) {
+        if (isGlbModel) {
+          // GLB : la texture embarquée du squelette est illisible (image/unknown) → on
+          // force la .fbm (comme le FBX), puis teinte spectrale bleutée (color/emissive)
+          // qui distingue l'allié de l'ennemi.
+          const materials = Array.isArray(child.material) ? child.material : [child.material]
+          const patched = materials.map((material) => {
+            if (!material) return material
+            const next = material.clone()
+            next.side = DoubleSide
+            if (cfg.textureUrl && forcedTexture) {
+              forcedTexture.colorSpace = SRGBColorSpace
+              forcedTexture.needsUpdate = true
+              next.map = forcedTexture
+              next.alphaMap = null
+              next.transparent = false
+              next.opacity = 1
+              next.depthWrite = true
+            }
+            next.color?.set('#acd6ff')
+            next.emissive?.set('#1b3a6b')
+            next.needsUpdate = true
+            return next
+          })
+          child.material = Array.isArray(child.material) ? patched : patched[0]
+        } else if (cfg.textureUrl && forcedTexture) {
           const materials = Array.isArray(child.material) ? child.material : [child.material]
           const patched = materials.map((material) => {
             if (!material) return material
@@ -10293,7 +10384,7 @@ function SummonedSkeleton({
     })
 
     return { object: source, offset: [-center.x, -box.min.y, -center.z], scale }
-  }, [cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, sourceModel])
+  }, [cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, idle, isGlbModel, sourceModel])
 
   const skeletonHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
   const animationClips = useMemo(() => {
@@ -13203,7 +13294,7 @@ function startStableInitialAssetPreloads() {
 // visuel ni de scène. Le montage/skinning GPU reste fait au passage (cf. note perf),
 // mais sur des données déjà parsées en mémoire.
 const OUTDOOR_IDLE_PRELOADS = [
-  () => useFBX.preload(SKELETON_ENEMY_MODEL_URL),
+  () => useLoader.preload(GLTFLoader, SKELETON_ENEMY_MODEL_GLB_URL),
   () => useTexture.preload(SKELETON_ENEMY_TEXTURE_URL),
   () => useLoader.preload(GLTFLoader, MUSHROOM_ENEMY_MODEL_GLB_URL),
   () => useGLTF.preload('/models/cat.glb'),
