@@ -89,7 +89,13 @@ function NaturalTerrainMaterial({ biomeAreas = MAP_BIOME_AREAS }) {
     configureTexture(dirtNormalMap)
   }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap])
 
-  const handleBeforeCompile = useMemo(() => (shader) => {
+  // Fonction classique (pas une arrow) : Three appelle `material.onBeforeCompile(...)`
+  // en méthode, donc `this` === le matériau en cours de compilation. On stocke le
+  // shader sur CE matériau plutôt que sur `materialRef.current`, qui peut être null
+  // transitoirement (compilation déclenchée hors rendu, ex. pré-warm shader pendant
+  // une transition où le ref n'est pas encore (ré)attaché) → évite un throw qui
+  // avortait toute la passe de compilation.
+  const handleBeforeCompile = useMemo(() => function handleBeforeCompile(shader) {
     shader.uniforms.uGrassMap = { value: grassMap }
     shader.uniforms.uDirtMap = { value: dirtMap }
     shader.uniforms.uGrassNormalMap = { value: grassNormalMap }
@@ -290,7 +296,8 @@ function NaturalTerrainMaterial({ biomeAreas = MAP_BIOME_AREAS }) {
       `,
     )
 
-    materialRef.current.userData.shader = shader
+    const material = materialRef.current ?? this
+    if (material) material.userData.shader = shader
   }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap, shaderBiomeData])
 
   useEffect(() => {
