@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Knowledge graph généré par graphify (régénérable via `graphify update .`).
+# ~2500 fichiers de cache AST qui changent à chaque update → bruit inutile dans git.
+graphify-out/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
