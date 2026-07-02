@@ -13,6 +13,7 @@ import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS,
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
+import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
 import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
 import { useGameStore } from './stores/useGameStore'
@@ -9490,28 +9491,88 @@ function prepareEnemyGlbTransforms(source) {
 // tenir compte du skinning. L'original étant partagé, on sauvegarde/restaure les
 // transforms des os autour de la mesure (exécution synchrone dans un useMemo → pas
 // d'entrelacement avec d'autres instances).
+const enemyGlbBoundsCache = new WeakMap()
+
+function getAnimationTrackTargetName(trackName) {
+  if (typeof trackName !== 'string') return ''
+  const bracketTarget = trackName.match(/\[(.+?)\]/)?.[1]
+  const propertyTarget = trackName.split('.')[0]?.replace(/\[.*$/, '') ?? ''
+  const pathTarget = bracketTarget ?? propertyTarget.split('/').pop() ?? ''
+  return normalizeMixamoObjectName(pathTarget)
+}
+
+function canApplyAnimationClipToObject(root, clip) {
+  if (!root || !clip?.tracks?.length) return false
+
+  const objectNames = new Set()
+  root.traverse((object) => {
+    if (object.name) objectNames.add(normalizeMixamoObjectName(object.name))
+  })
+  if (objectNames.size === 0) return false
+
+  const targetNames = new Set(
+    clip.tracks
+      .map((track) => getAnimationTrackTargetName(track.name))
+      .filter(Boolean),
+  )
+  if (targetNames.size === 0) return false
+
+  let matched = 0
+  targetNames.forEach((name) => {
+    if (objectNames.has(name)) matched += 1
+  })
+  return matched / targetNames.size >= 0.75
+}
+
+function getAnimationClipBoundsCacheKey(clip, compatible) {
+  if (!compatible) return 'bind-pose'
+  const name = clip?.name || 'clip'
+  const duration = Number.isFinite(clip?.duration) ? clip.duration.toFixed(3) : 'duration'
+  const trackCount = clip?.tracks?.length ?? 0
+  return `idle:${name}:${duration}:${trackCount}`
+}
+
 function measureEnemyGlbIdleBounds(original, idleClip) {
   original.traverse((object) => { object.name = normalizeMixamoObjectName(object.name) })
-  const snapshot = []
-  original.traverse((object) => { snapshot.push([object, object.position.clone(), object.quaternion.clone()]) })
 
-  if (idleClip) {
-    const poseClip = idleClip.clone()
-    lockHipsPlanarPosition(poseClip)
-    lockEmoteHipsHeight(poseClip, getObjectHipsRestHeight(original))
-    const poseMixer = new AnimationMixer(original)
-    poseMixer.clipAction(poseClip).play()
-    poseMixer.update(0)
+  let boundsCache = enemyGlbBoundsCache.get(original)
+  if (!boundsCache) {
+    boundsCache = new Map()
+    enemyGlbBoundsCache.set(original, boundsCache)
   }
-  original.updateWorldMatrix(true, true)
-  const box = new Box3().setFromObject(original, true)
 
-  for (const [object, position, quaternion] of snapshot) {
-    object.position.copy(position)
-    object.quaternion.copy(quaternion)
-  }
-  original.updateWorldMatrix(true, true)
-  return box
+  const clipCompatible = canApplyAnimationClipToObject(original, idleClip)
+  const cacheKey = getAnimationClipBoundsCacheKey(idleClip, clipCompatible)
+  const cached = boundsCache.get(cacheKey)
+  if (cached) return cached.clone()
+
+  return perfDiagnostics.time('enemy:measureBounds', () => {
+    const snapshot = []
+    original.traverse((object) => { snapshot.push([object, object.position.clone(), object.quaternion.clone()]) })
+
+    if (clipCompatible) {
+      const poseClip = idleClip.clone()
+      lockHipsPlanarPosition(poseClip)
+      lockEmoteHipsHeight(poseClip, getObjectHipsRestHeight(original))
+      const poseMixer = new AnimationMixer(original)
+      poseMixer.clipAction(poseClip).play()
+      poseMixer.update(0)
+    }
+    original.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(original, true)
+
+    for (const [object, position, quaternion] of snapshot) {
+      object.position.copy(position)
+      object.quaternion.copy(quaternion)
+    }
+    original.updateWorldMatrix(true, true)
+    boundsCache.set(cacheKey, box.clone())
+    return box
+  }, {
+    clip: idleClip?.name ?? null,
+    clipCompatible,
+    tracks: idleClip?.tracks?.length ?? 0,
+  })
 }
 
 // Animation procédurale « slime mou » (squash & stretch) pour les ennemis sans rig
@@ -9661,6 +9722,7 @@ function SmallMushroomEnemy({
   const [defeated, setDefeated] = useState(false)
   const [isEvading, setIsEvading] = useState(false)
   const [motion, setMotion] = useState('idle')
+  const requestedMotionRef = useRef('idle')
   const hpRef = useRef(cfg.maxHp)
   const defeatedRef = useRef(false)
   const stateRef = useRef('idle')
@@ -9726,9 +9788,9 @@ function SmallMushroomEnemy({
 
     source.traverse((child) => {
       if (child instanceof Mesh) {
-        child.castShadow = true
+        child.castShadow = cfg.castShadow === true
         child.receiveShadow = true
-        child.frustumCulled = false
+        child.frustumCulled = true
         if (isGlbModel) {
           // GLB : force DoubleSide. materialColor (archer/mage) = couleur unie ;
           // sinon textureUrl (squelette, texture embarquée illisible) = on force la .fbm ;
@@ -9802,7 +9864,7 @@ function SmallMushroomEnemy({
       offset: [-center.x, -box.min.y, -center.z],
       scale,
     }
-  }, [cfg.materialColor, cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, idle, isGlbModel, sourceModel])
+  }, [cfg.castShadow, cfg.materialColor, cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, idle, isGlbModel, sourceModel])
 
   const enemyHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
   const modelIdleAnimation = useMemo(() => (
@@ -9869,6 +9931,12 @@ function SmallMushroomEnemy({
     return true
   }, [actions])
 
+  const setEnemyMotion = useCallback((nextMotion) => {
+    if (requestedMotionRef.current === nextMotion) return
+    requestedMotionRef.current = nextMotion
+    setMotion(nextMotion)
+  }, [])
+
   useLayoutEffect(() => {
     if (!passive || !active || !actions.idle) return undefined
     model.object.visible = false
@@ -9913,6 +9981,7 @@ function SmallMushroomEnemy({
     setHp(cfg.maxHp)
     setDefeated(false)
     setHudVisible(false)
+    requestedMotionRef.current = 'idle'
     setMotion('idle')
     setDamageNumbers([])
   }, [spawnPosition])
@@ -10051,7 +10120,7 @@ function SmallMushroomEnemy({
     investigateTimerRef.current = 0
     lastSeenPosRef.current = null
     wanderTargetRef.current = null
-    setMotion('idle')
+    setEnemyMotion('idle')
     return undefined
   }, [active])
 
@@ -10208,12 +10277,12 @@ function SmallMushroomEnemy({
         if (lastSeenPosRef.current) {
           investigateTimerRef.current = 0
           stateRef.current = 'investigate'
-          setMotion('walk')
+          setEnemyMotion('walk')
         } else {
           evadingRef.current = true
           setIsEvading(true)
           stateRef.current = 'return'
-          setMotion('walk')
+          setEnemyMotion('walk')
         }
       }
     } else {
@@ -10231,13 +10300,13 @@ function SmallMushroomEnemy({
         const targetDistance = Math.hypot(wanderTargetRef.current.x - enemyPosition.x, wanderTargetRef.current.z - enemyPosition.z)
         if (targetDistance > cfg.wanderReachedDistance) {
           stateRef.current = 'wander'
-          setMotion('walk')
+          setEnemyMotion('walk')
         } else {
           nextWanderAtRef.current = state.clock.elapsedTime + cfg.wanderMinWait
-          setMotion('idle')
+          setEnemyMotion('idle')
         }
       } else {
-        setMotion('idle')
+        setEnemyMotion('idle')
       }
     }
 
@@ -10245,7 +10314,7 @@ function SmallMushroomEnemy({
       if (!patrol) {
         stateRef.current = 'idle'
         wanderTargetRef.current = null
-        setMotion('idle')
+        setEnemyMotion('idle')
         return
       }
       const wanderTarget = wanderTargetRef.current
@@ -10254,7 +10323,7 @@ function SmallMushroomEnemy({
       if (!wanderTarget || tooFarFromSpawn) {
         stateRef.current = 'return'
         wanderTargetRef.current = null
-        setMotion('walk')
+        setEnemyMotion('walk')
       } else {
         const distanceToTarget = moveMushroomEnemyToward(enemyPosition, wanderTarget, cfg.wanderSpeed, delta, 0, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
         if (distanceToTarget <= cfg.wanderReachedDistance) {
@@ -10262,9 +10331,9 @@ function SmallMushroomEnemy({
           wanderTargetRef.current = null
           const waitRange = cfg.wanderMaxWait - cfg.wanderMinWait
           nextWanderAtRef.current = state.clock.elapsedTime + cfg.wanderMinWait + getSeededUnitValue(wanderSeedRef.current + 9.4) * waitRange
-          setMotion('idle')
+          setEnemyMotion('idle')
         } else {
-          setMotion('walk')
+          setEnemyMotion('walk')
         }
       }
     }
@@ -10282,10 +10351,10 @@ function SmallMushroomEnemy({
         if (distanceToTarget - cfg.stopDistance > 0.001) {
           moveMushroomEnemyToward(enemyPosition, aggroPosition, cfg.chaseSpeed, delta, cfg.stopDistance, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
         }
-        setMotion('walk')
+        setEnemyMotion('walk')
       } else {
         stateRef.current = 'attack'
-        setMotion('idle')
+        setEnemyMotion('idle')
       }
     }
 
@@ -10298,7 +10367,7 @@ function SmallMushroomEnemy({
         evadingRef.current = true
         setIsEvading(true)
         stateRef.current = 'return'
-        setMotion('walk')
+        setEnemyMotion('walk')
       } else {
         const reached = moveMushroomEnemyToward(
           enemyPosition,
@@ -10315,17 +10384,17 @@ function SmallMushroomEnemy({
           // puis abandonne et rentre si rien n'a été repéré (la ré-acquisition
           // se fait via le bloc de détection ci-dessus, qui inclut 'investigate').
           investigateTimerRef.current += delta
-          setMotion('idle')
+          setEnemyMotion('idle')
           if (investigateTimerRef.current >= cfg.investigateLookSeconds) {
             investigateTimerRef.current = 0
             lastSeenPosRef.current = null
             evadingRef.current = true
             setIsEvading(true)
             stateRef.current = 'return'
-            setMotion('walk')
+            setEnemyMotion('walk')
           }
         } else {
-          setMotion('walk')
+          setEnemyMotion('walk')
         }
       }
     }
@@ -10344,10 +10413,10 @@ function SmallMushroomEnemy({
         setIsEvading(false)
         stateRef.current = 'idle'
         if (groupRef.current) groupRef.current.rotation.y = cfg.spawnYaw
-        setMotion('idle')
+        setEnemyMotion('idle')
       } else {
         moveMushroomEnemyToward(enemyPosition, { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] }, cfg.returnSpeed, delta, 0, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
-        setMotion('walk')
+        setEnemyMotion('walk')
       }
     }
 
@@ -10363,7 +10432,7 @@ function SmallMushroomEnemy({
         fired: false,
       }
       nextAttackAtRef.current = state.clock.elapsedTime + cfg.attackCooldown
-      setMotion('punch')
+      setEnemyMotion('punch')
     }
 
     // ── Séparation : empêche les monstres de se chevaucher ────────────────────
@@ -10434,7 +10503,7 @@ function SmallMushroomEnemy({
       if (stateRef.current === 'attack') {
         stateRef.current = weightedDistanceToTarget > cfg.attackRange ? 'chase' : 'attack'
       }
-      setMotion(stateRef.current === 'chase' ? 'walk' : 'idle')
+      setEnemyMotion(stateRef.current === 'chase' ? 'walk' : 'idle')
     }
 
   })
@@ -13564,6 +13633,12 @@ const OUTDOOR_CONTENT_STAGES = [
   { level: 4, delay: 640 },
   { level: 5, delay: 920 },
 ]
+const OUTDOOR_DECOR_REVEAL_DELAY_MS = 450
+const OUTDOOR_GRASS_REVEAL_DELAY_MS = 1100
+const OUTDOOR_ENEMIES_REVEAL_DELAY_MS = 2200
+const OUTDOOR_ENEMY_REVEAL_BATCH_SIZE = 2
+const OUTDOOR_ENEMY_REVEAL_FIRST_DELAY_MS = 250
+const OUTDOOR_ENEMY_REVEAL_INTERVAL_MS = 650
 const MOUNT_PRELOAD_START_DELAY_MS = 900
 const MOUNT_PRELOAD_STAGGER_MS = 450
 
@@ -13863,6 +13938,20 @@ function getRendererInfo(gl) {
   }
 }
 
+function getPerfRendererSnapshot(gl) {
+  const info = gl.info ?? {}
+  return {
+    calls: info.render?.calls ?? 0,
+    triangles: info.render?.triangles ?? 0,
+    lines: info.render?.lines ?? 0,
+    points: info.render?.points ?? 0,
+    geometries: info.memory?.geometries ?? 0,
+    textures: info.memory?.textures ?? 0,
+    programs: Array.isArray(info.programs) ? info.programs.length : undefined,
+    dpr: gl.getPixelRatio?.() ?? 1,
+  }
+}
+
 function isWeakRenderer(rendererInfo) {
   const value = `${rendererInfo.vendor} ${rendererInfo.renderer}`.toLowerCase()
   return [
@@ -13874,6 +13963,64 @@ function isWeakRenderer(rendererInfo) {
     'llvmpipe',
     'software',
   ].some((pattern) => value.includes(pattern))
+}
+
+function PerfFrameProbe({
+  currentZone,
+  zoneFadeActive,
+  outdoorTransitionPrimed,
+  outdoorContentStage,
+  outdoorRuntimeRevealStage,
+  visibleOutdoorEnemyCount,
+  shaderWarmupComplete,
+}) {
+  const warmupCompleteAtRef = useRef(null)
+
+  useEffect(() => {
+    if (shaderWarmupComplete && warmupCompleteAtRef.current == null) {
+      warmupCompleteAtRef.current = performance.now()
+    }
+    if (!shaderWarmupComplete) {
+      warmupCompleteAtRef.current = null
+    }
+  }, [shaderWarmupComplete])
+
+  useFrame((state, delta) => {
+    const durationMs = delta * 1000
+    const now = performance.now()
+    const postLoad = shaderWarmupComplete
+      && warmupCompleteAtRef.current != null
+      && now - warmupCompleteAtRef.current < 8000
+    const phase = !shaderWarmupComplete
+      ? 'loading'
+      : zoneFadeActive
+        ? 'transition'
+        : postLoad
+          ? 'post-load'
+          : 'runtime'
+    const context = {
+      zone: currentZone,
+      phase,
+      transition: zoneFadeActive ? 'zone-fade' : phase,
+      transitionStep: zoneFadeActive
+        ? outdoorTransitionPrimed ? 'outdoor-primed' : 'fade'
+        : phase,
+      outdoorTransitionPrimed,
+      outdoorContentStage,
+      outdoorRuntimeRevealStage,
+      visibleOutdoorEnemyCount,
+      shaderWarmupComplete,
+      msSinceWarmupComplete: warmupCompleteAtRef.current == null ? null : now - warmupCompleteAtRef.current,
+    }
+
+    perfDiagnostics.recordFrame({
+      durationMs,
+      context,
+      renderer: getPerfRendererSnapshot(state.gl),
+    })
+  })
+
+  return null
 }
 
 function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
@@ -14314,6 +14461,7 @@ function App() {
       return false
     }
   }, [])
+  const perfDiagnosticsActive = isPerfDiagnosticsEnabled()
   const isLocalNetwork = useMemo(() => {
     try {
       const h = window.location.hostname
@@ -14681,6 +14829,8 @@ function App() {
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
   const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
+  const [outdoorRuntimeRevealStage, setOutdoorRuntimeRevealStage] = useState(0)
+  const [visibleOutdoorEnemyCount, setVisibleOutdoorEnemyCount] = useState(0)
   // Passe à true quand OutdoorShaderPrewarm a fini de compiler les shaders
   // extérieurs : le fondu de transition attend ce signal avant de se lever
   // (plafonné par OUTDOOR_EXIT_FADE_MAX_HOLD_MS). Jamais remis à false : une fois
@@ -14937,6 +15087,57 @@ function App() {
       timerIds.forEach((timerId) => window.clearTimeout(timerId))
     }
   }, [currentZone, isNearOutdoorDoor, outdoorTransitionPrimed, shaderWarmupComplete])
+
+  useEffect(() => {
+    if (currentZone !== ZONES.outside) {
+      const timerId = window.setTimeout(() => setOutdoorRuntimeRevealStage(0), 0)
+      return () => window.clearTimeout(timerId)
+    }
+
+    const revealSteps = [
+      { level: 1, delay: OUTDOOR_DECOR_REVEAL_DELAY_MS, name: 'decor' },
+      { level: 2, delay: OUTDOOR_GRASS_REVEAL_DELAY_MS, name: 'grass' },
+      { level: 3, delay: OUTDOOR_ENEMIES_REVEAL_DELAY_MS, name: 'enemies' },
+    ]
+    const timerIds = revealSteps.map(({ level, delay, name }) => (
+      window.setTimeout(() => {
+        perfDiagnostics.event('outdoor:runtime-reveal', { level, name })
+        setOutdoorRuntimeRevealStage((stage) => Math.max(stage, level))
+      }, delay)
+    ))
+
+    return () => {
+      timerIds.forEach((timerId) => window.clearTimeout(timerId))
+    }
+  }, [currentZone])
+
+  useEffect(() => {
+    const enemiesRevealReady = currentZone === ZONES.outside
+      && outdoorRuntimeRevealStage >= 3
+      && outdoorContentStage >= 5
+
+    if (!enemiesRevealReady || monsterSpawnSlots.length === 0) {
+      const timerId = window.setTimeout(() => setVisibleOutdoorEnemyCount(0), 0)
+      return () => window.clearTimeout(timerId)
+    }
+
+    const chunkCount = Math.ceil(monsterSpawnSlots.length / OUTDOOR_ENEMY_REVEAL_BATCH_SIZE)
+    const timerIds = Array.from({ length: chunkCount }, (_, chunkIndex) => {
+      const count = Math.min(monsterSpawnSlots.length, (chunkIndex + 1) * OUTDOOR_ENEMY_REVEAL_BATCH_SIZE)
+      return window.setTimeout(() => {
+        perfDiagnostics.event('outdoor:enemy-batch-reveal', {
+          count,
+          total: monsterSpawnSlots.length,
+          chunkIndex,
+        })
+        setVisibleOutdoorEnemyCount((current) => Math.max(current, count))
+      }, OUTDOOR_ENEMY_REVEAL_FIRST_DELAY_MS + chunkIndex * OUTDOOR_ENEMY_REVEAL_INTERVAL_MS)
+    })
+
+    return () => {
+      timerIds.forEach((timerId) => window.clearTimeout(timerId))
+    }
+  }, [currentZone, monsterSpawnSlots.length, outdoorContentStage, outdoorRuntimeRevealStage])
 
   // Fin de la période de silence : les déblocages suivants affichent un toast.
   useEffect(() => {
@@ -16955,6 +17156,11 @@ function App() {
   const transitionToZone = (nextZone) => {
     if (zoneFadeActive || currentZone === nextZone) return
     const goingOutside = nextZone === ZONES.outside
+    perfDiagnostics.event('transition:start', {
+      from: currentZone,
+      to: nextZone,
+      goingOutside,
+    })
     setZoneFadeActive(true)
     const outdoorFadeSettleDelay = goingOutside ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS : 0
     const zoneSwitchDelay = goingOutside
@@ -16962,6 +17168,11 @@ function App() {
       : 180
     if (goingOutside) {
       window.setTimeout(() => {
+        perfDiagnostics.event('transition:outdoor-prime', {
+          from: currentZone,
+          to: nextZone,
+          stage: 1,
+        })
         setOutdoorTransitionPrimed(true)
         setOutdoorContentStage((stage) => Math.max(stage, 1))
       }, outdoorFadeSettleDelay)
@@ -16986,6 +17197,11 @@ function App() {
     setEditor('placementPreview',null)
     window.setTimeout(() => {
       const spawn = PLAYER_SPAWNS[nextZone] ?? PLAYER_SPAWNS.interior
+      perfDiagnostics.event('transition:zone-switch', {
+        from: currentZone,
+        to: nextZone,
+        spawn,
+      })
       setView('zone',nextZone)
       if (!goingOutside) {
         setOutdoorTransitionPrimed(false)
@@ -16999,6 +17215,11 @@ function App() {
       touchRef.current.cameraDistance = CAMERA_SETTINGS[nextZone]?.distance ?? CAMERA_DISTANCE
       window.setTimeout(() => {
         if (!goingOutside) {
+          perfDiagnostics.event('transition:fade-release', {
+            from: currentZone,
+            to: nextZone,
+            prewarmReady: true,
+          })
           setZoneFadeActive(false)
           return
         }
@@ -17007,6 +17228,11 @@ function App() {
         // ne tombe pas en plein freeze de compilation. Plafonné par
         // OUTDOOR_EXIT_FADE_MAX_HOLD_MS pour ne jamais coincer le joueur.
         const releaseFade = () => {
+          perfDiagnostics.event('transition:fade-release', {
+            from: currentZone,
+            to: nextZone,
+            prewarmReady: outdoorPrewarmReadyRef.current,
+          })
           setZoneFadeActive(false)
           setOutdoorTransitionPrimed(false)
         }
@@ -17406,6 +17632,7 @@ function App() {
   }
 
   const completeShaderWarmup = useCallback(() => {
+    perfDiagnostics.event('load:warmup-complete')
     setShaderWarmupComplete(true)
     // L'overlay est tombé : on profite du temps mort pour précharger les assets
     // extérieurs lourds avant que le joueur n'atteigne la porte (cf. note perf).
@@ -17459,9 +17686,26 @@ function App() {
   const outdoorContentMounted = isOutsideZone || outdoorTransitionPrimed
   const outdoorStaticReady = outdoorContentMounted && outdoorContentStage >= 1
   const outdoorVegetationReady = outdoorContentMounted && outdoorContentStage >= 2
-  const outdoorObjectsReady = outdoorContentMounted && outdoorContentStage >= 3
-  const outdoorGrassReady = isOutsideZone && outdoorContentStage >= 4
-  const outdoorEnemiesReady = isOutsideZone && outdoorContentStage >= 5
+  const outdoorObjectsReady = isOutsideZone && outdoorRuntimeRevealStage >= 1 && outdoorContentStage >= 3
+  const outdoorGrassReady = isOutsideZone && outdoorRuntimeRevealStage >= 2 && outdoorContentStage >= 4
+  const outdoorEnemiesReady = isOutsideZone && outdoorRuntimeRevealStage >= 3 && outdoorContentStage >= 5
+  const visibleMonsterSpawnSlots = useMemo(() => {
+    if (!outdoorEnemiesReady || visibleOutdoorEnemyCount <= 0) return []
+    const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
+    const originX = spawn[0] ?? 0
+    const originZ = spawn[2] ?? 0
+    return monsterSpawnSlots
+      .map((slot, index) => {
+        const slotSpawn = slot.spawnPosition ?? getMushroomEnemySpawnPosition(index)
+        return {
+          slot,
+          index,
+          distance: Math.hypot((slotSpawn[0] ?? 0) - originX, (slotSpawn[2] ?? 0) - originZ),
+        }
+      })
+      .sort((left, right) => left.distance - right.distance)
+      .slice(0, visibleOutdoorEnemyCount)
+  }, [monsterSpawnSlots, outdoorEnemiesReady, visibleOutdoorEnemyCount])
   const shadowsEnabled = !performanceSettings.disableShadows && (!isDebugMode || debugToggles.shadows)
   const showInteriorHouseDetails = !isOutsideZone
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
@@ -17510,6 +17754,17 @@ function App() {
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
         <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
+        {perfDiagnosticsActive && (
+          <PerfFrameProbe
+            currentZone={currentZone}
+            zoneFadeActive={zoneFadeActive}
+            outdoorTransitionPrimed={outdoorTransitionPrimed}
+            outdoorContentStage={outdoorContentStage}
+            outdoorRuntimeRevealStage={outdoorRuntimeRevealStage}
+            visibleOutdoorEnemyCount={visibleOutdoorEnemyCount}
+            shaderWarmupComplete={shaderWarmupComplete}
+          />
+        )}
         <SceneAtmosphere currentZone={currentZone} playerPositionRef={playerPositionRef} />
         <MultiplayerBridge
           channelRef={multiplayerChannelRef}
@@ -17737,7 +17992,7 @@ function App() {
           {outdoorEnemiesReady && (
             <Defer level={2}>
             <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
-            {monsterSpawnSlots.map((slot, index) => (
+            {visibleMonsterSpawnSlots.map(({ slot, index }) => (
               <SmallMushroomEnemy
                 key={slot.id}
                 enemyId={slot.id}

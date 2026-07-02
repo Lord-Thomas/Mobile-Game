@@ -1,3 +1,5 @@
+import { perfDiagnostics } from './perfDiagnostics'
+
 // Instrumentation du temps de chargement.
 //
 // But : savoir EXACTEMENT ce qui prend du temps entre le boot et l'affichage du
@@ -36,7 +38,13 @@ export function installLongTaskObserver() {
           .map((a) => a.containerName || a.containerId || a.containerType || a.name)
           .filter(Boolean)
           .join(', ')
-        longTasks.push({ start: entry.startTime, durée: entry.duration, source: attribution })
+        const task = { start: entry.startTime, durée: entry.duration, source: attribution }
+        longTasks.push(task)
+        perfDiagnostics.event('browser:long-task', {
+          start: entry.startTime,
+          durationMs: entry.duration,
+          source: attribution || '(self)',
+        })
       }
     })
     observer.observe({ type: 'longtask', buffered: true })
@@ -159,6 +167,11 @@ export function installAssetLoadProfiler(manager) {
     getActiveAssetStack(key).push(id)
     assetUrlByLoadId.set(id, key)
     record.starts.push(performance.now())
+    perfDiagnostics.event('asset:start', {
+      id,
+      url: key,
+      active: record.active + 1,
+    })
     record.active += 1
     if (initialAssetBatchCollecting && !initialAssetBatchLocked && !initialAssetBatchForcedReady) {
       initialBlockingAssetIds.add(id)
@@ -177,6 +190,14 @@ export function installAssetLoadProfiler(manager) {
     const t = performance.now()
     record.ends.push(t)
     record.latestEnd = t
+    perfDiagnostics.event('asset:end', {
+      id,
+      url: key,
+      durationMs: id != null
+        ? t - (record.starts[record.ends.length - 1] ?? t)
+        : null,
+      active: Math.max(0, record.active - 1),
+    })
     record.active = Math.max(0, record.active - 1)
     if (id != null && initialBlockingAssetIds.delete(id)) {
       notifyInitialLoadSubscribers()
@@ -185,7 +206,12 @@ export function installAssetLoadProfiler(manager) {
   }
 
   manager.itemError = (url) => {
-    getAssetRecord(url).errors += 1
+    const record = getAssetRecord(url)
+    record.errors += 1
+    perfDiagnostics.event('asset:error', {
+      url: record.url,
+      errors: record.errors,
+    })
     return originalItemError?.(url)
   }
 }
@@ -201,10 +227,25 @@ export function recordRenderProfile(id, phase, actualDuration) {
   existing.total += actualDuration
   if (phase === 'mount') existing.mountMs += actualDuration
   renderProfiles.set(id, existing)
+  perfDiagnostics.event('react:commit', {
+    id,
+    phase,
+    durationMs: actualDuration,
+    totalMs: existing.total,
+    mountMs: existing.mountMs,
+    commits: existing.commits,
+  })
 }
 
 function fmt(ms) {
   return `${ms.toFixed(0)} ms`
+}
+
+function withoutSortKeys(row) {
+  const next = { ...row }
+  delete next._d
+  delete next._end
+  return next
 }
 
 let reported = false
@@ -241,7 +282,7 @@ export function reportLoadTiming() {
     }))
     .sort((a, b) => b._d - a._d)
     .slice(0, 12)
-    .map(({ _d, ...rest }) => rest)
+    .map(withoutSortKeys)
 
   const latestResources = (performance.getEntriesByType?.('resource') || [])
     .map((r) => ({
@@ -254,7 +295,7 @@ export function reportLoadTiming() {
     }))
     .sort((a, b) => b._end - a._end)
     .slice(0, 20)
-    .map(({ _end, ...rest }) => rest)
+    .map(withoutSortKeys)
 
   const assets = Array.from(assetLoads.values())
     .flatMap((record) => record.starts.map((start, index) => {
@@ -270,7 +311,7 @@ export function reportLoadTiming() {
     }))
     .sort((a, b) => b._d - a._d)
     .slice(0, 20)
-    .map(({ _d, ...rest }) => rest)
+    .map(withoutSortKeys)
 
   const latestAssets = Array.from(assetLoads.values())
     .flatMap((record) => record.starts.map((start, index) => {
@@ -286,7 +327,7 @@ export function reportLoadTiming() {
     }))
     .sort((a, b) => b._end - a._end)
     .slice(0, 20)
-    .map(({ _end, ...rest }) => rest)
+    .map(withoutSortKeys)
 
   const pendingAssets = Array.from(assetLoads.values())
     .filter((record) => record.active > 0)

@@ -357,9 +357,11 @@ function TreeLodVariant({ variantId, placements, animated, playerPositionRef, fo
     lodVersionRef.current += 1
   })
 
+  const lodLevels = forceSimplified ? [forcedLevel] : [0, 1, 2, 3]
+
   return (
     <>
-      {[0, 1, 2, 3].map((lodLevel) => (
+      {lodLevels.map((lodLevel) => (
         <InstancedTreeVariant
           key={`${variantId}-lod-${lodLevel}`}
           variantId={variantId}

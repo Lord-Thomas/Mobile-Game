@@ -4,6 +4,7 @@ import { Box3, LoopRepeat, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import ParticleEffect from '../effects/ParticleEffect'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from '../effects/storedParticlePresets'
+import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import ProceduralTree from './trees/ProceduralTree'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, getMapObjectCatalogItem } from './mapObjects'
 import { getTerrainHeight } from './terrain/terrainGeometry'
@@ -141,6 +142,54 @@ function MapObjectTreeModel({ catalogItem }) {
   }), [catalogItem])
 
   return <ProceduralTree animated={false} config={config} />
+}
+
+function getMapObjectTreeBatchEntry(placement, catalogItem) {
+  if (catalogItem?.type !== 'tree' || !catalogItem.treeId || !catalogItem.treeConfig) return null
+
+  const [x, savedY, z] = placement.position ?? [0, 0, 0]
+  const basePosition = catalogItem.treeConfig.position ?? {}
+  const hasSavedY = Number.isFinite(savedY)
+  const placementScale = Number.isFinite(placement.scale)
+    ? placement.scale
+    : catalogItem.defaultScale ?? 1
+  const baseScale = Number.isFinite(catalogItem.treeConfig.scale)
+    ? catalogItem.treeConfig.scale
+    : 1
+
+  return {
+    id: placement.id,
+    variantId: catalogItem.treeId,
+    config: {
+      ...catalogItem.treeConfig,
+      position: {
+        x,
+        y: hasSavedY ? savedY + (basePosition.y ?? 0) : basePosition.y ?? 0,
+        z,
+      },
+      rotationY: (catalogItem.treeConfig.rotationY ?? 0) + (placement.rotationY ?? 0),
+      scale: baseScale * placementScale,
+      snapToGround: !hasSavedY,
+    },
+  }
+}
+
+function splitStaticTreePlacements(objects, enabled) {
+  if (!enabled) return { treeEntries: [], objectPlacements: objects }
+
+  const treeEntries = []
+  const objectPlacements = []
+  objects.forEach((placement) => {
+    const catalogItem = getMapObjectCatalogItem(placement.objectId)
+    const treeEntry = getMapObjectTreeBatchEntry(placement, catalogItem)
+    if (treeEntry) {
+      treeEntries.push(treeEntry)
+    } else {
+      objectPlacements.push(placement)
+    }
+  })
+
+  return { treeEntries, objectPlacements }
 }
 
 function MapObjectModel({ objectId }) {
@@ -301,14 +350,24 @@ export default function MapObjectPlaceables({
   onSelect = null,
   onStartDragging = null,
   registerRef = null,
+  batchStaticTrees = false,
 }) {
   useEffect(() => {
     preloadMapObjectAssets(objects)
   }, [objects])
 
+  const canBatchStaticTrees = batchStaticTrees && !onSelect && !onStartDragging && !registerRef
+  const { treeEntries, objectPlacements } = useMemo(
+    () => splitStaticTreePlacements(objects, canBatchStaticTrees),
+    [canBatchStaticTrees, objects],
+  )
+
   return (
     <group userData={{ debugCategory: 'map-placeables' }}>
-      {objects.map((placement) => (
+      {treeEntries.length > 0 && (
+        <InstancedTreeBatch trees={treeEntries} animated={false} forceSimplified />
+      )}
+      {objectPlacements.map((placement) => (
         <MapObjectInstance
           key={placement.id}
           placement={placement}

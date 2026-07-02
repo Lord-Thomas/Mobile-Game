@@ -180,7 +180,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       {preloadMapObjects && !showMapObjects && (
         <MapObjectAssetsPreloader objects={DECOR_MAP_OBJECT_PLACEMENTS} />
       )}
-      {showMapObjects && <MapObjectPlaceables objects={DECOR_MAP_OBJECT_PLACEMENTS} />}
+      {showMapObjects && <MapObjectPlaceables objects={DECOR_MAP_OBJECT_PLACEMENTS} batchStaticTrees />}
       {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
       {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
       {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}
