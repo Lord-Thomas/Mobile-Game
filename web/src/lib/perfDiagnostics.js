@@ -187,6 +187,12 @@ function buildFreezeSummary(capture) {
 
   const renderer = describeRenderer(freeze.renderer)
   if (renderer) lines.push(`Renderer : ${renderer}`)
+  if (context.quality) {
+    const quality = context.quality
+    lines.push(
+      `Qualite : DPR ${quality.appliedDpr ?? '-'} / natif ${quality.nativeDpr ?? '-'}, scale ${quality.renderScale ?? '-'}, basse resolution ${quality.lowResolution ? 'oui' : 'non'}, auto ${quality.autoQuality ? 'oui' : 'non'}`,
+    )
+  }
   const rendererBefore = describeDelta(signals.rendererDelta)
   if (rendererBefore) lines.push(`Renderer delta avant freeze : ${rendererBefore}`)
   const rendererAfter = describeDelta(signals.rendererEndDelta)

@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Html, useAnimations, useFBX, useGLTF } from '@react-three/drei'
-import { Box3, LoopRepeat, Mesh, Vector3 } from 'three'
+import { Box3, LoopRepeat, Matrix4, Mesh, Quaternion, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import ParticleEffect from '../effects/ParticleEffect'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from '../effects/storedParticlePresets'
@@ -12,6 +12,23 @@ import { getTerrainHeight } from './terrain/terrainGeometry'
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
+const STATIC_GLTF_BATCH_OBJECT_IDS = new Set(['stone_fence', 'stone_tombstone'])
+const WORLD_UP = new Vector3(0, 1, 0)
+
+function getModelFitTransform(object, catalogItem) {
+  object.updateWorldMatrix(true, true)
+  const box = new Box3().setFromObject(object)
+  const size = box.getSize(new Vector3())
+  const center = box.getCenter(new Vector3())
+  const targetHeight = (catalogItem.targetHeightMeters ?? 0) * WORLD_UNITS_PER_METER
+  const scale = targetHeight > 0 ? targetHeight / Math.max(size.y, 0.001) : 1
+
+  return {
+    offset: new Vector3(-center.x, -box.min.y, -center.z),
+    offsetArray: [-center.x, -box.min.y, -center.z],
+    scale,
+  }
+}
 
 function cloneInPlaceAnimationClip(clip, fallbackName) {
   const next = clip.clone()
@@ -32,19 +49,14 @@ function MapObjectGltfModel({ catalogItem }) {
       }
     })
 
-    object.updateWorldMatrix(true, true)
-    const box = new Box3().setFromObject(object)
-    const size = box.getSize(new Vector3())
-    const center = box.getCenter(new Vector3())
-    const targetHeight = (catalogItem.targetHeightMeters ?? 0) * WORLD_UNITS_PER_METER
-    const scale = targetHeight > 0 ? targetHeight / Math.max(size.y, 0.001) : 1
+    const transform = getModelFitTransform(object, catalogItem)
 
     return {
       object,
-      offset: [-center.x, -box.min.y, -center.z],
-      scale,
+      offset: transform.offsetArray,
+      scale: transform.scale,
     }
-  }, [catalogItem.targetHeightMeters, gltf.scene])
+  }, [catalogItem, gltf.scene])
 
   return (
     <group scale={model.scale}>
@@ -65,19 +77,14 @@ function MapObjectFbxModel({ catalogItem }) {
       }
     })
 
-    object.updateWorldMatrix(true, true)
-    const box = new Box3().setFromObject(object)
-    const size = box.getSize(new Vector3())
-    const center = box.getCenter(new Vector3())
-    const targetHeight = (catalogItem.targetHeightMeters ?? 0) * WORLD_UNITS_PER_METER
-    const scale = targetHeight > 0 ? targetHeight / Math.max(size.y, 0.001) : 1
+    const transform = getModelFitTransform(object, catalogItem)
 
     return {
       object,
-      offset: [-center.x, -box.min.y, -center.z],
-      scale,
+      offset: transform.offsetArray,
+      scale: transform.scale,
     }
-  }, [catalogItem.targetHeightMeters, fbx])
+  }, [catalogItem, fbx])
   const animationClips = useMemo(
     () => (fbx.animations ?? []).map((clip, index) => {
       return cloneInPlaceAnimationClip(clip, `fbxIdle${index}`)
@@ -174,22 +181,149 @@ function getMapObjectTreeBatchEntry(placement, catalogItem) {
   }
 }
 
-function splitStaticTreePlacements(objects, enabled) {
-  if (!enabled) return { treeEntries: [], objectPlacements: objects }
+function getMaterialKey(material) {
+  if (Array.isArray(material)) return material.map((entry) => entry?.uuid ?? 'material').join(':')
+  return material?.uuid ?? 'material'
+}
+
+function getStaticGltfMeshParts(scene) {
+  const previousPosition = scene.position.clone()
+  scene.position.set(0, 0, 0)
+  scene.updateWorldMatrix(true, true)
+  const parts = []
+
+  scene.traverse((child) => {
+    if (!(child instanceof Mesh)) return
+    if (child.isSkinnedMesh || !child.geometry || !child.material) return
+    parts.push({
+      key: `${child.uuid}:${child.geometry.uuid}:${getMaterialKey(child.material)}`,
+      geometry: child.geometry,
+      material: child.material,
+      matrix: child.matrixWorld.clone(),
+    })
+  })
+
+  scene.position.copy(previousPosition)
+  scene.updateWorldMatrix(true, true)
+  return parts
+}
+
+function canBatchStaticGltfObject(placement, catalogItem, objectCounts) {
+  return (
+    STATIC_GLTF_BATCH_OBJECT_IDS.has(placement.objectId) &&
+    objectCounts.get(placement.objectId) > 1 &&
+    getModelExtension(catalogItem?.modelUrl) === 'glb'
+  )
+}
+
+function splitStaticPlacements(objects, enabled) {
+  if (!enabled) return { treeEntries: [], instancedModelGroups: [], objectPlacements: objects }
 
   const treeEntries = []
+  const instancedModelGroupMap = new Map()
   const objectPlacements = []
+  const objectCounts = objects.reduce((counts, placement) => {
+    counts.set(placement.objectId, (counts.get(placement.objectId) ?? 0) + 1)
+    return counts
+  }, new Map())
+
   objects.forEach((placement) => {
     const catalogItem = getMapObjectCatalogItem(placement.objectId)
     const treeEntry = getMapObjectTreeBatchEntry(placement, catalogItem)
     if (treeEntry) {
       treeEntries.push(treeEntry)
+    } else if (canBatchStaticGltfObject(placement, catalogItem, objectCounts)) {
+      const group = instancedModelGroupMap.get(placement.objectId) ?? {
+        objectId: placement.objectId,
+        placements: [],
+      }
+      group.placements.push(placement)
+      instancedModelGroupMap.set(placement.objectId, group)
     } else {
       objectPlacements.push(placement)
     }
   })
 
-  return { treeEntries, objectPlacements }
+  return {
+    treeEntries,
+    instancedModelGroups: Array.from(instancedModelGroupMap.values()),
+    objectPlacements,
+  }
+}
+
+function StaticGltfModelBatchPart({ meshPart, placements, modelTransform }) {
+  const meshRef = useRef()
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+
+    const position = new Vector3()
+    const rotation = new Quaternion()
+    const scale = new Vector3()
+    const placementMatrix = new Matrix4()
+    const offsetMatrix = new Matrix4().makeTranslation(
+      modelTransform.offset.x,
+      modelTransform.offset.y,
+      modelTransform.offset.z,
+    )
+
+    placements.forEach((placement, index) => {
+      const [x, savedY, z] = placement.position ?? [0, 0, 0]
+      const y = Number.isFinite(savedY) ? savedY : getTerrainHeight(x, z)
+      const placementScale = Number.isFinite(placement.scale) ? placement.scale : 1
+      const totalScale = placementScale * modelTransform.scale
+      position.set(x, y, z)
+      rotation.setFromAxisAngle(WORLD_UP, placement.rotationY ?? 0)
+      scale.set(totalScale, totalScale, totalScale)
+      placementMatrix.compose(position, rotation, scale)
+      placementMatrix.multiply(offsetMatrix)
+      placementMatrix.multiply(meshPart.matrix)
+      mesh.setMatrixAt(index, placementMatrix)
+    })
+
+    mesh.count = placements.length
+    mesh.instanceMatrix.needsUpdate = true
+    mesh.computeBoundingSphere()
+  }, [meshPart.matrix, modelTransform.offset, modelTransform.scale, placements])
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[meshPart.geometry, meshPart.material, placements.length]}
+      castShadow
+      receiveShadow
+      userData={{ debugCategory: 'map-placeables-instanced' }}
+    />
+  )
+}
+
+function StaticGltfModelBatch({ objectId, placements }) {
+  const catalogItem = getMapObjectCatalogItem(objectId)
+  const gltf = useGLTF(catalogItem.modelUrl)
+  const modelTransform = useMemo(
+    () => getModelFitTransform(gltf.scene, catalogItem),
+    [catalogItem, gltf.scene],
+  )
+  const meshParts = useMemo(
+    () => getStaticGltfMeshParts(gltf.scene),
+    [gltf.scene],
+  )
+
+  if (!meshParts.length) return null
+
+  return (
+    <group userData={{ debugCategory: 'map-placeables-instanced', mapObjectId: objectId }}>
+      {meshParts.map((meshPart) => (
+        <StaticGltfModelBatchPart
+          key={meshPart.key}
+          meshPart={meshPart}
+          placements={placements}
+          modelTransform={modelTransform}
+        />
+      ))}
+    </group>
+  )
 }
 
 function MapObjectModel({ objectId }) {
@@ -356,10 +490,10 @@ export default function MapObjectPlaceables({
     preloadMapObjectAssets(objects)
   }, [objects])
 
-  const canBatchStaticTrees = batchStaticTrees && !onSelect && !onStartDragging && !registerRef
-  const { treeEntries, objectPlacements } = useMemo(
-    () => splitStaticTreePlacements(objects, canBatchStaticTrees),
-    [canBatchStaticTrees, objects],
+  const canBatchStaticObjects = batchStaticTrees && !onSelect && !onStartDragging && !registerRef
+  const { treeEntries, instancedModelGroups, objectPlacements } = useMemo(
+    () => splitStaticPlacements(objects, canBatchStaticObjects),
+    [canBatchStaticObjects, objects],
   )
 
   return (
@@ -367,6 +501,11 @@ export default function MapObjectPlaceables({
       {treeEntries.length > 0 && (
         <InstancedTreeBatch trees={treeEntries} animated={false} forceSimplified />
       )}
+      {instancedModelGroups.map((group) => (
+        <Suspense key={group.objectId} fallback={null}>
+          <StaticGltfModelBatch objectId={group.objectId} placements={group.placements} />
+        </Suspense>
+      ))}
       {objectPlacements.map((placement) => (
         <MapObjectInstance
           key={placement.id}

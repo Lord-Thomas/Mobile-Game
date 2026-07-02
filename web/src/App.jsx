@@ -70,7 +70,7 @@ const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFER
 const MAX_RENDER_DPR = 1.5
 const MIN_RENDER_DPR = 0.45
 const TARGET_MAX_RENDER_PIXELS = 2_200_000
-const MIN_DYNAMIC_RENDER_SCALE = 0.5
+const MIN_DYNAMIC_RENDER_SCALE = 0.7
 const MAX_DYNAMIC_RENDER_SCALE = 1
 const LOW_FPS_THRESHOLD = 48
 const HIGH_FPS_THRESHOLD = 57
@@ -154,6 +154,7 @@ function hasSavedGuestSession(userId) {
   return readSavedSession(userId)?.role === 'guest'
 }
 const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
+const PERFORMANCE_SETTINGS_VERSION = 2
 const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const SOFA_WIDTH_METERS = 1.5
@@ -478,10 +479,10 @@ function getCappedAnisotropy(gl) {
 }
 
 function getDefaultPerformanceSettings() {
-  const mobile = isLikelyMobileDevice()
   return {
+    version: PERFORMANCE_SETTINGS_VERSION,
     autoQuality: true,
-    lowResolution: mobile,
+    lowResolution: false,
     showFps: false,
     disableShadows: false,
     grass: true,
@@ -499,6 +500,10 @@ function loadPerformanceSettings() {
     if (typeof stored.disableShadows !== 'boolean' && typeof shadows === 'boolean') {
       storedSettings.disableShadows = !shadows
     }
+    if (isLikelyMobileDevice() && storedSettings.version !== PERFORMANCE_SETTINGS_VERSION && storedSettings.lowResolution === true) {
+      storedSettings.lowResolution = false
+    }
+    storedSettings.version = PERFORMANCE_SETTINGS_VERSION
     return { ...defaults, ...storedSettings }
   } catch {
     return defaults
@@ -8303,6 +8308,11 @@ function SeatTargetMarker({ seat }) {
 const CUSTOMIZE_ZOOM_MIN = 20
 const CUSTOMIZE_ZOOM_MAX = 150
 const CUSTOMIZE_ZOOM_DEFAULT = 58
+const PLACEABLE_PLAY_INITIAL_RENDER_COUNT = 6
+const PLACEABLE_PLAY_REVEAL_BATCH_SIZE = 3
+const PLACEABLE_PLAY_REVEAL_INTERVAL_MS = 180
+const PLACEABLE_PLAY_STUTTER_PAUSE_MS = 450
+const PLACEABLE_PLAY_FREEZE_PAUSE_MS = 1000
 
 function CustomizationCamera({ active }) {
   const { gl } = useThree()
@@ -12457,10 +12467,93 @@ function CustomizationLayer({
   registerCombatTarget,
   onTrainingDummyDefeated,
 }) {
-  const placedObjects = objects.filter((object) => (
+  const placedObjects = useMemo(() => objects.filter((object) => (
     object.status !== 'stored' &&
     (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35))
+  )), [hideInteriorObjects, objects])
+  const renderablePlacedObjects = useMemo(
+    () => placedObjects.filter((object) => object.type !== 'goal'),
+    [placedObjects],
+  )
+  const shouldStreamPlaceables = mode !== 'customize' && !draggingObjectId && !placingObjectId
+  const [visiblePlaceableCount, setVisiblePlaceableCount] = useState(() => (
+    shouldStreamPlaceables
+      ? Math.min(PLACEABLE_PLAY_INITIAL_RENDER_COUNT, renderablePlacedObjects.length)
+      : renderablePlacedObjects.length
   ))
+  const visiblePlaceableCountRef = useRef(visiblePlaceableCount)
+  const revealBudgetRef = useRef({ nextAt: 0, pauseUntil: 0 })
+
+  useEffect(() => {
+    const initialCount = shouldStreamPlaceables
+      ? Math.min(PLACEABLE_PLAY_INITIAL_RENDER_COUNT, renderablePlacedObjects.length)
+      : renderablePlacedObjects.length
+    visiblePlaceableCountRef.current = initialCount
+    revealBudgetRef.current.nextAt = performance.now() + PLACEABLE_PLAY_REVEAL_INTERVAL_MS
+    revealBudgetRef.current.pauseUntil = 0
+    setVisiblePlaceableCount(initialCount)
+  }, [renderablePlacedObjects.length, shouldStreamPlaceables])
+
+  useFrame((_, delta) => {
+    if (!shouldStreamPlaceables) {
+      return
+    }
+    if (visiblePlaceableCountRef.current >= renderablePlacedObjects.length) {
+      return
+    }
+
+    const now = performance.now()
+    const frameMs = delta * 1000
+    if (frameMs > 100) {
+      revealBudgetRef.current.pauseUntil = Math.max(
+        revealBudgetRef.current.pauseUntil,
+        now + PLACEABLE_PLAY_FREEZE_PAUSE_MS,
+      )
+      perfDiagnostics.event('placeables:reveal-paused', {
+        reason: 'freeze-frame',
+        frameMs,
+        visible: visiblePlaceableCountRef.current,
+        total: renderablePlacedObjects.length,
+      })
+      return
+    }
+    if (frameMs > 50) {
+      revealBudgetRef.current.pauseUntil = Math.max(
+        revealBudgetRef.current.pauseUntil,
+        now + PLACEABLE_PLAY_STUTTER_PAUSE_MS,
+      )
+      perfDiagnostics.event('placeables:reveal-paused', {
+        reason: 'stutter-frame',
+        frameMs,
+        visible: visiblePlaceableCountRef.current,
+        total: renderablePlacedObjects.length,
+      })
+      return
+    }
+    if (now < revealBudgetRef.current.pauseUntil || now < revealBudgetRef.current.nextAt) {
+      return
+    }
+
+    const previousCount = visiblePlaceableCountRef.current
+    const nextCount = Math.min(
+      previousCount + PLACEABLE_PLAY_REVEAL_BATCH_SIZE,
+      renderablePlacedObjects.length,
+    )
+    visiblePlaceableCountRef.current = nextCount
+    revealBudgetRef.current.nextAt = now + PLACEABLE_PLAY_REVEAL_INTERVAL_MS
+    perfDiagnostics.event('placeables:reveal', {
+      visible: nextCount,
+      total: renderablePlacedObjects.length,
+      objectIds: renderablePlacedObjects
+        .slice(previousCount, nextCount)
+        .map((object) => object.objectId),
+    })
+    setVisiblePlaceableCount(nextCount)
+  })
+
+  const visiblePlacedObjects = shouldStreamPlaceables
+    ? renderablePlacedObjects.slice(0, visiblePlaceableCount)
+    : renderablePlacedObjects
   const placingObject = objects.find((object) => object.id === placingObjectId)
   const placeableRefs = useRef(new Map())
   const previewGroupRef = useRef()
@@ -12557,7 +12650,7 @@ function CustomizationLayer({
           posZ={secondRoom.position[2]}
         />
       </group>
-      {placedObjects.map((object) => (
+      {visiblePlacedObjects.map((object) => (
         <EditableObject
           key={object.id}
           object={object}
@@ -13638,9 +13731,10 @@ const OUTDOOR_CONTENT_STAGES = [
 const OUTDOOR_DECOR_REVEAL_DELAY_MS = 450
 const OUTDOOR_GRASS_REVEAL_DELAY_MS = 1100
 const OUTDOOR_ENEMIES_REVEAL_DELAY_MS = 2200
-const OUTDOOR_ENEMY_REVEAL_BATCH_SIZE = 2
+const OUTDOOR_ENEMY_PRELOAD_DELAY_MS = 120
+const OUTDOOR_ENEMY_REVEAL_BATCH_SIZE = 1
 const OUTDOOR_ENEMY_REVEAL_FIRST_DELAY_MS = 250
-const OUTDOOR_ENEMY_REVEAL_INTERVAL_MS = 650
+const OUTDOOR_ENEMY_REVEAL_INTERVAL_MS = 600
 
 const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload(PLAYER_MODEL_URL),
@@ -14011,6 +14105,7 @@ function PerfFrameProbe({
   outdoorRuntimeRevealStage,
   visibleOutdoorEnemyCount,
   shaderWarmupComplete,
+  quality,
 }) {
   const warmupCompleteAtRef = useRef(null)
 
@@ -14049,6 +14144,7 @@ function PerfFrameProbe({
       visibleOutdoorEnemyCount,
       shaderWarmupComplete,
       msSinceWarmupComplete: warmupCompleteAtRef.current == null ? null : now - warmupCompleteAtRef.current,
+      quality,
     }
 
     perfDiagnostics.recordFrame({
@@ -14528,14 +14624,36 @@ function App() {
   const [showPwaGuide, setShowPwaGuide] = useState(false)
   const [isIosDevice, setIsIosDevice] = useState(false)
   const [dynamicRenderScale, setDynamicRenderScale] = useState(MAX_DYNAMIC_RENDER_SCALE)
+  const [rendererInfo, setRendererInfo] = useState(null)
   const effectiveRenderScale = performanceSettings.lowResolution
     ? Math.min(performanceSettings.autoQuality ? dynamicRenderScale : MAX_DYNAMIC_RENDER_SCALE, LOW_RESOLUTION_RENDER_SCALE)
     : performanceSettings.autoQuality
       ? dynamicRenderScale
       : MAX_DYNAMIC_RENDER_SCALE
   const renderSettings = useViewportRenderSettings(effectiveRenderScale)
+  const mobileQualityContext = useMemo(() => {
+    const activeViewport = typeof window === 'undefined'
+      ? { width: 0, height: 0 }
+      : getActiveViewportSize()
+    const nativeDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
+    return {
+      isMobile: isLikelyMobileDevice(),
+      nativeDpr: Number(nativeDpr.toFixed(2)),
+      appliedDpr: renderSettings.dpr,
+      renderScale: Number(effectiveRenderScale.toFixed(2)),
+      dynamicRenderScale: Number(dynamicRenderScale.toFixed(2)),
+      lowResolution: performanceSettings.lowResolution,
+      autoQuality: performanceSettings.autoQuality,
+      antialias: renderSettings.antialias,
+      shadows: !performanceSettings.disableShadows,
+      grass: performanceSettings.grass,
+      trees: performanceSettings.trees,
+      sky: performanceSettings.sky,
+      viewport: activeViewport,
+      renderer: rendererInfo,
+    }
+  }, [dynamicRenderScale, effectiveRenderScale, performanceSettings, renderSettings, rendererInfo])
   const [renderStats, setRenderStats] = useState(null)
-  const [rendererInfo, setRendererInfo] = useState(null)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
   const [freeCameraActive, setFreeCameraActive] = useState(false)
   const [debugToggles, setDebugToggles] = useState({
@@ -14558,6 +14676,11 @@ function App() {
       // localStorage can be unavailable in private browsing or embedded contexts.
     }
   }, [performanceSettings])
+
+  useEffect(() => {
+    if (!perfDiagnosticsActive) return
+    perfDiagnostics.snapshot('quality:mobile-render', mobileQualityContext)
+  }, [mobileQualityContext, perfDiagnosticsActive])
 
   useEffect(() => {
     try {
@@ -15134,6 +15257,40 @@ function App() {
       timerIds.forEach((timerId) => window.clearTimeout(timerId))
     }
   }, [currentZone])
+
+  useEffect(() => {
+    const shouldPreloadOutdoorEnemies = monsterSpawnSlots.length > 0
+      && (currentZone === ZONES.outside || outdoorTransitionPrimed)
+      && outdoorContentStage >= 3
+
+    if (!shouldPreloadOutdoorEnemies) return undefined
+
+    let cancelled = false
+    let idleId = 0
+    const run = () => {
+      preloadMonsterSpawnSlotAssets(monsterSpawnSlots).finally(() => {
+        if (cancelled) return
+        perfDiagnostics.event('outdoor:enemy-assets-preloaded', {
+          total: monsterSpawnSlots.length,
+        })
+      })
+    }
+    const timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(run, { timeout: 1500 })
+      } else {
+        run()
+      }
+    }, OUTDOOR_ENEMY_PRELOAD_DELAY_MS)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timerId)
+      if (idleId && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [currentZone, monsterSpawnSlots, outdoorContentStage, outdoorTransitionPrimed])
 
   useEffect(() => {
     const enemiesRevealReady = currentZone === ZONES.outside
@@ -17799,6 +17956,7 @@ function App() {
             outdoorRuntimeRevealStage={outdoorRuntimeRevealStage}
             visibleOutdoorEnemyCount={visibleOutdoorEnemyCount}
             shaderWarmupComplete={shaderWarmupComplete}
+            quality={mobileQualityContext}
           />
         )}
         <SceneAtmosphere currentZone={currentZone} playerPositionRef={playerPositionRef} />
