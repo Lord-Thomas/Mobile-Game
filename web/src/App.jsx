@@ -596,6 +596,7 @@ const SKELETON_TOWER_CAMERA_DISTANCE = 2.75
 const SKELETON_TOWER_CAMERA_HEIGHT = 1.05
 const SKELETON_TOWER_CAMERA_MIN_LOCAL_Y = 0.35
 const SKELETON_TOWER_CAMERA_TOP_MARGIN = 0.55
+const OUTDOOR_CAMERA_OBSTACLE_CLEARANCE = 0.28
 const MAGIC_SKULL_DISCOVERY_POSITION = (() => {
   if (MAGIC_SKULL_DISCOVERY_PLACEMENT) return MAGIC_SKULL_DISCOVERY_PLACEMENT.position
   if (!MAGIC_SKULL_TOWER_PLACEMENT) return null
@@ -1127,6 +1128,103 @@ function clampCameraInPlayableVolume(x, y, z, currentZone = ZONES.interior) {
   const clampedY = MathUtils.clamp(y, settings.minY, settings.maxY)
   const clampedZ = MathUtils.clamp(z, limits.minZ, zMax)
   return { x: clampedX, y: clampedY, z: clampedZ }
+}
+
+function getSegmentExpandedBoxHitT(startX, startZ, endX, endZ, collider, clearance) {
+  const rotationY = collider.rotationY ?? 0
+  const cos = Math.cos(-rotationY)
+  const sin = Math.sin(-rotationY)
+  const toLocal = (x, z) => {
+    const dx = x - collider.x
+    const dz = z - collider.z
+    return {
+      x: dx * cos - dz * sin,
+      z: dx * sin + dz * cos,
+    }
+  }
+  const start = toLocal(startX, startZ)
+  const end = toLocal(endX, endZ)
+  const dirX = end.x - start.x
+  const dirZ = end.z - start.z
+  const hx = collider.hx + clearance
+  const hz = collider.hz + clearance
+  let tMin = 0
+  let tMax = 1
+
+  const clipAxis = (startValue, dirValue, halfExtent) => {
+    if (Math.abs(dirValue) < 1e-6) {
+      return Math.abs(startValue) <= halfExtent
+    }
+    const inv = 1 / dirValue
+    let near = (-halfExtent - startValue) * inv
+    let far = (halfExtent - startValue) * inv
+    if (near > far) [near, far] = [far, near]
+    tMin = Math.max(tMin, near)
+    tMax = Math.min(tMax, far)
+    return tMin <= tMax
+  }
+
+  if (!clipAxis(start.x, dirX, hx)) return null
+  if (!clipAxis(start.z, dirZ, hz)) return null
+  return tMax >= 0 && tMin <= 1 ? MathUtils.clamp(tMin, 0, 1) : null
+}
+
+function constrainOutdoorCameraAgainstManualObstacles(focusX, originY, focusZ, targetX, targetY, targetZ) {
+  const segX = targetX - focusX
+  const segY = targetY - originY
+  const segZ = targetZ - focusZ
+  const segLen2 = segX * segX + segZ * segZ
+  if (segLen2 <= 0.001) return { x: targetX, y: targetY, z: targetZ }
+
+  const segLen = Math.sqrt(segLen2)
+  let minSafeT = 1
+
+  for (const treeEntry of EDITABLE_TREE_PLACEMENTS) {
+    const { x: tx, z: tz } = getEditableTreePosition(treeEntry)
+    const radius = getEditableTreeCollisionRadius(treeEntry) + OUTDOOR_CAMERA_OBSTACLE_CLEARANCE
+    const ftX = tx - focusX
+    const ftZ = tz - focusZ
+    const tParam = (ftX * segX + ftZ * segZ) / segLen2
+    if (tParam < 0.04 || tParam > 0.97) continue
+    const closestX = focusX + segX * tParam
+    const closestZ = focusZ + segZ * tParam
+    if ((tx - closestX) ** 2 + (tz - closestZ) ** 2 >= radius * radius) continue
+    minSafeT = Math.min(minSafeT, Math.max(0.05, tParam - radius / segLen))
+  }
+
+  for (const collider of OUTDOOR_PLAYER_COLLIDERS) {
+    let hitT
+    const clearance = OUTDOOR_CAMERA_OBSTACLE_CLEARANCE
+    if (collider.type === 'circle') {
+      const ftX = collider.x - focusX
+      const ftZ = collider.z - focusZ
+      const tParam = (ftX * segX + ftZ * segZ) / segLen2
+      if (tParam < 0.04 || tParam > 0.98) continue
+      const closestX = focusX + segX * tParam
+      const closestZ = focusZ + segZ * tParam
+      const radius = collider.radius + clearance
+      if ((collider.x - closestX) ** 2 + (collider.z - closestZ) ** 2 >= radius * radius) continue
+      hitT = Math.max(0.05, tParam - radius / segLen)
+    } else {
+      const tParam = getSegmentExpandedBoxHitT(focusX, focusZ, targetX, targetZ, collider, clearance)
+      if (tParam == null || tParam < 0.04 || tParam > 0.98) continue
+      const sampleY = originY + segY * tParam
+      if (
+        Number.isFinite(collider.y) &&
+        Number.isFinite(collider.hy) &&
+        (sampleY < collider.y - collider.hy - 0.25 || sampleY > collider.y + collider.hy + 0.25)
+      ) continue
+      hitT = Math.max(0.05, tParam - 0.03)
+    }
+    if (hitT != null) minSafeT = Math.min(minSafeT, hitT)
+  }
+
+  if (minSafeT >= 1) return { x: targetX, y: targetY, z: targetZ }
+  return {
+    x: focusX + segX * minSafeT,
+    y: originY + segY * minSafeT,
+    z: focusZ + segZ * minSafeT,
+  }
 }
 
 function useCombatActionsAvailability(actionsRef) {
@@ -3632,7 +3730,26 @@ function Player({
       const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
       let nextX = MathUtils.clamp(pos.x + dirX * forwardInput * speed * delta, limits.minX, limits.maxX)
       let nextZ = MathUtils.clamp(pos.z + dirZ * forwardInput * speed * delta, limits.minZ, limits.maxZ)
-      const nextGroundY = currentZone === ZONES.outside ? getTerrainHeight(nextX, nextZ) : 0
+      let nextGroundY = currentZone === ZONES.outside ? getTerrainHeight(nextX, nextZ) : 0
+      const mountBodyWidth = dragonRide.mountProfileRef?.current?.width ?? mountConfig.defaultBodyWidth ?? DRAGON_RIDE_DEFAULT_BODY_WIDTH
+      const mountCollisionRadius = Math.max(PLAYER_CAPSULE_RADIUS, mountBodyWidth * 0.5 + 0.08)
+      const collidesWithLowOutdoorObstacle = currentZone === ZONES.outside &&
+        nextAltitude <= 1.25 &&
+        collidesWithOutdoorObstacle(nextX, nextZ, nextGroundY, mountCollisionRadius)
+      const collidesWithTallMapObject = currentZone === ZONES.outside &&
+        nextAltitude > 1.25 &&
+        collidesWithMapObjectSolid(nextX, nextZ, nextGroundY + nextAltitude, mountCollisionRadius)
+      if (
+        collidesWithLowOutdoorObstacle ||
+        collidesWithTallMapObject
+      ) {
+        nextX = pos.x
+        nextZ = pos.z
+        nextGroundY = groundY
+        if (forwardInput > 0) {
+          mountJumpRef.current.vy = Math.min(mountJumpRef.current.vy, 0)
+        }
+      }
       const nextY = nextGroundY + nextAltitude
 
       dragonRide.positionRef.current.x = nextX
@@ -4351,32 +4468,18 @@ function Player({
       }
     }
 
-    // Pull camera before tree trunks (trees have no Rapier colliders)
     if (currentZone === ZONES.outside) {
-      const treeSegX = targetX - focusX
-      const treeSegZ = targetZ - focusZ
-      const treeSegLen2 = treeSegX * treeSegX + treeSegZ * treeSegZ
-      if (treeSegLen2 > 0.001) {
-        const treeSegLen = Math.sqrt(treeSegLen2)
-        let minSafeT = 1.0
-        for (const treeEntry of EDITABLE_TREE_PLACEMENTS) {
-          const { x: tx, z: tz } = getEditableTreePosition(treeEntry)
-          const r = getEditableTreeCollisionRadius(treeEntry) + 0.3
-          const ftX = tx - focusX
-          const ftZ = tz - focusZ
-          const tParam = (ftX * treeSegX + ftZ * treeSegZ) / treeSegLen2
-          if (tParam < 0.04 || tParam > 0.97) continue
-          const closestX = focusX + treeSegX * tParam
-          const closestZ = focusZ + treeSegZ * tParam
-          if ((tx - closestX) ** 2 + (tz - closestZ) ** 2 >= r * r) continue
-          minSafeT = Math.min(minSafeT, Math.max(0.05, tParam - r / treeSegLen))
-        }
-        if (minSafeT < 1.0) {
-          targetX = focusX + treeSegX * minSafeT
-          targetY = originY + (targetY - originY) * minSafeT
-          targetZ = focusZ + treeSegZ * minSafeT
-        }
-      }
+      const constrainedTarget = constrainOutdoorCameraAgainstManualObstacles(
+        focusX,
+        originY,
+        focusZ,
+        targetX,
+        targetY,
+        targetZ,
+      )
+      targetX = constrainedTarget.x
+      targetY = constrainedTarget.y
+      targetZ = constrainedTarget.z
     }
 
     if (towerCameraContext) {
@@ -4473,10 +4576,26 @@ function Player({
     }
     const cameraDistance = cameraDistanceState.value
     const horizontalDistance = cameraDistance * Math.cos(pitch)
+    let targetCameraX = cameraFocus.x + Math.sin(touch.cameraYaw) * horizontalDistance
+    let targetCameraY = cameraFocus.y + 1.6 + Math.sin(pitch) * cameraDistance
+    let targetCameraZ = cameraFocus.z + Math.cos(touch.cameraYaw) * horizontalDistance
+    if (currentZone === ZONES.outside) {
+      const constrainedTarget = constrainOutdoorCameraAgainstManualObstacles(
+        cameraFocus.x,
+        cameraFocus.y + 0.6,
+        cameraFocus.z,
+        targetCameraX,
+        targetCameraY,
+        targetCameraZ,
+      )
+      targetCameraX = constrainedTarget.x
+      targetCameraY = constrainedTarget.y
+      targetCameraZ = constrainedTarget.z
+    }
     const cameraTarget = clampCameraInPlayableVolume(
-      cameraFocus.x + Math.sin(touch.cameraYaw) * horizontalDistance,
-      cameraFocus.y + 1.6 + Math.sin(pitch) * cameraDistance,
-      cameraFocus.z + Math.cos(touch.cameraYaw) * horizontalDistance,
+      targetCameraX,
+      targetCameraY,
+      targetCameraZ,
       currentZone,
     )
 
@@ -9281,6 +9400,13 @@ function getSeededUnitValue(seed) {
   return value - Math.floor(value)
 }
 
+function isMobWanderPointValid(x, z, referenceY = getTerrainHeight(x, z)) {
+  const insideWorld = Math.abs(x) < OUTDOOR_HALF_SIZE - 1.5 && Math.abs(z) < OUTDOOR_HALF_SIZE - 1.5
+  if (!insideWorld) return false
+  const footY = getMobOutdoorFootY(x, z, referenceY)
+  return !collidesWithOutdoorObstacle(x, z, footY, PLAYER_CAPSULE_RADIUS * 0.9)
+}
+
 // `wanderRadius` DOIT correspondre au rayon de laisse utilisé par l'état 'wander'
 // (cfg.wanderRadius), sinon la cible générée tombe hors laisse → 'return' immédiat
 // → aucune patrouille. Pour un spawner ce rayon est petit (radius*0.35) ; on ne peut
@@ -9295,7 +9421,7 @@ function getMushroomEnemyWanderPoint(spawnPosition, seed, wanderRadius = MUSHROO
 
     if (
       Math.hypot(x - spawnPosition[0], z - spawnPosition[2]) <= wanderRadius &&
-      isMushroomEnemySpawnCandidateValid(x, z)
+      isMobWanderPointValid(x, z, spawnPosition[1])
     ) {
       return { x, y: getMobOutdoorFootY(x, z, spawnPosition[1]), z }
     }
@@ -9749,8 +9875,9 @@ function SmallMushroomEnemy({
   const stuckDeflectionRef = useRef(1)
   const lastPositionRef = useRef({ x: 0, z: 0 })
   const wanderTargetRef = useRef(null)
-  const nextWanderAtRef = useRef(0)
   const wanderSeedRef = useRef(spawnIndex * 37 + 11)
+  const initialYawRef = useRef(cfg.spawnYaw + getSeededUnitValue(wanderSeedRef.current + 3.17) * Math.PI * 2)
+  const nextWanderAtRef = useRef(getSeededUnitValue(wanderSeedRef.current + 6.41) * (cfg.wanderMaxWait ?? MUSHROOM_ENEMY_WANDER_MAX_WAIT))
   const threatRef = useRef(new Map())
   const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const respawnTimerRef = useRef(null)
@@ -9764,8 +9891,8 @@ function SmallMushroomEnemy({
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
     currentPositionRef.current.z = spawnPosition[2]
-    if (groupRef.current) groupRef.current.rotation.y = cfg.spawnYaw
-  }, [spawnPosition, cfg.spawnYaw])
+    if (groupRef.current) groupRef.current.rotation.y = initialYawRef.current
+  }, [spawnPosition])
   const targetRef = useRef({
     id: enemyId,
     position: { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] },
@@ -9982,7 +10109,7 @@ function SmallMushroomEnemy({
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
     currentPositionRef.current.z = spawnPosition[2]
-    if (groupRef.current) groupRef.current.rotation.y = cfg.spawnYaw
+    if (groupRef.current) groupRef.current.rotation.y = initialYawRef.current
     hpRef.current = cfg.maxHp
     recoilRef.current.x = 0
     recoilRef.current.y = 0
@@ -10424,7 +10551,7 @@ function SmallMushroomEnemy({
         setHp(cfg.maxHp)
         setIsEvading(false)
         stateRef.current = 'idle'
-        if (groupRef.current) groupRef.current.rotation.y = cfg.spawnYaw
+        if (groupRef.current) groupRef.current.rotation.y = initialYawRef.current
         setEnemyMotion('idle')
       } else {
         moveMushroomEnemyToward(enemyPosition, { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] }, cfg.returnSpeed, delta, 0, stuckTimerRef, stuckDeflectionRef, lastPositionRef)
@@ -10534,7 +10661,7 @@ function SmallMushroomEnemy({
   const hudHeight = cfg.hudHeight ?? 1.55
 
   return (
-    <group ref={groupRef} position={active ? spawnPosition : [0, -500, 0]} rotation={[0, cfg.spawnYaw, 0]}>
+    <group ref={groupRef} position={active ? spawnPosition : [0, -500, 0]} rotation={[0, initialYawRef.current, 0]}>
       {!defeated && (
         <>
           {cfg.squashStretch ? (
@@ -10997,17 +11124,17 @@ function getTwitchParentHost() {
   return window.location.hostname || 'localhost'
 }
 
-function collidesWithEditableTree(nextX, nextZ) {
+function collidesWithEditableTree(nextX, nextZ, radius = PLAYER_CAPSULE_RADIUS) {
   return EDITABLE_TREE_PLACEMENTS.some((treeEntry) => {
     const { x, z } = getEditableTreePosition(treeEntry)
-    return Math.hypot(nextX - x, nextZ - z) <= getEditableTreeCollisionRadius(treeEntry) + PLAYER_CAPSULE_RADIUS
+    return Math.hypot(nextX - x, nextZ - z) <= getEditableTreeCollisionRadius(treeEntry) + radius
   })
 }
 
-function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(nextX, nextZ)) {
+function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(nextX, nextZ), radius = PLAYER_CAPSULE_RADIUS) {
   const collidesWithAuthoredObstacle = OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
     if (collider.type === 'circle') {
-      return Math.hypot(nextX - collider.x, nextZ - collider.z) <= collider.radius + PLAYER_CAPSULE_RADIUS
+      return Math.hypot(nextX - collider.x, nextZ - collider.z) <= collider.radius + radius
     }
 
     const rotationY = collider.rotationY ?? 0
@@ -11020,13 +11147,13 @@ function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(next
 
     const outsideX = Math.max(Math.abs(localX) - collider.hx, 0)
     const outsideZ = Math.max(Math.abs(localZ) - collider.hz, 0)
-    return outsideX * outsideX + outsideZ * outsideZ <= PLAYER_CAPSULE_RADIUS * PLAYER_CAPSULE_RADIUS
+    return outsideX * outsideX + outsideZ * outsideZ <= radius * radius
   })
 
   return (
     collidesWithAuthoredObstacle ||
-    collidesWithEditableTree(nextX, nextZ) ||
-    collidesWithMapObjectSolid(nextX, nextZ, footY, PLAYER_CAPSULE_RADIUS)
+    collidesWithEditableTree(nextX, nextZ, radius) ||
+    collidesWithMapObjectSolid(nextX, nextZ, footY, radius)
   )
 }
 

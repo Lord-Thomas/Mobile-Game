@@ -196,7 +196,10 @@ function createTreeEntries(placements, includeCollider = true) {
   scaleMultiplier,
   ]) => {
     const config = getLibraryTreeConfig(variantId, { x, z, rotationY, scaleMultiplier })
-    const trunkRadius = Math.max(0.18, 0.18 + config.scale * 1.25)
+    const authoredTrunkRadius = Number.isFinite(config.branch?.trunkRadius)
+      ? config.branch.trunkRadius * config.scale
+      : 0.16 + config.scale * 0.42
+    const trunkRadius = Math.max(0.18, Math.min(0.34, authoredTrunkRadius * 1.15))
 
     return {
       id,
