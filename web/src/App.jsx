@@ -154,7 +154,7 @@ function hasSavedGuestSession(userId) {
   return readSavedSession(userId)?.role === 'guest'
 }
 const PERFORMANCE_SETTINGS_STORAGE_KEY = 'lab_performance_settings_v1'
-const PERFORMANCE_SETTINGS_VERSION = 2
+const PERFORMANCE_SETTINGS_VERSION = 3
 const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const SOFA_WIDTH_METERS = 1.5
@@ -482,7 +482,7 @@ function getDefaultPerformanceSettings() {
   return {
     version: PERFORMANCE_SETTINGS_VERSION,
     autoQuality: true,
-    lowResolution: false,
+    lowResolution: isLikelyMobileDevice(),
     showFps: false,
     disableShadows: false,
     grass: true,
@@ -500,8 +500,8 @@ function loadPerformanceSettings() {
     if (typeof stored.disableShadows !== 'boolean' && typeof shadows === 'boolean') {
       storedSettings.disableShadows = !shadows
     }
-    if (isLikelyMobileDevice() && storedSettings.version !== PERFORMANCE_SETTINGS_VERSION && storedSettings.lowResolution === true) {
-      storedSettings.lowResolution = false
+    if (isLikelyMobileDevice() && storedSettings.version !== PERFORMANCE_SETTINGS_VERSION) {
+      storedSettings.lowResolution = true
     }
     storedSettings.version = PERFORMANCE_SETTINGS_VERSION
     return { ...defaults, ...storedSettings }
