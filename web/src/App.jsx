@@ -6245,6 +6245,8 @@ function RemotePlayer({
   const [displayedMountId, setDisplayedMountId] = useState(stateRef.current?.mount?.id ?? null)
   const displayedCatActiveRef = useRef(Boolean(stateRef.current?.catActive))
   const [displayedCatActive, setDisplayedCatActive] = useState(Boolean(stateRef.current?.catActive))
+  const displayedSlimePetIdRef = useRef(typeof stateRef.current?.activeSlimePetId === 'string' ? stateRef.current.activeSlimePetId : null)
+  const [displayedSlimePetId, setDisplayedSlimePetId] = useState(typeof stateRef.current?.activeSlimePetId === 'string' ? stateRef.current.activeSlimePetId : null)
   const remoteHandBoneRef = useRef(null)
 
   // Initialize group position imperatively on mount — never via JSX props
@@ -6424,6 +6426,12 @@ function RemotePlayer({
       displayedCatActiveRef.current = catActive
       setDisplayedCatActive(catActive)
     }
+
+    const nextSlimePetId = typeof stateRef.current?.activeSlimePetId === 'string' ? stateRef.current.activeSlimePetId : null
+    if (nextSlimePetId !== displayedSlimePetIdRef.current) {
+      displayedSlimePetIdRef.current = nextSlimePetId
+      setDisplayedSlimePetId(nextSlimePetId)
+    }
   })
 
   const remoteMountConfig = displayedMountId ? getMountConfig(displayedMountId) : null
@@ -6465,8 +6473,18 @@ function RemotePlayer({
           currentZone={currentZone}
         />
       )}
-      {displayedCatActive && (
+      {displayedCatActive && !displayedSlimePetId && (
         <NetworkCat stateRef={stateRef} currentZone={currentZone} />
+      )}
+      {displayedSlimePetId && (
+        <Suspense fallback={null}>
+          <NetworkSlimePet
+            key={displayedSlimePetId}
+            slimePetId={displayedSlimePetId}
+            stateRef={stateRef}
+            currentZone={currentZone}
+          />
+        </Suspense>
       )}
       <group ref={groupRef}>
         <PlayerAvatar
@@ -6552,6 +6570,68 @@ function NetworkCat({ stateRef, currentZone }) {
   return (
     <group ref={groupRef} position={[0, -500, 0]} userData={{ debugCategory: 'npcs' }}>
       <primitive object={cat} />
+    </group>
+  )
+}
+
+function NetworkSlimePet({ slimePetId, stateRef, currentZone }) {
+  const cfg = useMemo(() => getSlimePetWildConfig(slimePetId), [slimePetId])
+  const model = usePetEnemyModel(cfg)
+  const groupRef = useRef(null)
+  const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const initializedRef = useRef(false)
+
+  useFrame((_, delta) => {
+    const group = groupRef.current
+    const state = stateRef.current
+    const slimeState = state?.slimePet
+    if (!group) return
+
+    if (state?.activeSlimePetId !== slimePetId || !slimeState?.position) {
+      group.visible = false
+      initializedRef.current = false
+      return
+    }
+
+    const [x, y, z] = slimeState.position
+    if (![x, y, z].every(Number.isFinite)) return
+
+    group.visible = !state?.zone || state.zone === currentZone
+    if (!initializedRef.current) {
+      group.position.set(x, y, z)
+      group.rotation.y = Number.isFinite(slimeState.rotationY) ? slimeState.rotationY : 0
+      initializedRef.current = true
+    } else {
+      const distance = Math.hypot(group.position.x - x, group.position.y - y, group.position.z - z)
+      if (distance > 7) {
+        group.position.set(x, y, z)
+      } else {
+        group.position.x = MathUtils.damp(group.position.x, x, 18, delta)
+        group.position.y = MathUtils.damp(group.position.y, y, 18, delta)
+        group.position.z = MathUtils.damp(group.position.z, z, 18, delta)
+      }
+      group.rotation.y = dampAngle(group.rotation.y, Number.isFinite(slimeState.rotationY) ? slimeState.rotationY : group.rotation.y, 18, delta)
+    }
+
+    currentPositionRef.current.x = group.position.x
+    currentPositionRef.current.y = group.position.y
+    currentPositionRef.current.z = group.position.z
+  })
+
+  return (
+    <group ref={groupRef} position={[0, -500, 0]} userData={{ debugCategory: 'npcs' }}>
+      {cfg.squashStretch ? (
+        <SquashStretchModel
+          object={model.object}
+          offset={model.offset}
+          scale={model.scale}
+          positionRef={currentPositionRef}
+        />
+      ) : (
+        <group scale={model.scale}>
+          <primitive object={model.object} position={model.offset} />
+        </group>
+      )}
     </group>
   )
 }
@@ -7740,6 +7820,8 @@ function MultiplayerBridge({
   characterAppearance,
   catActive = false,
   catNetworkStateRef = null,
+  activeSlimePetId = null,
+  slimePetNetworkStateRef = null,
 }) {
   const lastSendRef = useRef(0)
   const lastBallSendRef = useRef(0)
@@ -7759,17 +7841,19 @@ function MultiplayerBridge({
     const velocity = playerVelocityRef?.current ?? { x: 0, z: 0 }
     const motion = localPlayerStateRef.current.motion
     const mountState = localPlayerStateRef.current.mount
+    const slimePetActive = typeof activeSlimePetId === 'string' && activeSlimePetId.length > 0
     const playerActive =
       Math.hypot(velocity.x, velocity.z) > 0.02 ||
       motion !== 'idle' ||
       Boolean(mountState?.moving || mountState?.airborne || mountState?.jumping)
     const playerSendInterval = playerActive
       ? MULTIPLAYER_PLAYER_SEND_INTERVAL
-      : (catActive ? MULTIPLAYER_PLAYER_PET_SEND_INTERVAL : MULTIPLAYER_PLAYER_IDLE_SEND_INTERVAL)
+      : ((catActive || slimePetActive) ? MULTIPLAYER_PLAYER_PET_SEND_INTERVAL : MULTIPLAYER_PLAYER_IDLE_SEND_INTERVAL)
 
     if (now - lastSendRef.current > playerSendInterval) {
       const position = playerPositionRef.current
       const catState = catActive ? catNetworkStateRef?.current : null
+      const slimePetState = slimePetActive ? slimePetNetworkStateRef?.current : null
       channel.sendPlayerState({
         seq: playerSeqRef.current++,
         hostTime: estimatedHostTime,
@@ -7796,6 +7880,14 @@ function MultiplayerBridge({
               position: roundNetVector(catState.position),
               rotationY: roundNetValue(catState.rotationY ?? 0),
               motion: catState.motion ?? 'Idle',
+            }
+          : null,
+        activeSlimePetId: slimePetActive ? activeSlimePetId : null,
+        slimePet: slimePetState?.position
+          ? {
+              position: roundNetVector(slimePetState.position),
+              rotationY: roundNetValue(slimePetState.rotationY ?? 0),
+              motion: slimePetState.motion ?? 'idle',
             }
           : null,
         equippedWeapon,
@@ -14497,6 +14589,7 @@ function App() {
   const catPositionRef = useRef({ x: 0, y: 0, z: 0 })
   const catGroupRef = useRef(null)
   const catNetworkStateRef = useRef(null)
+  const slimePetNetworkStateRef = useRef(null)
   const catTapCallbackRef = useRef(null)
   const dragonRidePositionRef = useRef({ x: 0, y: 0, z: 0 })
   const dragonRideYawRef = useRef(0)
@@ -17434,6 +17527,8 @@ function App() {
           characterAppearance={characterAppearance}
           catActive={catActive}
           catNetworkStateRef={catNetworkStateRef}
+          activeSlimePetId={activeSlimePetId}
+          slimePetNetworkStateRef={slimePetNetworkStateRef}
         />
         <InteriorLighting
           active={currentZone !== ZONES.outside}
@@ -17489,6 +17584,9 @@ function App() {
                   playerPositionRef={playerPositionRef}
                   playerVelocityRef={playerVelocityRef}
                   currentZone={currentZone}
+                  onNetworkState={(nextState) => {
+                    slimePetNetworkStateRef.current = nextState
+                  }}
                 />
               </Suspense>
             )}
@@ -18381,7 +18479,7 @@ function usePetEnemyModel(cfg) {
   }, [cfg.materialColor, cfg.modelTargetHeight, isGlbModel, sourceModel])
 }
 
-function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZone }) {
+function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZone, onNetworkState = null }) {
   const cfg = useMemo(() => getSlimePetWildConfig(slimePetId), [slimePetId])
   const model = usePetEnemyModel(cfg)
   const groupRef = useRef()
@@ -18458,6 +18556,17 @@ function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZon
     group.rotation.y += diff * Math.min(CAT_TURN_SPEED * delta, 1)
   }, [])
 
+  const syncCurrentPosition = useCallback((group) => {
+    currentPositionRef.current.x = group.position.x
+    currentPositionRef.current.y = group.position.y
+    currentPositionRef.current.z = group.position.z
+    onNetworkState?.({
+      position: [group.position.x, group.position.y, group.position.z],
+      rotationY: group.rotation.y,
+      motion: stateRef.current,
+    })
+  }, [onNetworkState])
+
   useFrame((_, delta) => {
     const group = groupRef.current
     const pp = playerPositionRef?.current
@@ -18497,9 +18606,7 @@ function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZon
         lazyTimerRef.current = Math.max(0, lazyTimerRef.current - delta * 2)
       }
       timerRef.current -= delta
-      currentPositionRef.current.x = group.position.x
-      currentPositionRef.current.y = group.position.y
-      currentPositionRef.current.z = group.position.z
+      syncCurrentPosition(group)
       return
     }
 
@@ -18507,9 +18614,7 @@ function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZon
       stateRef.current = PET_STATE.IDLE_NEAR
       timerRef.current = CAT_SIT_DELAY
       lazyTimerRef.current = 0
-      currentPositionRef.current.x = group.position.x
-      currentPositionRef.current.y = group.position.y
-      currentPositionRef.current.z = group.position.z
+      syncCurrentPosition(group)
       return
     }
 
@@ -18517,10 +18622,12 @@ function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZon
       if (playerSpeed > CAT_RUN_PLAYER_SPEED) {
         pickOffset()
         stateRef.current = PET_STATE.RUN_WITH_PLAYER
+        syncCurrentPosition(group)
         return
       }
       if (distToPlayer > CAT_CATCHUP_DIST) {
         stateRef.current = PET_STATE.CATCH_UP
+        syncCurrentPosition(group)
         return
       }
     }
@@ -18566,9 +18673,7 @@ function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZon
       }
     }
 
-    currentPositionRef.current.x = group.position.x
-    currentPositionRef.current.y = group.position.y
-    currentPositionRef.current.z = group.position.z
+    syncCurrentPosition(group)
   })
 
   useEffect(() => {

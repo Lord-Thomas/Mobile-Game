@@ -79,10 +79,17 @@ function sanitizeCatState(value) {
   }
 }
 
+function sanitizeSlimePetId(value) {
+  if (typeof value !== 'string') return null
+  const id = value.trim().slice(0, 80)
+  return /^[a-zA-Z0-9_-]+$/.test(id) ? id : null
+}
+
 function sanitizePlayerState(message, client, player) {
   const equippedTitleId = typeof message?.equippedTitleId === 'string'
     ? message.equippedTitleId.slice(0, 80)
     : null
+  const activeSlimePetId = sanitizeSlimePetId(message?.activeSlimePetId)
 
   return {
     seq: Number.isFinite(message?.seq) ? message.seq : player.lastSeq + 1,
@@ -98,8 +105,10 @@ function sanitizePlayerState(message, client, player) {
     motion: typeof message?.motion === 'string' ? message.motion.slice(0, 32) : 'idle',
     zone: typeof message?.zone === 'string' ? message.zone.slice(0, 32) : 'interior',
     mount: sanitizeMount(message?.mount),
-    catActive: Boolean(message?.catActive),
+    catActive: activeSlimePetId ? false : Boolean(message?.catActive),
     cat: sanitizeCatState(message?.cat),
+    activeSlimePetId,
+    slimePet: activeSlimePetId ? sanitizeCatState(message?.slimePet) : null,
     equippedWeapon: sanitizeEquippedWeapon(message?.equippedWeapon),
     equippedTitleId,
     characterAppearance: sanitizeCharacterAppearance(message?.characterAppearance),
@@ -225,6 +234,8 @@ export class VisitRoom extends Room {
       mount: null,
       catActive: false,
       cat: null,
+      activeSlimePetId: null,
+      slimePet: null,
       equippedWeapon: null,
       equippedTitleId: null,
       characterAppearance: null,
@@ -290,6 +301,8 @@ export class VisitRoom extends Room {
     player.mount = state.mount
     player.catActive = state.catActive
     player.cat = state.cat
+    player.activeSlimePetId = state.activeSlimePetId
+    player.slimePet = state.slimePet
     player.equippedWeapon = state.equippedWeapon
     player.equippedTitleId = state.equippedTitleId
     player.characterAppearance = state.characterAppearance
@@ -413,6 +426,8 @@ export class VisitRoom extends Room {
         mount: player.mount,
         catActive: player.catActive,
         cat: player.cat,
+        activeSlimePetId: player.activeSlimePetId,
+        slimePet: player.slimePet,
         equippedWeapon: player.equippedWeapon,
         equippedTitleId: player.equippedTitleId,
         characterAppearance: player.characterAppearance,
