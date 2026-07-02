@@ -7,6 +7,7 @@
 // - sans metric : haut fait événementiel, débloqué au moment de l'action.
 
 export const LOCAL_ACHIEVEMENTS = [
+  { id: 'slime_tamer', icon: 'S', name: 'Dompteur de slime', description: 'Debloquer un slime en familier.', category: 'Collection' },
   // ── Combat ────────────────────────────────────────────────────────────────
   { id: 'kill_first_mob', icon: '⚔️', name: 'Premier sang', description: 'Vaincre ton premier monstre.', metric: 'mobKills', goal: 1, category: 'Combat' },
   { id: 'kill_skeleton', icon: '💀', name: 'Brise-os', description: 'Vaincre un squelette.', category: 'Combat' },

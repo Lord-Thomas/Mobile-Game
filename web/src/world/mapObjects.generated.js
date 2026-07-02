@@ -40,9 +40,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "meadow_ash_medium_02",
     "objectId": "tree_ashMedium",
     "position": [
-      16.25,
-      9.16741609277135,
-      -40.25
+      13,
+      0.3964669520060079,
+      56.75
     ],
     "rotationY": 2.2,
     "scale": 0.98
@@ -62,9 +62,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "meadow_ash_small_04",
     "objectId": "tree_ashSmall",
     "position": [
-      27.4,
-      0.14256817950892944,
-      9.6
+      -21.5,
+      0.34687477740882544,
+      61.75
     ],
     "rotationY": 5.4,
     "scale": 1.05
@@ -95,9 +95,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "forest_edge_ash_03",
     "objectId": "tree_ashMedium",
     "position": [
-      21.5,
-      10.0443112775266,
-      -37.5
+      -165.25,
+      3.7118965754529065,
+      10.5
     ],
     "rotationY": 4.7,
     "scale": 1.12
@@ -172,9 +172,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "southwest_forest_ash_05",
     "objectId": "tree_ashMedium",
     "position": [
-      -46.75,
-      1.2541618075312806,
-      -33.75
+      -94.5,
+      -0.19026185218527242,
+      88
     ],
     "rotationY": 5.5,
     "scale": 1.7
@@ -205,9 +205,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "southwest_forest_ash_08",
     "objectId": "tree_ashMedium",
     "position": [
-      -15.75,
-      2.3760972028397687,
-      -48
+      -15,
+      2.7433367033740073,
+      -47
     ],
     "rotationY": 0.9,
     "scale": 2.5
@@ -739,6 +739,248 @@ export const MAP_OBJECT_PLACEMENTS = [
     ],
     "rotationY": 1.5707963267948966,
     "scale": 1
+  },
+  {
+    "id": "tree_ashSmall_mr3g9qq2",
+    "objectId": "tree_ashSmall",
+    "position": [
+      -154,
+      5.090054335231311,
+      -9.25
+    ],
+    "rotationY": 3.7,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashSmall_mr3g9slu",
+    "objectId": "tree_ashSmall",
+    "position": [
+      -15.5,
+      1.369162519933447,
+      -22.75
+    ],
+    "rotationY": 2,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashSmall_mr3g9t65",
+    "objectId": "tree_ashSmall",
+    "position": [
+      -164,
+      3.2687284477957816,
+      69.25
+    ],
+    "rotationY": 2,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3g9uka",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -126.5,
+      3.6896380326464784,
+      -67
+    ],
+    "rotationY": 0.9,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3g9vfu",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -46.25,
+      3.037005898790375,
+      91.75
+    ],
+    "rotationY": 1.6,
+    "scale": 2.45
+  },
+  {
+    "id": "tree_ashMedium_mr3g9x1u",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -113.25,
+      2.3503403204911044,
+      132.5
+    ],
+    "rotationY": 1.2,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3g9y5c",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -166.25,
+      4.17753982190216,
+      40.25
+    ],
+    "rotationY": 1.2,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashSmall_mr3ga4bb",
+    "objectId": "tree_ashSmall",
+    "position": [
+      -93,
+      0.8263909167966313,
+      122.25
+    ],
+    "rotationY": 2,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3ga6ny",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -63,
+      1.7026291995895781,
+      107
+    ],
+    "rotationY": 5.8,
+    "scale": 0.96
+  },
+  {
+    "id": "tree_ashMedium_mr3gaear",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -51.25,
+      9.761966871068546,
+      164
+    ],
+    "rotationY": 0.9,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3gavo4",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -113.75,
+      0.6933310704316821,
+      1.75
+    ],
+    "rotationY": 5.5,
+    "scale": 1.7
+  },
+  {
+    "id": "tree_ashMedium_mr3gay1g",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -55.25,
+      0.026873109732717813,
+      51.75
+    ],
+    "rotationY": 5.5,
+    "scale": 1.7
+  },
+  {
+    "id": "tree_ashMedium_mr3gazou",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -138,
+      0.3433551991545668,
+      98
+    ],
+    "rotationY": 5.5,
+    "scale": 1.7
+  },
+  {
+    "id": "tree_ashMedium_mr3gb2du",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -178,
+      6.535550677798963,
+      61.25
+    ],
+    "rotationY": 1.2,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashSmall_mr3gb55q",
+    "objectId": "tree_ashSmall",
+    "position": [
+      -171.75,
+      7.0616238785849035,
+      -12.25
+    ],
+    "rotationY": 3.7,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3gb7lq",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -156,
+      7.030369131284486,
+      -45
+    ],
+    "rotationY": 0.9,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3gba74",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -152.75,
+      5.451390998968552,
+      149
+    ],
+    "rotationY": 1.2,
+    "scale": 2.5
+  },
+  {
+    "id": "tree_ashMedium_mr3gbm8m",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -10.5,
+      0.4755330837104054,
+      90
+    ],
+    "rotationY": 2.2,
+    "scale": 0.98
+  },
+  {
+    "id": "tree_ashMedium_mr3gbovj",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -163.25,
+      6.763469142136714,
+      102.75
+    ],
+    "rotationY": 2.2,
+    "scale": 0.98
+  },
+  {
+    "id": "tree_ashMedium_mr3gbq7p",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -138.25,
+      1.9485519961949458,
+      122.25
+    ],
+    "rotationY": 2.2,
+    "scale": 0.98
+  },
+  {
+    "id": "tree_ashMedium_mr3gbsnp",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -69,
+      -0.0020380085270598845,
+      86.5
+    ],
+    "rotationY": 2.2,
+    "scale": 0.98
+  },
+  {
+    "id": "tree_ashMedium_mr3gbtp7",
+    "objectId": "tree_ashMedium",
+    "position": [
+      -107.75,
+      -0.3581279454682316,
+      69.5
+    ],
+    "rotationY": 2.2,
+    "scale": 0.98
   }
 ]
 
@@ -892,9 +1134,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "mushroom",
     "heightOffset": 0,
     "position": [
-      -18,
-      2.864011261988809,
-      -46.25
+      -25.5,
+      2.3949350779971113,
+      -45.5
     ],
     "radius": 31,
     "populationMax": 10,
@@ -1000,15 +1242,15 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "cute_slime",
     "heightOffset": 0,
     "position": [
-      -21.25,
-      -0.14695209141025983,
-      -0.75
+      -105.5,
+      -0.3318291986628279,
+      80.75
     ],
-    "radius": 7,
-    "populationMax": 7,
+    "radius": 76,
+    "populationMax": 14,
     "respawnSeconds": 45,
     "minDistance": 5,
-    "maxHp": 15,
+    "maxHp": 25,
     "rewardCoins": 5,
     "attackDamage": 10,
     "sizeScale": 0.6,
@@ -1038,14 +1280,6 @@ export const MAP_MONSTER_SPAWNERS = [
     "aggressive": false,
     "variants": [
       {
-        "monsterType": "mushroom",
-        "weight": 5
-      },
-      {
-        "monsterType": "skeleton",
-        "weight": 10
-      },
-      {
         "monsterType": "cute_slime",
         "weight": 100
       }
@@ -1056,12 +1290,12 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "blue_slime",
     "heightOffset": 0,
     "position": [
-      -23.75,
-      -0.15420786595598904,
-      -0.5
+      -119,
+      -0.1855790278352481,
+      28.25
     ],
-    "radius": 11,
-    "populationMax": 4,
+    "radius": 59,
+    "populationMax": 5,
     "respawnSeconds": 45,
     "minDistance": 5,
     "maxHp": 60,
@@ -1071,11 +1305,11 @@ export const MAP_MONSTER_SPAWNERS = [
     "lootTable": [
       {
         "itemId": "bone",
-        "chance": 0.05
+        "chance": 0.1
       },
       {
         "itemId": "mushroom",
-        "chance": 0.1
+        "chance": 0.2
       },
       {
         "itemId": "red_crystal",
@@ -1087,11 +1321,11 @@ export const MAP_MONSTER_SPAWNERS = [
       },
       {
         "itemId": "blue_slime",
-        "chance": 1
+        "chance": 0.001
       }
     ],
     "patrol": true,
-    "aggressive": true,
+    "aggressive": false,
     "variants": [
       {
         "monsterType": "blue_slime",
@@ -1104,12 +1338,12 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "red_slime",
     "heightOffset": 0,
     "position": [
-      -28,
-      -0.14947030272602316,
-      1.25
+      -118.75,
+      -0.19571137834899544,
+      29.75
     ],
-    "radius": 25,
-    "populationMax": 2,
+    "radius": 46,
+    "populationMax": 3,
     "respawnSeconds": 45,
     "minDistance": 5,
     "maxHp": 120,
@@ -1135,7 +1369,7 @@ export const MAP_MONSTER_SPAWNERS = [
       },
       {
         "itemId": "red_slime",
-        "chance": 1
+        "chance": 0.001
       }
     ],
     "patrol": true,

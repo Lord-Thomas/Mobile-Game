@@ -15,7 +15,8 @@ export const GENERATED_ITEM_DEFINITIONS = [
       "/items/ame_slime_vert.png"
     ],
     "emoji": "📦",
-    "sellPrice": 6000
+    "sellPrice": 6000,
+    "slimePetId": "blue_slime"
   },
   {
     "id": "cute_slime",
@@ -33,7 +34,8 @@ export const GENERATED_ITEM_DEFINITIONS = [
       "/items/ame_slime_vert.png"
     ],
     "emoji": "📦",
-    "sellPrice": 3000
+    "sellPrice": 3000,
+    "slimePetId": "cute_slime"
   },
   {
     "id": "red_slime",
@@ -51,6 +53,7 @@ export const GENERATED_ITEM_DEFINITIONS = [
       "/items/ame_slime_vert.png"
     ],
     "emoji": "📦",
-    "sellPrice": 12000
+    "sellPrice": 12000,
+    "slimePetId": "red_slime"
   }
 ]

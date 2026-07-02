@@ -116,6 +116,8 @@ export const useGameStore = create((set) => ({
     applyWallToCeiling: false,
     ownedCat: false,
     catActive: false,
+    ownedSlimePets: [],
+    activeSlimePetId: null,
   },
   setInventory: (key, value) => set((state) => {
     const prev = state.inventory[key]

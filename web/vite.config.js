@@ -39,6 +39,18 @@ function titleFromObjectId(id) {
     .join(' ')
 }
 
+function normalizeGeneratedId(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9_-]+$/.test(value)
+    ? value
+    : null
+}
+
+function getSlimePetIdForLoot(id, name, existing = {}) {
+  const existingSlimePetId = normalizeGeneratedId(existing.slimePetId)
+  if (existingSlimePetId) return existingSlimePetId
+  return /slime/i.test(`${id} ${name ?? ''}`) ? id : null
+}
+
 function getMapObjectIdFromRelativePath(relativePath) {
   const normalized = relativePath.split(sep).join('/')
   const parts = normalized.split('/')
@@ -209,11 +221,13 @@ function createLootItemDefinitionsFromFiles(files, itemsDir, iconFiles = [], exi
       const sameDirIcon = iconOptions.find((icon) => (
         modelDir ? icon.startsWith(encodeURI(`/items/${modelDir}/`)) : icon.split('/').length === 3
       ))
+      const name = typeof existing.name === 'string' && existing.name.trim() ? existing.name.trim() : titleFromObjectId(id)
       const model = modelOptions.includes(existing.model) ? existing.model : publicPath
       const icon = iconOptions.includes(existing.icon) ? existing.icon : sameDirIcon ?? ''
+      const slimePetId = getSlimePetIdForLoot(id, name, existing)
       definitions.set(id, {
         id,
-        name: typeof existing.name === 'string' && existing.name.trim() ? existing.name.trim() : titleFromObjectId(id),
+        name,
         model,
         modelOptions,
         icon,
@@ -222,6 +236,7 @@ function createLootItemDefinitionsFromFiles(files, itemsDir, iconFiles = [], exi
         sellPrice: Number.isFinite(Number(existing.sellPrice))
           ? Math.max(0, Math.round(Number(existing.sellPrice)))
           : 10,
+        ...(slimePetId ? { slimePetId } : {}),
       })
     })
 
@@ -247,12 +262,14 @@ function sanitizeLootDefinitions(definitions) {
       const icon = typeof definition.icon === 'string' && iconOptions.includes(definition.icon)
         ? definition.icon
         : ''
+      const name = typeof definition.name === 'string' && definition.name.trim()
+        ? definition.name.trim().slice(0, 80)
+        : titleFromObjectId(id)
+      const slimePetId = getSlimePetIdForLoot(id, name, definition)
 
       return {
         id,
-        name: typeof definition.name === 'string' && definition.name.trim()
-          ? definition.name.trim().slice(0, 80)
-          : titleFromObjectId(id),
+        name,
         model,
         modelOptions,
         icon,
@@ -263,6 +280,7 @@ function sanitizeLootDefinitions(definitions) {
         sellPrice: Number.isFinite(Number(definition.sellPrice))
           ? Math.min(100000, Math.max(0, Math.round(Number(definition.sellPrice))))
           : 10,
+        ...(slimePetId ? { slimePetId } : {}),
       }
     })
     .filter(Boolean)

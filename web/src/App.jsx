@@ -25,7 +25,7 @@ import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurren
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
 import { connectColyseusVisitSession, getColyseusConnectionLabel } from './services/colyseusSessionService'
 import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generateThumbnailBlob'
-import { TITLES, getTitleDefinition, getTitleRarity } from './gameProgress/titles'
+import { TITLE_IDS, TITLES, getTitleDefinition, getTitleRarity } from './gameProgress/titles'
 import { LOCAL_ACHIEVEMENTS, getLocalAchievement, evaluateMetricAchievements } from './gameProgress/achievements'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
@@ -48,7 +48,7 @@ import { FIRST_QUEST_ID, QUEST_NPC_OBJECT_ID, getQuestDefinition } from './quest
 import { completeQuest as completeQuestState, isReadyToComplete, normalizeQuestProgress, registerKill, startQuest } from './quests/questState'
 import { rollLoot } from './items/lootTable'
 import { addItems, getMaterialEntries, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
-import { getItemDefinition } from './items/itemDefinitions'
+import { getItemDefinition, getSlimePetDefinitions } from './items/itemDefinitions'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
@@ -107,6 +107,30 @@ const ACTIVE_SESSION_STORAGE_PREFIX = 'lab_active_session_v1:'
 const ACTIVE_SESSION_MAX_AGE_MS = 10 * 60 * 1000
 const ACTIVE_SESSION_REJOIN_TIMEOUT_MS = 20000
 const activeSessionStorageKey = (userId) => `${ACTIVE_SESSION_STORAGE_PREFIX}${userId}`
+const SLIME_PET_DEFINITIONS = getSlimePetDefinitions()
+const VALID_SLIME_PET_IDS = new Set(SLIME_PET_DEFINITIONS.map((pet) => pet.petId))
+const LOCAL_TITLE_IDS = new Set(Object.values(TITLES).filter((title) => title.local).map((title) => title.id))
+
+function normalizeOwnedSlimePets(values) {
+  return Array.isArray(values)
+    ? Array.from(new Set(values.filter((value) => typeof value === 'string' && VALID_SLIME_PET_IDS.has(value))))
+    : []
+}
+
+function normalizeActiveSlimePetId(value, ownedSlimePetIds) {
+  return typeof value === 'string' && ownedSlimePetIds.includes(value) ? value : null
+}
+
+function mergeLocalTitleIds(serverTitleIds = [], currentTitleIds = []) {
+  return Array.from(new Set([
+    ...serverTitleIds,
+    ...currentTitleIds.filter((titleId) => LOCAL_TITLE_IDS.has(titleId)),
+  ]))
+}
+
+function isRainbowTitle(title) {
+  return title?.id === TITLE_IDS.slimeMaster
+}
 
 // Reads the persisted session (if any) for a user without applying it.
 function readSavedSession(userId) {
@@ -6154,7 +6178,7 @@ function PlayerNameplateAnchor({ playerPositionRef, label, title }) {
         <div className="remote-player-nameplate">
           {label && <div className="remote-player-label">{label}</div>}
           {title && (
-            <div className="remote-player-title" style={{ '--title-color': rarity.color }}>
+            <div className={`remote-player-title ${isRainbowTitle(title) ? 'rainbow-title-text' : ''}`} style={{ '--title-color': rarity.color }}>
               {title.name}
             </div>
           )}
@@ -6460,7 +6484,7 @@ function RemotePlayer({
             <div className="remote-player-nameplate">
               <div className="remote-player-label">{label}</div>
               {displayedTitle && (
-                <div className="remote-player-title" style={{ '--title-color': getTitleRarity(displayedTitle).color }}>
+                <div className={`remote-player-title ${isRainbowTitle(displayedTitle) ? 'rainbow-title-text' : ''}`} style={{ '--title-color': getTitleRarity(displayedTitle).color }}>
                   {displayedTitle.name}
                 </div>
               )}
@@ -7517,7 +7541,7 @@ function AchievementsPanel({
               disabled={!unlocked || busy}
               onClick={() => onToggleTitle(title.id)}
             >
-              <span className="title-card-name">{title.name}</span>
+              <span className={`title-card-name ${isRainbowTitle(title) ? 'rainbow-title-text' : ''}`}>{title.name}</span>
               <span className="title-card-meta">
                 {unlocked ? equipped ? 'Equipe' : 'Debloque' : 'Verrouille'} / {rarity.label}
               </span>
@@ -9100,6 +9124,15 @@ function getSpawnerMobConfig(monsterType, spawner) {
     wanderRadius: spawner.patrol ? Math.max(0.8, Math.min(baseConfig.wanderRadius ?? 3.8, radius * 0.35)) : 0,
     leashRange: Math.max(baseConfig.leashRange ?? 18, radius + 6),
   }
+}
+
+function getSlimePetWildConfig(slimePetId) {
+  const spawner = MAP_MONSTER_SPAWNERS.find((candidate) => (
+    candidate.monsterType === slimePetId ||
+    candidate.variants?.some((variant) => variant.monsterType === slimePetId)
+  ))
+  if (spawner) return getSpawnerMobConfig(slimePetId, { ...spawner, monsterType: slimePetId })
+  return MOB_CONFIGS[slimePetId] ?? MOB_CONFIGS.mushroom
 }
 
 function getMonsterSpawnerSlots() {
@@ -12773,6 +12806,9 @@ function EnvironmentMenu({
   mountItems = [],
   ownedMountIds = [],
   onBuyMount,
+  ownedSlimePets = [],
+  activeSlimePetId = null,
+  onToggleSlimePet,
 }) {
   if (!open) return null
 
@@ -12801,6 +12837,7 @@ function EnvironmentMenu({
   const canCheckoutCart = cartItemCount > 0 && (hasUnlimitedCoins || coins >= cartTotal)
   const magicBookShopItem = objectCatalog.magic_book
   const magicSkullShopItem = objectCatalog.magic_skull
+  const ownedSlimePetCards = SLIME_PET_DEFINITIONS.filter((pet) => ownedSlimePets.includes(pet.petId))
 
   return (
     <div className="skin-menu-overlay environment-shop-overlay">
@@ -13037,6 +13074,24 @@ function EnvironmentMenu({
                   </button>
                 )}
               </div>
+              {ownedSlimePetCards.map((pet) => {
+                const active = activeSlimePetId === pet.petId
+                return (
+                <div key={pet.petId} className="animal-shop-card">
+                  <div className="animal-shop-preview">
+                    <ItemIcon def={getItemDefinition(pet.itemId)} className="animal-shop-item-icon" />
+                  </div>
+                  <span className="animal-shop-name">{pet.name}</span>
+                  <button
+                    type="button"
+                    className={`animal-toggle-btn ${active ? 'dismiss' : 'summon'}`}
+                    onClick={() => onToggleSlimePet?.(pet.petId)}
+                  >
+                    {active ? 'Renvoyer' : 'Invoquer'}
+                  </button>
+                </div>
+                )
+              })}
             </div>
           </>
         ) : isFurnitureTab ? (
@@ -14559,6 +14614,8 @@ function App() {
   const isNearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
   const ownedCat = useGameStore((s) => s.inventory.ownedCat)
   const catActive = useGameStore((s) => s.inventory.catActive)
+  const ownedSlimePets = useGameStore((s) => s.inventory.ownedSlimePets)
+  const activeSlimePetId = useGameStore((s) => s.inventory.activeSlimePetId)
   const ownedMagicBook = useGameStore((s) => s.equipment.ownedMagicBook)
   const ownedMagicSkull = useGameStore((s) => s.equipment.ownedMagicSkull)
   const magicSkullDiscovered = useGameStore((s) => s.progress.magicSkullDiscovered)
@@ -14824,6 +14881,14 @@ function App() {
   }, [ownedMagicSkull, magicSkullDiscovered])
 
   useEffect(() => {
+    const normalizedOwnedSlimePets = normalizeOwnedSlimePets(ownedSlimePets)
+    if (!activeSlimePetId) return
+    if (!normalizedOwnedSlimePets.includes(activeSlimePetId)) {
+      setInventory('activeSlimePetId',null)
+    }
+  }, [activeSlimePetId, ownedSlimePets])
+
+  useEffect(() => {
     if (!authUser?.id) return
     localStorage.setItem(`lab_friends_v1:${authUser.id}`, JSON.stringify(friends))
   }, [authUser?.id, friends])
@@ -14935,6 +15000,8 @@ function App() {
     editableObjects,
     ownedCat,
     catActive,
+    ownedSlimePets,
+    activeSlimePetId,
     ownedMagicBook,
     ownedMagicSkull,
     magicSkullDiscovered,
@@ -14943,6 +15010,7 @@ function App() {
     mobKillCount,
     ownedMounts,
     equippedWeapon,
+    ownedTitleIds,
     equippedTitleId,
     characterAppearance,
     friends,
@@ -14979,6 +15047,8 @@ function App() {
       ownedWallSkins,
       ownedCat,
       catActive,
+      ownedSlimePets,
+      activeSlimePetId,
       ownedMagicBook,
       ownedMagicSkull,
       magicSkullDiscovered,
@@ -14987,6 +15057,7 @@ function App() {
       mobKillCount,
       ownedMounts,
       equippedWeapon,
+      ownedTitleIds,
       equippedTitleId,
       characterAppearance,
       friends,
@@ -15028,6 +15099,8 @@ function App() {
     setSeatedState(null)
     setInventory('ownedCat',false)
     setInventory('catActive',false)
+    setInventory('ownedSlimePets',[])
+    setInventory('activeSlimePetId',null)
     setEquipment('ownedMagicBook',false)
     setEquipment('ownedMagicSkull',false)
     setProgress('magicSkullDiscovered',isAdminMode)
@@ -15161,6 +15234,11 @@ function App() {
     if (includeInventory) {
       if (typeof parsed.ownedCat === 'boolean') setInventory('ownedCat',parsed.ownedCat)
       if (typeof parsed.catActive === 'boolean') setInventory('catActive',parsed.catActive)
+      const parsedOwnedSlimePets = normalizeOwnedSlimePets(parsed.ownedSlimePets)
+      const parsedActiveSlimePetId = normalizeActiveSlimePetId(parsed.activeSlimePetId, parsedOwnedSlimePets)
+      setInventory('ownedSlimePets',parsedOwnedSlimePets)
+      setInventory('activeSlimePetId',parsedActiveSlimePetId)
+      if (parsedActiveSlimePetId) setInventory('catActive',false)
       // Hauts faits locaux : on charge le set sauvegardé (les hauts faits
       // événementiels ne sont pas redérivables, il faut les conserver).
       const parsedAchievements = Array.isArray(parsed.unlockedAchievements)
@@ -15188,6 +15266,9 @@ function App() {
         (savedEquipped === 'magic_book' && hasMagicBook) ||
         (savedEquipped === 'magic_skull' && hasMagicSkull)
       setEquipment('equippedWeapon',equippedIsValid ? savedEquipped : null)
+    }
+    if (includeIdentity && Array.isArray(parsed.ownedTitleIds)) {
+      setEquipment('ownedTitleIds',mergeLocalTitleIds(parsed.ownedTitleIds, useGameStore.getState().equipment.ownedTitleIds))
     }
     if (includeIdentity && (typeof parsed.equippedTitleId === 'string' || parsed.equippedTitleId === null)) setEquipment('equippedTitleId',parsed.equippedTitleId)
     if (includeIdentity && Array.isArray(parsed.friends)) {
@@ -15287,15 +15368,21 @@ function App() {
 
   const refreshPlayerTitles = async () => {
     if (!isSupabaseConfigured || !authUserRef.current) {
-      setEquipment('ownedTitleIds',[])
-      setEquipment('equippedTitleId',null)
+      const currentTitleIds = useGameStore.getState().equipment.ownedTitleIds
+      setEquipment('ownedTitleIds',currentTitleIds.filter((titleId) => LOCAL_TITLE_IDS.has(titleId)))
+      if (!LOCAL_TITLE_IDS.has(useGameStore.getState().equipment.equippedTitleId)) setEquipment('equippedTitleId',null)
       return null
     }
 
     const titleState = await loadPlayerTitles({ scope: progressScope })
     const ownedTitles = Array.isArray(titleState?.ownedTitles) ? titleState.ownedTitles : []
-    setEquipment('ownedTitleIds',ownedTitles.map((title) => title.titleId).filter(Boolean))
-    setEquipment('equippedTitleId',titleState?.equippedTitleId ?? null)
+    const mergedTitleIds = mergeLocalTitleIds(
+      ownedTitles.map((title) => title.titleId).filter(Boolean),
+      useGameStore.getState().equipment.ownedTitleIds,
+    )
+    setEquipment('ownedTitleIds',mergedTitleIds)
+    const localEquippedTitleId = useGameStore.getState().equipment.equippedTitleId
+    setEquipment('equippedTitleId',titleState?.equippedTitleId ?? (LOCAL_TITLE_IDS.has(localEquippedTitleId) ? localEquippedTitleId : null))
     return titleState
   }
 
@@ -15360,8 +15447,14 @@ function App() {
   }
 
   const toggleEquippedTitle = async (titleId) => {
-    if (!isSupabaseConfigured || !authUserRef.current || !ownedTitleIds.includes(titleId)) return
+    if (!ownedTitleIds.includes(titleId)) return
     const nextTitleId = equippedTitleId === titleId ? null : titleId
+    const title = getTitleDefinition(titleId)
+    if (title?.local) {
+      setEquipment('equippedTitleId',nextTitleId)
+      return
+    }
+    if (!isSupabaseConfigured || !authUserRef.current) return
     setTitleActionState(titleId)
     try {
       await equipPlayerTitle(nextTitleId, { scope: progressScope })
@@ -15392,7 +15485,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -15730,8 +15823,9 @@ function App() {
       if (!user) {
         hasLoadedCloudProgressRef.current = false
         setAccount('cloudSaveState','offline')
-        setEquipment('ownedTitleIds',[])
-        setEquipment('equippedTitleId',null)
+        const currentTitleIds = useGameStore.getState().equipment.ownedTitleIds
+        setEquipment('ownedTitleIds',currentTitleIds.filter((titleId) => LOCAL_TITLE_IDS.has(titleId)))
+        if (!LOCAL_TITLE_IDS.has(useGameStore.getState().equipment.equippedTitleId)) setEquipment('equippedTitleId',null)
         return
       }
       setAccount('displayName',(current) => current || getUserDisplayName(user))
@@ -15764,8 +15858,9 @@ function App() {
         authUserRef.current = user
         if (!user) {
           setAccount('cloudSaveState','offline')
-          setEquipment('ownedTitleIds',[])
-          setEquipment('equippedTitleId',null)
+          const currentTitleIds = useGameStore.getState().equipment.ownedTitleIds
+          setEquipment('ownedTitleIds',currentTitleIds.filter((titleId) => LOCAL_TITLE_IDS.has(titleId)))
+          if (!LOCAL_TITLE_IDS.has(useGameStore.getState().equipment.equippedTitleId)) setEquipment('equippedTitleId',null)
           return null
         }
         setAccount('displayName',(current) => current || getUserDisplayName(user))
@@ -15820,7 +15915,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -16072,10 +16167,56 @@ function App() {
     setLootDrops((prev) => prev.filter((drop) => drop.id !== dropId))
   }
 
+  const unlockLocalTitle = (titleId) => {
+    const title = getTitleDefinition(titleId)
+    if (!title?.local) return
+    let unlocked = false
+    setEquipment('ownedTitleIds',(current) => {
+      const currentIds = Array.isArray(current) ? current : []
+      if (currentIds.includes(titleId)) return current
+      unlocked = true
+      return [...currentIds, titleId]
+    })
+    if (unlocked && !suppressAchievementToastsRef.current) {
+      showAchievementToast({
+        kind: 'info',
+        kicker: 'Titre obtenu',
+        name: title.name,
+        description: title.description,
+      })
+    }
+  }
+
+  const unlockSlimePetFromLoot = (itemId) => {
+    const item = getItemDefinition(itemId)
+    const slimePetId = item?.slimePetId
+    if (!slimePetId || !VALID_SLIME_PET_IDS.has(slimePetId)) return
+
+    let unlocked = false
+    let nextOwnedSlimePets = []
+    setInventory('ownedSlimePets',(current) => {
+      const normalized = normalizeOwnedSlimePets(current)
+      if (normalized.includes(slimePetId)) {
+        nextOwnedSlimePets = normalized
+        return normalized.length === current?.length ? current : normalized
+      }
+      unlocked = true
+      nextOwnedSlimePets = [...normalized, slimePetId]
+      return nextOwnedSlimePets
+    })
+
+    if (!unlocked) return
+    unlockAchievement('slime_tamer')
+    const hasAllSlimes = SLIME_PET_DEFINITIONS.length > 0
+      && SLIME_PET_DEFINITIONS.every((pet) => nextOwnedSlimePets.includes(pet.petId))
+    if (hasAllSlimes) unlockLocalTitle(TITLE_IDS.slimeMaster)
+  }
+
   // Le joueur absorbe un objet au sol : il rejoint l'inventaire + petit popup.
   const absorbLootDrop = (dropId, itemId) => {
     setLootDrops((prev) => prev.filter((drop) => drop.id !== dropId))
     setEconomy('materials',(prev) => addItems(prev, [itemId]))
+    unlockSlimePetFromLoot(itemId)
     const p = playerPositionRef.current
     setScorePopups((previous) => [
       ...previous,
@@ -16601,7 +16742,24 @@ function App() {
     // allowed while visiting too — the other player sees it via networked state.
     if (mode !== 'play') return
     if (!ownedCat) return
-    setInventory('catActive',(v) => !v)
+    const nextCatActive = !useGameStore.getState().inventory.catActive
+    setInventory('catActive',nextCatActive)
+    if (nextCatActive) {
+      setInventory('activeSlimePetId',null)
+    } else {
+      setCameraOnCat(false)
+    }
+  }
+
+  const toggleSlimePet = (slimePetId) => {
+    if (mode !== 'play') return
+    if (!ownedSlimePets.includes(slimePetId)) return
+    const nextSlimePetId = activeSlimePetId === slimePetId ? null : slimePetId
+    setInventory('activeSlimePetId',nextSlimePetId)
+    if (nextSlimePetId) {
+      setInventory('catActive',false)
+      setCameraOnCat(false)
+    }
   }
 
   const toggleMount = (mountId) => {
@@ -17323,6 +17481,17 @@ function App() {
                 }}
               />
             )}
+            {activeSlimePetId && (
+              <Suspense fallback={null}>
+                <SlimePet
+                  key={activeSlimePetId}
+                  slimePetId={activeSlimePetId}
+                  playerPositionRef={playerPositionRef}
+                  playerVelocityRef={playerVelocityRef}
+                  currentZone={currentZone}
+                />
+              </Suspense>
+            )}
             {activeMountConfig && (
               <MountedMount
                 key={activeMountConfig.id}
@@ -18028,8 +18197,11 @@ function App() {
         onCheckoutFurnitureCart={checkoutFurnitureCart}
         ownedCat={ownedCat}
         catActive={catActive}
+        ownedSlimePets={ownedSlimePets}
+        activeSlimePetId={activeSlimePetId}
         onBuyCat={buyCat}
         onToggleCat={toggleCat}
+        onToggleSlimePet={toggleSlimePet}
         ownedMagicBook={ownedMagicBook}
         onBuyMagicBook={buyMagicBook}
         ownedMagicSkull={ownedMagicSkull}
@@ -18162,6 +18334,277 @@ const CAT_OFFSETS = [
   { side:  0.5, back: 0.3 },
   { side:  0.0, back: 1.1 },
 ]
+
+function usePetEnemyModel(cfg) {
+  const { scene: sourceModel } = useEnemySourceModel(cfg)
+  const isGlbModel = cfg.modelFormat === 'glb'
+
+  return useMemo(() => {
+    const source = clone(sourceModel)
+    if (isGlbModel) prepareEnemyGlbTransforms(source)
+    source.updateWorldMatrix(true, true)
+    const box = new Box3().setFromObject(source, true)
+    const size = box.getSize(new Vector3())
+    const center = box.getCenter(new Vector3())
+    const targetHeight = (cfg.modelTargetHeight ?? 1.15) * WORLD_UNITS_PER_METER
+    const scale = targetHeight / Math.max(size.y, 0.001)
+
+    source.traverse((child) => {
+      if (!(child instanceof Mesh)) return
+      child.castShadow = true
+      child.receiveShadow = true
+      child.frustumCulled = false
+      const materials = Array.isArray(child.material) ? child.material : [child.material]
+      const patchedMaterials = materials.map((material) => {
+        if (!material) return material
+        const nextMaterial = material.clone()
+        nextMaterial.side = DoubleSide
+        if (cfg.materialColor) {
+          nextMaterial.map = null
+          nextMaterial.alphaMap = null
+          nextMaterial.transparent = false
+          nextMaterial.opacity = 1
+          nextMaterial.depthWrite = true
+          nextMaterial.color?.set(cfg.materialColor)
+        }
+        nextMaterial.needsUpdate = true
+        return nextMaterial
+      })
+      child.material = Array.isArray(child.material) ? patchedMaterials : patchedMaterials[0]
+    })
+
+    return {
+      object: source,
+      offset: [-center.x, -box.min.y, -center.z],
+      scale,
+    }
+  }, [cfg.materialColor, cfg.modelTargetHeight, isGlbModel, sourceModel])
+}
+
+function SlimePet({ slimePetId, playerPositionRef, playerVelocityRef, currentZone }) {
+  const cfg = useMemo(() => getSlimePetWildConfig(slimePetId), [slimePetId])
+  const model = usePetEnemyModel(cfg)
+  const groupRef = useRef()
+  const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const initializedRef = useRef(false)
+  const stateRef = useRef(PET_STATE.IDLE_NEAR)
+  const timerRef = useRef(CAT_SIT_DELAY)
+  const lazyTimerRef = useRef(0)
+  const wanderTargetRef = useRef(new Vector3())
+  const offsetRef = useRef(CAT_OFFSETS[1])
+
+  const getFloorY = useCallback((x, z) => (
+    currentZone === ZONES.outside ? getTerrainHeight(x, z) : 0
+  ), [currentZone])
+
+  const pickOffset = useCallback(() => {
+    const prev = offsetRef.current
+    const choices = CAT_OFFSETS.filter((offset) => offset !== prev)
+    offsetRef.current = choices[Math.floor(Math.random() * choices.length)]
+  }, [])
+
+  const computeTarget = useCallback((pp, pv, side, back) => {
+    const speed = Math.hypot(pv.x, pv.z)
+    let fwdX
+    let fwdZ
+    if (speed > 0.15) {
+      fwdX = pv.x / speed
+      fwdZ = pv.z / speed
+    } else {
+      const group = groupRef.current
+      if (!group) return { x: pp.x, z: pp.z }
+      const dx = pp.x - group.position.x
+      const dz = pp.z - group.position.z
+      const dist = Math.hypot(dx, dz) || 1
+      fwdX = dx / dist
+      fwdZ = dz / dist
+    }
+    const rightX = fwdZ
+    const rightZ = -fwdX
+    return {
+      x: pp.x - fwdX * back + rightX * side,
+      z: pp.z - fwdZ * back + rightZ * side,
+    }
+  }, [])
+
+  const arriveToward = useCallback((tx, tz, maxSpeed, delta) => {
+    const group = groupRef.current
+    if (!group) return 0
+    const dx = tx - group.position.x
+    const dz = tz - group.position.z
+    const dist = Math.hypot(dx, dz)
+    if (dist < 0.02) return 0
+    if (dist > 7) {
+      group.position.set(tx, getFloorY(tx, tz), tz)
+      return 0
+    }
+    const speed = maxSpeed * MathUtils.clamp(dist / CAT_SLOW_RADIUS, 0, 1)
+    const step = Math.min(speed * delta, dist)
+    group.position.x += (dx / dist) * step
+    group.position.z += (dz / dist) * step
+    group.position.y = getFloorY(group.position.x, group.position.z)
+    return dist
+  }, [getFloorY])
+
+  const turnToward = useCallback((tx, tz, delta) => {
+    const group = groupRef.current
+    if (!group) return
+    const dx = tx - group.position.x
+    const dz = tz - group.position.z
+    if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return
+    let diff = Math.atan2(dx, dz) - group.rotation.y
+    while (diff > Math.PI) diff -= Math.PI * 2
+    while (diff < -Math.PI) diff += Math.PI * 2
+    group.rotation.y += diff * Math.min(CAT_TURN_SPEED * delta, 1)
+  }, [])
+
+  useFrame((_, delta) => {
+    const group = groupRef.current
+    const pp = playerPositionRef?.current
+    if (!group || !pp) return
+
+    const pv = playerVelocityRef?.current ?? { x: 0, z: 0 }
+    const playerSpeed = Math.hypot(pv.x, pv.z)
+
+    if (!initializedRef.current) {
+      const { side, back } = offsetRef.current
+      const target = computeTarget(pp, pv, side, back)
+      group.position.set(target.x, getFloorY(target.x, target.z), target.z)
+      initializedRef.current = true
+    }
+
+    group.position.y = getFloorY(group.position.x, group.position.z)
+    const distToPlayer = Math.hypot(pp.x - group.position.x, pp.z - group.position.z)
+    const state = stateRef.current
+
+    if (state === PET_STATE.IDLE_NEAR) {
+      if (distToPlayer > CAT_LAZY_MOVE_DIST) {
+        lazyTimerRef.current += delta
+        if (lazyTimerRef.current >= CAT_LAZY_MOVE_TIME) {
+          lazyTimerRef.current = 0
+          if (playerSpeed > CAT_RUN_PLAYER_SPEED) {
+            pickOffset()
+            stateRef.current = PET_STATE.RUN_WITH_PLAYER
+          } else if (distToPlayer > CAT_CATCHUP_DIST) {
+            stateRef.current = PET_STATE.CATCH_UP
+          } else {
+            pickOffset()
+            stateRef.current = PET_STATE.FOLLOW
+            timerRef.current = CAT_SIT_DELAY
+          }
+        }
+      } else {
+        lazyTimerRef.current = Math.max(0, lazyTimerRef.current - delta * 2)
+      }
+      timerRef.current -= delta
+      currentPositionRef.current.x = group.position.x
+      currentPositionRef.current.y = group.position.y
+      currentPositionRef.current.z = group.position.z
+      return
+    }
+
+    if (distToPlayer <= CAT_IDLE_DIST && state !== PET_STATE.WANDER) {
+      stateRef.current = PET_STATE.IDLE_NEAR
+      timerRef.current = CAT_SIT_DELAY
+      lazyTimerRef.current = 0
+      currentPositionRef.current.x = group.position.x
+      currentPositionRef.current.y = group.position.y
+      currentPositionRef.current.z = group.position.z
+      return
+    }
+
+    if (state === PET_STATE.FOLLOW) {
+      if (playerSpeed > CAT_RUN_PLAYER_SPEED) {
+        pickOffset()
+        stateRef.current = PET_STATE.RUN_WITH_PLAYER
+        return
+      }
+      if (distToPlayer > CAT_CATCHUP_DIST) {
+        stateRef.current = PET_STATE.CATCH_UP
+        return
+      }
+    }
+
+    if (state === PET_STATE.CATCH_UP && distToPlayer <= CAT_CATCHUP_DIST * 0.7) {
+      pickOffset()
+      stateRef.current = PET_STATE.FOLLOW
+      timerRef.current = CAT_SIT_DELAY
+    }
+
+    if (state === PET_STATE.RUN_WITH_PLAYER && playerSpeed <= CAT_RUN_PLAYER_SPEED * 0.7 && distToPlayer <= CAT_CATCHUP_DIST) {
+      pickOffset()
+      stateRef.current = PET_STATE.FOLLOW
+      timerRef.current = CAT_SIT_DELAY
+    }
+
+    if (stateRef.current === PET_STATE.FOLLOW) {
+      const { side, back } = offsetRef.current
+      const target = computeTarget(pp, pv, side, back)
+      turnToward(target.x, target.z, delta)
+      arriveToward(target.x, target.z, CAT_MAX_WALK_SPEED, delta)
+    } else if (stateRef.current === PET_STATE.CATCH_UP) {
+      turnToward(pp.x, pp.z, delta)
+      arriveToward(pp.x, pp.z, CAT_MAX_RUN_SPEED, delta)
+    } else if (stateRef.current === PET_STATE.RUN_WITH_PLAYER) {
+      const { side, back } = offsetRef.current
+      const target = computeTarget(pp, pv, side, back)
+      turnToward(target.x, target.z, delta)
+      arriveToward(target.x, target.z, CAT_MAX_RUN_SPEED, delta)
+    } else if (stateRef.current === PET_STATE.WANDER) {
+      if (distToPlayer > CAT_CATCHUP_DIST) {
+        stateRef.current = PET_STATE.CATCH_UP
+      } else {
+        const target = wanderTargetRef.current
+        turnToward(target.x, target.z, delta)
+        const remaining = arriveToward(target.x, target.z, CAT_MAX_WALK_SPEED * 0.75, delta)
+        timerRef.current -= delta
+        if (remaining < 0.2 || timerRef.current <= 0) {
+          stateRef.current = PET_STATE.IDLE_NEAR
+          timerRef.current = CAT_SIT_DELAY
+          lazyTimerRef.current = 0
+        }
+      }
+    }
+
+    currentPositionRef.current.x = group.position.x
+    currentPositionRef.current.y = group.position.y
+    currentPositionRef.current.z = group.position.z
+  })
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (stateRef.current !== PET_STATE.IDLE_NEAR) return
+      if (!playerPositionRef?.current || !groupRef.current) return
+      const pv = playerVelocityRef?.current ?? { x: 0, z: 0 }
+      if (Math.hypot(pv.x, pv.z) > 0.2) return
+      if (Math.random() > 0.5) return
+      const pp = playerPositionRef.current
+      const angle = Math.random() * Math.PI * 2
+      const r = CAT_WANDER_RADIUS * (0.4 + Math.random() * 0.6)
+      wanderTargetRef.current.set(pp.x + Math.cos(angle) * r, 0, pp.z + Math.sin(angle) * r)
+      stateRef.current = PET_STATE.WANDER
+      timerRef.current = 3 + Math.random() * 3
+    }, CAT_WANDER_INTERVAL)
+    return () => clearInterval(id)
+  }, [playerPositionRef, playerVelocityRef])
+
+  return (
+    <group ref={groupRef} position={[1, 0, 2]} userData={{ debugCategory: 'npcs' }}>
+      {cfg.squashStretch ? (
+        <SquashStretchModel
+          object={model.object}
+          offset={model.offset}
+          scale={model.scale}
+          positionRef={currentPositionRef}
+        />
+      ) : (
+        <group scale={model.scale}>
+          <primitive object={model.object} position={model.offset} />
+        </group>
+      )}
+    </group>
+  )
+}
 
 function Cat({ playerPositionRef, playerVelocityRef, currentZone, catPositionRef, catGroupRef, onNetworkState = null }) {
   const { scene, animations } = useGLTF('/models/cat.glb')

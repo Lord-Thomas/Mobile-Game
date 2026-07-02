@@ -1,5 +1,6 @@
 export const TITLE_IDS = {
   firstMobSlayerFounder: 'first_mob_slayer_founder',
+  slimeMaster: 'slime_master',
 }
 
 export const ACHIEVEMENT_IDS = {
@@ -42,6 +43,14 @@ export const TITLES = {
     rarity: 'founder',
     limited: true,
     maxOwners: 50,
+    obtainable: true,
+  },
+  [TITLE_IDS.slimeMaster]: {
+    id: TITLE_IDS.slimeMaster,
+    name: 'Maitre des slimes',
+    description: 'Debloque tous les slimes en familiers.',
+    rarity: 'epic',
+    local: true,
     obtainable: true,
   },
 }

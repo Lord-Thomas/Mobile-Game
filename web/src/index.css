@@ -926,6 +926,34 @@ canvas {
   opacity: 1;
 }
 
+.rainbow-title-text {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    #ff1744 0%,
+    #ff6d00 14%,
+    #ffea00 28%,
+    #22e600 43%,
+    #00d8ff 58%,
+    #2962ff 75%,
+    #ff00e5 100%
+  );
+  background-size: 165% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-stroke: 0.18px rgba(255, 255, 255, 0.82);
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 0.5),
+    0 1px 3px rgba(0, 0, 0, 0.72);
+  filter: saturate(1.35) brightness(0.92);
+  animation: rainbow-title-shift 4.2s linear infinite;
+}
+
+@keyframes rainbow-title-shift {
+  from { background-position: 0% 50%; }
+  to { background-position: 180% 50%; }
+}
+
 .free-camera-badge {
   position: absolute;
   top: 66px;

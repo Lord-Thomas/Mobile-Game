@@ -61,6 +61,12 @@ function mergeProgressRow(existingRow, progress) {
   const existing = fromProgressRow(existingRow)
   const ownedWeapons = mergeUnique(existing.ownedWeapons, progress.ownedWeapons)
   const ownedMounts = mergeUnique(existing.ownedMounts, progress.ownedMounts)
+  const ownedSlimePets = mergeUnique(existing.ownedSlimePets, progress.ownedSlimePets)
+  const ownedTitleIds = mergeUnique(existing.ownedTitleIds, progress.ownedTitleIds)
+  const hasActiveSlimePetState = Object.prototype.hasOwnProperty.call(progress, 'activeSlimePetId')
+  const activeSlimePetId = hasActiveSlimePetState
+    ? (ownedSlimePets.includes(progress.activeSlimePetId) ? progress.activeSlimePetId : null)
+    : (ownedSlimePets.includes(existing.activeSlimePetId) ? existing.activeSlimePetId : null)
   const unlockedAchievements = mergeUnique(existing.unlockedAchievements, progress.unlockedAchievements)
   const mobKillCount = Math.max(normalizeCount(existing.mobKillCount), normalizeCount(progress.mobKillCount))
   const friends = mergeFriends(existing.friends, progress.friends)
@@ -87,6 +93,9 @@ function mergeProgressRow(existingRow, progress) {
       : progress.selectedWallSkinId,
     ownedWeapons,
     ownedMounts,
+    ownedSlimePets,
+    activeSlimePetId,
+    ownedTitleIds,
     unlockedAchievements,
     mobKillCount,
     friends,
@@ -191,10 +200,14 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
       applyWallToCeiling: progress.applyWallToCeiling,
       ownedCat: progress.ownedCat ?? false,
       catActive: progress.catActive ?? false,
+      ownedSlimePets: normalizeStringList(progress.ownedSlimePets),
+      activeSlimePetId: progress.activeSlimePetId ?? null,
       ownedMagicBook: progress.ownedMagicBook ?? false,
       magicSkullDiscovered: progress.magicSkullDiscovered ?? progress.ownedWeapons?.includes?.('magic_skull') ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       ownedMounts: progress.ownedMounts ?? [],
+      ownedTitleIds: normalizeStringList(progress.ownedTitleIds),
+      equippedTitleId: progress.equippedTitleId ?? null,
       unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
       mobKillCount: normalizeCount(progress.mobKillCount),
       equippedWeapon: progress.equippedWeapon ?? null,
@@ -228,10 +241,14 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       applyWallToCeiling: progress.applyWallToCeiling,
       ownedCat: progress.ownedCat ?? false,
       catActive: progress.catActive ?? false,
+      ownedSlimePets: normalizeStringList(progress.ownedSlimePets),
+      activeSlimePetId: progress.activeSlimePetId ?? null,
       ownedMagicBook: progress.ownedMagicBook ?? false,
       magicSkullDiscovered: progress.magicSkullDiscovered ?? progress.ownedWeapons?.includes?.('magic_skull') ?? false,
       ownedWeapons: progress.ownedWeapons ?? (progress.ownedMagicBook ? ['magic_book'] : []),
       ownedMounts: progress.ownedMounts ?? [],
+      ownedTitleIds: normalizeStringList(progress.ownedTitleIds),
+      equippedTitleId: progress.equippedTitleId ?? null,
       unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
       mobKillCount: normalizeCount(progress.mobKillCount),
       equippedWeapon: progress.equippedWeapon ?? null,
@@ -269,14 +286,17 @@ export function fromProgressRow(row) {
     applyWallToCeiling: Boolean(row.world_settings?.applyWallToCeiling),
     ownedCat: Boolean(row.world_settings?.ownedCat),
     catActive: Boolean(row.world_settings?.catActive),
+    ownedSlimePets: normalizeStringList(row.world_settings?.ownedSlimePets),
+    activeSlimePetId: typeof row.world_settings?.activeSlimePetId === 'string' ? row.world_settings.activeSlimePetId : null,
     ownedMagicBook,
     magicSkullDiscovered: Boolean(row.world_settings?.magicSkullDiscovered || ownedWeapons.includes('magic_skull')),
     ownedWeapons: ownedMagicBook ? mergeUnique(ownedWeapons, ['magic_book']) : ownedWeapons,
     ownedMounts,
+    ownedTitleIds: normalizeStringList(row.world_settings?.ownedTitleIds),
     unlockedAchievements: normalizeStringList(row.world_settings?.unlockedAchievements),
     mobKillCount: normalizeCount(row.world_settings?.mobKillCount),
     equippedWeapon: typeof row.world_settings?.equippedWeapon === 'string' ? row.world_settings.equippedWeapon : null,
-    equippedTitleId: row.equipped_title_id ?? null,
+    equippedTitleId: row.equipped_title_id ?? row.world_settings?.equippedTitleId ?? null,
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],
     characterAppearance: row.world_settings?.characterAppearance ?? null,
     friends: normalizeFriends(row.world_settings?.friends),

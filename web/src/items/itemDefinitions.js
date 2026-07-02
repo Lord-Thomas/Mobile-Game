@@ -47,12 +47,17 @@ function normalizeGeneratedItem(definition) {
     ? definition.model.trim()
     : null
   if (!id || !model || BASE_ITEMS[id]) return null
+  const name = typeof definition.name === 'string' && definition.name.trim()
+    ? definition.name.trim()
+    : id
+  const inferredSlimePetId = /slime/i.test(`${id} ${name}`) ? id : null
+  const slimePetId = typeof definition.slimePetId === 'string' && /^[a-zA-Z0-9_-]+$/.test(definition.slimePetId)
+    ? definition.slimePetId
+    : inferredSlimePetId
 
   return {
     id,
-    name: typeof definition.name === 'string' && definition.name.trim()
-      ? definition.name.trim()
-      : id,
+    name,
     model,
     icon: typeof definition.icon === 'string' && definition.icon.trim()
       ? definition.icon.trim()
@@ -63,6 +68,7 @@ function normalizeGeneratedItem(definition) {
     sellPrice: Number.isFinite(Number(definition.sellPrice))
       ? Math.max(0, Math.round(Number(definition.sellPrice)))
       : 10,
+    ...(slimePetId ? { slimePetId } : {}),
   }
 }
 
@@ -81,4 +87,23 @@ export const ALL_ITEM_IDS = Object.keys(ITEMS)
 
 export function getItemDefinition(itemId) {
   return ITEMS[itemId] ?? null
+}
+
+export function getSlimePetDefinitions() {
+  const byPetId = new Map()
+  ALL_ITEM_IDS.forEach((itemId) => {
+    const item = ITEMS[itemId]
+    if (!item?.slimePetId) return
+    if (!byPetId.has(item.slimePetId)) {
+      byPetId.set(item.slimePetId, {
+        petId: item.slimePetId,
+        itemId,
+        name: item.name,
+        model: item.model,
+        icon: item.icon,
+        emoji: item.emoji,
+      })
+    }
+  })
+  return Array.from(byPetId.values())
 }

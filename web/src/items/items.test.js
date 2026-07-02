@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { rollLoot } from './lootTable'
+import { getSlimePetDefinitions } from './itemDefinitions'
 import {
   addItems,
   getItemCount,
@@ -97,5 +98,12 @@ describe('materialsInventory', () => {
     expect(entries).toEqual([
       { itemId: 'bone', def: expect.objectContaining({ id: 'bone' }), count: 2, unitPrice: 10, totalPrice: 20 },
     ])
+  })
+})
+
+describe('slime pet unlock items', () => {
+  it('expose chaque mini-slime genere comme familier debloquable', () => {
+    const petIds = getSlimePetDefinitions().map((pet) => pet.petId)
+    expect(petIds).toEqual(expect.arrayContaining(['blue_slime', 'cute_slime', 'red_slime']))
   })
 })
