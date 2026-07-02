@@ -3389,6 +3389,7 @@ function Player({
   playerBodyYawRef = null,
   playerCombatActionsRef = null,
   appearance = null,
+  onSpawnConsumed = null,
   freeCameraActive = false,
   movementLocked = false,
   dragonRide = null,
@@ -3504,7 +3505,8 @@ function Player({
       camera.position.set(targetCamera.x, targetCamera.y, targetCamera.z)
       camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
     }
-  }, [camera, spawnRequest, playerPositionRef, touchRef])
+    onSpawnConsumed?.(spawnRequest.token)
+  }, [camera, onSpawnConsumed, spawnRequest, playerPositionRef, touchRef])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -13639,8 +13641,6 @@ const OUTDOOR_ENEMIES_REVEAL_DELAY_MS = 2200
 const OUTDOOR_ENEMY_REVEAL_BATCH_SIZE = 2
 const OUTDOOR_ENEMY_REVEAL_FIRST_DELAY_MS = 250
 const OUTDOOR_ENEMY_REVEAL_INTERVAL_MS = 650
-const MOUNT_PRELOAD_START_DELAY_MS = 900
-const MOUNT_PRELOAD_STAGGER_MS = 450
 
 const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload(PLAYER_MODEL_URL),
@@ -13692,6 +13692,7 @@ const OUTDOOR_IDLE_PRELOADS = [
 ]
 
 let outdoorIdlePreloadStarted = false
+const enemyAssetPreloadPromises = new Map()
 
 // Lance les préchargements extérieurs au prochain temps mort du navigateur (repli
 // setTimeout si requestIdleCallback indisponible). Idempotent.
@@ -13709,6 +13710,43 @@ function startOutdoorIdlePreloads() {
   } else {
     window.setTimeout(run, 1200)
   }
+}
+
+function preloadEnemyAssetOnce(key, preload) {
+  if (!key) return Promise.resolve()
+  if (!enemyAssetPreloadPromises.has(key)) {
+    enemyAssetPreloadPromises.set(key, Promise.resolve().then(preload).catch(() => null))
+  }
+  return enemyAssetPreloadPromises.get(key)
+}
+
+function preloadEnemyConfigAssets(config) {
+  if (!config) return Promise.resolve()
+  const tasks = []
+  if (config.modelUrl) {
+    const Loader = config.modelFormat === 'fbx' ? FBXLoader : GLTFLoader
+    tasks.push(preloadEnemyAssetOnce(`model:${config.modelUrl}`, () => useLoader.preload(Loader, config.modelUrl)))
+  }
+  if (config.textureUrl) {
+    tasks.push(preloadEnemyAssetOnce(`texture:${config.textureUrl}`, () => useTexture.preload(config.textureUrl)))
+  }
+  return Promise.allSettled(tasks)
+}
+
+function preloadMonsterSpawnSlotAssets(slots = []) {
+  const configs = []
+  const seen = new Set()
+  slots.forEach((slot) => {
+    const config = slot?.config
+    const key = `${config?.modelUrl ?? ''}|${config?.textureUrl ?? ''}`
+    if (!config?.modelUrl || seen.has(key)) return
+    seen.add(key)
+    configs.push(config)
+  })
+
+  return configs.reduce((chain, config) => (
+    chain.then(() => preloadEnemyConfigAssets(config))
+  ), Promise.resolve())
 }
 
 function waitForPromiseWithTimeout(promise, timeoutMs) {
@@ -15056,20 +15094,6 @@ function App() {
   }, [mobKillCount, coins, editableObjects, ownedMounts, ownedMagicBook, ownedMagicSkull, unlockAchievement])
 
   useEffect(() => {
-    if (!shaderWarmupComplete || ownedMounts.length === 0) return undefined
-
-    const timerIds = ownedMounts
-      .filter((mountId) => VALID_MOUNT_IDS.has(mountId))
-      .map((mountId, index) => window.setTimeout(() => {
-        preloadMountModel(mountId)
-      }, MOUNT_PRELOAD_START_DELAY_MS + index * MOUNT_PRELOAD_STAGGER_MS))
-
-    return () => {
-      timerIds.forEach((timerId) => window.clearTimeout(timerId))
-    }
-  }, [ownedMounts, shaderWarmupComplete])
-
-  useEffect(() => {
     const shouldPrepareOutdoor = (
       currentZone === ZONES.outside ||
       outdoorTransitionPrimed ||
@@ -15121,23 +15145,29 @@ function App() {
       return () => window.clearTimeout(timerId)
     }
 
+    let cancelled = false
     const chunkCount = Math.ceil(monsterSpawnSlots.length / OUTDOOR_ENEMY_REVEAL_BATCH_SIZE)
     const timerIds = Array.from({ length: chunkCount }, (_, chunkIndex) => {
       const count = Math.min(monsterSpawnSlots.length, (chunkIndex + 1) * OUTDOOR_ENEMY_REVEAL_BATCH_SIZE)
       return window.setTimeout(() => {
-        perfDiagnostics.event('outdoor:enemy-batch-reveal', {
-          count,
-          total: monsterSpawnSlots.length,
-          chunkIndex,
+        const slotsToReveal = monsterSpawnSlots.slice(0, count)
+        preloadMonsterSpawnSlotAssets(slotsToReveal).finally(() => {
+          if (cancelled) return
+          perfDiagnostics.event('outdoor:enemy-batch-reveal', {
+            count,
+            total: monsterSpawnSlots.length,
+            chunkIndex,
+          })
+          setVisibleOutdoorEnemyCount((current) => Math.max(current, count))
         })
-        setVisibleOutdoorEnemyCount((current) => Math.max(current, count))
       }, OUTDOOR_ENEMY_REVEAL_FIRST_DELAY_MS + chunkIndex * OUTDOOR_ENEMY_REVEAL_INTERVAL_MS)
     })
 
     return () => {
+      cancelled = true
       timerIds.forEach((timerId) => window.clearTimeout(timerId))
     }
-  }, [currentZone, monsterSpawnSlots.length, outdoorContentStage, outdoorRuntimeRevealStage])
+  }, [currentZone, monsterSpawnSlots, outdoorContentStage, outdoorRuntimeRevealStage])
 
   // Fin de la période de silence : les déblocages suivants affichent un toast.
   useEffect(() => {
@@ -17639,6 +17669,12 @@ function App() {
     startOutdoorIdlePreloads()
   }, [])
 
+  const consumeSpawnRequest = useCallback((token) => {
+    setSpawnRequest((current) => (
+      current?.token === token ? null : current
+    ))
+  }, [])
+
   const requestAccountSubmit = async (event) => {
     event.preventDefault()
     const email = authEmail.trim()
@@ -17992,25 +18028,27 @@ function App() {
           {outdoorEnemiesReady && (
             <Defer level={2}>
             <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
-            {visibleMonsterSpawnSlots.map(({ slot, index }) => (
-              <SmallMushroomEnemy
-                key={slot.id}
-                enemyId={slot.id}
-                spawnIndex={index}
-                spawnPositionOverride={slot.spawnPosition}
-                active
-                playerPositionRef={playerPositionRef}
-                registerCombatTarget={registerCombatTarget}
-                onDefeated={handleSmallEnemyDefeated}
-                onHitPlayer={handlePlayerHit}
-                config={slot.config}
-                monsterType={slot.monsterType}
-                aggressive={slot.aggressive}
-                patrol={slot.patrol}
-                mobGroupRef={mobGroupRef}
-                allyTargetsRef={allyTargetsRef}
-              />
-            ))}
+            <Suspense fallback={null}>
+              {visibleMonsterSpawnSlots.map(({ slot, index }) => (
+                <SmallMushroomEnemy
+                  key={slot.id}
+                  enemyId={slot.id}
+                  spawnIndex={index}
+                  spawnPositionOverride={slot.spawnPosition}
+                  active
+                  playerPositionRef={playerPositionRef}
+                  registerCombatTarget={registerCombatTarget}
+                  onDefeated={handleSmallEnemyDefeated}
+                  onHitPlayer={handlePlayerHit}
+                  config={slot.config}
+                  monsterType={slot.monsterType}
+                  aggressive={slot.aggressive}
+                  patrol={slot.patrol}
+                  mobGroupRef={mobGroupRef}
+                  allyTargetsRef={allyTargetsRef}
+                />
+              ))}
+            </Suspense>
             </Profiler>
             </Defer>
           )}
@@ -18094,6 +18132,7 @@ function App() {
               freeCameraActive={isLocalNetwork && freeCameraActive}
               movementLocked={isCharging || isLearningMagicSkull}
               playerCombatActionsRef={playerCombatActionsRef}
+              onSpawnConsumed={consumeSpawnRequest}
               dragonRide={{
                 active: dragonMounted,
                 config: activeMountConfig,

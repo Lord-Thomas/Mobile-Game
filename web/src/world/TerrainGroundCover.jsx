@@ -1134,7 +1134,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
       {QUADRANTS.map((quadrant, qi) => (
         <instancedMesh
           key={quadrant.id}
-          ref={(el) => { grassMeshRefs.current[qi] = el }}
+          ref={(el) => {
+            grassMeshRefs.current[qi] = el
+            if (el) el.count = 0
+          }}
           args={[grassGeometries[qi], grassMaterial, MAX_QUADRANT_INSTANCES]}
           frustumCulled
           userData={{ debugCategory: 'grass-mesh' }}
@@ -1143,7 +1146,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
       {QUADRANTS.map((quadrant, qi) => (
         <instancedMesh
           key={`global-${quadrant.id}`}
-          ref={(el) => { globalGrassMeshRefs.current[qi] = el }}
+          ref={(el) => {
+            globalGrassMeshRefs.current[qi] = el
+            if (el) el.count = 0
+          }}
           args={[grassGeometries[qi], globalGrassMaterial, MAX_GLOBAL_GRASS_INSTANCES_PER_QUADRANT]}
           frustumCulled
           userData={{ debugCategory: 'global-grass-mesh' }}
