@@ -2018,6 +2018,11 @@ html[data-orientation='landscape'] .combat-action-dock--count-3 .combat-action-b
   min-height: 48px;
 }
 
+html[data-orientation='landscape'] .combat-action-dock--count-4 .combat-action-btn {
+  width: clamp(52px, 13vw, 64px);
+  min-height: 44px;
+}
+
 html[data-orientation='landscape'] .combat-action-icon {
   font-size: 1.25rem;
 }
@@ -3648,6 +3653,15 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   font-size: 0.56rem;
 }
 
+.combat-action-dock--count-4 .combat-action-btn {
+  width: clamp(60px, 17vw, 72px);
+  min-height: 54px;
+}
+
+.combat-action-dock--count-4 .combat-action-label {
+  font-size: 0.52rem;
+}
+
 .combat-action-btn--punch {
   border: 2px solid rgba(239, 68, 68, 0.75);
   background: rgba(40, 10, 10, 0.88);
@@ -3667,6 +3681,36 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   background: rgba(40, 15, 5, 0.88);
   color: #fed7aa;
   box-shadow: 0 0 20px rgba(255, 100, 0, 0.45);
+}
+
+.combat-action-btn--wings {
+  border: 2px solid rgba(125, 180, 255, 0.8);
+  background: rgba(10, 22, 44, 0.88);
+  color: #cfe6ff;
+  box-shadow: 0 0 20px rgba(125, 180, 255, 0.4);
+}
+
+.combat-action-btn--wings:disabled {
+  opacity: 0.55;
+  filter: grayscale(0.7);
+  cursor: default;
+}
+
+.combat-action-btn--wings:disabled:active {
+  transform: none;
+}
+
+.combat-action-img {
+  width: 1.7rem;
+  height: 1.7rem;
+  object-fit: contain;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+html[data-orientation='landscape'] .combat-action-img {
+  width: 1.4rem;
+  height: 1.4rem;
 }
 
 .combat-action-btn--spell:active {

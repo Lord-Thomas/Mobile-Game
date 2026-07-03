@@ -11,6 +11,7 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
+import { WINGS_PHASE, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
@@ -1245,14 +1246,42 @@ function useCombatActionsAvailability(actionsRef) {
   return actions
 }
 
+// État du sort d'ailes pollé depuis le ref publié par Player() : seul ce
+// composant se re-rend (à ~8 Hz max), jamais l'arbre App.
+function useWingsSpellUi(wingsUiRef) {
+  const [ui, setUi] = useState({ visible: false, canCast: false, flying: false, cooldownSeconds: 0 })
+
+  useEffect(() => {
+    if (!wingsUiRef) return undefined
+    const interval = window.setInterval(() => {
+      const next = wingsUiRef.current
+      const cooldownSeconds = Math.ceil(next.cooldownRemaining ?? 0)
+      setUi((current) => (
+        current.visible === next.visible &&
+        current.canCast === next.canCast &&
+        current.flying === next.flying &&
+        current.cooldownSeconds === cooldownSeconds
+          ? current
+          : { visible: next.visible, canCast: next.canCast, flying: next.flying, cooldownSeconds }
+      ))
+    }, 120)
+    return () => window.clearInterval(interval)
+  }, [wingsUiRef])
+
+  return ui
+}
+
 function CombatActionDock({
   touchRef,
   canKick,
   canPunch,
   showSpell,
   onSpellPress,
+  wingsUiRef,
 }) {
-  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0)
+  const wingsUi = useWingsSpellUi(wingsUiRef)
+  const showWings = wingsUi.visible && !wingsUi.flying
+  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0)
   if (count === 0) return null
 
   const queuePunch = () => {
@@ -1261,6 +1290,10 @@ function CombatActionDock({
 
   const queueKick = () => {
     touchRef.current.kickQueued = true
+  }
+
+  const queueWings = () => {
+    touchRef.current.wingsQueued = true
   }
 
   return (
@@ -1305,6 +1338,23 @@ function CombatActionDock({
         >
           <span className="combat-action-icon" aria-hidden="true">🔥</span>
           <span className="combat-action-label">Sort</span>
+        </button>
+      )}
+      {showWings && (
+        <button
+          className="combat-action-btn combat-action-btn--wings"
+          type="button"
+          aria-label="Envol Céleste"
+          disabled={!wingsUi.canCast}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            if (wingsUi.canCast) queueWings()
+          }}
+        >
+          <img className="combat-action-img" src="/ui/envol-celeste.png" alt="" aria-hidden="true" draggable="false" />
+          <span className="combat-action-label">
+            {wingsUi.cooldownSeconds > 0 ? `${wingsUi.cooldownSeconds}s` : 'Envol'}
+          </span>
         </button>
       )}
     </div>
@@ -3496,6 +3546,7 @@ function Player({
   freeCameraActive = false,
   movementLocked = false,
   dragonRide = null,
+  wingsUiRef = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -3527,6 +3578,8 @@ function Player({
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
   const wasOnGroundRef = useRef(true)
+  // Sort d'ailes « Envol Céleste » : état simulé à 60 Hz, jamais dans un useState.
+  const wingsSpellRef = useRef(createWingsState())
   const landingPreparedRef = useRef(false)
   const [isPlayerVisible, setIsPlayerVisible] = useState(true)
   const [playerMotion, setPlayerMotion] = useState('idle')
@@ -3582,6 +3635,7 @@ function Player({
     velocityYRef.current = 0
     onGroundRef.current = true
     wasOnGroundRef.current = true
+    Object.assign(wingsSpellRef.current, createWingsState())
     playerBodyRef.current?.setNextKinematicTranslation({ x, y, z })
     visualRef.current?.position.set(x, y, z)
     cameraLookRef.current.x = x
@@ -3636,6 +3690,13 @@ function Player({
     const key = keyboardRef.current
     const touch = touchRef.current
 
+    // Le cast d'ailes est consommé dès le début de frame : si un chemin qui
+    // sort tôt (monture, assis, caméra libre) est actif, la demande est
+    // simplement perdue au lieu de rester en attente et surprendre plus tard.
+    const wantsWings = touch.wingsQueued === true
+    touch.wingsQueued = false
+    const wings = wingsSpellRef.current
+
     if (freeCameraActive || movementLocked) {
       key.forward = false
       key.back = false
@@ -3659,6 +3720,9 @@ function Player({
     }
 
     if (!movementLocked && dragonRide?.active && dragonRide.positionRef && dragonRide.yawRef) {
+      // Monture et ailes ne se cumulent jamais.
+      cancelWings(wings, state.clock.elapsedTime)
+      if (wingsUiRef) wingsUiRef.current.visible = false
       const mountConfig = dragonRide.config ?? MOUNT_CONFIGS.dragon
       const flight = dragonFlightInputRef.current
       const pos = dragonRide.positionRef.current
@@ -4053,22 +4117,31 @@ function Player({
       worldZ /= length
     }
 
+    const wingsAirborne = isWingsFlying(wings)
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
     const speed = isMoving
       ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95))
       : 0
-    const targetVelX = worldX * speed
-    const targetVelZ = worldZ * speed
-    const planarDamping = 14
-    planarVelocityRef.current.x +=
-      (targetVelX - planarVelocityRef.current.x) * Math.min(1, planarDamping * delta)
-    planarVelocityRef.current.z +=
-      (targetVelZ - planarVelocityRef.current.z) * Math.min(1, planarDamping * delta)
-    if (Math.abs(targetVelX) < 0.0001 && Math.abs(planarVelocityRef.current.x) < 0.02) {
-      planarVelocityRef.current.x = 0
-    }
-    if (Math.abs(targetVelZ) < 0.0001 && Math.abs(planarVelocityRef.current.z) < 0.02) {
-      planarVelocityRef.current.z = 0
+    if (wingsAirborne) {
+      // Plané : l'avance est dirigée par la caméra (wings.forwardSpeed le long
+      // du forward caméra), le joystick de déplacement est ignoré.
+      const glideBlend = Math.min(1, 8 * delta)
+      planarVelocityRef.current.x += (forwardX * wings.forwardSpeed - planarVelocityRef.current.x) * glideBlend
+      planarVelocityRef.current.z += (forwardZ * wings.forwardSpeed - planarVelocityRef.current.z) * glideBlend
+    } else {
+      const targetVelX = worldX * speed
+      const targetVelZ = worldZ * speed
+      const planarDamping = 14
+      planarVelocityRef.current.x +=
+        (targetVelX - planarVelocityRef.current.x) * Math.min(1, planarDamping * delta)
+      planarVelocityRef.current.z +=
+        (targetVelZ - planarVelocityRef.current.z) * Math.min(1, planarDamping * delta)
+      if (Math.abs(targetVelX) < 0.0001 && Math.abs(planarVelocityRef.current.x) < 0.02) {
+        planarVelocityRef.current.x = 0
+      }
+      if (Math.abs(targetVelZ) < 0.0001 && Math.abs(planarVelocityRef.current.z) < 0.02) {
+        planarVelocityRef.current.z = 0
+      }
     }
 
     const prevX = playerPosRef.current.x
@@ -4076,7 +4149,11 @@ function Player({
     let nextX = prevX + planarVelocityRef.current.x * delta
     let nextZ = prevZ + planarVelocityRef.current.z * delta
 
-    if (isMoving) {
+    if (wingsAirborne) {
+      // En vol, le corps s'aligne sur la direction de vol.
+      const targetYaw = Math.atan2(forwardX, forwardZ)
+      visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 8, delta)
+    } else if (isMoving) {
       const targetYaw = Math.atan2(worldX, worldZ)
       visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 12, delta)
     }
@@ -4232,7 +4309,41 @@ function Player({
     key.kickQueued = false
     touch.emoteQueued = null
 
-    if (!onGroundRef.current) {
+    if (wantsWings && mode === 'play') {
+      const didCast = castWings(wings, {
+        now: state.clock.elapsedTime,
+        grounded: onGroundRef.current,
+        outdoors: currentZone === ZONES.outside,
+        mounted: Boolean(dragonRide?.active),
+        seated: Boolean(seatedState),
+        busy: isEmoting || isAttackLocked,
+      })
+      if (didCast) {
+        onGroundRef.current = false
+        jumpStartUntilRef.current = 0
+        jumpLandUntilRef.current = 0
+        landingPreparedRef.current = false
+      }
+    }
+
+    if (isWingsFlying(wings)) {
+      // Vol : quitter la zone extérieure coupe le sort, sinon la simulation
+      // du plané pilote la verticale à la place de la gravité.
+      if (currentZone !== ZONES.outside) {
+        cancelWings(wings, state.clock.elapsedTime)
+      } else {
+        stepWings(wings, {
+          now: state.clock.elapsedTime,
+          dt: delta,
+          pitch: touch.cameraPitch,
+          grounded: onGroundRef.current,
+        })
+      }
+    }
+    if (isWingsFlying(wings)) {
+      onGroundRef.current = false
+      velocityYRef.current = wings.verticalVelocity
+    } else if (!onGroundRef.current) {
       velocityYRef.current -= 12 * delta
     } else {
       velocityYRef.current = 0
@@ -4419,7 +4530,26 @@ function Player({
         rotationY: visualRef.current.rotation.y,
         motion: nextMotion,
         zone: currentZone,
+        wings: isWingsFlying(wings),
       }
+    }
+
+    if (wingsUiRef) {
+      // Instantané basse fréquence pour le bouton du sort (pollé côté DOM,
+      // même pattern que useCombatActionsAvailability).
+      const wingsUi = wingsUiRef.current
+      wingsUi.visible = mode === 'play' && currentZone === ZONES.outside
+      wingsUi.flying = isWingsFlying(wings)
+      wingsUi.cooldownRemaining = getWingsCooldownRemaining(wings, state.clock.elapsedTime)
+      wingsUi.energyRatio = getWingsEnergyRatio(wings)
+      wingsUi.canCast = canCastWings(wings, {
+        now: state.clock.elapsedTime,
+        grounded: onGroundRef.current,
+        outdoors: currentZone === ZONES.outside,
+        mounted: Boolean(dragonRide?.active),
+        seated: Boolean(seatedState),
+        busy: isEmoting || isAttackLocked,
+      })
     }
 
     const pitch = touch.cameraPitch
@@ -4627,8 +4757,66 @@ function Player({
         />
         <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
         <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+        <MagicWings wingsSpellRef={wingsSpellRef} />
       </group>
     </>
+  )
+}
+
+// Ailes du sort « Envol Céleste » — visuel provisoire (deux plans translucides)
+// en attendant le modèle GLB. Visibilité et battement pilotés en impératif dans
+// useFrame : aucun setState, donc aucun re-rendu de l'arbre 3D pendant le vol.
+function MagicWings({ wingsSpellRef }) {
+  const groupRef = useRef(null)
+  const leftPivotRef = useRef(null)
+  const rightPivotRef = useRef(null)
+
+  useFrame((state) => {
+    const group = groupRef.current
+    if (!group) return
+    const wings = wingsSpellRef.current
+    const flying = isWingsFlying(wings)
+    if (group.visible !== flying) group.visible = flying
+    if (!flying) return
+    // Battement ample pendant le lancement, ondulation douce en plané.
+    const launching = wings.phase === WINGS_PHASE.LAUNCHING
+    const t = state.clock.elapsedTime
+    const flap = launching ? Math.sin(t * 16) * 0.5 : Math.sin(t * 2.6) * 0.12
+    if (leftPivotRef.current) leftPivotRef.current.rotation.z = 0.28 + flap
+    if (rightPivotRef.current) rightPivotRef.current.rotation.z = -0.28 - flap
+  })
+
+  return (
+    <group ref={groupRef} visible={false} position={[0, 0.72, -0.14]}>
+      <group ref={leftPivotRef} rotation={[0, 0.55, 0.28]}>
+        <mesh position={[-0.5, 0.22, 0]} rotation={[0.18, 0, 0.35]}>
+          <planeGeometry args={[0.95, 1.25]} />
+          <meshStandardMaterial
+            color="#d9ecff"
+            emissive="#7fb4ff"
+            emissiveIntensity={0.6}
+            transparent
+            opacity={0.72}
+            side={DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
+      <group ref={rightPivotRef} rotation={[0, -0.55, -0.28]}>
+        <mesh position={[0.5, 0.22, 0]} rotation={[0.18, 0, -0.35]}>
+          <planeGeometry args={[0.95, 1.25]} />
+          <meshStandardMaterial
+            color="#d9ecff"
+            emissive="#7fb4ff"
+            emissiveIntensity={0.6}
+            transparent
+            opacity={0.72}
+            side={DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
+    </group>
   )
 }
 
@@ -14947,12 +15135,15 @@ function App() {
     actionQueued: false,
     punchQueued: false,
     kickQueued: false,
+    wingsQueued: false,
     emoteQueued: null,
     mountAscend: false,
     mountDescend: false,
   })
   const playerCombatActionsRef = useRef({ canKick: false, canPunch: false })
   const { canKick, canPunch } = useCombatActionsAvailability(playerCombatActionsRef)
+  // Sort d'ailes : instantané écrit par Player() dans useFrame, pollé par le dock.
+  const wingsUiRef = useRef({ visible: false, canCast: false, flying: false, cooldownRemaining: 0, energyRatio: 0 })
 
   useEffect(() => {
     const resetTouchControls = () => {
@@ -18417,6 +18608,7 @@ function App() {
               freeCameraActive={isLocalNetwork && freeCameraActive}
               movementLocked={isCharging || isLearningMagicSkull}
               playerCombatActionsRef={playerCombatActionsRef}
+              wingsUiRef={wingsUiRef}
               onSpawnConsumed={consumeSpawnRequest}
               dragonRide={{
                 active: dragonMounted,
@@ -18567,6 +18759,7 @@ function App() {
           canPunch={canPunch}
           showSpell={equippedWeapon === 'magic_book' || equippedWeapon === 'magic_skull'}
           onSpellPress={handleSpellPress}
+          wingsUiRef={wingsUiRef}
         />
       )}
       {showCaptureUi && (
