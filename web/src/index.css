@@ -1495,7 +1495,14 @@ html[data-chat-open='true'] .game-chat-panel {
   pointer-events: auto;
 }
 
+.customize-build-actions {
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+
 .customize-rotation button,
+.customize-build-button,
 .customize-done,
 .customize-cancel {
   border: 0;
@@ -1509,6 +1516,11 @@ html[data-chat-open='true'] .game-chat-panel {
   font-weight: 900;
   backdrop-filter: blur(6px);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.customize-build-button {
+  min-width: 92px;
+  font-size: 14px;
 }
 
 .customize-rotation button:disabled {
@@ -1880,11 +1892,13 @@ html[data-orientation='landscape'] .customize-ui {
 }
 
 html[data-orientation='landscape'] .customize-rotation,
+html[data-orientation='landscape'] .customize-build-actions,
 html[data-orientation='landscape'] .customize-placement-actions {
   flex-wrap: wrap;
 }
 
 html[data-orientation='landscape'] .customize-rotation button,
+html[data-orientation='landscape'] .customize-build-button,
 html[data-orientation='landscape'] .customize-done,
 html[data-orientation='landscape'] .customize-cancel {
   height: 40px;

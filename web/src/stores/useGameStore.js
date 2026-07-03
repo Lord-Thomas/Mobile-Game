@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { CHARACTER_DEFAULT_APPEARANCE } from '../game/characterAppearance'
 import { defaultEditableObjects } from '../gameObjects/placeableObjects'
+import { createDefaultHousePlan, normalizeHousePlan } from '../world/house/housePlan'
 
 // Même check que lib/supabase.isSupabaseConfigured, mais inliné pour NE PAS
 // importer le client Supabase (createClient touche window au chargement → casse
@@ -286,10 +287,13 @@ export const useGameStore = create((set) => ({
     roomLightOn: true,
     lightColor: '#ffffff',
     lightIntensity: 2,
+    housePlan: createDefaultHousePlan(),
   },
   setHouse: (key, value) => set((state) => {
     const prev = state.house[key]
-    const next = typeof value === 'function' ? value(prev) : value
+    const rawNext = typeof value === 'function' ? value(prev) : value
+    if (rawNext === prev) return state
+    const next = key === 'housePlan' ? normalizeHousePlan(rawNext) : rawNext
     if (next === prev) return state
     return { house: { ...state.house, [key]: next } }
   }),

@@ -53,6 +53,8 @@ import { getItemDefinition, getSlimePetDefinitions } from './items/itemDefinitio
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
+import { addPrototypeEastRoom, createDefaultHousePlan, normalizeHousePlan } from './world/house/housePlan'
+import { deriveHouseLayout } from './world/house/deriveHouseLayout'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
@@ -1407,11 +1409,12 @@ function useKeyboardInput() {
   return keysRef
 }
 
-function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false }) {
+function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false, layout = houseLayout }) {
   const floorColorMap = useGameTexture(floorTexturePath)
   const wallColorMap = useGameTexture(wallTexturePath)
   const ceilingColorMap = useGameTexture(ceilingTexturePath)
   const exteriorWallTexture = useTexture(EXTERIOR_WALL_TEXTURE)
+  const rooms = layout.rooms ?? houseLayout.rooms
   floorColorMap.wrapS = RepeatWrapping
   floorColorMap.wrapT = RepeatWrapping
   floorColorMap.repeat.set(3.2, 3.2)
@@ -1437,20 +1440,18 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
   useEffect(() => () => ceilingTexture.dispose(), [ceilingTexture])
 
   return (
-    <group userData={{ debugCategory: exteriorOnly ? 'house-exterior' : 'house-shell' }}>
+      <group userData={{ debugCategory: exteriorOnly ? 'house-exterior' : 'house-shell' }}>
       <group visible={exteriorOnly}>
-        <MergedPlayerExteriorShell />
+        <MergedPlayerExteriorShell layout={layout} />
       </group>
       <group visible={!exteriorOnly}>
-        <HouseWalls wallTexture={wallColorMap} />
-        <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
-          <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
-          <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
-        </mesh>
-        <mesh position={[secondRoom.position[0], secondRoom.size[1] - 0.02, secondRoom.position[2]]} visible={!hideCeiling}>
-          <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
-          <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
-        </mesh>
+        <HouseWalls wallTexture={wallColorMap} layout={layout} />
+        {rooms.map((room) => (
+          <mesh key={`${room.id}-ceiling`} position={[room.position[0], room.size[1] - 0.02, room.position[2]]} visible={!hideCeiling}>
+            <boxGeometry args={[room.size[0], 0.1, room.size[2]]} />
+            <meshStandardMaterial map={ceilingTexture} color={room.wallColor ?? '#e6edf6'} side={BackSide} />
+          </mesh>
+        ))}
       </group>
       <group visible={!hideRoof}>
           <GableRoof
@@ -1466,34 +1467,20 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
             gableColor={EXTERIOR_WALL_COLOR}
             gableTexture={exteriorWallTexture}
           />
-          <group position={secondRoom.position}>
-            <LeanToRoof
-              width={secondRoom.size[0]}
-              depth={secondRoom.size[2]}
-              wallTopY={secondRoom.size[1]}
-              attachSide="south"
-              rise={MAIN_ROOM.height - secondRoom.size[1]}
-              overhang={0.34}
-              overhangAttached={0}
-              thickness={0.12}
-              wallThickness={houseLayout.wallThickness}
-              color="#8b4c3f"
-              gableColor={EXTERIOR_WALL_COLOR}
-              gableTexture={exteriorWallTexture}
-            />
-          </group>
       </group>
 
       <group visible={!exteriorOnly}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-          <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
-          <meshStandardMaterial
-            map={floorColorMap}
-            roughness={0.66}
-            metalness={0.08}
-            color="#b8ad9b"
-          />
-        </mesh>
+        {rooms.map((room) => (
+          <mesh key={`${room.id}-floor`} rotation={[-Math.PI / 2, 0, 0]} position={[room.position[0], 0, room.position[2]]}>
+            <planeGeometry args={[room.size[0], room.size[2]]} />
+            <meshStandardMaterial
+              map={floorColorMap}
+              roughness={0.66}
+              metalness={0.08}
+              color={room.floorColor ?? '#b8ad9b'}
+            />
+          </mesh>
+        ))}
       </group>
 
       <gridHelper
@@ -1548,10 +1535,10 @@ function getWallExteriorColor(wall) {
       : EXTERIOR_WALL_COLOR
 }
 
-function createPlayerExteriorShellGeometry() {
+function createPlayerExteriorShellGeometry(layout = houseLayout) {
   const collector = createColoredGeometryCollector()
 
-  houseLayout.walls.forEach((wall) => {
+  layout.walls.forEach((wall) => {
     const color = getWallExteriorColor(wall)
     splitWallIntoSolidRects(wall).forEach((rect) => {
       const transform = getWallColliderTransform(wall, rect)
@@ -1608,8 +1595,8 @@ function createPlayerExteriorShellGeometry() {
   return geometry
 }
 
-function MergedPlayerExteriorShell() {
-  const geometry = useMemo(() => createPlayerExteriorShellGeometry(), [])
+function MergedPlayerExteriorShell({ layout = houseLayout }) {
+  const geometry = useMemo(() => createPlayerExteriorShellGeometry(layout), [layout])
 
   useEffect(() => () => geometry.dispose(), [geometry])
 
@@ -1724,9 +1711,9 @@ function WallVolume({ wall, rect, wallTexture, exteriorTexture }) {
   )
 }
 
-function HouseWalls({ wallTexture }) {
+function HouseWalls({ wallTexture, layout = houseLayout }) {
   const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
-  const walls = houseLayout.walls
+  const walls = layout.walls ?? houseLayout.walls
 
   return (
     <>
@@ -1988,18 +1975,25 @@ function LightSwitch({ isOn, isNear, onOpen, mode }) {
   )
 }
 
-function PhysicsBounds() {
-  const wallSegments = houseLayout.walls
+function PhysicsBounds({ layout = houseLayout }) {
+  const wallSegments = (layout.walls ?? houseLayout.walls)
     .flatMap((wall) =>
       splitWallIntoSolidRects(wall).map((rect) => ({
         id: rect.id,
         ...getWallColliderTransform(wall, rect),
       })),
     )
+  const rooms = layout.rooms ?? houseLayout.rooms
 
   return (
     <RigidBody type="fixed" colliders={false}>
-      <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
+      {rooms.map((room) => (
+        <CuboidCollider
+          key={`${room.id}-floor-collider`}
+          args={[room.size[0] * 0.5, 0.2, room.size[2] * 0.5]}
+          position={[room.position[0], -0.2, room.position[2]]}
+        />
+      ))}
       {wallSegments.map((segment) => (
         <CuboidCollider key={segment.id} args={segment.args} position={segment.position} rotation={segment.rotation} />
       ))}
@@ -12579,6 +12573,7 @@ function PlacementPreview({ object, preview, groupRef }) {
 function CustomizationLayer({
   mode,
   objects,
+  layout = houseLayout,
   hideInteriorObjects = false,
   selectedObjectId,
   draggingObjectId,
@@ -12594,10 +12589,12 @@ function CustomizationLayer({
   registerCombatTarget,
   onTrainingDummyDefeated,
 }) {
+  const rooms = layout.rooms ?? houseLayout.rooms
+  const customizeGridSize = Math.max(10, ...rooms.map((room) => Math.max(room.size[0], room.size[2])))
   const placedObjects = useMemo(() => objects.filter((object) => (
     object.status !== 'stored' &&
-    (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35))
-  )), [hideInteriorObjects, objects])
+    (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35, layout))
+  )), [hideInteriorObjects, layout, objects])
   const renderablePlacedObjects = useMemo(
     () => placedObjects.filter((object) => object.type !== 'goal'),
     [placedObjects],
@@ -12706,7 +12703,7 @@ function CustomizationLayer({
   }, [])
 
   const getFloorPlacementY = useCallback((x, z) => {
-    const insideHouse = houseLayout.rooms.some((room) => {
+    const insideHouse = rooms.some((room) => {
       const [rx, , rz] = room.position
       return (
         Math.abs(x - rx) <= room.size[0] * 0.5 &&
@@ -12714,7 +12711,7 @@ function CustomizationLayer({
       )
     })
     return insideHouse ? 0 : getTerrainHeight(x, z)
-  }, [])
+  }, [rooms])
 
   const getPlacementY = useCallback((x, z, ignoredObjectId) => {
     const movingObject = objects.find((object) => object.id === ignoredObjectId)
@@ -12766,16 +12763,18 @@ function CustomizationLayer({
       />
       <group visible={mode === 'customize'}>
         <gridHelper
-          args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
+          args={[customizeGridSize, customizeGridSize / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
           position={[0, 0.032, 0]}
         />
-        <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} />
-        <RoomBorder
-          width={secondRoom.size[0]}
-          depth={secondRoom.size[2]}
-          posX={secondRoom.position[0]}
-          posZ={secondRoom.position[2]}
-        />
+        {rooms.map((room) => (
+          <RoomBorder
+            key={`${room.id}-border`}
+            width={room.size[0]}
+            depth={room.size[2]}
+            posX={room.position[0]}
+            posZ={room.position[2]}
+          />
+        ))}
       </group>
       {visiblePlacedObjects.map((object) => (
         <EditableObject
@@ -13562,10 +13561,11 @@ function EnvironmentMenu({
   )
 }
 
-function isPositionInsideHouse(position, margin = 0.5) {
+function isPositionInsideHouse(position, margin = 0.5, layout = houseLayout) {
   if (!position) return true
   const [x, , z] = position
-  return houseLayout.rooms.some((room) => {
+  const rooms = layout.rooms ?? houseLayout.rooms
+  return rooms.some((room) => {
     const [rx, , rz] = room.position
     return (
       Math.abs(x - rx) <= room.size[0] * 0.5 + margin &&
@@ -15076,6 +15076,7 @@ function App() {
   const roomLightOn = useGameStore((s) => s.house.roomLightOn)
   const lightColor = useGameStore((s) => s.house.lightColor)
   const lightIntensity = useGameStore((s) => s.house.lightIntensity)
+  const housePlan = useGameStore((s) => s.house.housePlan)
   // Slice "proximité" migré vers le store : ces flags ne vivent plus dans App(),
   // on s'y abonne via des sélecteurs fins. `setNear` (action stable) les écrit
   // depuis les callbacks onNearChange des détecteurs. Prochaine étape : descendre
@@ -15565,7 +15566,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, roomLightOn, lightColor, lightIntensity, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, roomLightOn, lightColor, lightIntensity, housePlan, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -15600,6 +15601,7 @@ function App() {
     roomLightOn,
     lightColor,
     lightIntensity,
+    housePlan,
     ownedFloorSkins,
     ownedWallSkins,
     selectedFloorSkinId,
@@ -15630,6 +15632,7 @@ function App() {
     roomLightOn,
     lightColor,
     lightIntensity,
+    housePlan,
     selectedFloorSkinId,
     selectedWallSkinId,
     applyWallToCeiling,
@@ -15674,6 +15677,7 @@ function App() {
       roomLightOn: savedWorld.roomLightOn ?? roomLightOn,
       lightColor: savedWorld.lightColor ?? lightColor,
       lightIntensity: savedWorld.lightIntensity ?? lightIntensity,
+      housePlan: savedWorld.housePlan ? normalizeHousePlan(savedWorld.housePlan) : housePlan,
       selectedFloorSkinId: savedWorld.selectedFloorSkinId ?? selectedFloorSkinId,
       selectedWallSkinId: savedWorld.selectedWallSkinId ?? selectedWallSkinId,
       applyWallToCeiling: savedWorld.applyWallToCeiling ?? applyWallToCeiling,
@@ -15689,6 +15693,7 @@ function App() {
     setHouse('roomLightOn',true)
     setHouse('lightColor','#ffffff')
     setHouse('lightIntensity',2)
+    setHouse('housePlan',createDefaultHousePlan())
     setInventory('ownedFloorSkins',['floor-classic'])
     setInventory('ownedWallSkins',['wall-classic'])
     setInventory('selectedFloorSkinId','floor-classic')
@@ -15762,6 +15767,9 @@ function App() {
     if (includeWorld && typeof parsed.lightColor === 'string') setHouse('lightColor',parsed.lightColor)
     if (includeWorld && typeof parsed.lightIntensity === 'number') {
       setHouse('lightIntensity',MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
+    }
+    if (includeWorld && parsed.housePlan && typeof parsed.housePlan === 'object') {
+      setHouse('housePlan',normalizeHousePlan(parsed.housePlan))
     }
     if (includeIdentity && parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
       setEquipment('characterAppearance',{ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
@@ -16093,7 +16101,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -16523,7 +16531,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -16952,6 +16960,7 @@ function App() {
   const activeFloorSkin = floorSkins.find((skin) => skin.id === activeFloorSkinId) || floorSkins[0]
   const activeWallSkin = availableWallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
   const activeCeilingTexturePath = applyWallToCeiling ? activeWallSkin.texture : DEFAULT_CEILING_TEXTURE
+  const activeHouseLayout = useMemo(() => deriveHouseLayout(housePlan), [housePlan])
   const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
@@ -17095,6 +17104,7 @@ function App() {
       setInventory('previewFloorSkinId',floorSkins[next].id)
       return
     }
+    if (environmentTab !== 'wall') return
     const current = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
     const next = (current + direction + availableWallSkins.length) % availableWallSkins.length
     setInventory('previewWallSkinId',availableWallSkins[next].id)
@@ -17139,6 +17149,16 @@ function App() {
     const skin = availableWallSkins[previewWallIndex]
     if (!ownedWallSkins.includes(skin.id)) return
     setInventory('selectedWallSkinId',skin.id)
+  }
+
+  const addPrototypeHouseRoom = () => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => addPrototypeEastRoom(current))
+  }
+
+  const resetHousePlan = () => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',createDefaultHousePlan())
   }
 
   const buyCat = async () => {
@@ -18125,6 +18145,7 @@ function App() {
               hideCeiling={mode === 'customize'}
               hideRoof={mode === 'customize' || currentZone !== ZONES.outside}
               exteriorOnly={currentZone === ZONES.outside}
+              layout={activeHouseLayout}
             />
             <group visible={showInteriorHouseDetails} userData={{ debugCategory: 'house-interior' }}>
                 <LightSwitch
@@ -18132,12 +18153,6 @@ function App() {
                   isNear={isNearLightSwitch && canModifyWorld}
                   onOpen={() => canModifyWorld && setUi('lightMenuOpen',true)}
                   mode={mode}
-                />
-                <Dragon playerPositionRef={playerPositionRef} visible={showInteriorHouseDetails} />
-                <GlassContainmentRoom
-                  roomLightOn={roomLightOn}
-                  lightColor={lightColor}
-                  lightweight={performanceSettings.lowResolution}
                 />
             </group>
             {catActive && (
@@ -18199,6 +18214,7 @@ function App() {
           <CustomizationLayer
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             objects={editableObjects}
+            layout={activeHouseLayout}
             hideInteriorObjects={currentZone === ZONES.outside}
             selectedObjectId={selectedObjectId}
             draggingObjectId={draggingObjectId}
@@ -18272,8 +18288,7 @@ function App() {
         )}
         <Suspense fallback={null}>
         <Physics gravity={[0, -9.81, 0]}>
-          <PhysicsBounds />
-          <GlassContainmentColliders />
+          <PhysicsBounds layout={activeHouseLayout} />
           <OutdoorBounds includeHouseFootprint={false} />
           {!PERF_NO_MAP_COLLIDERS && (
             <Profiler id="MapObjectPhysicsColliders" onRender={recordRenderProfile}>
@@ -18798,6 +18813,14 @@ function App() {
                 Ranger
               </button>
             )}
+          </div>
+          <div className="customize-build-actions">
+            <button type="button" className="customize-build-button" onClick={addPrototypeHouseRoom}>
+              Ajouter piece
+            </button>
+            <button type="button" className="customize-build-button" onClick={resetHousePlan}>
+              Reset plan
+            </button>
           </div>
           {placingObjectId ? (
             <div className="customize-placement-actions">
