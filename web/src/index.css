@@ -1497,6 +1497,8 @@ html[data-chat-open='true'] .game-chat-panel {
 
 .customize-build-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   pointer-events: auto;
 }
@@ -1521,6 +1523,11 @@ html[data-chat-open='true'] .game-chat-panel {
 .customize-build-button {
   min-width: 92px;
   font-size: 14px;
+}
+
+.customize-build-button.danger {
+  background: rgba(142, 35, 35, 0.92);
+  color: #fff8f4;
 }
 
 .customize-rotation button:disabled {

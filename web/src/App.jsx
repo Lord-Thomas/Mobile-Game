@@ -53,9 +53,9 @@ import { getItemDefinition, getSlimePetDefinitions } from './items/itemDefinitio
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { addPrototypeEastRoom, createDefaultHousePlan, normalizeHousePlan } from './world/house/housePlan'
+import { createDefaultHousePlan, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, splitHouseWallSegment } from './world/house/housePlan'
 import { deriveHouseLayout } from './world/house/deriveHouseLayout'
-import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
+import { getWallColliderTransform, getWallDirection, getWallPointAt, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
@@ -12570,10 +12570,130 @@ function PlacementPreview({ object, preview, groupRef }) {
   )
 }
 
+function HouseBuildHandles({
+  layout,
+  selectedElement,
+  onSelectElement,
+  onResizeWall,
+}) {
+  const [resizeDrag, setResizeDrag] = useState(null)
+  const walls = layout.walls ?? []
+
+  const getWallHitTransform = (wall) => {
+    const direction = getWallDirection(wall)
+    const center = getWallPointAt(wall, direction.length * 0.5)
+    return {
+      position: [center.x, 0.09, center.z],
+      rotation: [0, -Math.atan2(direction.z, direction.x), 0],
+      length: direction.length,
+    }
+  }
+
+  const getWallOutsideNormal = (wall) => {
+    const outsideSide = wall.sideA?.type === 'outside' ? wall.sideA : wall.sideB?.type === 'outside' ? wall.sideB : null
+    return outsideSide?.normal ?? null
+  }
+
+  const getDoorTransform = (wall, opening) => {
+    const center = getWallPointAt(wall, opening.center)
+    return {
+      position: [center.x, 0.13, center.z],
+      rotation: [0, -Math.atan2(wall.endCorner.z - wall.startCorner.z, wall.endCorner.x - wall.startCorner.x), 0],
+    }
+  }
+
+  const finishResizeDrag = (event) => {
+    if (!resizeDrag) return
+    event.stopPropagation()
+    const dx = event.point.x - resizeDrag.startX
+    const dz = event.point.z - resizeDrag.startZ
+    const amount = Math.round(dx * resizeDrag.normal[0] + dz * resizeDrag.normal[2])
+    setResizeDrag(null)
+    if (Math.abs(amount) >= 1) onResizeWall(resizeDrag.wallId, amount)
+  }
+
+  return (
+    <group visible userData={{ debugCategory: 'house-build-handles' }}>
+      {resizeDrag && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, 0.18, 0]}
+          onPointerMove={(event) => event.stopPropagation()}
+          onPointerUp={finishResizeDrag}
+          onPointerCancel={(event) => {
+            event.stopPropagation()
+            setResizeDrag(null)
+          }}
+        >
+          <planeGeometry args={[PLAYER_PLOT_SIZE + 12, PLAYER_PLOT_SIZE + 12]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
+      {walls.map((wall) => {
+        const transform = getWallHitTransform(wall)
+        const selected = selectedElement?.type === 'wall' && selectedElement.id === wall.id
+        const outsideNormal = getWallOutsideNormal(wall)
+        return (
+          <group key={`build-wall-${wall.id}`}>
+            <mesh
+              position={transform.position}
+              rotation={transform.rotation}
+              onPointerDown={(event) => {
+                event.stopPropagation()
+                onSelectElement({ type: 'wall', id: wall.id })
+                if (!outsideNormal) return
+                setResizeDrag({
+                  wallId: wall.id,
+                  startX: event.point.x,
+                  startZ: event.point.z,
+                  normal: outsideNormal,
+                })
+              }}
+            >
+              <boxGeometry args={[Math.max(0.2, transform.length), 0.08, selected ? 0.72 : 0.52]} />
+              <meshBasicMaterial
+                color={selected ? '#f2c14e' : outsideNormal ? '#75d5ff' : '#ff8e6e'}
+                transparent
+                opacity={selected ? 0.62 : 0.28}
+                depthWrite={false}
+              />
+            </mesh>
+            {(wall.openings ?? []).map((opening) => {
+              const doorTransform = getDoorTransform(wall, opening)
+              const doorSelected = selectedElement?.type === 'opening' && selectedElement.id === opening.id
+              return (
+                <mesh
+                  key={`build-opening-${opening.id}`}
+                  position={doorTransform.position}
+                  rotation={doorTransform.rotation}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    setResizeDrag(null)
+                    onSelectElement({ type: 'opening', id: opening.id })
+                  }}
+                >
+                  <boxGeometry args={[Math.max(0.35, opening.width), 0.1, 0.86]} />
+                  <meshBasicMaterial
+                    color={doorSelected ? '#f2c14e' : '#65f2a3'}
+                    transparent
+                    opacity={doorSelected ? 0.72 : 0.44}
+                    depthWrite={false}
+                  />
+                </mesh>
+              )
+            })}
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
 function CustomizationLayer({
   mode,
   objects,
   layout = houseLayout,
+  selectedBuildElement,
   hideInteriorObjects = false,
   selectedObjectId,
   draggingObjectId,
@@ -12586,6 +12706,8 @@ function CustomizationLayer({
   onUpdatePosition,
   onUpdatePlacementPreview,
   onLockPlacement,
+  onSelectBuildElement,
+  onResizeBuildWall,
   registerCombatTarget,
   onTrainingDummyDefeated,
 }) {
@@ -12758,7 +12880,10 @@ function CustomizationLayer({
           onUpdatePosition(id, position)
         }}
         onStopDragging={onStopDragging}
-        onClearSelection={() => onSelect(null)}
+        onClearSelection={() => {
+          onSelect(null)
+          onSelectBuildElement(null)
+        }}
         onLockPlacement={onLockPlacement}
       />
       <group visible={mode === 'customize'}>
@@ -12776,6 +12901,14 @@ function CustomizationLayer({
           />
         ))}
       </group>
+      {mode === 'customize' && (
+        <HouseBuildHandles
+          layout={layout}
+          selectedElement={selectedBuildElement}
+          onSelectElement={onSelectBuildElement}
+          onResizeWall={onResizeBuildWall}
+        />
+      )}
       {visiblePlacedObjects.map((object) => (
         <EditableObject
           key={object.id}
@@ -16961,6 +17094,7 @@ function App() {
   const activeWallSkin = availableWallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
   const activeCeilingTexturePath = applyWallToCeiling ? activeWallSkin.texture : DEFAULT_CEILING_TEXTURE
   const activeHouseLayout = useMemo(() => deriveHouseLayout(housePlan), [housePlan])
+  const [selectedBuildElement, setSelectedBuildElement] = useState(null)
   const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
@@ -17151,14 +17285,31 @@ function App() {
     setInventory('selectedWallSkinId',skin.id)
   }
 
-  const addPrototypeHouseRoom = () => {
-    if (!canModifyWorld) return
-    setHouse('housePlan',(current) => addPrototypeEastRoom(current))
-  }
-
   const resetHousePlan = () => {
     if (!canModifyWorld) return
+    setSelectedBuildElement(null)
     setHouse('housePlan',createDefaultHousePlan())
+  }
+
+  const deleteSelectedBuildElement = () => {
+    if (!canModifyWorld || !selectedBuildElement) return
+    setHouse('housePlan',(current) => (
+      selectedBuildElement.type === 'opening'
+        ? removeHouseOpening(current, selectedBuildElement.id)
+        : removeHouseWall(current, selectedBuildElement.id)
+    ))
+    setSelectedBuildElement(null)
+  }
+
+  const splitSelectedBuildWall = () => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'wall') return
+    setHouse('housePlan',(current) => splitHouseWallSegment(current, selectedBuildElement.id, 0.5))
+    setSelectedBuildElement(null)
+  }
+
+  const resizeSelectedBuildWall = (wallId, amount) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => resizeHouseExteriorWall(current, wallId, amount))
   }
 
   const buyCat = async () => {
@@ -18215,18 +18366,27 @@ function App() {
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             objects={editableObjects}
             layout={activeHouseLayout}
+            selectedBuildElement={selectedBuildElement}
             hideInteriorObjects={currentZone === ZONES.outside}
             selectedObjectId={selectedObjectId}
             draggingObjectId={draggingObjectId}
             placingObjectId={placingObjectId}
             placementLocked={placementLocked}
             placementPreview={placementPreview}
-            onSelect={(id) => setEditor('selectedObjectId', id)}
+            onSelect={(id) => {
+              setSelectedBuildElement(null)
+              setEditor('selectedObjectId', id)
+            }}
             onStartDragging={(id) => setEditor('draggingObjectId', id)}
             onStopDragging={() => setEditor('draggingObjectId',null)}
             onUpdatePosition={updateEditableObjectPosition}
             onUpdatePlacementPreview={updatePlacementPreview}
             onLockPlacement={() => setEditor('placementLocked',true)}
+            onSelectBuildElement={(element) => {
+              setSelectedBuildElement(element)
+              setEditor('selectedObjectId',null)
+            }}
+            onResizeBuildWall={resizeSelectedBuildWall}
             registerCombatTarget={registerCombatTarget}
             onTrainingDummyDefeated={handleTrainingDummyDefeated}
           />
@@ -18815,11 +18975,18 @@ function App() {
             )}
           </div>
           <div className="customize-build-actions">
-            <button type="button" className="customize-build-button" onClick={addPrototypeHouseRoom}>
-              Ajouter piece
-            </button>
+            {selectedBuildElement?.type === 'wall' && (
+              <button type="button" className="customize-build-button" onClick={splitSelectedBuildWall}>
+                Segment
+              </button>
+            )}
+            {selectedBuildElement && (
+              <button type="button" className="customize-build-button danger" onClick={deleteSelectedBuildElement}>
+                Supprimer
+              </button>
+            )}
             <button type="button" className="customize-build-button" onClick={resetHousePlan}>
-              Reset plan
+              Reset
             </button>
           </div>
           {placingObjectId ? (
