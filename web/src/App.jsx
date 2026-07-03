@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMixer, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMixer, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, MeshStandardMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { FBXLoader, GLTFLoader } from 'three-stdlib'
@@ -4794,16 +4794,24 @@ function AngelWingsModel({ flightRef }) {
   const { scene, animations } = useGLTF(ANGEL_WINGS_MODEL_URL)
   const { wings, materials, mixer, flapAction } = useMemo(() => {
     const wings = clone(scene)
-    const materials = []
+    // Le FBX source ne contient PAS la texture PNG des plumes : FBX2glTF n'a
+    // embarqué qu'un placeholder 1x1 (d'où des ailes invisibles). En attendant
+    // la vraie texture dans models-src/ (puis re-conversion), on pose un
+    // matériau magique stylisé. IMPORTANT : DoubleSide — les ailes sont des
+    // plans, invisibles de dos en simple face.
+    const material = new MeshStandardMaterial({
+      color: '#eaf4ff',
+      emissive: '#8fbcff',
+      emissiveIntensity: 0.55,
+      transparent: true,
+      opacity: 0,
+      side: DoubleSide,
+      depthWrite: false,
+    })
+    const materials = [material]
     wings.traverse((child) => {
       if (!child.isMesh && !child.isSkinnedMesh) return
       child.frustumCulled = false
-      // Matériau cloné par instance : l'opacité est animée indépendamment.
-      const material = child.material.clone()
-      material.transparent = true
-      material.opacity = 0
-      material.depthWrite = false
-      materials.push(material)
       child.material = material
     })
     // Normalise l'envergure : le FBX embarque échelles et rotations arbitraires

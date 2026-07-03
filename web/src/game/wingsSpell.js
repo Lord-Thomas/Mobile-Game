@@ -21,9 +21,9 @@ export const WINGS_CONFIG = {
   // Lancement : propulsion verticale au cast. Le saut normal est à 4.9 avec une
   // gravité de 12 — on part nettement plus haut, mais contrôlé (vitesse imposée
   // par frame pendant launchDuration, pas une impulsion balistique).
-  // Hauteur gagnée ≈ launchSpeed * launchDuration / 2 ≈ 7,6 m.
-  launchSpeed: 16,
-  launchDuration: 0.95,
+  // Hauteur gagnée ≈ launchSpeed * launchDuration / 2 ≈ 12 m.
+  launchSpeed: 22,
+  launchDuration: 1.1,
 
   // Vitesse avant pendant le plané (unités monde / s). La course max du joueur
   // est ~5.2 : planer à plat va un peu plus vite, piquer va beaucoup plus vite.
@@ -50,8 +50,8 @@ export const WINGS_CONFIG = {
   divePitchRef: 0.55,
   climbPitchRef: 0.6,
 
-  // Garde-fous.
-  maxDuration: 8, // s de vol maxi, ailes disparaissent ensuite en plein vol
+  // Garde-fous. Pas de durée max : le vol ne s'arrête qu'au contact du sol
+  // (ou annulation externe : intérieur, monture, respawn).
   cooldown: 18, // s après la fin du vol avant de pouvoir relancer
   landingGraceDelay: 0.25, // s après le cast pendant lesquelles on ignore le sol
 }
@@ -118,17 +118,11 @@ function endFlight(state, now, config) {
 // Avance la simulation d'une frame de vol. À appeler uniquement quand
 // isWingsFlying(state). `pitch` est le pitch caméra brut (radians, positif =
 // regarde vers le bas). `grounded` = le joueur a touché le sol cette frame.
-// Retourne l'événement de la frame : 'flying' | 'landed' | 'expired'.
+// Retourne l'événement de la frame : 'flying' | 'landed'.
 // Les vitesses à appliquer sont lues dans state.forwardSpeed (le long du
 // forward caméra) et state.verticalVelocity.
 export function stepWings(state, { now, dt, pitch, grounded }, config = WINGS_CONFIG) {
   const elapsed = now - state.startedAt
-
-  // Durée max dépassée : les ailes disparaissent, la gravité normale reprend.
-  if (elapsed >= config.maxDuration) {
-    endFlight(state, now, config)
-    return 'expired'
-  }
 
   // Contact sol (après la petite grâce du décollage) : fin naturelle du vol.
   if (grounded && elapsed >= config.landingGraceDelay) {

@@ -77,7 +77,7 @@ describe('castWings / lancement', () => {
     const state = createWingsState()
     castWings(state, castOptions(0))
     const { altitude } = simulate(state, { seconds: WINGS_CONFIG.launchDuration, pitch: 0 })
-    expect(altitude).toBeGreaterThan(6) // propulsion haute (~3x un saut de tremplin)
+    expect(altitude).toBeGreaterThan(10) // propulsion très haute (~12 m)
     expect(state.phase).toBe(WINGS_PHASE.GLIDING)
   })
 
@@ -179,17 +179,12 @@ describe('fins de vol', () => {
     expect(getWingsCooldownRemaining(state, 2)).toBeCloseTo(WINGS_CONFIG.cooldown)
   })
 
-  it('durée max : événement expired, les ailes disparaissent en vol', () => {
+  it('pas de limite de temps : le vol continue tant que le sol n’est pas touché', () => {
     const state = createWingsState()
     castWings(state, castOptions(0))
-    const event = stepWings(state, {
-      now: WINGS_CONFIG.maxDuration + 0.01,
-      dt: DT,
-      pitch: 0,
-      grounded: false,
-    })
-    expect(event).toBe('expired')
-    expect(state.phase).toBe(WINGS_PHASE.COOLDOWN)
+    const event = stepWings(state, { now: 120, dt: DT, pitch: 0, grounded: false })
+    expect(event).toBe('flying')
+    expect(isWingsFlying(state)).toBe(true)
   })
 
   it('cancelWings coupe le vol et lance le cooldown', () => {
