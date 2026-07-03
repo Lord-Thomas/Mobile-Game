@@ -12,6 +12,7 @@ import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/char
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { WINGS_PHASE, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
+import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
@@ -4783,42 +4784,8 @@ function Player({
 const ANGEL_WINGS_MODEL_URL = '/models/props/angel-wings.glb'
 const ANGEL_WINGS_SPAN = 1.9 // envergure cible (unités monde)
 
-// Mesure de l'envergure RENDUE des ailes. Une bbox naïve (Box3.setFromObject)
-// est fausse sur ce rig : le nœud Armature porte une échelle 0,02 et les os
-// des unités ×50 — le rendu skinné suit les matrices d'os, pas le matrixWorld
-// du mesh (même famille de piège que measureEnemyGlbIdleBounds, ×71 chez les
-// ennemis). On skinne donc chaque sommet en pose bind via boneTransform, ce
-// qui donne exactement la taille affichée à l'écran. Mesuré une fois, mis en
-// cache par modèle source (les clones sont identiques).
-const angelWingsBoundsCache = new WeakMap()
-
-function getAngelWingsBounds(sourceScene, wings) {
-  const cached = angelWingsBoundsCache.get(sourceScene)
-  if (cached) return cached
-  wings.updateMatrixWorld(true)
-  const box = new Box3()
-  const vertex = new Vector3()
-  wings.traverse((child) => {
-    if (child.isSkinnedMesh) {
-      child.skeleton.update()
-      const position = child.geometry.attributes.position
-      for (let i = 0; i < position.count; i++) {
-        child.boneTransform(i, vertex)
-        vertex.applyMatrix4(child.matrixWorld)
-        box.expandByPoint(vertex)
-      }
-    } else if (child.isMesh) {
-      box.expandByObject(child, true)
-    }
-  })
-  const size = box.getSize(new Vector3())
-  const bounds = {
-    span: Math.max(size.x, size.y, size.z) || 1,
-    center: box.getCenter(new Vector3()),
-  }
-  angelWingsBoundsCache.set(sourceScene, bounds)
-  return bounds
-}
+// Mesure de l'envergure RENDUE des ailes : extraite dans
+// src/game/angelWingsBounds.js (logique pure three, testée).
 
 // Modèle GLB des ailes du sort « Envol Céleste », partagé entre joueur local et
 // joueurs distants. flightRef.current = { active, launching } piloté par le
