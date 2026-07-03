@@ -77,7 +77,7 @@ describe('castWings / lancement', () => {
     const state = createWingsState()
     castWings(state, castOptions(0))
     const { altitude } = simulate(state, { seconds: WINGS_CONFIG.launchDuration, pitch: 0 })
-    expect(altitude).toBeGreaterThan(1.5) // le lancement gagne réellement de la hauteur
+    expect(altitude).toBeGreaterThan(6) // propulsion haute (~3x un saut de tremplin)
     expect(state.phase).toBe(WINGS_PHASE.GLIDING)
   })
 

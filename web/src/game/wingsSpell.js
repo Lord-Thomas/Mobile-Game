@@ -21,8 +21,9 @@ export const WINGS_CONFIG = {
   // Lancement : propulsion verticale au cast. Le saut normal est à 4.9 avec une
   // gravité de 12 — on part nettement plus haut, mais contrôlé (vitesse imposée
   // par frame pendant launchDuration, pas une impulsion balistique).
-  launchSpeed: 9,
-  launchDuration: 0.55,
+  // Hauteur gagnée ≈ launchSpeed * launchDuration / 2 ≈ 7,6 m.
+  launchSpeed: 16,
+  launchDuration: 0.95,
 
   // Vitesse avant pendant le plané (unités monde / s). La course max du joueur
   // est ~5.2 : planer à plat va un peu plus vite, piquer va beaucoup plus vite.

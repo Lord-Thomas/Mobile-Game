@@ -104,6 +104,7 @@ function sanitizePlayerState(message, client, player) {
     grounded: Boolean(message?.grounded ?? true),
     motion: typeof message?.motion === 'string' ? message.motion.slice(0, 32) : 'idle',
     zone: typeof message?.zone === 'string' ? message.zone.slice(0, 32) : 'interior',
+    wings: message?.wings === true,
     mount: sanitizeMount(message?.mount),
     catActive: activeSlimePetId ? false : Boolean(message?.catActive),
     cat: sanitizeCatState(message?.cat),
@@ -231,6 +232,7 @@ export class VisitRoom extends Room {
       grounded: true,
       motion: 'idle',
       zone: 'interior',
+      wings: false,
       mount: null,
       catActive: false,
       cat: null,
@@ -298,6 +300,7 @@ export class VisitRoom extends Room {
     player.grounded = state.grounded
     player.motion = state.motion
     player.zone = state.zone
+    player.wings = state.wings
     player.mount = state.mount
     player.catActive = state.catActive
     player.cat = state.cat
@@ -423,6 +426,7 @@ export class VisitRoom extends Room {
         grounded: player.grounded,
         motion: player.motion,
         zone: player.zone,
+        wings: player.wings === true,
         mount: player.mount,
         catActive: player.catActive,
         cat: player.cat,

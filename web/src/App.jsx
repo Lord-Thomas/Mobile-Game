@@ -3580,6 +3580,8 @@ function Player({
   const wasOnGroundRef = useRef(true)
   // Sort d'ailes « Envol Céleste » : état simulé à 60 Hz, jamais dans un useState.
   const wingsSpellRef = useRef(createWingsState())
+  // Groupe d'inclinaison du corps en vol (l'avatar passe à l'horizontale).
+  const wingsTiltRef = useRef(null)
   const landingPreparedRef = useRef(false)
   const [isPlayerVisible, setIsPlayerVisible] = useState(true)
   const [playerMotion, setPlayerMotion] = useState('idle')
@@ -4158,6 +4160,16 @@ function Player({
       visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 12, delta)
     }
     if (playerBodyYawRef) playerBodyYawRef.current = visualRef.current.rotation.y
+
+    if (wingsTiltRef.current) {
+      // Plané : corps à l'horizontale (π/2), le nez suit le pitch caméra —
+      // regarder le sol pique vers le sol, regarder le ciel redresse vers le
+      // ciel. Hors vol (et pendant la propulsion), retour souple à la verticale.
+      const tiltTarget = wingsAirborne && wings.phase === WINGS_PHASE.GLIDING
+        ? Math.PI / 2 + touch.cameraPitch
+        : 0
+      wingsTiltRef.current.rotation.x = MathUtils.damp(wingsTiltRef.current.rotation.x, tiltTarget, 5, delta)
+    }
 
     const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
     nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
@@ -4747,76 +4759,96 @@ function Player({
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
       <group ref={visualRef} visible={isPlayerVisible}>
-        <PlayerAvatar
-          motion={playerMotion}
-          handBoneRef={handBoneRef}
-          mountProfileRef={dragonRide?.mountProfileRef}
-          equippedWeapon={equippedWeapon}
-          appearance={appearance}
-          currentZone={currentZone}
-        />
-        <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
-        <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
-        <MagicWings wingsSpellRef={wingsSpellRef} />
+        {/* Groupe intermédiaire : rotation.y (cap) sur visualRef, rotation.x
+            (inclinaison en vol plané) sur wingsTiltRef, pour que le tilt reste
+            dans le repère local du corps quel que soit le cap. */}
+        <group ref={wingsTiltRef}>
+          <PlayerAvatar
+            motion={playerMotion}
+            handBoneRef={handBoneRef}
+            mountProfileRef={dragonRide?.mountProfileRef}
+            equippedWeapon={equippedWeapon}
+            appearance={appearance}
+            currentZone={currentZone}
+          />
+          <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+          <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+          <MagicWings wingsSpellRef={wingsSpellRef} />
+        </group>
       </group>
     </>
   )
 }
 
-// Ailes du sort « Envol Céleste » — visuel provisoire (deux plans translucides)
-// en attendant le modèle GLB. Visibilité et battement pilotés en impératif dans
-// useFrame : aucun setState, donc aucun re-rendu de l'arbre 3D pendant le vol.
-function MagicWings({ wingsSpellRef }) {
-  const groupRef = useRef(null)
-  const leftPivotRef = useRef(null)
-  const rightPivotRef = useRef(null)
+const ANGEL_WINGS_MODEL_URL = '/models/props/angel-wings.glb'
+const ANGEL_WINGS_SPAN = 1.9 // envergure cible (unités monde)
 
-  useFrame((state) => {
-    const group = groupRef.current
-    if (!group) return
+// Modèle GLB des ailes du sort « Envol Céleste », partagé entre joueur local et
+// joueurs distants. flightRef.current = { active, launching } piloté par le
+// parent dans son useFrame.
+//
+// PERF : toujours monté et rendu (opacité 0 au repos), jamais visible={false} —
+// cf. la note FireballFlameShell : un objet invisible ne compile pas ses shaders
+// et ferait payer un freeze au premier cast.
+function AngelWingsModel({ flightRef }) {
+  const { scene, animations } = useGLTF(ANGEL_WINGS_MODEL_URL)
+  const { wings, materials, mixer, flapAction } = useMemo(() => {
+    const wings = clone(scene)
+    const materials = []
+    wings.traverse((child) => {
+      if (!child.isMesh && !child.isSkinnedMesh) return
+      child.frustumCulled = false
+      // Matériau cloné par instance : l'opacité est animée indépendamment.
+      const material = child.material.clone()
+      material.transparent = true
+      material.opacity = 0
+      material.depthWrite = false
+      materials.push(material)
+      child.material = material
+    })
+    // Normalise l'envergure : le FBX embarque échelles et rotations arbitraires
+    // (scale 2, -90° X…), on mesure la bbox en bind pose et on remet à l'échelle.
+    const box = new Box3().setFromObject(wings)
+    const size = new Vector3()
+    box.getSize(size)
+    const span = Math.max(size.x, size.y, size.z) || 1
+    wings.scale.multiplyScalar(ANGEL_WINGS_SPAN / span)
+    const mixer = new AnimationMixer(wings)
+    const flapAction = animations.length ? mixer.clipAction(animations[0]) : null
+    if (flapAction) flapAction.play()
+    return { wings, materials, mixer, flapAction }
+  }, [scene, animations])
+
+  const opacityRef = useRef(0)
+
+  useFrame((_, delta) => {
+    const flight = flightRef.current
+    const target = flight.active ? 0.96 : 0
+    const opacity = MathUtils.damp(opacityRef.current, target, 9, delta)
+    opacityRef.current = opacity
+    for (const material of materials) material.opacity = opacity
+    if (opacity < 0.01) return // ailes repliées : pas d'animation à payer
+    if (flapAction) flapAction.timeScale = flight.launching ? 2.4 : 0.9
+    mixer.update(delta)
+  })
+
+  return <primitive object={wings} position={[0, 0.72, -0.12]} />
+}
+
+// Ailes du joueur local : adapte l'état du sort (wingsSpellRef) au modèle.
+function MagicWings({ wingsSpellRef }) {
+  const flightRef = useRef({ active: false, launching: false })
+
+  useFrame(() => {
     const wings = wingsSpellRef.current
-    const flying = isWingsFlying(wings)
-    if (group.visible !== flying) group.visible = flying
-    if (!flying) return
-    // Battement ample pendant le lancement, ondulation douce en plané.
-    const launching = wings.phase === WINGS_PHASE.LAUNCHING
-    const t = state.clock.elapsedTime
-    const flap = launching ? Math.sin(t * 16) * 0.5 : Math.sin(t * 2.6) * 0.12
-    if (leftPivotRef.current) leftPivotRef.current.rotation.z = 0.28 + flap
-    if (rightPivotRef.current) rightPivotRef.current.rotation.z = -0.28 - flap
+    flightRef.current.active = isWingsFlying(wings)
+    flightRef.current.launching = wings.phase === WINGS_PHASE.LAUNCHING
   })
 
   return (
-    <group ref={groupRef} visible={false} position={[0, 0.72, -0.14]}>
-      <group ref={leftPivotRef} rotation={[0, 0.55, 0.28]}>
-        <mesh position={[-0.5, 0.22, 0]} rotation={[0.18, 0, 0.35]}>
-          <planeGeometry args={[0.95, 1.25]} />
-          <meshStandardMaterial
-            color="#d9ecff"
-            emissive="#7fb4ff"
-            emissiveIntensity={0.6}
-            transparent
-            opacity={0.72}
-            side={DoubleSide}
-            depthWrite={false}
-          />
-        </mesh>
-      </group>
-      <group ref={rightPivotRef} rotation={[0, -0.55, -0.28]}>
-        <mesh position={[0.5, 0.22, 0]} rotation={[0.18, 0, -0.35]}>
-          <planeGeometry args={[0.95, 1.25]} />
-          <meshStandardMaterial
-            color="#d9ecff"
-            emissive="#7fb4ff"
-            emissiveIntensity={0.6}
-            transparent
-            opacity={0.72}
-            side={DoubleSide}
-            depthWrite={false}
-          />
-        </mesh>
-      </group>
-    </group>
+    <Suspense fallback={null}>
+      <AngelWingsModel flightRef={flightRef} />
+    </Suspense>
   )
 }
 
@@ -6563,6 +6595,9 @@ function RemotePlayer({
   const displayedSlimePetIdRef = useRef(typeof stateRef.current?.activeSlimePetId === 'string' ? stateRef.current.activeSlimePetId : null)
   const [displayedSlimePetId, setDisplayedSlimePetId] = useState(typeof stateRef.current?.activeSlimePetId === 'string' ? stateRef.current.activeSlimePetId : null)
   const remoteHandBoneRef = useRef(null)
+  // Ailes du sort Envol Céleste (flag réseau `wings`) + inclinaison du corps.
+  const remoteWingsFlightRef = useRef({ active: false, launching: false })
+  const remoteTiltRef = useRef(null)
 
   // Initialize group position imperatively on mount — never via JSX props
   useLayoutEffect(() => {
@@ -6581,6 +6616,15 @@ function RemotePlayer({
     const state = stateRef.current
     if (rootRef.current) {
       rootRef.current.visible = !state?.zone || state.zone === currentZone
+    }
+    // Ailes distantes : le flag réseau pilote l'apparition du modèle et le
+    // passage du corps à l'horizontale (le pitch caméra distant n'est pas
+    // répliqué, on garde un plané neutre).
+    const remoteWingsActive = state?.wings === true
+    remoteWingsFlightRef.current.active = remoteWingsActive
+    if (remoteTiltRef.current) {
+      const tiltTarget = remoteWingsActive ? Math.PI / 2 : 0
+      remoteTiltRef.current.rotation.x = MathUtils.damp(remoteTiltRef.current.rotation.x, tiltTarget, 5, delta)
     }
     if (state?.position) {
       const seq = state.seq ?? 0
@@ -6802,16 +6846,21 @@ function RemotePlayer({
         </Suspense>
       )}
       <group ref={groupRef}>
-        <PlayerAvatar
-          motion={displayedMotion}
-          handBoneRef={remoteHandBoneRef}
-          mountProfileRef={remoteMountProfileRef}
-          equippedWeapon={displayedEquippedWeapon}
-          appearance={displayedAppearance}
-          currentZone={currentZone}
-        />
-        <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
-        <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+        <group ref={remoteTiltRef}>
+          <PlayerAvatar
+            motion={displayedMotion}
+            handBoneRef={remoteHandBoneRef}
+            mountProfileRef={remoteMountProfileRef}
+            equippedWeapon={displayedEquippedWeapon}
+            appearance={displayedAppearance}
+            currentZone={currentZone}
+          />
+          <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+          <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+          <Suspense fallback={null}>
+            <AngelWingsModel flightRef={remoteWingsFlightRef} />
+          </Suspense>
+        </group>
         {showOverlays && (
           <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
             <div className="remote-player-nameplate">
@@ -8178,6 +8227,7 @@ function MultiplayerBridge({
         grounded: true,
         motion,
         zone: localPlayerStateRef.current.zone,
+        wings: localPlayerStateRef.current.wings === true,
         mount: mountState
           ? {
               id: mountState.id,
