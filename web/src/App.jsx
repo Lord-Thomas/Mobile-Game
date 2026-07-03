@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
-import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMixer, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, MeshStandardMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
+import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMixer, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { FBXLoader, GLTFLoader } from 'three-stdlib'
@@ -4783,6 +4783,43 @@ function Player({
 const ANGEL_WINGS_MODEL_URL = '/models/props/angel-wings.glb'
 const ANGEL_WINGS_SPAN = 1.9 // envergure cible (unités monde)
 
+// Mesure de l'envergure RENDUE des ailes. Une bbox naïve (Box3.setFromObject)
+// est fausse sur ce rig : le nœud Armature porte une échelle 0,02 et les os
+// des unités ×50 — le rendu skinné suit les matrices d'os, pas le matrixWorld
+// du mesh (même famille de piège que measureEnemyGlbIdleBounds, ×71 chez les
+// ennemis). On skinne donc chaque sommet en pose bind via boneTransform, ce
+// qui donne exactement la taille affichée à l'écran. Mesuré une fois, mis en
+// cache par modèle source (les clones sont identiques).
+const angelWingsBoundsCache = new WeakMap()
+
+function getAngelWingsBounds(sourceScene, wings) {
+  const cached = angelWingsBoundsCache.get(sourceScene)
+  if (cached) return cached
+  wings.updateMatrixWorld(true)
+  const box = new Box3()
+  const vertex = new Vector3()
+  wings.traverse((child) => {
+    if (child.isSkinnedMesh) {
+      child.skeleton.update()
+      const position = child.geometry.attributes.position
+      for (let i = 0; i < position.count; i++) {
+        child.boneTransform(i, vertex)
+        vertex.applyMatrix4(child.matrixWorld)
+        box.expandByPoint(vertex)
+      }
+    } else if (child.isMesh) {
+      box.expandByObject(child, true)
+    }
+  })
+  const size = box.getSize(new Vector3())
+  const bounds = {
+    span: Math.max(size.x, size.y, size.z) || 1,
+    center: box.getCenter(new Vector3()),
+  }
+  angelWingsBoundsCache.set(sourceScene, bounds)
+  return bounds
+}
+
 // Modèle GLB des ailes du sort « Envol Céleste », partagé entre joueur local et
 // joueurs distants. flightRef.current = { active, launching } piloté par le
 // parent dans son useFrame.
@@ -4794,35 +4831,38 @@ function AngelWingsModel({ flightRef }) {
   const { scene, animations } = useGLTF(ANGEL_WINGS_MODEL_URL)
   const { wings, materials, mixer, flapAction } = useMemo(() => {
     const wings = clone(scene)
-    // Le FBX source ne contient PAS la texture PNG des plumes : FBX2glTF n'a
-    // embarqué qu'un placeholder 1x1 (d'où des ailes invisibles). En attendant
-    // la vraie texture dans models-src/ (puis re-conversion), on pose un
-    // matériau magique stylisé. IMPORTANT : DoubleSide — les ailes sont des
-    // plans, invisibles de dos en simple face.
-    const material = new MeshStandardMaterial({
-      color: '#eaf4ff',
-      emissive: '#8fbcff',
-      emissiveIntensity: 0.55,
-      transparent: true,
-      opacity: 0,
-      side: DoubleSide,
-      depthWrite: false,
-    })
-    const materials = [material]
+    const materials = []
     wings.traverse((child) => {
       if (!child.isMesh && !child.isSkinnedMesh) return
       child.frustumCulled = false
+      // Matériau du GLB (texture plumes, alpha BLEND, double face — réglés à
+      // l'export Blender), cloné par instance pour animer l'opacité sans
+      // toucher aux autres joueurs.
+      const material = child.material.clone()
+      material.transparent = true
+      material.opacity = 0
+      material.depthWrite = false
+      materials.push(material)
       child.material = material
     })
-    // Normalise l'envergure : le FBX embarque échelles et rotations arbitraires
-    // (scale 2, -90° X…), on mesure la bbox en bind pose et on remet à l'échelle.
-    const box = new Box3().setFromObject(wings)
-    const size = new Vector3()
-    box.getSize(size)
-    const span = Math.max(size.x, size.y, size.z) || 1
-    wings.scale.multiplyScalar(ANGEL_WINGS_SPAN / span)
+    // Normalise l'envergure sur la taille réellement rendue et recentre le
+    // modèle sur son pivot (l'export Blender place l'origine ailleurs).
+    const bounds = getAngelWingsBounds(scene, wings)
+    const wingsScale = ANGEL_WINGS_SPAN / bounds.span
+    wings.scale.multiplyScalar(wingsScale)
+    wings.position.set(
+      -bounds.center.x * wingsScale,
+      -bounds.center.y * wingsScale,
+      -bounds.center.z * wingsScale,
+    )
     const mixer = new AnimationMixer(wings)
-    const flapAction = animations.length ? mixer.clipAction(animations[0]) : null
+    // L'export Blender produit plusieurs clips (armature + racine) : on joue
+    // celui qui porte le squelette, c.-à-d. celui qui a le plus de pistes.
+    const flapClip = animations.reduce(
+      (best, clip) => (clip.tracks.length > (best?.tracks.length ?? 0) ? clip : best),
+      null,
+    )
+    const flapAction = flapClip ? mixer.clipAction(flapClip) : null
     if (flapAction) flapAction.play()
     return { wings, materials, mixer, flapAction }
   }, [scene, animations])
@@ -4840,7 +4880,13 @@ function AngelWingsModel({ flightRef }) {
     mixer.update(delta)
   })
 
-  return <primitive object={wings} position={[0, 0.72, -0.12]} />
+  // Le décalage dos est porté par un groupe : wings.position sert au recentrage
+  // du pivot (un position sur <primitive> l'écraserait).
+  return (
+    <group position={[0, 0.72, -0.12]}>
+      <primitive object={wings} />
+    </group>
+  )
 }
 
 // Ailes du joueur local : adapte l'état du sort (wingsSpellRef) au modèle.
