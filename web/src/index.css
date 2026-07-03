@@ -1530,6 +1530,23 @@ html[data-chat-open='true'] .game-chat-panel {
   color: #fff8f4;
 }
 
+.customize-build-button.active {
+  background: #f2c14e;
+  color: #17202a;
+}
+
+.customize-build-warning {
+  background: rgba(178, 60, 44, 0.88);
+  color: #fff6f2;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  max-width: 280px;
+  text-align: center;
+  pointer-events: none;
+}
+
 .customize-rotation button:disabled {
   opacity: 0.42;
 }

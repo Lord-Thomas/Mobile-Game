@@ -273,6 +273,10 @@ function getWallPointAtOffset(wall, offset) {
   ]
 }
 
+function getWallLength(wall) {
+  return Math.hypot(wall.to[0] - wall.from[0], wall.to[1] - wall.from[1]) || 1
+}
+
 function getWallPoint(axisInfo, value) {
   return axisInfo.axis === 'z'
     ? [axisInfo.constant, value]
@@ -480,9 +484,21 @@ export function normalizeHousePlan(plan = DEFAULT_HOUSE_PLAN) {
   const source = plan && typeof plan === 'object' ? plan : DEFAULT_HOUSE_PLAN
   const walls = normalizeWalls(source.walls)
   const openings = normalizeOpenings(source.openings, walls)
-  const entranceDoorId = typeof source.entranceDoorId === 'string' && openings[source.entranceDoorId]
+  const floorCells = normalizeFloorCells(source.floorCells)
+  let entranceDoorId = typeof source.entranceDoorId === 'string' && openings[source.entranceDoorId]
     ? source.entranceDoorId
     : Object.values(openings).find((opening) => opening.role === 'entrance')?.id ?? null
+
+  // Une entrée dont le mur est devenu intérieur (extension devant la porte)
+  // redevient une porte normale : le joueur devra définir une nouvelle entrée.
+  if (entranceDoorId) {
+    const entrance = openings[entranceDoorId]
+    const entranceWall = walls[entrance.wallId]
+    if (!entranceWall || !getExteriorNormal({ floorCells }, entranceWall)) {
+      openings[entranceDoorId] = { ...entrance, role: 'normal' }
+      entranceDoorId = null
+    }
+  }
 
   return {
     version: HOUSE_PLAN_VERSION,
@@ -490,7 +506,7 @@ export function normalizeHousePlan(plan = DEFAULT_HOUSE_PLAN) {
     wallThickness: Math.max(0.05, normalizeNumber(source.wallThickness, DEFAULT_HOUSE_WALL_THICKNESS)),
     defaultWallHeight: Math.max(0.1, normalizeNumber(source.defaultWallHeight, DEFAULT_HOUSE_WALL_HEIGHT)),
     entranceDoorId,
-    floorCells: normalizeFloorCells(source.floorCells),
+    floorCells,
     walls,
     openings,
     styles: {
@@ -598,12 +614,141 @@ export function removeLatestJunctionDoor(plan) {
 export function removeHouseOpening(plan, openingId) {
   const normalized = normalizeHousePlan(plan)
   if (!normalized.openings[openingId]) return normalized
+  // La maison doit toujours garder une entrée : définir une autre entrée d'abord.
+  if (openingId === normalized.entranceDoorId) return normalized
 
   const openings = { ...normalized.openings }
   delete openings[openingId]
   return normalizeHousePlan({
     ...normalized,
     openings,
+  })
+}
+
+export function addHouseOpeningToWall(plan, wallId, offset, options = {}) {
+  const normalized = normalizeHousePlan(plan)
+  const wall = normalized.walls[wallId]
+  if (!wall) return normalized
+
+  const width = Math.max(0.4, normalizeNumber(options.width, 1.2))
+  const length = getWallLength(wall)
+  if (length < width + 0.4) return normalized
+
+  const margin = (width * 0.5 + 0.2) / length
+  const nextOffset = Math.min(1 - margin, Math.max(margin, normalizeNumber(offset, 0.5)))
+  const center = nextOffset * length
+  const overlapsExisting = Object.values(normalized.openings).some((opening) => {
+    if (opening.wallId !== wallId) return false
+    const otherCenter = opening.offset * length
+    return Math.abs(otherCenter - center) < (opening.width + width) * 0.5 + 0.2
+  })
+  if (overlapsExisting) return normalized
+
+  const id = createUniqueId(`door_${makeSafeIdPart(wallId)}`, normalized.openings)
+  return normalizeHousePlan({
+    ...normalized,
+    openings: {
+      ...normalized.openings,
+      [id]: {
+        id,
+        wallId,
+        offset: nextOffset,
+        width,
+        bottom: 0,
+        height: Math.max(0.1, normalizeNumber(options.height, 2.4)),
+        type: 'door',
+        role: 'normal',
+      },
+    },
+  })
+}
+
+// Applique une texture de sol à un ensemble de cellules (typiquement toutes les
+// cellules d'un espace détecté : « appliquer à toute la pièce »).
+// styleId null = retour à la texture globale par défaut.
+export function setHouseFloorStyleForCells(plan, cellKeys, styleId) {
+  const normalized = normalizeHousePlan(plan)
+  if (!Array.isArray(cellKeys) || !cellKeys.length) return normalized
+
+  const floorByCell = { ...normalized.styles.floorByCell }
+  cellKeys.forEach((key) => {
+    if (!parseCellKey(key) || !normalized.floorCells[key]) return
+    if (typeof styleId === 'string' && styleId) floorByCell[key] = styleId
+    else delete floorByCell[key]
+  })
+
+  return normalizeHousePlan({
+    ...normalized,
+    styles: {
+      ...normalized.styles,
+      floorByCell,
+    },
+  })
+}
+
+export function setHouseWallSideStyle(plan, wallId, side, styleId) {
+  const normalized = normalizeHousePlan(plan)
+  if (!normalized.walls[wallId]) return normalized
+  if (side !== 'inside' && side !== 'outside') return normalized
+
+  const key = `${wallId}:${side}`
+  const wallBySide = { ...normalized.styles.wallBySide }
+  if (typeof styleId === 'string' && styleId) wallBySide[key] = styleId
+  else delete wallBySide[key]
+
+  return normalizeHousePlan({
+    ...normalized,
+    styles: {
+      ...normalized.styles,
+      wallBySide,
+    },
+  })
+}
+
+export function setHouseEntranceDoor(plan, openingId) {
+  const normalized = normalizeHousePlan(plan)
+  const opening = normalized.openings[openingId]
+  if (!opening || opening.type !== 'door') return normalized
+  if (openingId === normalized.entranceDoorId) return normalized
+
+  const wall = normalized.walls[opening.wallId]
+  if (!wall || !getExteriorNormal(normalized, wall)) return normalized
+
+  const openings = Object.fromEntries(
+    Object.entries(normalized.openings).map(([id, current]) => {
+      if (id === openingId) return [id, { ...current, role: 'entrance' }]
+      if (current.role === 'entrance') return [id, { ...current, role: 'normal' }]
+      return [id, current]
+    }),
+  )
+
+  return normalizeHousePlan({
+    ...normalized,
+    entranceDoorId: openingId,
+    openings,
+  })
+}
+
+export function moveHouseOpening(plan, openingId, wallId, offset) {
+  const normalized = normalizeHousePlan(plan)
+  const opening = normalized.openings[openingId]
+  const wall = normalized.walls[wallId]
+  if (!opening || !wall) return normalized
+
+  const length = getWallLength(wall)
+  const margin = Math.min(0.45, opening.width * 0.5 / length)
+  const nextOffset = Math.min(1 - margin, Math.max(margin, normalizeNumber(offset, opening.offset)))
+
+  return normalizeHousePlan({
+    ...normalized,
+    openings: {
+      ...normalized.openings,
+      [openingId]: {
+        ...opening,
+        wallId,
+        offset: nextOffset,
+      },
+    },
   })
 }
 
@@ -622,6 +767,34 @@ export function removeHouseWall(plan, wallId) {
     ...normalized,
     walls,
     openings,
+  })
+}
+
+export function addInteriorWallToHousePlan(plan, start, end) {
+  const normalized = normalizeHousePlan(plan)
+  const from = normalizePoint(start, null)
+  const rawTo = normalizePoint(end, null)
+  if (!from || !rawTo) return normalized
+
+  const dx = rawTo[0] - from[0]
+  const dz = rawTo[1] - from[1]
+  const to = Math.abs(dx) >= Math.abs(dz)
+    ? [rawTo[0], from[1]]
+    : [from[0], rawTo[1]]
+  if (Math.hypot(to[0] - from[0], to[1] - from[1]) < 1) return normalized
+
+  const id = createUniqueId(`wall_partition_${from[0]}_${from[1]}_${to[0]}_${to[1]}`, normalized.walls)
+  return normalizeHousePlan({
+    ...normalized,
+    walls: {
+      ...normalized.walls,
+      [id]: {
+        id,
+        from,
+        to,
+        height: normalized.defaultWallHeight,
+      },
+    },
   })
 }
 
@@ -703,18 +876,7 @@ export function removeLatestInteriorWall(plan) {
   })
 }
 
-export function resizeHouseExteriorWall(plan, wallId, amount) {
-  const normalized = normalizeHousePlan(plan)
-  const wall = normalized.walls[wallId]
-  const steps = clampInteger(amount, -4, 4, 0)
-  if (!wall || steps === 0) return normalized
-
-  const normal = getExteriorNormal(normalized, wall)
-  if (!normal) return normalized
-
-  const floorCells = applyWallResizeCells(normalized.floorCells, wall, normal, steps)
-  if (Object.keys(floorCells).length < MIN_ROOM_SIZE * MIN_ROOM_SIZE) return normalized
-
+function shiftWallWithConnections(normalized, wall, normal, steps) {
   const shiftedFrom = shiftPoint(wall.from, normal, steps)
   const shiftedTo = shiftPoint(wall.to, normal, steps)
   const walls = {}
@@ -736,7 +898,7 @@ export function resizeHouseExteriorWall(plan, wallId, amount) {
   }
 
   Object.entries(normalized.walls).forEach(([id, candidate]) => {
-    if (id === wallId) {
+    if (id === wall.id) {
       walls[id] = {
         ...candidate,
         from: shiftedFrom,
@@ -777,12 +939,184 @@ export function resizeHouseExteriorWall(plan, wallId, amount) {
     }
   })
 
+  return {
+    ...walls,
+    ...connectorWalls,
+  }
+}
+
+export function resizeHouseExteriorWall(plan, wallId, amount) {
+  const normalized = normalizeHousePlan(plan)
+  const wall = normalized.walls[wallId]
+  const steps = clampInteger(amount, -4, 4, 0)
+  if (!wall || steps === 0) return normalized
+
+  const normal = getExteriorNormal(normalized, wall)
+  if (!normal) return normalized
+
+  const floorCells = applyWallResizeCells(normalized.floorCells, wall, normal, steps)
+  if (Object.keys(floorCells).length < MIN_ROOM_SIZE * MIN_ROOM_SIZE) return normalized
+
   return normalizeHousePlan({
     ...normalized,
     floorCells,
-    walls: {
-      ...walls,
-      ...connectorWalls,
-    },
+    walls: shiftWallWithConnections(normalized, wall, normal, steps),
   })
+}
+
+// Déplace une cloison intérieure perpendiculairement à son axe (amount = pas de
+// grille le long de la normale gauche [-dz, 0, dx]). Le sol ne change pas : ce
+// sont les espaces détectés qui se rééquilibrent de part et d'autre.
+export function moveHouseInteriorWall(plan, wallId, amount) {
+  const normalized = normalizeHousePlan(plan)
+  const wall = normalized.walls[wallId]
+  const steps = clampInteger(amount, -4, 4, 0)
+  if (!wall || steps === 0) return normalized
+  if (!isInteriorWall(normalized, wall)) return normalized
+
+  const direction = getWallDirection(wall)
+  const normal = [-direction.z, 0, direction.x]
+  const next = normalizeHousePlan({
+    ...normalized,
+    walls: shiftWallWithConnections(normalized, wall, normal, steps),
+  })
+  const movedWall = next.walls[wallId]
+  if (!movedWall || !isInteriorWall(next, movedWall)) return normalized
+  return next
+}
+
+function getOpeningAxisSpan(wall, opening) {
+  const axisInfo = getWallAxis(wall)
+  const center = axisInfo.from + (axisInfo.to - axisInfo.from) * opening.offset
+  return {
+    min: center - opening.width * 0.5,
+    max: center + opening.width * 0.5,
+    center,
+  }
+}
+
+function replaceWallSpan(normalized, wall, nextFrom, nextTo) {
+  const axisInfo = getWallAxis(wall)
+  const nextWall = {
+    ...wall,
+    from: getWallPoint(axisInfo, nextFrom),
+    to: getWallPoint(axisInfo, nextTo),
+  }
+  const openings = { ...normalized.openings }
+  Object.values(normalized.openings)
+    .filter((opening) => opening.wallId === wall.id)
+    .forEach((opening) => {
+      const remapped = remapOpeningToWall(wall, opening, nextWall)
+      if (remapped) {
+        openings[opening.id] = remapped
+      } else {
+        delete openings[opening.id]
+      }
+    })
+
+  return normalizeHousePlan({
+    ...normalized,
+    walls: {
+      ...normalized.walls,
+      [wall.id]: nextWall,
+    },
+    openings,
+  })
+}
+
+// Redimensionne une cloison en déplaçant une extrémité libre le long de son axe.
+// L'extrémité est libre si aucun autre mur ne s'y raccorde par un sommet ;
+// sinon il faut passer par moveHouseWallJoint (point de segment).
+export function resizeHouseWallEnd(plan, wallId, end, targetValue) {
+  const normalized = normalizeHousePlan(plan)
+  const wall = normalized.walls[wallId]
+  if (!wall) return normalized
+
+  const movingPoint = end === 'from' ? wall.from : wall.to
+  const endpointShared = Object.values(normalized.walls).some((candidate) => (
+    candidate.id !== wallId &&
+    (pointsMatch(candidate.from, movingPoint) || pointsMatch(candidate.to, movingPoint))
+  ))
+  if (endpointShared) return normalized
+
+  const axisInfo = getWallAxis(wall)
+  const fixedValue = end === 'from' ? axisInfo.to : axisInfo.from
+  let nextValue = Math.round(normalizeNumber(targetValue, NaN))
+  if (!Number.isFinite(nextValue)) return normalized
+  if (Math.abs(nextValue - fixedValue) < 1) return normalized
+
+  // Ne pas couper une porte existante : l'extrémité s'arrête au bord de l'ouverture.
+  Object.values(normalized.openings)
+    .filter((opening) => opening.wallId === wallId)
+    .forEach((opening) => {
+      const span = getOpeningAxisSpan(wall, opening)
+      const openingSide = Math.sign(span.center - fixedValue)
+      const valueSide = Math.sign(nextValue - fixedValue)
+      if (openingSide !== valueSide) return
+      if (valueSide > 0) nextValue = Math.max(nextValue, Math.ceil(span.max + 0.2))
+      else nextValue = Math.min(nextValue, Math.floor(span.min - 0.2))
+    })
+
+  const nextFrom = end === 'from' ? nextValue : axisInfo.from
+  const nextTo = end === 'to' ? nextValue : axisInfo.to
+  return replaceWallSpan(normalized, wall, nextFrom, nextTo)
+}
+
+// Déplace un point de découpe entre deux segments colinéaires : l'un s'allonge,
+// l'autre se raccourcit, et le mur est donc "recoupé" à la nouvelle position.
+export function moveHouseWallJoint(plan, wallIdA, wallIdB, targetValue) {
+  const normalized = normalizeHousePlan(plan)
+  const wallA = normalized.walls[wallIdA]
+  const wallB = normalized.walls[wallIdB]
+  if (!wallA || !wallB || !wallAxisMatches(wallA, wallB)) return normalized
+
+  const jointOnA = pointsMatch(wallA.to, wallB.from) || pointsMatch(wallA.to, wallB.to) ? 'to' : 'from'
+  const jointPoint = jointOnA === 'to' ? wallA.to : wallA.from
+  const jointOnB = pointsMatch(wallB.from, jointPoint) ? 'from' : pointsMatch(wallB.to, jointPoint) ? 'to' : null
+  if (!jointOnB) return normalized
+
+  const axisA = getWallAxis(wallA)
+  const axisB = getWallAxis(wallB)
+  const fixedA = jointOnA === 'to' ? axisA.from : axisA.to
+  const fixedB = jointOnB === 'to' ? axisB.from : axisB.to
+  let nextValue = Math.round(normalizeNumber(targetValue, NaN))
+  if (!Number.isFinite(nextValue)) return normalized
+
+  // Chaque segment garde une longueur d'au moins 1.
+  const low = Math.min(fixedA, fixedB) + 1
+  const high = Math.max(fixedA, fixedB) - 1
+  if (low > high) return normalized
+  nextValue = Math.min(high, Math.max(low, nextValue))
+
+  // Le point de découpe ne traverse pas une ouverture.
+  const clampAgainstOpenings = (wall) => {
+    Object.values(normalized.openings)
+      .filter((opening) => opening.wallId === wall.id)
+      .forEach((opening) => {
+        const span = getOpeningAxisSpan(wall, opening)
+        if (nextValue <= span.min - 0.2 || nextValue >= span.max + 0.2) return
+        const jointValue = axisA.axis === 'z' ? jointPoint[1] : jointPoint[0]
+        nextValue = jointValue >= span.center
+          ? Math.ceil(span.max + 0.2)
+          : Math.floor(span.min - 0.2)
+      })
+  }
+  clampAgainstOpenings(wallA)
+  clampAgainstOpenings(wallB)
+  if (nextValue < low || nextValue > high) return normalized
+
+  const withResizedA = replaceWallSpan(
+    normalized,
+    wallA,
+    jointOnA === 'from' ? nextValue : axisA.from,
+    jointOnA === 'to' ? nextValue : axisA.to,
+  )
+  const wallBAfter = withResizedA.walls[wallIdB]
+  const axisBAfter = getWallAxis(wallBAfter)
+  return replaceWallSpan(
+    withResizedA,
+    wallBAfter,
+    jointOnB === 'from' ? nextValue : axisBAfter.from,
+    jointOnB === 'to' ? nextValue : axisBAfter.to,
+  )
 }

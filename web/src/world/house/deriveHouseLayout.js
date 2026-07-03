@@ -4,6 +4,7 @@ import {
   normalizeHousePlan,
 } from './housePlan'
 import { detectHouseSpaces } from './houseSpaces'
+import { decomposeCellsIntoRects, getCellsBounds } from './floorGeometry'
 
 function getCornerId(x, z) {
   return `corner_${String(x).replace('-', 'm').replace('.', 'p')}_${String(z).replace('-', 'm').replace('.', 'p')}`
@@ -43,6 +44,7 @@ function getWallSides(wall, plan, spaceLookup) {
         type: 'outside',
         material: 'facade_main',
         color: DEFAULT_HOUSE_EXTERIOR_COLOR,
+        styleId: plan.styles?.wallBySide?.[`${wall.id}:outside`] ?? null,
         normal,
       }
     }
@@ -52,9 +54,26 @@ function getWallSides(wall, plan, spaceLookup) {
       roomId,
       material: 'active_wall',
       color: DEFAULT_HOUSE_INTERIOR_COLOR,
+      styleId: plan.styles?.wallBySide?.[`${wall.id}:inside`] ?? null,
       normal,
     }
   })
+}
+
+// Regroupe les cellules de sol par texture (null = texture globale par défaut)
+// puis décompose chaque groupe en rectangles pleins pour le rendu.
+function getFloorStyleRects(plan) {
+  const groups = new Map()
+  Object.keys(plan.floorCells).forEach((key) => {
+    const styleId = plan.styles?.floorByCell?.[key] ?? null
+    if (!groups.has(styleId)) groups.set(styleId, [])
+    groups.get(styleId).push(key)
+  })
+
+  return [...groups.entries()].map(([styleId, cellKeys]) => ({
+    styleId,
+    rects: decomposeCellsIntoRects(cellKeys),
+  }))
 }
 
 function normalizeWallSegment(segment, cornerById, wallThickness) {
@@ -108,6 +127,53 @@ function createRoom(space, plan) {
     ],
     openings: [],
   }
+}
+
+const ENTRANCE_INSIDE_OFFSET = 1.2
+const ENTRANCE_OUTSIDE_OFFSET = 2.2
+
+// Position monde de la porte d'entrée + points d'entrée/sortie du joueur.
+// Si aucune entrée n'est définie (mur devenu intérieur), retombe sur la première
+// porte extérieure pour que la transition intérieur/extérieur reste jouable.
+export function getHouseEntranceTransform(layout) {
+  const entranceDoorId = layout.plan?.entranceDoorId ?? null
+  let fallback = null
+
+  for (const wall of layout.walls) {
+    const outsideSide = wall.sideA?.type === 'outside'
+      ? wall.sideA
+      : wall.sideB?.type === 'outside' ? wall.sideB : null
+    if (!outsideSide) continue
+
+    for (const opening of wall.openings ?? []) {
+      if (opening.type !== 'door') continue
+      const direction = {
+        x: (wall.endCorner.x - wall.startCorner.x) / (wall.length || 1),
+        z: (wall.endCorner.z - wall.startCorner.z) / (wall.length || 1),
+      }
+      const doorX = wall.startCorner.x + direction.x * opening.center
+      const doorZ = wall.startCorner.z + direction.z * opening.center
+      const [nx, , nz] = outsideSide.normal
+      const transform = {
+        openingId: opening.id,
+        wallId: wall.id,
+        width: opening.width,
+        height: opening.height,
+        bottom: opening.bottom ?? 0,
+        doorPosition: { x: doorX, z: doorZ },
+        insidePosition: { x: doorX - nx * ENTRANCE_INSIDE_OFFSET, z: doorZ - nz * ENTRANCE_INSIDE_OFFSET },
+        outsidePosition: { x: doorX + nx * ENTRANCE_OUTSIDE_OFFSET, z: doorZ + nz * ENTRANCE_OUTSIDE_OFFSET },
+        rotationY: Math.atan2(nx, nz),
+        outsideNormal: [nx, 0, nz],
+        isFallback: opening.id !== entranceDoorId,
+      }
+
+      if (opening.id === entranceDoorId) return transform
+      fallback ??= transform
+    }
+  }
+
+  return fallback
 }
 
 export function deriveHouseLayout(sourcePlan) {
@@ -169,6 +235,10 @@ export function deriveHouseLayout(sourcePlan) {
     }, cornerById, plan.wallThickness)
   })
 
+  const enabledCellKeys = Object.keys(plan.floorCells)
+  const maxWallHeight = Object.values(plan.walls)
+    .reduce((maxHeight, wall) => Math.max(maxHeight, wall.height), plan.defaultWallHeight)
+
   return {
     wallThickness: plan.wallThickness,
     plan,
@@ -176,5 +246,11 @@ export function deriveHouseLayout(sourcePlan) {
     corners,
     rooms: spaces.map((space) => createRoom(space, plan)),
     walls,
+    // Empreinte réelle du sol (rectangles pleins) : sol/plafond/toit/colliders
+    // doivent s'appuyer dessus, pas sur les bounding boxes des pièces (formes en L).
+    footprintRects: decomposeCellsIntoRects(enabledCellKeys),
+    floorStyleRects: getFloorStyleRects(plan),
+    bounds: getCellsBounds(enabledCellKeys),
+    maxWallHeight,
   }
 }
