@@ -4385,6 +4385,7 @@ function Player({
     const distanceToGround = Math.max(0, nextY - floorY)
     const shouldPrepareLanding =
       !onGroundRef.current &&
+      !isWingsFlying(wings) &&
       !landingPreparedRef.current &&
       state.clock.elapsedTime >= jumpStartUntilRef.current &&
       velocityYRef.current < -1 &&
@@ -4519,6 +4520,8 @@ function Player({
         ? 'jumpLand'
         : !onGroundRef.current && state.clock.elapsedTime < jumpStartUntilRef.current
           ? 'jumpStart'
+          : wings.phase === WINGS_PHASE.GLIDING
+            ? 'idle'
           : !onGroundRef.current
             ? 'fallingIdle'
             : state.clock.elapsedTime < waveUntilRef.current
@@ -4774,7 +4777,7 @@ function Player({
           />
           <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
           <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
-          <MagicWings wingsSpellRef={wingsSpellRef} />
+          <MagicWings wingsSpellRef={wingsSpellRef} currentZone={currentZone} />
         </group>
       </group>
     </>
@@ -4794,7 +4797,7 @@ const ANGEL_WINGS_SPAN = 1.9 // envergure cible (unités monde)
 // PERF : toujours monté et rendu (opacité 0 au repos), jamais visible={false} —
 // cf. la note FireballFlameShell : un objet invisible ne compile pas ses shaders
 // et ferait payer un freeze au premier cast.
-function AngelWingsModel({ flightRef }) {
+function AngelWingsModel({ flightRef, currentZone = ZONES.outside }) {
   const { scene, animations } = useGLTF(ANGEL_WINGS_MODEL_URL)
   const { wings, materials, mixer, flapAction } = useMemo(() => {
     const wings = clone(scene)
@@ -4809,6 +4812,14 @@ function AngelWingsModel({ flightRef }) {
       material.transparent = true
       material.opacity = 0
       material.depthWrite = false
+      material.side = DoubleSide
+      if ('color' in material) material.color.set('#ffffff')
+      if ('roughness' in material) material.roughness = Math.min(material.roughness ?? 0.86, 0.72)
+      if ('metalness' in material) material.metalness = 0
+      if ('emissive' in material) material.emissive.set('#eaf7ff')
+      if ('emissiveIntensity' in material) material.emissiveIntensity = 0.12
+      if ('envMapIntensity' in material) material.envMapIntensity = Math.max(material.envMapIntensity ?? 1, 1.2)
+      material.needsUpdate = true
       materials.push(material)
       child.material = material
     })
@@ -4836,6 +4847,13 @@ function AngelWingsModel({ flightRef }) {
 
   const opacityRef = useRef(0)
 
+  useLayoutEffect(() => {
+    const lightingLayer = currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0
+    wings.traverse((object) => {
+      object.layers.set(lightingLayer)
+    })
+  }, [wings, currentZone])
+
   useFrame((_, delta) => {
     const flight = flightRef.current
     const target = flight.active ? 0.96 : 0
@@ -4857,7 +4875,7 @@ function AngelWingsModel({ flightRef }) {
 }
 
 // Ailes du joueur local : adapte l'état du sort (wingsSpellRef) au modèle.
-function MagicWings({ wingsSpellRef }) {
+function MagicWings({ wingsSpellRef, currentZone }) {
   const flightRef = useRef({ active: false, launching: false })
 
   useFrame(() => {
@@ -4868,7 +4886,7 @@ function MagicWings({ wingsSpellRef }) {
 
   return (
     <Suspense fallback={null}>
-      <AngelWingsModel flightRef={flightRef} />
+      <AngelWingsModel flightRef={flightRef} currentZone={currentZone} />
     </Suspense>
   )
 }
@@ -6879,7 +6897,7 @@ function RemotePlayer({
           <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
           <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
           <Suspense fallback={null}>
-            <AngelWingsModel flightRef={remoteWingsFlightRef} />
+            <AngelWingsModel flightRef={remoteWingsFlightRef} currentZone={currentZone} />
           </Suspense>
         </group>
         {showOverlays && (
