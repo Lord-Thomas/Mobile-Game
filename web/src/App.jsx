@@ -51,7 +51,8 @@ import { rollLoot } from './items/lootTable'
 import { addItems, getMaterialEntries, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
 import { getItemDefinition, getSlimePetDefinitions } from './items/itemDefinitions'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
-import { getTerrainHeight } from './world/terrain/terrainGeometry'
+import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
+import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseWallSideStyle, splitHouseWallSegment } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
@@ -4173,6 +4174,12 @@ function Player({
     const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
     nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
     nextZ = MathUtils.clamp(nextZ, limits.minZ, limits.maxZ)
+
+    if (currentZone !== ZONES.outside) {
+      const resolved = resolveInteriorWallCollision(prevX, prevZ, nextX, nextZ, PLAYER_CAPSULE_RADIUS)
+      nextX = resolved.x
+      nextZ = resolved.z
+    }
 
     const playerYaw = visualRef.current.rotation.y
     const punchTarget = getNearestPunchTarget({
@@ -12556,6 +12563,57 @@ function RoomBorder({ width, depth, posX = 0, posZ = 0, visible = true }) {
   )
 }
 
+// Grille du mode personnalisation : suit l'empreinte réelle des cellules du
+// plan (contour exact, formes en L comprises) au lieu d'un carré fixe.
+function HouseFootprintGrid({ layout, gridSize = CUSTOM_GRID_SIZE }) {
+  const { gridGeometry, borderGeometry } = useMemo(() => {
+    const cellKeys = Object.keys(layout.plan?.floorCells ?? {})
+    const cells = new Set(cellKeys)
+    const grid = []
+    const border = []
+
+    cellKeys.forEach((key) => {
+      const [x, z] = key.split(',').map(Number)
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return
+      // Contour : arête dessinée seulement si la cellule voisine n'existe pas.
+      if (!cells.has(`${x},${z - 1}`)) border.push(x, 0, z, x + 1, 0, z)
+      if (!cells.has(`${x},${z + 1}`)) border.push(x, 0, z + 1, x + 1, 0, z + 1)
+      if (!cells.has(`${x - 1},${z}`)) border.push(x, 0, z, x, 0, z + 1)
+      if (!cells.has(`${x + 1},${z}`)) border.push(x + 1, 0, z, x + 1, 0, z + 1)
+      // Sous-lignes de placement au pas de la grille objets.
+      for (let offset = gridSize; offset < 1 - 1e-6; offset += gridSize) {
+        grid.push(x + offset, 0, z, x + offset, 0, z + 1)
+        grid.push(x, 0, z + offset, x + 1, 0, z + offset)
+      }
+      // Arêtes internes entre cellules (une seule fois par paire, côté +).
+      if (cells.has(`${x + 1},${z}`)) grid.push(x + 1, 0, z, x + 1, 0, z + 1)
+      if (cells.has(`${x},${z + 1}`)) grid.push(x, 0, z + 1, x + 1, 0, z + 1)
+    })
+
+    const makeGeometry = (positions) => {
+      const geometry = new BufferGeometry()
+      geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+      return geometry
+    }
+    return { gridGeometry: makeGeometry(grid), borderGeometry: makeGeometry(border) }
+  }, [layout, gridSize])
+  useEffect(() => () => {
+    gridGeometry.dispose()
+    borderGeometry.dispose()
+  }, [gridGeometry, borderGeometry])
+
+  return (
+    <group>
+      <lineSegments geometry={gridGeometry} position={[0, 0.032, 0]}>
+        <lineBasicMaterial color="#d8e0e8" transparent opacity={0.55} />
+      </lineSegments>
+      <lineSegments geometry={borderGeometry} position={[0, 0.07, 0]}>
+        <lineBasicMaterial color="#f2c14e" />
+      </lineSegments>
+    </group>
+  )
+}
+
 function EditableFloor({
   mode,
   draggingObjectId,
@@ -12998,7 +13056,6 @@ function CustomizationLayer({
   onTrainingDummyDefeated,
 }) {
   const rooms = layout.rooms ?? houseLayout.rooms
-  const customizeGridSize = Math.max(10, ...rooms.map((room) => Math.max(room.size[0], room.size[2])))
   const placedObjects = useMemo(() => objects.filter((object) => (
     object.status !== 'stored' &&
     (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35, layout))
@@ -13175,19 +13232,7 @@ function CustomizationLayer({
         onLockPlacement={onLockPlacement}
       />
       <group visible={mode === 'customize'}>
-        <gridHelper
-          args={[customizeGridSize, customizeGridSize / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
-          position={[0, 0.032, 0]}
-        />
-        {rooms.map((room) => (
-          <RoomBorder
-            key={`${room.id}-border`}
-            width={room.size[0]}
-            depth={room.size[2]}
-            posX={room.position[0]}
-            posZ={room.position[2]}
-          />
-        ))}
+        {mode === 'customize' && <HouseFootprintGrid layout={layout} />}
         {partitionStart && (
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[partitionStart.x, 0.08, partitionStart.z]}>
             <ringGeometry args={[0.28, 0.36, 24]} />
@@ -13582,30 +13627,45 @@ function CustomizationChoiceMenu({ open, onChooseRoom, onClose }) {
   )
 }
 
+// Palette de peinture du mode personnalisation : swatches des skins sol/mur,
+// achat direct si non possédé (le prix s'affiche sur le swatch).
+function SkinPaintPalette({ title, skins, ownedSkinIds, activeSkinId, coins, hasUnlimitedCoins, onPick }) {
+  return (
+    <div className="skin-paint-palette">
+      <span className="skin-paint-title">{title}</span>
+      <div className="skin-paint-swatches">
+        {skins.map((skin) => {
+          const owned = ownedSkinIds.includes(skin.id)
+          const affordable = hasUnlimitedCoins || coins >= skin.price
+          return (
+            <button
+              key={skin.id}
+              type="button"
+              className={`skin-paint-swatch ${activeSkinId === skin.id ? 'active' : ''}`}
+              style={{ backgroundImage: `url(${skin.texture})` }}
+              onClick={() => onPick(skin)}
+              disabled={!owned && !affordable}
+              title={skin.name}
+              aria-label={skin.name}
+            >
+              {!owned && <span className="skin-paint-price">{skin.price}</span>}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function EnvironmentMenu({
   open,
   coins,
   hasUnlimitedCoins = false,
   activeTab,
   onTabChange,
-  floorSkins,
-  wallSkins,
   furnitureItems,
   furnitureCounts,
-  previewFloorIndex,
-  previewWallIndex,
-  selectedFloorSkinId,
-  selectedWallSkinId,
-  ownedFloorSkinIds,
-  ownedWallSkinIds,
-  applyWallToCeiling,
-  canApplyWorldSkins = true,
-  onApplyWallToCeilingChange,
   onClose,
-  onPrevious,
-  onNext,
-  onBuy,
-  onSelect,
   furnitureCart,
   onAddFurnitureToCart,
   onRemoveFurnitureFromCart,
@@ -13630,20 +13690,13 @@ function EnvironmentMenu({
 }) {
   if (!open) return null
 
-  const isAnimalsTab = activeTab === 'animals'
-  const isWeaponsTab = showWeaponShop && activeTab === 'weapons'
-  const isMountsTab = activeTab === 'mounts'
-  const isFurnitureTab = activeTab === 'furniture'
-  const isCartTab = activeTab === 'cart'
-  const isFloorTab = activeTab === 'floor'
-  const skins = isFloorTab ? floorSkins : wallSkins
-  const previewIndex = isFloorTab ? previewFloorIndex : previewWallIndex
-  const selectedSkinId = isFloorTab ? selectedFloorSkinId : selectedWallSkinId
-  const ownedSkinIds = isFloorTab ? ownedFloorSkinIds : ownedWallSkinIds
-  const skin = skins[previewIndex]
-  const isOwned = skin ? ownedSkinIds.includes(skin.id) : false
-  const isSelected = skin ? selectedSkinId === skin.id : false
-  const canBuy = skin ? coins >= skin.price : false
+  // La personnalisation sols/murs a déménagé dans la vue personnalisation :
+  // les anciens onglets 'floor'/'wall' retombent sur les meubles.
+  const normalizedTab = activeTab === 'floor' || activeTab === 'wall' ? 'furniture' : activeTab
+  const isAnimalsTab = normalizedTab === 'animals'
+  const isWeaponsTab = showWeaponShop && normalizedTab === 'weapons'
+  const isMountsTab = normalizedTab === 'mounts'
+  const isCartTab = normalizedTab === 'cart'
   const cartEntries = furnitureCart
     .map((entry) => {
       const item = furnitureItems.find((candidate) => candidate.id === entry.objectId)
@@ -13676,21 +13729,7 @@ function EnvironmentMenu({
         <div className="env-tabs">
           <button
             type="button"
-            className={`env-tab-btn ${isFloorTab ? 'active' : ''}`}
-            onClick={() => onTabChange('floor')}
-          >
-            Sol
-          </button>
-          <button
-            type="button"
-            className={`env-tab-btn ${activeTab === 'wall' ? 'active' : ''}`}
-            onClick={() => onTabChange('wall')}
-          >
-            Mur
-          </button>
-          <button
-            type="button"
-            className={`env-tab-btn ${isFurnitureTab ? 'active' : ''}`}
+            className={`env-tab-btn ${normalizedTab === 'furniture' ? 'active' : ''}`}
             onClick={() => onTabChange('furniture')}
           >
             Meubles
@@ -13912,7 +13951,7 @@ function EnvironmentMenu({
               })}
             </div>
           </>
-        ) : isFurnitureTab ? (
+        ) : (
           <>
             <div className="shop-section-heading">
               <span>Meubles</span>
@@ -13942,49 +13981,6 @@ function EnvironmentMenu({
                 )
               })}
             </div>
-          </>
-        ) : (
-          <>
-            <div className="skin-title">{skin.name}</div>
-            <div className="env-preview-wrap">
-              <div
-                className="env-preview-wall"
-                style={{
-                  backgroundImage: `url(${isFloorTab ? wallSkins[previewWallIndex].texture : skin.texture})`,
-                }}
-              />
-              <div
-                className="env-preview-floor"
-                style={{
-                  backgroundImage: `url(${isFloorTab ? skin.texture : floorSkins[previewFloorIndex].texture})`,
-                }}
-              />
-            </div>
-            {!isFloorTab && (
-              <label className="env-ceiling-toggle">
-                <input
-                  type="checkbox"
-                  checked={applyWallToCeiling}
-                  disabled={!canApplyWorldSkins}
-                  onChange={(event) => canApplyWorldSkins && onApplyWallToCeilingChange(event.target.checked)}
-                />
-                <span>Appliquer au plafond</span>
-              </label>
-            )}
-            <div className="skin-nav">
-              <button type="button" onClick={onPrevious} className="skin-nav-btn">{'<'}</button>
-              <button type="button" onClick={onNext} className="skin-nav-btn">{'>'}</button>
-            </div>
-            {!isOwned && (
-              <button type="button" className="skin-action-btn" onClick={onBuy} disabled={!canBuy}>
-                Acheter - {skin.price}
-              </button>
-            )}
-            {isOwned && !isSelected && canApplyWorldSkins && (
-              <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
-            )}
-            {isOwned && isSelected && canApplyWorldSkins && <div className="skin-equipped">Equipe</div>}
-            {isOwned && !canApplyWorldSkins && <div className="skin-equipped">Possede</div>}
           </>
         )}
         {!isCartTab && (
@@ -15539,8 +15535,6 @@ function App() {
   const ownedWallSkins = useGameStore((s) => s.inventory.ownedWallSkins)
   const selectedFloorSkinId = useGameStore((s) => s.inventory.selectedFloorSkinId)
   const selectedWallSkinId = useGameStore((s) => s.inventory.selectedWallSkinId)
-  const previewFloorSkinId = useGameStore((s) => s.inventory.previewFloorSkinId)
-  const previewWallSkinId = useGameStore((s) => s.inventory.previewWallSkinId)
   const applyWallToCeiling = useGameStore((s) => s.inventory.applyWallToCeiling)
   const isEnvironmentMenuOpen = useGameStore((s) => s.menus.environment ?? false)
   const [furnitureCart, setFurnitureCart] = useState([])
@@ -17389,10 +17383,8 @@ function App() {
       : null
   const remotePresenceTitleId = onlinePlayers.find((player) => player.userId === remoteUserId)?.equippedTitleId ?? null
   const availableWallSkins = (isAdminMode || isLocalNetwork) ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
-  const previewFloorIndex = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
-  const previewWallIndex = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
-  const activeFloorSkinId = isEnvironmentMenuOpen ? previewFloorSkinId : selectedFloorSkinId
-  const activeWallSkinId = isEnvironmentMenuOpen ? previewWallSkinId : selectedWallSkinId
+  const activeFloorSkinId = selectedFloorSkinId
+  const activeWallSkinId = selectedWallSkinId
   const activeFloorSkin = floorSkins.find((skin) => skin.id === activeFloorSkinId) || floorSkins[0]
   const activeWallSkin = availableWallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
   const activeCeilingTexturePath = applyWallToCeiling ? activeWallSkin.texture : DEFAULT_CEILING_TEXTURE
@@ -17401,10 +17393,15 @@ function App() {
   useEffect(() => {
     syncInteriorPlayAreaLimits(activeHouseLayout.bounds)
     syncHouseEntranceRuntime(houseEntrance)
+    syncPlayerHouseTerrainFootprint(activeHouseLayout.footprintRects)
+    syncInteriorWallColliders(buildInteriorWallColliderBoxes(activeHouseLayout))
   }, [activeHouseLayout, houseEntrance])
   const [selectedBuildElement, setSelectedBuildElement] = useState(null)
   const [activeBuildTool, setActiveBuildTool] = useState(null)
   const [partitionStart, setPartitionStart] = useState(null)
+  const [paintFloorSkinId, setPaintFloorSkinId] = useState(null)
+  // Pinceau de peinture du sol (par défaut : skin global).
+  const floorPaintBrushId = paintFloorSkinId ?? activeFloorSkinId
   const selectedBuildOpeningWall = selectedBuildElement?.type === 'opening'
     ? activeHouseLayout.walls.find((wall) => (wall.openings ?? []).some((opening) => opening.id === selectedBuildElement.id))
     : null
@@ -17444,16 +17441,12 @@ function App() {
     setMenuOpen('skin', false)
   }
   const openEnvironmentMenu = () => {
-    setUi('environmentTab','floor')
-    setInventory('previewFloorSkinId',selectedFloorSkinId)
-    setInventory('previewWallSkinId',selectedWallSkinId)
+    setUi('environmentTab','furniture')
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
     setMenuOpen('environment', true)
   }
   const closeEnvironmentMenu = () => {
-    setInventory('previewFloorSkinId',selectedFloorSkinId)
-    setInventory('previewWallSkinId',selectedWallSkinId)
     setMenuOpen('environment', false)
   }
 
@@ -17551,19 +17544,6 @@ function App() {
     const next = (current + direction + ballSkins.length) % ballSkins.length
     setInventory('previewSkinId',ballSkins[next].id)
   }
-  const goEnvironmentPreview = (direction) => {
-    if (environmentTab === 'floor') {
-      const current = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
-      const next = (current + direction + floorSkins.length) % floorSkins.length
-      setInventory('previewFloorSkinId',floorSkins[next].id)
-      return
-    }
-    if (environmentTab !== 'wall') return
-    const current = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
-    const next = (current + direction + availableWallSkins.length) % availableWallSkins.length
-    setInventory('previewWallSkinId',availableWallSkins[next].id)
-  }
-
   const buyPreviewSkin = async () => {
     const skin = ballSkins[previewIndex]
     if (ownedSkins.includes(skin.id)) return
@@ -17579,30 +17559,30 @@ function App() {
     setInventory('selectedSkinId',skin.id)
     setMenuOpen('skin', false)
   }
-  const buyPreviewEnvironmentSkin = async () => {
-    const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : availableWallSkins[previewWallIndex]
-    const owned = environmentTab === 'floor' ? ownedFloorSkins : ownedWallSkins
-    if (owned.includes(skin.id)) return
-    if (!isAdminMode && coins < skin.price) return
-    const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
-    if (!paid) return
-    if (environmentTab === 'floor') {
+  // Palette de peinture du mode personnalisation : cliquer un swatch achète le
+  // skin si nécessaire puis en fait le pinceau actif.
+  const pickFloorPaintSkin = async (skin) => {
+    if (!canModifyWorld) return
+    if (!ownedFloorSkins.includes(skin.id)) {
+      if (!isAdminMode && coins < skin.price) return
+      const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
+      if (!paid) return
       setInventory('ownedFloorSkins',(current) => [...current, skin.id])
-    } else {
+    }
+    setPaintFloorSkinId(skin.id)
+  }
+
+  const pickWallPaintSkin = async (skin) => {
+    if (!canModifyWorld) return
+    if (!ownedWallSkins.includes(skin.id)) {
+      if (!isAdminMode && coins < skin.price) return
+      const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
+      if (!paid) return
       setInventory('ownedWallSkins',(current) => [...current, skin.id])
     }
-  }
-  const selectPreviewEnvironmentSkin = () => {
-    if (!canModifyWorld) return
-    if (environmentTab === 'floor') {
-      const skin = floorSkins[previewFloorIndex]
-      if (!ownedFloorSkins.includes(skin.id)) return
-      setInventory('selectedFloorSkinId',skin.id)
-      return
+    if (selectedBuildElement?.type === 'wall') {
+      setHouse('housePlan',(current) => setHouseWallSideStyle(current, selectedBuildElement.id, 'inside', skin.id))
     }
-    const skin = availableWallSkins[previewWallIndex]
-    if (!ownedWallSkins.includes(skin.id)) return
-    setInventory('selectedWallSkinId',skin.id)
   }
 
   const resetHousePlan = () => {
@@ -17648,11 +17628,6 @@ function App() {
     setActiveBuildTool((current) => current === 'paintFloor' ? null : 'paintFloor')
     setPartitionStart(null)
     setSelectedBuildElement(null)
-  }
-
-  const paintSelectedBuildWall = () => {
-    if (!canModifyWorld || selectedBuildElement?.type !== 'wall') return
-    setHouse('housePlan',(current) => setHouseWallSideStyle(current, selectedBuildElement.id, 'inside', activeWallSkinId))
   }
 
   const beginPartitionTool = () => {
@@ -17715,7 +17690,7 @@ function App() {
       const cellKey = `${Math.floor(point.x)},${Math.floor(point.z)}`
       const space = activeHouseLayout.spaces.find((candidate) => candidate.cells.includes(cellKey))
       if (!space) return
-      setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, activeFloorSkinId))
+      setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, floorPaintBrushId))
       return
     }
     if (activeBuildTool !== 'partition') return
@@ -19416,6 +19391,38 @@ function App() {
               Aucune entrée définie — sélectionne une porte extérieure puis « Entrée »
             </div>
           )}
+          {activeBuildTool === 'paintFloor' && (
+            <SkinPaintPalette
+              title="Sol — choisis une texture puis clique une pièce"
+              skins={floorSkins}
+              ownedSkinIds={ownedFloorSkins}
+              activeSkinId={floorPaintBrushId}
+              coins={coins}
+              hasUnlimitedCoins={isAdminMode}
+              onPick={pickFloorPaintSkin}
+            />
+          )}
+          {selectedBuildElement?.type === 'wall' && !activeBuildTool && (
+            <>
+              <SkinPaintPalette
+                title="Tapisserie du mur sélectionné"
+                skins={availableWallSkins}
+                ownedSkinIds={ownedWallSkins}
+                activeSkinId={housePlan?.styles?.wallBySide?.[`${selectedBuildElement.id}:inside`] ?? null}
+                coins={coins}
+                hasUnlimitedCoins={isAdminMode}
+                onPick={pickWallPaintSkin}
+              />
+              <label className="env-ceiling-toggle customize-ceiling-toggle">
+                <input
+                  type="checkbox"
+                  checked={applyWallToCeiling}
+                  onChange={(event) => setInventory('applyWallToCeiling', event.target.checked)}
+                />
+                <span>Appliquer la tapisserie au plafond</span>
+              </label>
+            </>
+          )}
           <div className="customize-build-actions">
             <button
               type="button"
@@ -19452,11 +19459,6 @@ function App() {
             >
               Peindre sol
             </button>
-            {selectedBuildElement?.type === 'wall' && (
-              <button type="button" className="customize-build-button" onClick={paintSelectedBuildWall}>
-                Peindre
-              </button>
-            )}
             {canSetBuildEntrance && (
               <button type="button" className="customize-build-button" onClick={setBuildEntrance}>
                 Entrée
@@ -19521,24 +19523,9 @@ function App() {
         hasUnlimitedCoins={isAdminMode}
         activeTab={environmentTab}
         onTabChange={(v) => setUi('environmentTab', v)}
-        floorSkins={floorSkins}
-        wallSkins={availableWallSkins}
         furnitureItems={furnitureShopItems}
         furnitureCounts={furnitureCounts}
-        previewFloorIndex={previewFloorIndex}
-        previewWallIndex={previewWallIndex}
-        selectedFloorSkinId={selectedFloorSkinId}
-        selectedWallSkinId={selectedWallSkinId}
-        ownedFloorSkinIds={ownedFloorSkins}
-        ownedWallSkinIds={ownedWallSkins}
-        applyWallToCeiling={applyWallToCeiling}
-        canApplyWorldSkins={canModifyWorld}
-        onApplyWallToCeilingChange={(v) => setInventory('applyWallToCeiling', v)}
         onClose={closeEnvironmentMenu}
-        onPrevious={() => goEnvironmentPreview(-1)}
-        onNext={() => goEnvironmentPreview(1)}
-        onBuy={buyPreviewEnvironmentSkin}
-        onSelect={selectPreviewEnvironmentSkin}
         furnitureCart={furnitureCart}
         onAddFurnitureToCart={addFurnitureToCart}
         onRemoveFurnitureFromCart={removeFurnitureFromCart}

@@ -240,15 +240,53 @@ function getNeighborPathMask() {
   return 0
 }
 
-function getHouseCutMask(x, z) {
-  const playerHouseMask = houseLayout.rooms.reduce((maxMask, room) => {
-    const bounds = getRoomBounds(room)
-    const width = bounds.maxX - bounds.minX
-    const depth = bounds.maxZ - bounds.minZ
-    return Math.max(maxMask, softRectMask(x, z, [room.position[0], 0, room.position[2]], [width + 0.5, depth + 0.5], 0, 0.45))
-  }, 0)
+// Empreinte de la maison du joueur pour la découpe du terrain. Initialisée sur
+// le layout legacy, puis synchronisée sur le housePlan via
+// syncPlayerHouseTerrainFootprint (extensions comprises).
+let playerHouseFootprintRects = houseLayout.rooms.map((room) => {
+  const bounds = getRoomBounds(room)
+  return { minX: bounds.minX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: bounds.maxZ }
+})
 
-  return playerHouseMask
+function getFootprintSignature(rects) {
+  return rects.map((rect) => `${rect.minX},${rect.minZ},${rect.maxX},${rect.maxZ}`).sort().join(';')
+}
+
+function getFootprintBounds(rects) {
+  return rects.reduce((bounds, rect) => ({
+    minX: Math.min(bounds.minX, rect.minX),
+    maxX: Math.max(bounds.maxX, rect.maxX),
+    minZ: Math.min(bounds.minZ, rect.minZ),
+    maxZ: Math.max(bounds.maxZ, rect.maxZ),
+  }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity })
+}
+
+// Aligne la découpe du terrain sur l'empreinte du plan et rafraîchit la
+// géométrie visuelle localement (ancienne + nouvelle zone, marge de fondu).
+export function syncPlayerHouseTerrainFootprint(rects) {
+  if (!Array.isArray(rects) || !rects.length) return
+  if (getFootprintSignature(rects) === getFootprintSignature(playerHouseFootprintRects)) return
+
+  const previousBounds = getFootprintBounds(playerHouseFootprintRects)
+  playerHouseFootprintRects = rects.map((rect) => ({ ...rect }))
+  const nextBounds = getFootprintBounds(playerHouseFootprintRects)
+  const margin = 4
+  updateCachedVisualGeometryHeights({
+    minX: Math.min(previousBounds.minX, nextBounds.minX) - margin,
+    maxX: Math.max(previousBounds.maxX, nextBounds.maxX) + margin,
+    minZ: Math.min(previousBounds.minZ, nextBounds.minZ) - margin,
+    maxZ: Math.max(previousBounds.maxZ, nextBounds.maxZ) + margin,
+  })
+}
+
+function getHouseCutMask(x, z) {
+  return playerHouseFootprintRects.reduce((maxMask, rect) => {
+    const width = rect.maxX - rect.minX
+    const depth = rect.maxZ - rect.minZ
+    const centerX = (rect.minX + rect.maxX) * 0.5
+    const centerZ = (rect.minZ + rect.maxZ) * 0.5
+    return Math.max(maxMask, softRectMask(x, z, [centerX, 0, centerZ], [width + 0.5, depth + 0.5], 0, 0.45))
+  }, 0)
 }
 
 function getNeighborHousePadHeight(house) {

@@ -1547,6 +1547,74 @@ html[data-chat-open='true'] .game-chat-panel {
   pointer-events: none;
 }
 
+.skin-paint-palette {
+  background: rgba(14, 23, 34, 0.86);
+  border-radius: 12px;
+  padding: 8px 10px;
+  max-width: 340px;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.skin-paint-title {
+  display: block;
+  color: #f8fbff;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.skin-paint-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skin-paint-swatch {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  background-size: cover;
+  background-position: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.skin-paint-swatch.active {
+  border-color: #f2c14e;
+  box-shadow: 0 0 0 2px rgba(242, 193, 78, 0.45);
+}
+
+.skin-paint-swatch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.skin-paint-price {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  background: rgba(14, 23, 34, 0.92);
+  color: #ffd447;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 4px;
+  pointer-events: none;
+}
+
+.customize-ceiling-toggle {
+  background: rgba(14, 23, 34, 0.86);
+  border-radius: 10px;
+  padding: 6px 10px;
+  color: #f8fbff;
+  font-size: 12px;
+  pointer-events: auto;
+}
+
 .customize-rotation button:disabled {
   opacity: 0.42;
 }
