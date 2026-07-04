@@ -630,7 +630,8 @@ export function addHouseOpeningToWall(plan, wallId, offset, options = {}) {
   const wall = normalized.walls[wallId]
   if (!wall) return normalized
 
-  const width = Math.max(0.4, normalizeNumber(options.width, 1.2))
+  const type = options.type === 'window' ? 'window' : 'door'
+  const width = Math.max(0.4, normalizeNumber(options.width, type === 'window' ? 1.6 : 1.2))
   const length = getWallLength(wall)
   if (length < width + 0.4) return normalized
 
@@ -644,7 +645,7 @@ export function addHouseOpeningToWall(plan, wallId, offset, options = {}) {
   })
   if (overlapsExisting) return normalized
 
-  const id = createUniqueId(`door_${makeSafeIdPart(wallId)}`, normalized.openings)
+  const id = createUniqueId(`${type}_${makeSafeIdPart(wallId)}`, normalized.openings)
   return normalizeHousePlan({
     ...normalized,
     openings: {
@@ -654,10 +655,45 @@ export function addHouseOpeningToWall(plan, wallId, offset, options = {}) {
         wallId,
         offset: nextOffset,
         width,
-        bottom: 0,
-        height: Math.max(0.1, normalizeNumber(options.height, 2.4)),
-        type: 'door',
+        bottom: Math.max(0, normalizeNumber(options.bottom, type === 'window' ? 0.9 : 0)),
+        height: Math.max(0.1, normalizeNumber(options.height, type === 'window' ? 1.4 : 2.4)),
+        type,
         role: 'normal',
+      },
+    },
+  })
+}
+
+// Redéfinit la position et la largeur d'une ouverture sur son mur (poignées de
+// redimensionnement d'une vitre/porte). Refuse le chevauchement plutôt que de
+// pousser les ouvertures voisines.
+export function setHouseOpeningSpan(plan, openingId, offset, width) {
+  const normalized = normalizeHousePlan(plan)
+  const opening = normalized.openings[openingId]
+  if (!opening) return normalized
+  const wall = normalized.walls[opening.wallId]
+  if (!wall) return normalized
+
+  const length = getWallLength(wall)
+  const nextWidth = Math.max(0.4, Math.min(normalizeNumber(width, opening.width), length - 0.4))
+  const halfWidth = nextWidth * 0.5
+  const rawCenter = normalizeNumber(offset, opening.offset) * length
+  const center = Math.min(length - halfWidth - 0.2, Math.max(halfWidth + 0.2, rawCenter))
+  const overlapsExisting = Object.values(normalized.openings).some((other) => {
+    if (other.id === openingId || other.wallId !== opening.wallId) return false
+    const otherCenter = other.offset * length
+    return Math.abs(otherCenter - center) < (other.width + nextWidth) * 0.5 + 0.2
+  })
+  if (overlapsExisting) return normalized
+
+  return normalizeHousePlan({
+    ...normalized,
+    openings: {
+      ...normalized.openings,
+      [openingId]: {
+        ...opening,
+        offset: center / length,
+        width: nextWidth,
       },
     },
   })
@@ -701,6 +737,32 @@ export function setHouseWallSideStyle(plan, wallId, side, styleId) {
     styles: {
       ...normalized.styles,
       wallBySide,
+    },
+  })
+}
+
+// Règle la dimension verticale d'une ouverture (hauteur de vitre, allège).
+// Bornes : l'ouverture reste dans le mur avec un linteau d'au moins 0.1.
+export function setHouseOpeningVertical(plan, openingId, options = {}) {
+  const normalized = normalizeHousePlan(plan)
+  const opening = normalized.openings[openingId]
+  if (!opening) return normalized
+  const wall = normalized.walls[opening.wallId]
+  if (!wall) return normalized
+
+  const maxTop = wall.height - 0.1
+  const bottom = Math.min(maxTop - 0.3, Math.max(0, normalizeNumber(options.bottom, opening.bottom)))
+  const height = Math.min(maxTop - bottom, Math.max(0.3, normalizeNumber(options.height, opening.height)))
+
+  return normalizeHousePlan({
+    ...normalized,
+    openings: {
+      ...normalized.openings,
+      [openingId]: {
+        ...opening,
+        bottom,
+        height,
+      },
     },
   })
 }

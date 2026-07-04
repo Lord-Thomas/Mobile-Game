@@ -1615,6 +1615,31 @@ html[data-chat-open='true'] .game-chat-panel {
   pointer-events: auto;
 }
 
+.customize-opening-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(14, 23, 34, 0.86);
+  border-radius: 12px;
+  padding: 4px 10px;
+  color: #f8fbff;
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+}
+
+.customize-opening-size button {
+  border: 0;
+  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #f8fbff;
+  font-size: 18px;
+  font-weight: 900;
+}
+
 .customize-rotation button:disabled {
   opacity: 0.42;
 }

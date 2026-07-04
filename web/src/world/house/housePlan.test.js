@@ -18,6 +18,8 @@ import {
   resizeHouseWallEnd,
   setHouseEntranceDoor,
   setHouseFloorStyleForCells,
+  setHouseOpeningSpan,
+  setHouseOpeningVertical,
   setHouseWallSideStyle,
   splitHouseWallSegment,
 } from './housePlan'
@@ -347,6 +349,63 @@ describe('housePlan', () => {
       .at(0)
 
     expect(Math.abs(jointValue - span.center)).toBeGreaterThanOrEqual(entrance.width * 0.5)
+  })
+
+  it('ajoute une vitre avec allege et hauteur de fenetre', () => {
+    const plan = addHouseOpeningToWall(createDefaultHousePlan(), 'wall_main_north', 0.5, { type: 'window' })
+    const window = Object.values(plan.openings).find((opening) => opening.type === 'window')
+
+    expect(window).toMatchObject({
+      wallId: 'wall_main_north',
+      type: 'window',
+      width: 1.6,
+      bottom: 0.9,
+      height: 1.4,
+    })
+    // Une vitre n'est jamais une entree possible.
+    expect(setHouseEntranceDoor(plan, window.id).entranceDoorId).toBe('door_entrance')
+  })
+
+  it('redimensionne une vitre sur son mur', () => {
+    const plan = addHouseOpeningToWall(createDefaultHousePlan(), 'wall_main_north', 0.5, { type: 'window' })
+    const window = Object.values(plan.openings).find((opening) => opening.type === 'window')
+    const resized = setHouseOpeningSpan(plan, window.id, 0.4, 3)
+
+    expect(resized.openings[window.id].width).toBeCloseTo(3)
+    expect(resized.openings[window.id].offset).toBeCloseTo(0.4)
+  })
+
+  it('borne le redimensionnement d une ouverture aux limites du mur', () => {
+    const plan = addHouseOpeningToWall(createDefaultHousePlan(), 'wall_main_north', 0.5, { type: 'window' })
+    const window = Object.values(plan.openings).find((opening) => opening.type === 'window')
+    const resized = setHouseOpeningSpan(plan, window.id, 0.02, 30)
+    const result = resized.openings[window.id]
+    const length = 10
+
+    expect(result.width).toBeCloseTo(length - 0.4)
+    expect(result.offset * length - result.width * 0.5).toBeGreaterThanOrEqual(0.2 - 1e-6)
+  })
+
+  it('regle la hauteur d une vitre dans les bornes du mur', () => {
+    const plan = addHouseOpeningToWall(createDefaultHousePlan(), 'wall_main_north', 0.5, { type: 'window' })
+    const window = Object.values(plan.openings).find((opening) => opening.type === 'window')
+    const taller = setHouseOpeningVertical(plan, window.id, { height: 2 })
+    const clamped = setHouseOpeningVertical(plan, window.id, { height: 50 })
+
+    expect(taller.openings[window.id].height).toBeCloseTo(2)
+    expect(taller.openings[window.id].bottom).toBeCloseTo(0.9)
+    // Mur de hauteur 5, allege 0.9, linteau minimal 0.1 → hauteur max 4.
+    expect(clamped.openings[window.id].height).toBeCloseTo(4)
+  })
+
+  it('refuse un redimensionnement qui chevauche une autre ouverture', () => {
+    const plan = addHouseOpeningToWall(createDefaultHousePlan(), 'wall_main_west', 0.25, { type: 'window' })
+    const window = Object.values(plan.openings).find((opening) => opening.type === 'window')
+    // L'entree est a offset 0.725 sur le meme mur : grossir jusqu'a elle est refuse.
+    const resized = setHouseOpeningSpan(plan, window.id, 0.5, 6)
+
+    expect(resized.openings[window.id].width).toBe(window.width)
+    expect(resized.openings[window.id].offset).toBe(window.offset)
   })
 
   it('applique une texture de sol a toutes les cellules d une piece', () => {

@@ -54,7 +54,7 @@ import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biome
 import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
 import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseWallSideStyle, splitHouseWallSegment } from './world/house/housePlan'
+import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
 import { createFloorRectsGeometryData } from './world/house/floorGeometry'
 import { getWallColliderTransform, getWallDirection, getWallPointAt, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -1536,6 +1536,8 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
           <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
         </mesh>
       </group>
+      {/* Vitres : visibles aussi bien de l'intérieur que de l'extérieur. */}
+      <HouseWindowPanes walls={layout.walls ?? houseLayout.walls} />
       <group visible={!hideRoof}>
         {footprintRects.map((rect) => (
           <group
@@ -1827,6 +1829,53 @@ function HouseWalls({ wallTexture, layout = houseLayout }) {
   )
 }
 
+function getWindowPaneTransform(wall, opening) {
+  const wallBottom = wall.bottom ?? wall.bottomY ?? 0
+  const bottom = opening.bottom ?? 0
+  return getWallColliderTransform(wall, {
+    center: opening.center,
+    y: wallBottom + bottom + opening.height * 0.5,
+    width: opening.width,
+    height: opening.height,
+  })
+}
+
+function getWallWindowOpenings(wall) {
+  return (wall.openings ?? []).filter((opening) => opening.type === 'window')
+}
+
+// Panneau de verre dans le trou d'une ouverture de type fenêtre — même esprit
+// que la vitre de la pièce du dragon (GlassContainmentRoom), en version légère.
+function HouseWindowPanes({ walls }) {
+  return (
+    <>
+      {walls.flatMap((wall) =>
+        getWallWindowOpenings(wall).map((opening) => {
+          const transform = getWindowPaneTransform(wall, opening)
+          return (
+            <mesh
+              key={`${wall.id}-${opening.id}-glass`}
+              position={transform.position}
+              rotation={transform.rotation}
+            >
+              <boxGeometry args={[opening.width, opening.height, 0.05]} />
+              <meshStandardMaterial
+                color="#bfefff"
+                transparent
+                opacity={0.22}
+                roughness={0.12}
+                metalness={0.05}
+                depthWrite={false}
+                side={DoubleSide}
+              />
+            </mesh>
+          )
+        }),
+      )}
+    </>
+  )
+}
+
 function HouseOpeningReveals({ walls }) {
   const revealColor = '#d8d0c4'
 
@@ -2079,6 +2128,13 @@ function PhysicsBounds({ layout = houseLayout }) {
     )
   const rooms = layout.rooms ?? houseLayout.rooms
   const floorRects = getLayoutFootprintRects(layout, rooms)
+  const windowPanes = (layout.walls ?? houseLayout.walls).flatMap((wall) =>
+    getWallWindowOpenings(wall).map((opening) => ({
+      id: `${wall.id}-${opening.id}-glass-collider`,
+      ...getWindowPaneTransform(wall, opening),
+      paneArgs: [opening.width * 0.5, opening.height * 0.5, 0.04],
+    })),
+  )
 
   return (
     <RigidBody type="fixed" colliders={false}>
@@ -2091,6 +2147,9 @@ function PhysicsBounds({ layout = houseLayout }) {
       ))}
       {wallSegments.map((segment) => (
         <CuboidCollider key={segment.id} args={segment.args} position={segment.position} rotation={segment.rotation} />
+      ))}
+      {windowPanes.map((pane) => (
+        <CuboidCollider key={pane.id} args={pane.paneArgs} position={pane.position} rotation={pane.rotation} />
       ))}
     </RigidBody>
   )
@@ -12766,6 +12825,7 @@ function HouseBuildHandles({
   onMoveInteriorWall,
   onResizeWallEnd,
   onMoveWallJoint,
+  onResizeOpeningSpan,
   onAddOpening,
   onAddRoom,
   onCompleteBuildTool,
@@ -12835,6 +12895,18 @@ function HouseBuildHandles({
       return
     }
 
+    if (drag.type === 'openingSpan') {
+      const wallLength = Math.max(0.001, drag.wall.length)
+      const distance = getWallOffsetFromPoint(drag.wall, event.point) * wallLength
+      const snapped = Math.round(distance * 10) / 10
+      if (snapped === drag.lastDistance) return
+      drag.lastDistance = snapped
+      const width = Math.abs(snapped - drag.fixedDistance)
+      const center = (snapped + drag.fixedDistance) * 0.5
+      onResizeOpeningSpan(drag.openingId, center / wallLength, width)
+      return
+    }
+
     if (drag.type === 'opening') {
       // La porte peut passer sur un autre mur si le pointeur s'en approche.
       const nearest = findNearestHouseWallToPoint(walls, event.point)
@@ -12896,8 +12968,8 @@ function HouseBuildHandles({
                   onCompleteBuildTool()
                   return
                 }
-                if (buildTool === 'door') {
-                  onAddOpening(wall.id, offset)
+                if (buildTool === 'door' || buildTool === 'window') {
+                  onAddOpening(wall.id, offset, buildTool)
                   onCompleteBuildTool()
                   return
                 }
@@ -12935,8 +13007,9 @@ function HouseBuildHandles({
                 color={
                   buildTool === 'segment' ? '#f2c14e'
                     : buildTool === 'door' ? '#65f2a3'
-                      : buildTool === 'room' ? (outsideNormal ? '#75d5ff' : '#4a5560')
-                        : selected ? '#f2c14e' : outsideNormal ? '#75d5ff' : '#ff8e6e'
+                      : buildTool === 'window' ? '#8fd7ff'
+                        : buildTool === 'room' ? (outsideNormal ? '#75d5ff' : '#4a5560')
+                          : selected ? '#f2c14e' : outsideNormal ? '#75d5ff' : '#ff8e6e'
                 }
                 transparent
                 opacity={
@@ -12979,7 +13052,7 @@ function HouseBuildHandles({
                     })
                   }}
                 >
-                  <sphereGeometry args={[0.26, 16, 12]} />
+                  <sphereGeometry args={[0.34, 16, 12]} />
                   <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
                 </mesh>
               )
@@ -12988,31 +13061,58 @@ function HouseBuildHandles({
               const doorTransform = getDoorTransform(wall, opening)
               const doorSelected = selectedElement?.type === 'opening' && selectedElement.id === opening.id
               return (
-                <mesh
-                  key={`build-opening-${opening.id}`}
-                  position={doorTransform.position}
-                  rotation={doorTransform.rotation}
-                  onPointerDown={(event) => {
-                    event.stopPropagation()
-                    activeDragRef.current = null
-                    setActiveDrag(null)
-                    onSelectElement({ type: 'opening', id: opening.id })
-                    beginDrag({
-                      type: 'opening',
-                      openingId: opening.id,
-                      wall,
-                      lastOffset: opening.center / Math.max(0.001, wall.length),
-                    })
-                  }}
-                >
-                  <boxGeometry args={[Math.max(0.45, opening.width), 0.12, 1.12]} />
-                  <meshBasicMaterial
-                    color={doorSelected ? '#f2c14e' : opening.role === 'entrance' ? '#5aa0ff' : '#65f2a3'}
-                    transparent
-                    opacity={doorSelected ? 0.72 : 0.44}
-                    depthWrite={false}
-                  />
-                </mesh>
+                <group key={`build-opening-${opening.id}`}>
+                  <mesh
+                    position={doorTransform.position}
+                    rotation={doorTransform.rotation}
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      activeDragRef.current = null
+                      setActiveDrag(null)
+                      onSelectElement({ type: 'opening', id: opening.id })
+                      beginDrag({
+                        type: 'opening',
+                        openingId: opening.id,
+                        wall,
+                        lastOffset: opening.center / Math.max(0.001, wall.length),
+                      })
+                    }}
+                  >
+                    <boxGeometry args={[Math.max(0.45, opening.width), 0.12, 1.12]} />
+                    <meshBasicMaterial
+                      color={
+                        doorSelected ? '#f2c14e'
+                          : opening.role === 'entrance' ? '#5aa0ff'
+                            : opening.type === 'window' ? '#8fd7ff' : '#65f2a3'
+                      }
+                      transparent
+                      opacity={doorSelected ? 0.72 : 0.44}
+                      depthWrite={false}
+                    />
+                  </mesh>
+                  {doorSelected && [-1, 1].map((side) => {
+                    const endPoint = getWallPointAt(wall, opening.center + side * opening.width * 0.5)
+                    return (
+                      <mesh
+                        key={`build-opening-end-${opening.id}-${side}`}
+                        position={[endPoint.x, 0.24, endPoint.z]}
+                        onPointerDown={(event) => {
+                          event.stopPropagation()
+                          beginDrag({
+                            type: 'openingSpan',
+                            openingId: opening.id,
+                            wall,
+                            fixedDistance: opening.center - side * opening.width * 0.5,
+                            lastDistance: null,
+                          })
+                        }}
+                      >
+                        <sphereGeometry args={[0.34, 16, 12]} />
+                        <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
+                      </mesh>
+                    )
+                  })}
+                </group>
               )
             })}
           </group>
@@ -13049,6 +13149,7 @@ function CustomizationLayer({
   onMoveBuildInteriorWall,
   onResizeBuildWallEnd,
   onMoveBuildWallJoint,
+  onResizeBuildOpeningSpan,
   onAddBuildOpening,
   onAddBuildRoom,
   onCompleteBuildTool,
@@ -13252,6 +13353,7 @@ function CustomizationLayer({
           onMoveInteriorWall={onMoveBuildInteriorWall}
           onResizeWallEnd={onResizeBuildWallEnd}
           onMoveWallJoint={onMoveBuildWallJoint}
+          onResizeOpeningSpan={onResizeBuildOpeningSpan}
           onAddOpening={onAddBuildOpening}
           onAddRoom={onAddBuildRoom}
           onCompleteBuildTool={onCompleteBuildTool}
@@ -17405,10 +17507,14 @@ function App() {
   const selectedBuildOpeningWall = selectedBuildElement?.type === 'opening'
     ? activeHouseLayout.walls.find((wall) => (wall.openings ?? []).some((opening) => opening.id === selectedBuildElement.id))
     : null
+  const selectedBuildOpening = selectedBuildOpeningWall
+    ? (selectedBuildOpeningWall.openings ?? []).find((opening) => opening.id === selectedBuildElement.id)
+    : null
   const selectedBuildOpeningIsEntrance = selectedBuildElement?.type === 'opening' &&
     selectedBuildElement.id === activeHouseLayout.plan.entranceDoorId
   const canSetBuildEntrance = Boolean(
     selectedBuildOpeningWall &&
+    selectedBuildOpening?.type === 'door' &&
     !selectedBuildOpeningIsEntrance &&
     (selectedBuildOpeningWall.sideA?.type === 'outside' || selectedBuildOpeningWall.sideB?.type === 'outside'),
   )
@@ -17616,6 +17722,13 @@ function App() {
     setSelectedBuildElement(null)
   }
 
+  const beginWindowTool = () => {
+    if (!canModifyWorld) return
+    setActiveBuildTool((current) => current === 'window' ? null : 'window')
+    setPartitionStart(null)
+    setSelectedBuildElement(null)
+  }
+
   const beginRoomTool = () => {
     if (!canModifyWorld) return
     setActiveBuildTool((current) => current === 'room' ? null : 'room')
@@ -17653,9 +17766,34 @@ function App() {
     setHouse('housePlan',(current) => moveHouseOpening(current, openingId, wallId, offset))
   }
 
-  const addBuildOpening = (wallId, offset) => {
+  const addBuildOpening = (wallId, offset, type = 'door') => {
     if (!canModifyWorld) return
-    setHouse('housePlan',(current) => addHouseOpeningToWall(current, wallId, offset))
+    setHouse('housePlan',(current) => addHouseOpeningToWall(current, wallId, offset, { type }))
+  }
+
+  const resizeBuildOpeningSpan = (openingId, offset, width) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => setHouseOpeningSpan(current, openingId, offset, width))
+  }
+
+  // Boutons +/− du panneau : redimensionnement fiable au doigt (les poignées
+  // 3D restent disponibles à la souris).
+  const adjustSelectedOpeningWidth = (delta) => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
+    setHouse('housePlan',(current) => {
+      const opening = current.openings?.[selectedBuildElement.id]
+      if (!opening) return current
+      return setHouseOpeningSpan(current, opening.id, opening.offset, opening.width + delta)
+    })
+  }
+
+  const adjustSelectedOpeningHeight = (delta) => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
+    setHouse('housePlan',(current) => {
+      const opening = current.openings?.[selectedBuildElement.id]
+      if (!opening) return current
+      return setHouseOpeningVertical(current, opening.id, { height: opening.height + delta })
+    })
   }
 
   const moveBuildInteriorWall = (wallId, amount) => {
@@ -19454,11 +19592,28 @@ function App() {
             </button>
             <button
               type="button"
+              className={`customize-build-button ${activeBuildTool === 'window' ? 'active' : ''}`}
+              onClick={beginWindowTool}
+            >
+              Vitre
+            </button>
+            <button
+              type="button"
               className={`customize-build-button ${activeBuildTool === 'paintFloor' ? 'active' : ''}`}
               onClick={beginPaintFloorTool}
             >
               Peindre sol
             </button>
+            {selectedBuildElement?.type === 'opening' && (
+              <div className="customize-opening-size">
+                <span>Largeur</span>
+                <button type="button" onClick={() => adjustSelectedOpeningWidth(-0.2)} aria-label="Réduire la largeur">-</button>
+                <button type="button" onClick={() => adjustSelectedOpeningWidth(0.2)} aria-label="Agrandir la largeur">+</button>
+                <span>Hauteur</span>
+                <button type="button" onClick={() => adjustSelectedOpeningHeight(-0.2)} aria-label="Réduire la hauteur">-</button>
+                <button type="button" onClick={() => adjustSelectedOpeningHeight(0.2)} aria-label="Agrandir la hauteur">+</button>
+              </div>
+            )}
             {canSetBuildEntrance && (
               <button type="button" className="customize-build-button" onClick={setBuildEntrance}>
                 Entrée
