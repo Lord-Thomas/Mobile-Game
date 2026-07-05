@@ -11,7 +11,7 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
-import { WINGS_PHASE, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
+import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
@@ -21,7 +21,7 @@ import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
 import { useGameStore } from './stores/useGameStore'
 import { GENERATED_ENEMY_DEFINITIONS } from './enemies/enemyDefinitions.generated'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
-import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
+import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
@@ -371,6 +371,9 @@ const FIREBALL_IMPACT_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, in
 const MAGIC_SKULL_DISCOVERY_CHARGE_MS = 5000
 const CHARGE_TIME_MS = 1200
 const MIN_CHARGE_RATIO = 0.2
+const SPELL_ICON_FIREBALL = '/ui/spell-fireball.png'
+const SPELL_ICON_NECROMANCER = '/ui/spell-necromancer.png'
+const SPELL_ICON_WINGS_BOOST = '/ui/spell-wings-boost.png'
 
 // ── Crâne nécromancien : invocation de squelettes alliés ─────────────────────
 const MAGIC_SKULL_PRICE = 1200
@@ -1250,20 +1253,27 @@ function useCombatActionsAvailability(actionsRef) {
 // État du sort d'ailes pollé depuis le ref publié par Player() : seul ce
 // composant se re-rend (à ~8 Hz max), jamais l'arbre App.
 function useWingsSpellUi(wingsUiRef) {
-  const [ui, setUi] = useState({ visible: false, canCast: false, flying: false, cooldownSeconds: 0 })
+  const [ui, setUi] = useState({ visible: false, canCast: false, flying: false, boostAvailable: false, cooldownSeconds: 0, cooldownAngle: 0 })
 
   useEffect(() => {
     if (!wingsUiRef) return undefined
     const interval = window.setInterval(() => {
       const next = wingsUiRef.current
-      const cooldownSeconds = Math.ceil(next.cooldownRemaining ?? 0)
+      const cooldownRemaining = Math.max(0, next.cooldownRemaining ?? 0)
+      const cooldownSeconds = Math.ceil(cooldownRemaining)
+      const cooldownRatio = WINGS_CONFIG.cooldown > 0
+        ? Math.min(1, cooldownRemaining / WINGS_CONFIG.cooldown)
+        : 0
+      const cooldownAngle = Math.ceil(cooldownRatio * 360)
       setUi((current) => (
         current.visible === next.visible &&
         current.canCast === next.canCast &&
         current.flying === next.flying &&
-        current.cooldownSeconds === cooldownSeconds
+        current.boostAvailable === next.boostAvailable &&
+        current.cooldownSeconds === cooldownSeconds &&
+        current.cooldownAngle === cooldownAngle
           ? current
-          : { visible: next.visible, canCast: next.canCast, flying: next.flying, cooldownSeconds }
+          : { visible: next.visible, canCast: next.canCast, flying: next.flying, boostAvailable: next.boostAvailable, cooldownSeconds, cooldownAngle }
       ))
     }, 120)
     return () => window.clearInterval(interval)
@@ -1277,12 +1287,14 @@ function CombatActionDock({
   canKick,
   canPunch,
   showSpell,
+  spellUi,
   onSpellPress,
   wingsUiRef,
 }) {
   const wingsUi = useWingsSpellUi(wingsUiRef)
   const showWings = wingsUi.visible && !wingsUi.flying
-  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0)
+  const showWingsBoost = wingsUi.visible && wingsUi.flying
+  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
   if (count === 0) return null
 
   const queuePunch = () => {
@@ -1295,6 +1307,10 @@ function CombatActionDock({
 
   const queueWings = () => {
     touchRef.current.wingsQueued = true
+  }
+
+  const queueWingsBoost = () => {
+    touchRef.current.wingsBoostQueued = true
   }
 
   return (
@@ -1329,33 +1345,60 @@ function CombatActionDock({
       )}
       {showSpell && (
         <button
-          className="combat-action-btn combat-action-btn--spell"
+          className={`combat-action-btn combat-action-btn--spell combat-action-btn--image-spell${(spellUi?.cooldownAngle ?? 0) > 0 ? ' combat-action-btn--cooling' : ''}`}
           type="button"
-          aria-label="Lancer un sort"
+          aria-label={spellUi?.ariaLabel ?? 'Lancer un sort'}
+          disabled={spellUi?.disabled === true}
+          style={{ '--cooldown-angle': `${spellUi?.cooldownAngle ?? 0}deg` }}
           onPointerDown={(event) => {
             event.preventDefault()
-            onSpellPress?.()
+            if (spellUi?.disabled !== true) onSpellPress?.()
           }}
         >
+          <img className="combat-action-img" src={spellUi?.icon ?? SPELL_ICON_FIREBALL} alt="" aria-hidden="true" draggable="false" />
+          {(spellUi?.cooldownAngle ?? 0) > 0 && <span className="combat-action-cooldown-radial" aria-hidden="true" />}
+          {(spellUi?.cooldownSeconds ?? 0) > 0 && (
+            <span className="combat-action-cooldown-count" aria-hidden="true">
+              {spellUi.cooldownSeconds}
+            </span>
+          )}
           <span className="combat-action-icon" aria-hidden="true">🔥</span>
           <span className="combat-action-label">Sort</span>
         </button>
       )}
       {showWings && (
         <button
-          className="combat-action-btn combat-action-btn--wings"
+          className={`combat-action-btn combat-action-btn--wings${wingsUi.cooldownAngle > 0 ? ' combat-action-btn--cooling' : ''}`}
           type="button"
           aria-label="Envol Céleste"
           disabled={!wingsUi.canCast}
+          style={{ '--cooldown-angle': `${wingsUi.cooldownAngle}deg` }}
           onPointerDown={(event) => {
             event.preventDefault()
             if (wingsUi.canCast) queueWings()
           }}
         >
           <img className="combat-action-img" src="/ui/envol-celeste.png" alt="" aria-hidden="true" draggable="false" />
-          <span className="combat-action-label">
-            {wingsUi.cooldownSeconds > 0 ? `${wingsUi.cooldownSeconds}s` : 'Envol'}
-          </span>
+          {wingsUi.cooldownAngle > 0 && <span className="combat-action-cooldown-radial" aria-hidden="true" />}
+          {wingsUi.cooldownSeconds > 0 && (
+            <span className="combat-action-cooldown-count" aria-hidden="true">
+              {wingsUi.cooldownSeconds}
+            </span>
+          )}
+        </button>
+      )}
+      {showWingsBoost && (
+        <button
+          className="combat-action-btn combat-action-btn--wings-boost combat-action-btn--image-spell"
+          type="button"
+          aria-label="Boost de vol"
+          disabled={!wingsUi.boostAvailable}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            if (wingsUi.boostAvailable) queueWingsBoost()
+          }}
+        >
+          <img className="combat-action-img" src={SPELL_ICON_WINGS_BOOST} alt="" aria-hidden="true" draggable="false" />
         </button>
       )}
     </div>
@@ -3548,6 +3591,7 @@ function Player({
   movementLocked = false,
   dragonRide = null,
   wingsUiRef = null,
+  onWingsParticleBurst = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -3581,6 +3625,7 @@ function Player({
   const wasOnGroundRef = useRef(true)
   // Sort d'ailes « Envol Céleste » : état simulé à 60 Hz, jamais dans un useState.
   const wingsSpellRef = useRef(createWingsState())
+  const wingsEndEffectEmittedRef = useRef(true)
   // Groupe d'inclinaison du corps en vol (l'avatar passe à l'horizontale).
   const wingsTiltRef = useRef(null)
   const landingPreparedRef = useRef(false)
@@ -3639,6 +3684,7 @@ function Player({
     onGroundRef.current = true
     wasOnGroundRef.current = true
     Object.assign(wingsSpellRef.current, createWingsState())
+    wingsEndEffectEmittedRef.current = true
     playerBodyRef.current?.setNextKinematicTranslation({ x, y, z })
     visualRef.current?.position.set(x, y, z)
     cameraLookRef.current.x = x
@@ -3698,7 +3744,25 @@ function Player({
     // simplement perdue au lieu de rester en attente et surprendre plus tard.
     const wantsWings = touch.wingsQueued === true
     touch.wingsQueued = false
+    const wantsWingsBoost = touch.wingsBoostQueued === true
+    touch.wingsBoostQueued = false
     const wings = wingsSpellRef.current
+    const emitWingsParticleBurst = (kind, position = playerPosRef.current) => {
+      onWingsParticleBurst?.({
+        kind,
+        layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+        position: [
+          position.x,
+          position.y - PLAYER_HEIGHT + 0.32,
+          position.z,
+        ],
+      })
+    }
+    const emitWingsEndParticleBurst = (position = playerPosRef.current) => {
+      if (wingsEndEffectEmittedRef.current) return
+      wingsEndEffectEmittedRef.current = true
+      emitWingsParticleBurst('end', position)
+    }
 
     if (freeCameraActive || movementLocked) {
       key.forward = false
@@ -3724,6 +3788,7 @@ function Player({
 
     if (!movementLocked && dragonRide?.active && dragonRide.positionRef && dragonRide.yawRef) {
       // Monture et ailes ne se cumulent jamais.
+      emitWingsEndParticleBurst()
       cancelWings(wings, state.clock.elapsedTime)
       if (wingsUiRef) wingsUiRef.current.visible = false
       const mountConfig = dragonRide.config ?? MOUNT_CONFIGS.dragon
@@ -4336,6 +4401,8 @@ function Player({
         jumpStartUntilRef.current = 0
         jumpLandUntilRef.current = 0
         landingPreparedRef.current = false
+        wingsEndEffectEmittedRef.current = false
+        emitWingsParticleBurst('start')
       }
     }
 
@@ -4343,14 +4410,19 @@ function Player({
       // Vol : quitter la zone extérieure coupe le sort, sinon la simulation
       // du plané pilote la verticale à la place de la gravité.
       if (currentZone !== ZONES.outside) {
+        emitWingsEndParticleBurst()
         cancelWings(wings, state.clock.elapsedTime)
       } else {
-        stepWings(wings, {
+        if (wantsWingsBoost) {
+          boostWings(wings, { now: state.clock.elapsedTime })
+        }
+        const wingsStep = stepWings(wings, {
           now: state.clock.elapsedTime,
           dt: delta,
           pitch: touch.cameraPitch,
           grounded: onGroundRef.current,
         })
+        if (wingsStep === 'landed') emitWingsEndParticleBurst()
       }
     }
     if (isWingsFlying(wings)) {
@@ -4556,6 +4628,7 @@ function Player({
       const wingsUi = wingsUiRef.current
       wingsUi.visible = mode === 'play' && currentZone === ZONES.outside
       wingsUi.flying = isWingsFlying(wings)
+      wingsUi.boostAvailable = canBoostWings(wings, state.clock.elapsedTime)
       wingsUi.cooldownRemaining = getWingsCooldownRemaining(wings, state.clock.elapsedTime)
       wingsUi.energyRatio = getWingsEnergyRatio(wings)
       wingsUi.canCast = canCastWings(wings, {
@@ -4779,8 +4852,90 @@ function Player({
           <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
           <MagicWings wingsSpellRef={wingsSpellRef} currentZone={currentZone} />
         </group>
+        <WingsSpeedTrail wingsSpellRef={wingsSpellRef} />
       </group>
     </>
+  )
+}
+
+function WingsSpeedTrail({ wingsSpellRef }) {
+  const groupRef = useRef(null)
+  const materialRefs = useRef([])
+  const trailTexture = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 256
+    const ctx = canvas.getContext('2d')
+    const centerX = canvas.width / 2
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
+    gradient.addColorStop(0, 'rgba(255,255,255,0.0)')
+    gradient.addColorStop(0.14, 'rgba(220,250,255,0.92)')
+    gradient.addColorStop(0.42, 'rgba(98,204,255,0.42)')
+    gradient.addColorStop(1, 'rgba(98,204,255,0.0)')
+    ctx.fillStyle = gradient
+    ctx.beginPath()
+    ctx.moveTo(centerX, 0)
+    ctx.bezierCurveTo(canvas.width * 0.9, canvas.height * 0.22, canvas.width * 0.72, canvas.height * 0.72, centerX, canvas.height)
+    ctx.bezierCurveTo(canvas.width * 0.28, canvas.height * 0.72, canvas.width * 0.1, canvas.height * 0.22, centerX, 0)
+    ctx.closePath()
+    ctx.fill()
+    const texture = new CanvasTexture(canvas)
+    texture.needsUpdate = true
+    return texture
+  }, [])
+
+  useEffect(() => () => trailTexture.dispose(), [trailTexture])
+
+  useFrame((state, delta) => {
+    const wings = wingsSpellRef.current
+    const active = wings.phase === WINGS_PHASE.GLIDING
+    const speedRatio = active
+      ? MathUtils.clamp(
+        (wings.forwardSpeed - WINGS_CONFIG.baseForwardSpeed) /
+          (WINGS_CONFIG.boostedMaxForwardSpeed - WINGS_CONFIG.baseForwardSpeed),
+        0,
+        1,
+      )
+      : 0
+    const targetOpacity = MathUtils.smoothstep(speedRatio, 0.08, 1) * 0.85
+
+    if (groupRef.current) {
+      groupRef.current.visible = targetOpacity > 0.02
+      const length = MathUtils.lerp(0.7, 4.2, speedRatio)
+      const width = MathUtils.lerp(0.16, 0.58, speedRatio)
+      groupRef.current.rotation.x = MathUtils.damp(groupRef.current.rotation.x, Math.PI / 2, 10, delta)
+      groupRef.current.scale.x = MathUtils.damp(groupRef.current.scale.x, width, 12, delta)
+      groupRef.current.scale.y = MathUtils.damp(groupRef.current.scale.y, length, 12, delta)
+    }
+
+    materialRefs.current.forEach((material, index) => {
+      if (!material) return
+      const layerFade = 1 - index * 0.28
+      material.opacity = MathUtils.damp(material.opacity, targetOpacity * layerFade, 16, delta)
+    })
+  })
+
+  return (
+    <group ref={groupRef} position={[0, 0.28, -0.48]} rotation={[Math.PI / 2, 0, 0]} visible={false}>
+      {[0, 1, 2].map((index) => (
+        <mesh key={index} position={[0, -0.72 - index * 0.18, -index * 0.012]} scale={[1 - index * 0.22, 1, 1]} renderOrder={3}>
+          <planeGeometry args={[1, 1]} />
+          <meshBasicMaterial
+            ref={(material) => { materialRefs.current[index] = material }}
+            color={index === 0 ? '#e9fbff' : '#82d8ff'}
+            map={trailTexture}
+            transparent
+            opacity={0}
+            alphaTest={0.02}
+            depthWrite={false}
+            depthTest={false}
+            blending={AdditiveBlending}
+            side={DoubleSide}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+    </group>
   )
 }
 
@@ -9804,16 +9959,25 @@ function RuntimeParticleEffect({
   preset,
   playing = true,
   loop = false,
+  forceOneShot = false,
   playbackId = 0,
   layer = OUTDOOR_LIGHT_LAYER,
 }) {
   const groupRef = useRef()
+  const renderLayers = useMemo(() => {
+    const values = Array.isArray(layer) ? layer : [layer]
+    const finiteLayers = values.filter(Number.isFinite)
+    return finiteLayers.length > 0 ? finiteLayers : [0]
+  }, [layer])
 
   useLayoutEffect(() => {
     groupRef.current?.traverse((object) => {
-      object.layers.set(layer)
+      object.layers.set(renderLayers[0])
+      for (let index = 1; index < renderLayers.length; index += 1) {
+        object.layers.enable(renderLayers[index])
+      }
     })
-  }, [layer])
+  }, [renderLayers])
 
   if (!preset) return null
 
@@ -9823,6 +9987,7 @@ function RuntimeParticleEffect({
         preset={preset}
         playing={playing}
         loop={loop}
+        forceOneShot={forceOneShot}
         playbackId={playbackId}
       />
     </group>
@@ -9859,6 +10024,60 @@ function PlayerHealingAura({ active, playerPositionRef, layer }) {
         preset={HEAL_AURA_PARTICLE_PRESET}
         playing={active || warming}
         loop
+        layer={layer}
+      />
+    </group>
+  )
+}
+
+function SummonSpellParticleBursts({ bursts, onComplete, layer, followTargetRef = null }) {
+  const startPreset = useStoredParticlePreset(SUMMON_START_PARTICLE_NAME)
+  const endPreset = useStoredParticlePreset(SUMMON_END_PARTICLE_NAME)
+
+  return (
+    <>
+      {bursts.map((burst) => (
+        <SummonSpellParticleBurst
+          key={burst.id}
+          burst={burst}
+          preset={burst.kind === 'end' ? endPreset : startPreset}
+          layer={burst.layer === OUTDOOR_LIGHT_LAYER ? [0, OUTDOOR_LIGHT_LAYER] : (burst.layer ?? layer)}
+          followTargetRef={followTargetRef}
+          onComplete={onComplete}
+        />
+      ))}
+    </>
+  )
+}
+
+function SummonSpellParticleBurst({ burst, preset, layer, followTargetRef, onComplete }) {
+  const groupRef = useRef(null)
+
+  useEffect(() => {
+    const durationMs = Math.max(250, (preset?.duration ?? 1) * 1000 + 350)
+    const timeout = window.setTimeout(() => onComplete?.(burst.id), durationMs)
+    return () => window.clearTimeout(timeout)
+  }, [burst.id, onComplete, preset?.duration])
+
+  useFrame(() => {
+    if (!burst.followTarget || !groupRef.current || !followTargetRef?.current) return
+    const position = followTargetRef.current
+    groupRef.current.position.set(
+      position.x,
+      position.y - PLAYER_HEIGHT + 0.32,
+      position.z,
+    )
+  })
+
+  if (!preset) return null
+
+  return (
+    <group ref={groupRef} position={burst.position}>
+      <RuntimeParticleEffect
+        preset={preset}
+        playing
+        forceOneShot
+        playbackId={burst.playbackId}
         layer={layer}
       />
     </group>
@@ -15225,6 +15444,7 @@ function App() {
     punchQueued: false,
     kickQueued: false,
     wingsQueued: false,
+    wingsBoostQueued: false,
     emoteQueued: null,
     mountAscend: false,
     mountDescend: false,
@@ -15232,7 +15452,34 @@ function App() {
   const playerCombatActionsRef = useRef({ canKick: false, canPunch: false })
   const { canKick, canPunch } = useCombatActionsAvailability(playerCombatActionsRef)
   // Sort d'ailes : instantané écrit par Player() dans useFrame, pollé par le dock.
-  const wingsUiRef = useRef({ visible: false, canCast: false, flying: false, cooldownRemaining: 0, energyRatio: 0 })
+  const wingsUiRef = useRef({ visible: false, canCast: false, flying: false, boostAvailable: false, cooldownRemaining: 0, energyRatio: 0 })
+  const wingsParticleBurstIdRef = useRef(0)
+  const lastWingsParticleBurstRef = useRef({ kind: null, at: 0 })
+  const [wingsParticleBursts, setWingsParticleBursts] = useState([])
+  const addWingsParticleBurst = useCallback(({ kind = 'start', position, layer = OUTDOOR_LIGHT_LAYER }) => {
+    if (!Array.isArray(position) || position.length < 3) return
+    const normalizedKind = kind === 'end' ? 'end' : 'start'
+    const now = performance.now()
+    const lastBurst = lastWingsParticleBurstRef.current
+    if (lastBurst.kind === normalizedKind && now - lastBurst.at < 900) return
+    lastWingsParticleBurstRef.current = { kind: normalizedKind, at: now }
+    const nextIndex = wingsParticleBurstIdRef.current + 1
+    wingsParticleBurstIdRef.current = nextIndex
+    setWingsParticleBursts((current) => [
+      ...current.filter((burst) => burst.kind !== normalizedKind).slice(-4),
+      {
+        id: `wings_${normalizedKind}_${nextIndex}`,
+        kind: normalizedKind,
+        position,
+        followTarget: normalizedKind !== 'end',
+        playbackId: nextIndex,
+        layer: Number.isFinite(layer) ? layer : OUTDOOR_LIGHT_LAYER,
+      },
+    ])
+  }, [])
+  const removeWingsParticleBurst = useCallback((id) => {
+    setWingsParticleBursts((current) => current.filter((burst) => burst.id !== id))
+  }, [])
 
   useEffect(() => {
     const resetTouchControls = () => {
@@ -15446,6 +15693,7 @@ function App() {
   const projectilesRef = useRef([])
   const remoteProjectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
+  const [spellCooldownNow, setSpellCooldownNow] = useState(Date.now())
   const isChargingRef = useRef(false)
   const [isCharging, setIsCharging] = useState(false)
   const magicSkullLearnTimerRef = useRef(null)
@@ -15458,6 +15706,10 @@ function App() {
   const playerBodyYawRef = useRef(0) // yaw du corps joueur (mis à jour par Player)
   const nearbySeat = useGameStore((s) => s.near.seat ?? null)
   const nearbyTv = useGameStore((s) => s.near.tv ?? null)
+  useEffect(() => {
+    const interval = window.setInterval(() => setSpellCooldownNow(Date.now()), 100)
+    return () => window.clearInterval(interval)
+  }, [])
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
   const [seatedState, setSeatedState] = useState(null)
   const authUser = useGameStore((s) => s.account.user)
@@ -17625,6 +17877,33 @@ function App() {
     startCharge()
   }, [equippedWeapon, summonSkeletons, startCharge])
 
+  const spellUi = useMemo(() => {
+    if (equippedWeapon === 'magic_skull') {
+      const remainingMs = Math.max(0, summonCooldownUntil - spellCooldownNow)
+      const totalMs = SUMMON_SKELETON_DURATION_MS + SUMMON_RECAST_EXTRA_MS
+      const cooldownRatio = totalMs > 0 ? Math.min(1, remainingMs / totalMs) : 0
+      return {
+        icon: SPELL_ICON_NECROMANCER,
+        ariaLabel: 'Invocation necromancienne',
+        disabled: remainingMs > 0,
+        cooldownAngle: Math.ceil(cooldownRatio * 360),
+        cooldownSeconds: Math.ceil(remainingMs / 1000),
+      }
+    }
+    if (equippedWeapon === 'magic_book') {
+      const remainingMs = Math.max(0, FIREBALL_COOLDOWN_MS - (spellCooldownNow - fireballCooldownRef.current))
+      const cooldownRatio = FIREBALL_COOLDOWN_MS > 0 ? Math.min(1, remainingMs / FIREBALL_COOLDOWN_MS) : 0
+      return {
+        icon: SPELL_ICON_FIREBALL,
+        ariaLabel: 'Boule de feu',
+        disabled: remainingMs > 0 || isCharging,
+        cooldownAngle: Math.ceil(cooldownRatio * 360),
+        cooldownSeconds: Math.ceil(remainingMs / 1000),
+      }
+    }
+    return null
+  }, [equippedWeapon, isCharging, spellCooldownNow, summonCooldownUntil])
+
   const toggleCat = () => {
     // Summoning your own pet is a personal action (not a world edit), so it is
     // allowed while visiting too — the other player sees it via networked state.
@@ -18698,6 +18977,7 @@ function App() {
               movementLocked={isCharging || isLearningMagicSkull}
               playerCombatActionsRef={playerCombatActionsRef}
               wingsUiRef={wingsUiRef}
+              onWingsParticleBurst={addWingsParticleBurst}
               onSpawnConsumed={consumeSpawnRequest}
               dragonRide={{
                 active: dragonMounted,
@@ -18714,6 +18994,12 @@ function App() {
             </Profiler>
             </Suspense>
           )}
+          <SummonSpellParticleBursts
+            bursts={wingsParticleBursts}
+            onComplete={removeWingsParticleBurst}
+            layer={currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0}
+            followTargetRef={playerPositionRef}
+          />
           <OutdoorDoorTrigger
             playerPositionRef={playerPositionRef}
             currentZone={currentZone}
@@ -18838,15 +19124,13 @@ function App() {
           <span className="charge-bar-label">💀 {magicSkullLearnProgress >= 1 ? 'Appris !' : 'Apprentissage...'}</span>
         </div>
       )}
-      {showCaptureUi && mode === 'play' && equippedWeapon === 'magic_skull' && (
-        <SummonCooldownBadge until={summonCooldownUntil} />
-      )}
       {showCaptureUi && mode === 'play' && (
         <CombatActionDock
           touchRef={touchRef}
           canKick={canKick}
           canPunch={canPunch}
           showSpell={equippedWeapon === 'magic_book' || equippedWeapon === 'magic_skull'}
+          spellUi={spellUi}
           onSpellPress={handleSpellPress}
           wingsUiRef={wingsUiRef}
         />

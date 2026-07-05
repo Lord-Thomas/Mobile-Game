@@ -30,6 +30,7 @@ export const WINGS_CONFIG = {
   baseForwardSpeed: 6.5,
   minForwardSpeed: 3.5,
   maxForwardSpeed: 14,
+  boostedMaxForwardSpeed: 34,
 
   // Verticale pendant le plané.
   baseSinkSpeed: 1.7, // chute douce en vol à plat
@@ -37,6 +38,8 @@ export const WINGS_CONFIG = {
   diveFallBonus: 5.5, // chute supplémentaire en piqué complet
   climbDrag: 7, // perte de vitesse avant en montée complète (u/s²)
   climbLift: 3.6, // portance max en montée (doit dépasser baseSinkSpeed)
+  maxLiftSpeedScale: 4.2,
+  boostedLiftEnergyScale: 0.9,
 
   // Énergie : chargée en piqué, dépensée en montée. La portance s'estompe quand
   // l'énergie approche de zéro (energyFadeBand) pour éviter une coupure sèche.
@@ -54,6 +57,12 @@ export const WINGS_CONFIG = {
   // (ou annulation externe : intérieur, monture, respawn).
   cooldown: 18, // s après la fin du vol avant de pouvoir relancer
   landingGraceDelay: 0.25, // s après le cast pendant lesquelles on ignore le sol
+
+  // Boost utilisable une seule fois par vol : donne de la vitesse avant.
+  // Le joueur regagne de la hauteur seulement s'il cabre pendant ce surplus.
+  boostSpeed: 20,
+  boostDrag: 6.4,
+  boostMinDelay: 0.2,
 }
 
 // État mutable du sort, à garder dans un useRef côté React (mis à jour à 60 Hz,
@@ -66,6 +75,8 @@ export function createWingsState() {
     forwardSpeed: 0,
     verticalVelocity: 0,
     energy: 0,
+    boostUsed: false,
+    boostSpeedActive: false,
   }
 }
 
@@ -97,6 +108,8 @@ export function castWings(state, options, config = WINGS_CONFIG) {
   state.forwardSpeed = config.baseForwardSpeed * 0.5
   state.verticalVelocity = config.launchSpeed
   state.energy = 0
+  state.boostUsed = false
+  state.boostSpeedActive = false
   return true
 }
 
@@ -113,6 +126,24 @@ function endFlight(state, now, config) {
   state.forwardSpeed = 0
   state.verticalVelocity = 0
   state.energy = 0
+  state.boostUsed = true
+  state.boostSpeedActive = false
+}
+
+export function canBoostWings(state, now, config = WINGS_CONFIG) {
+  return (
+    state.phase === WINGS_PHASE.GLIDING &&
+    !state.boostUsed &&
+    now - state.startedAt >= config.boostMinDelay
+  )
+}
+
+export function boostWings(state, { now }, config = WINGS_CONFIG) {
+  if (!canBoostWings(state, now, config)) return false
+  state.boostUsed = true
+  state.boostSpeedActive = true
+  state.forwardSpeed = Math.min(config.boostedMaxForwardSpeed, state.forwardSpeed + config.boostSpeed)
+  return true
 }
 
 // Avance la simulation d'une frame de vol. À appeler uniquement quand
@@ -151,8 +182,18 @@ export function stepWings(state, { now, dt, pitch, grounded }, config = WINGS_CO
   // Vitesse avant : le piqué accélère, la montée freine.
   state.forwardSpeed += diveAmount * config.diveAccel * dt
   state.forwardSpeed -= climbAmount * config.climbDrag * dt
+  if (state.boostSpeedActive && state.forwardSpeed > config.maxForwardSpeed && diveAmount <= 0.01) {
+    state.forwardSpeed = Math.max(
+      config.maxForwardSpeed,
+      state.forwardSpeed - config.boostDrag * dt,
+    )
+  }
+  if (state.boostSpeedActive && state.forwardSpeed <= config.maxForwardSpeed + 0.001) {
+    state.boostSpeedActive = false
+  }
+  const maxForwardSpeed = state.boostSpeedActive ? config.boostedMaxForwardSpeed : config.maxForwardSpeed
   state.forwardSpeed = Math.min(
-    config.maxForwardSpeed,
+    maxForwardSpeed,
     Math.max(config.minForwardSpeed, state.forwardSpeed),
   )
 
@@ -166,11 +207,17 @@ export function stepWings(state, { now, dt, pitch, grounded }, config = WINGS_CO
   // vitesse avant. À vitesse mini ou réserve vide, remonter ne fait que
   // ralentir la chute, jamais gagner de hauteur.
   const energyScale = clamp01(state.energy / config.energyFadeBand)
-  const speedScale = clamp01(
+  const boostedSpeedEnergyScale = clamp01(
+    (state.forwardSpeed - config.maxForwardSpeed) /
+      (config.boostedMaxForwardSpeed - config.maxForwardSpeed),
+  ) * config.boostedLiftEnergyScale
+  const liftReserveScale = Math.max(energyScale, boostedSpeedEnergyScale)
+  const speedScale = Math.min(
+    config.maxLiftSpeedScale,
     (state.forwardSpeed - config.minForwardSpeed) /
       (config.baseForwardSpeed - config.minForwardSpeed),
   )
-  const lift = climbAmount * config.climbLift * energyScale * speedScale
+  const lift = climbAmount * config.climbLift * liftReserveScale * Math.max(0, speedScale)
 
   state.verticalVelocity =
     -config.baseSinkSpeed - diveAmount * config.diveFallBonus + lift

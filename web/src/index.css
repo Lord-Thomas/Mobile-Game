@@ -2023,6 +2023,11 @@ html[data-orientation='landscape'] .combat-action-dock--count-4 .combat-action-b
   min-height: 44px;
 }
 
+html[data-orientation='landscape'] .combat-action-dock--count-5 .combat-action-btn {
+  width: clamp(46px, 11vw, 56px);
+  min-height: 40px;
+}
+
 html[data-orientation='landscape'] .combat-action-icon {
   font-size: 1.25rem;
 }
@@ -3662,6 +3667,15 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   font-size: 0.52rem;
 }
 
+.combat-action-dock--count-5 .combat-action-btn {
+  width: clamp(52px, 14vw, 62px);
+  min-height: 50px;
+}
+
+.combat-action-dock--count-5 .combat-action-label {
+  font-size: 0.48rem;
+}
+
 .combat-action-btn--punch {
   border: 2px solid rgba(239, 68, 68, 0.75);
   background: rgba(40, 10, 10, 0.88);
@@ -3683,20 +3697,62 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   box-shadow: 0 0 20px rgba(255, 100, 0, 0.45);
 }
 
-.combat-action-btn--wings {
-  border: 2px solid rgba(125, 180, 255, 0.8);
-  background: rgba(10, 22, 44, 0.88);
+.combat-action-btn--wings,
+.combat-action-btn--image-spell {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #cfe6ff;
-  box-shadow: 0 0 20px rgba(125, 180, 255, 0.4);
+  box-shadow: none;
+  backdrop-filter: none;
+  filter: drop-shadow(0 0 12px rgba(125, 180, 255, 0.45));
 }
 
-.combat-action-btn--wings:disabled {
-  opacity: 0.55;
-  filter: grayscale(0.7);
+.combat-action-dock--count-2 .combat-action-btn--wings,
+.combat-action-dock--count-2 .combat-action-btn--image-spell {
+  width: clamp(62px, 20vw, 76px);
+  height: clamp(62px, 20vw, 76px);
+  min-height: 0;
+}
+
+.combat-action-dock--count-3 .combat-action-btn--wings,
+.combat-action-dock--count-3 .combat-action-btn--image-spell {
+  width: clamp(58px, 18vw, 68px);
+  height: clamp(58px, 18vw, 68px);
+  min-height: 0;
+}
+
+.combat-action-dock--count-4 .combat-action-btn--wings,
+.combat-action-dock--count-4 .combat-action-btn--image-spell {
+  width: clamp(52px, 15vw, 62px);
+  height: clamp(52px, 15vw, 62px);
+  min-height: 0;
+}
+
+.combat-action-dock--count-5 .combat-action-btn--wings,
+.combat-action-dock--count-5 .combat-action-btn--image-spell {
+  width: clamp(48px, 13vw, 56px);
+  height: clamp(48px, 13vw, 56px);
+  min-height: 0;
+}
+
+.combat-action-btn--wings:disabled,
+.combat-action-btn--image-spell:disabled {
+  opacity: 1;
   cursor: default;
 }
 
-.combat-action-btn--wings:disabled:active {
+.combat-action-btn--wings:disabled .combat-action-img,
+.combat-action-btn--image-spell:disabled .combat-action-img {
+  filter: grayscale(0.45) saturate(0.65) brightness(0.72);
+  cursor: default;
+}
+
+.combat-action-btn--wings:disabled:active,
+.combat-action-btn--image-spell:disabled:active {
   transform: none;
 }
 
@@ -3708,9 +3764,85 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   pointer-events: none;
 }
 
+.combat-action-btn--wings .combat-action-img,
+.combat-action-btn--image-spell .combat-action-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.combat-action-btn--wings .combat-action-label,
+.combat-action-btn--image-spell .combat-action-label,
+.combat-action-btn--image-spell .combat-action-icon {
+  display: none;
+}
+
+.combat-action-cooldown-radial {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(
+    from -90deg,
+    rgba(0, 0, 0, 0.72) 0deg var(--cooldown-angle),
+    rgba(0, 0, 0, 0.04) var(--cooldown-angle) 360deg
+  );
+  pointer-events: none;
+}
+
+.combat-action-cooldown-count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 10px rgba(125, 180, 255, 0.75);
+  pointer-events: none;
+}
+
 html[data-orientation='landscape'] .combat-action-img {
   width: 1.4rem;
   height: 1.4rem;
+}
+
+html[data-orientation='landscape'] .combat-action-btn--wings .combat-action-img,
+html[data-orientation='landscape'] .combat-action-btn--image-spell .combat-action-img {
+  width: 100%;
+  height: 100%;
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-2 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-2 .combat-action-btn--image-spell {
+  width: clamp(52px, 15vw, 64px);
+  height: clamp(52px, 15vw, 64px);
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-3 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-3 .combat-action-btn--image-spell {
+  width: clamp(48px, 13vw, 58px);
+  height: clamp(48px, 13vw, 58px);
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-4 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-4 .combat-action-btn--image-spell {
+  width: clamp(44px, 11vw, 52px);
+  height: clamp(44px, 11vw, 52px);
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-5 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-5 .combat-action-btn--image-spell {
+  width: clamp(40px, 10vw, 48px);
+  height: clamp(40px, 10vw, 48px);
+}
+
+html[data-orientation='landscape'] .combat-action-cooldown-count {
+  font-size: 0.95rem;
 }
 
 .combat-action-btn--spell:active {

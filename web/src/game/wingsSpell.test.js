@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   WINGS_CONFIG,
   WINGS_PHASE,
+  boostWings,
+  canBoostWings,
   canCastWings,
   cancelWings,
   castWings,
@@ -166,6 +168,33 @@ describe('plané', () => {
     expect(getWingsEnergyRatio(state)).toBeLessThanOrEqual(1)
     simulate(state, { from: 5.5, seconds: 2, pitch: -WINGS_CONFIG.climbPitchRef })
     expect(state.energy).toBeGreaterThanOrEqual(0)
+  })
+
+  it('le boost de vol donne de la vitesse et ne peut servir qu une fois', () => {
+    const state = glidingState()
+    const now = WINGS_CONFIG.launchDuration + WINGS_CONFIG.boostMinDelay + DT
+    const speedBefore = state.forwardSpeed
+    expect(canBoostWings(state, now)).toBe(true)
+    expect(boostWings(state, { now })).toBe(true)
+    expect(state.forwardSpeed).toBeGreaterThan(WINGS_CONFIG.maxForwardSpeed)
+    stepWings(state, { now, dt: DT, pitch: 0, grounded: false })
+    expect(state.verticalVelocity).toBeLessThan(0)
+    expect(state.forwardSpeed).toBeGreaterThan(speedBefore)
+    const boostedSpeed = state.forwardSpeed
+    simulate(state, { from: now, seconds: 1, pitch: 0 })
+    expect(state.forwardSpeed).toBeLessThan(boostedSpeed)
+    expect(state.forwardSpeed).toBeGreaterThanOrEqual(WINGS_CONFIG.maxForwardSpeed)
+    expect(canBoostWings(state, now + DT)).toBe(false)
+    expect(boostWings(state, { now: now + DT })).toBe(false)
+  })
+
+  it('le boost peut etre converti en altitude en cabrant meme sans energie', () => {
+    const state = glidingState()
+    state.energy = 0
+    const now = WINGS_CONFIG.launchDuration + WINGS_CONFIG.boostMinDelay + DT
+    expect(boostWings(state, { now })).toBe(true)
+    stepWings(state, { now, dt: DT, pitch: -WINGS_CONFIG.climbPitchRef, grounded: false })
+    expect(state.verticalVelocity).toBeGreaterThan(0)
   })
 })
 
