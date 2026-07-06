@@ -365,6 +365,7 @@ const FIREBALL_SPEED = 12
 const FIREBALL_LIFETIME_MS = 2500
 const FIREBALL_COOLDOWN_MS = 800
 const FIREBALL_COLLISION_RADIUS = 0.9
+const FIREBALL_GROUND_CLEARANCE = 0.72
 const MAX_ACTIVE_FIREBALLS = 5
 const FIREBALL_PROJECTILE_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
 const FIREBALL_IMPACT_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
@@ -6307,7 +6308,6 @@ function FireballProjectileSlot({ projectile }) {
 
 function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, chargeAimYawRef, chargeProgressRef, chargeStartTimeRef, chargePosRef, setChargeProgress, onCancel, onLaunch }) {
   const groupRef = useRef(null)
-  const frameRef = useRef(0)
   const launchedRef = useRef(false)
   const phase = useMemo(() => Math.random() * Math.PI * 2, [])
 
@@ -6318,15 +6318,17 @@ function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, c
     }
     if (active) {
       launchedRef.current = false
-      frameRef.current = 0
     }
   }, [active])
 
-  useFrame(() => {
+  useFrame((state) => {
     const g = groupRef.current
     if (!g || !active || launchedRef.current) return
-    const elapsed = Date.now() - chargeStartTimeRef.current
-    const progress = Math.min(elapsed / CHARGE_TIME_MS, 1.0)
+    if (chargeStartTimeRef.current <= 0 || chargeStartTimeRef.current > state.clock.elapsedTime) {
+      chargeStartTimeRef.current = state.clock.elapsedTime
+    }
+    const elapsed = state.clock.elapsedTime - chargeStartTimeRef.current
+    const progress = Math.min(elapsed / (CHARGE_TIME_MS / 1000), 1.0)
     chargeProgressRef.current = progress
 
     // Annuler si le joueur bouge
@@ -6351,9 +6353,8 @@ function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, c
     const yaw = center + diff
     chargeAimYawRef.current = yaw
 
-    // Mettre à jour la barre (throttlé)
-    frameRef.current++
-    if (frameRef.current % 2 === 0) setChargeProgress(progress)
+    // Mettre à jour la barre à chaque frame avec l'horloge du renderer.
+    setChargeProgress(progress)
 
     // Positionner la boule dans le cône devant le joueur, plus basse
     g.position.set(pos.x - Math.sin(yaw) * 0.85, pos.y + 0.3, pos.z - Math.cos(yaw) * 0.85)
@@ -6602,7 +6603,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
   return null
 }
 
-function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef = null }) {
+function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef = null, currentZone = ZONES.interior }) {
   const [, setRenderTick] = useState(0)
   const impactsRef = useRef([])
   const hadVisualsRef = useRef(false)
@@ -6617,6 +6618,9 @@ function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef =
       if (now - p.startedAt > FIREBALL_LIFETIME_MS) continue
       const nx = p.x + p.dirX * FIREBALL_SPEED * delta
       const nz = p.z + p.dirZ * FIREBALL_SPEED * delta
+      const ny = currentZone === ZONES.outside
+        ? getTerrainHeight(nx, nz) + FIREBALL_GROUND_CLEARANCE
+        : p.y
       let hit = false
       if (combatTargetsRef?.current) {
         for (const [tid, target] of combatTargetsRef.current) {
@@ -6629,7 +6633,7 @@ function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef =
             hit = true
             impactsRef.current.push({
               id: `imp_${now}_${Math.random().toString(36).slice(2, 5)}`,
-              x: nx, y: p.y + 0.8, z: nz,
+              x: nx, y: ny + 0.25, z: nz,
               createdAt: now,
             })
             break
@@ -6637,7 +6641,10 @@ function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef =
         }
       }
       if (!hit) {
-        next.push({ ...p, x: nx, z: nz })
+        p.x = nx
+        p.y = ny
+        p.z = nz
+        next.push(p)
       }
     }
 
@@ -11249,6 +11256,7 @@ function SummonedSkeleton({
   allyTargetsRef = null,
   playerTargetIdRef = null,
   onExpire,
+  onParticleBurst = null,
 }) {
   const cfg = MOB_CONFIGS.skeleton
   const allyId = `summon_${index}`
@@ -11436,10 +11444,19 @@ function SummonedSkeleton({
   const expire = useCallback(() => {
     if (expiredRef.current) return
     expiredRef.current = true
+    onParticleBurst?.({
+      kind: 'end',
+      source: `summon_skeleton_${index}`,
+      position: [
+        currentPositionRef.current.x,
+        currentPositionRef.current.y + 0.4,
+        currentPositionRef.current.z,
+      ],
+    })
     groupPositionsRef?.current?.delete(index)
     setActiveVisual(false)
     onExpire?.(index)
-  }, [index, onExpire, groupPositionsRef, setActiveVisual])
+  }, [index, onExpire, onParticleBurst, groupPositionsRef, setActiveVisual])
 
   useFrame((state, delta) => {
     const slot = slotRef?.current ?? null
@@ -11453,6 +11470,15 @@ function SummonedSkeleton({
         currentPositionRef.current.x = slot.spawnPosition[0]
         currentPositionRef.current.y = slot.spawnPosition[1]
         currentPositionRef.current.z = slot.spawnPosition[2]
+        onParticleBurst?.({
+          kind: 'start',
+          source: `summon_skeleton_${index}`,
+          position: [
+            slot.spawnPosition[0],
+            slot.spawnPosition[1] + 0.4,
+            slot.spawnPosition[2],
+          ],
+        })
         hpRef.current = SUMMON_SKELETON_MAX_HP
         setHp(SUMMON_SKELETON_MAX_HP)
         expiredRef.current = false
@@ -15456,22 +15482,24 @@ function App() {
   const wingsParticleBurstIdRef = useRef(0)
   const lastWingsParticleBurstRef = useRef({ kind: null, at: 0 })
   const [wingsParticleBursts, setWingsParticleBursts] = useState([])
-  const addWingsParticleBurst = useCallback(({ kind = 'start', position, layer = OUTDOOR_LIGHT_LAYER }) => {
+  const addWingsParticleBurst = useCallback(({ kind = 'start', position, layer = OUTDOOR_LIGHT_LAYER, source = 'wings', followTarget = null }) => {
     if (!Array.isArray(position) || position.length < 3) return
     const normalizedKind = kind === 'end' ? 'end' : 'start'
+    const normalizedSource = String(source || 'effect')
     const now = performance.now()
     const lastBurst = lastWingsParticleBurstRef.current
-    if (lastBurst.kind === normalizedKind && now - lastBurst.at < 900) return
-    lastWingsParticleBurstRef.current = { kind: normalizedKind, at: now }
+    if (lastBurst.key === `${normalizedSource}:${normalizedKind}` && now - lastBurst.at < 900) return
+    lastWingsParticleBurstRef.current = { key: `${normalizedSource}:${normalizedKind}`, at: now }
     const nextIndex = wingsParticleBurstIdRef.current + 1
     wingsParticleBurstIdRef.current = nextIndex
     setWingsParticleBursts((current) => [
-      ...current.filter((burst) => burst.kind !== normalizedKind).slice(-4),
+      ...current.filter((burst) => `${burst.source}:${burst.kind}` !== `${normalizedSource}:${normalizedKind}`).slice(-8),
       {
-        id: `wings_${normalizedKind}_${nextIndex}`,
+        id: `${normalizedSource}_${normalizedKind}_${nextIndex}`,
+        source: normalizedSource,
         kind: normalizedKind,
         position,
-        followTarget: normalizedKind !== 'end',
+        followTarget: followTarget ?? (normalizedSource === 'wings' && normalizedKind !== 'end'),
         playbackId: nextIndex,
         layer: Number.isFinite(layer) ? layer : OUTDOOR_LIGHT_LAYER,
       },
@@ -17816,7 +17844,7 @@ function App() {
     if (projectilesRef.current.length >= MAX_ACTIVE_FIREBALLS) return
     isChargingRef.current = true
     setIsCharging(true)
-    chargeStartTimeRef.current = Date.now()
+    chargeStartTimeRef.current = 0
     chargeProgressRef.current = 0
     setChargeProgress(0)
     const pos = playerPositionRef.current
@@ -17834,11 +17862,16 @@ function App() {
     fireballCooldownRef.current = now
     const pos = playerPositionRef.current
     const yaw = chargeAimYawRef.current // direction clampée dans le cône
+    const projectileX = pos.x - Math.sin(yaw) * 0.85
+    const projectileZ = pos.z - Math.cos(yaw) * 0.85
+    const projectileY = currentZone === ZONES.outside
+      ? getTerrainHeight(projectileX, projectileZ) + FIREBALL_GROUND_CLEARANCE
+      : pos.y + 0.3
     const projectile = {
       id: `fb_${now}_${Math.random().toString(36).slice(2, 6)}`,
-      x: pos.x - Math.sin(yaw) * 0.85,
-      y: pos.y + 0.3,
-      z: pos.z - Math.cos(yaw) * 0.85,
+      x: projectileX,
+      y: projectileY,
+      z: projectileZ,
       dirX: -Math.sin(yaw),
       dirZ: -Math.cos(yaw),
       startedAt: now,
@@ -17857,7 +17890,7 @@ function App() {
       sentAt: Date.now(),
       phase: projectile.phase,
     })
-  }, [])
+  }, [currentZone])
 
   const cancelCharge = useCallback(() => {
     if (!isChargingRef.current) return
@@ -17938,6 +17971,13 @@ function App() {
       const pos = dragonRidePositionRef.current
       const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
       if (pos.y - groundY > 0.15) return
+      addWingsParticleBurst({
+        kind: 'end',
+        source: `mount_${mountedMountId}`,
+        position: [pos.x, groundY + 0.55, pos.z],
+        layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+        followTarget: false,
+      })
       if (mountId === mountedMountId) {
         setMountedMountId(null)
         setSpawnRequest({
@@ -17973,6 +18013,13 @@ function App() {
     dragonRideMountProfileRef.current.handTargetsMeasured = false
     dragonRideMountProfileRef.current.seatHeightMeasured = false
     dragonRideRiderTransformRef.current.ready = false
+    addWingsParticleBurst({
+      kind: 'start',
+      source: `mount_${mountId}`,
+      position: [spawnX, groundY + 0.55, spawnZ],
+      layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+      followTarget: false,
+    })
     setMountedMountId(mountId)
   }
 
@@ -18900,10 +18947,12 @@ function App() {
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
             playerTargetIdRef={playerTargetIdRef}
+            currentZone={currentZone}
           />
           <FireballManager
             projectilesRef={remoteProjectilesRef}
             combatTargetsRef={null}
+            currentZone={currentZone}
           />
           {/* Pool de squelettes invoqués : monté dès le chargement du monde
               pour précharger modèle/animations/GPU et éviter tout freeze au sort. */}
@@ -18921,6 +18970,13 @@ function App() {
                   allyTargetsRef={allyTargetsRef}
                   playerTargetIdRef={playerTargetIdRef}
                   onExpire={handleSummonExpire}
+                  onParticleBurst={({ kind, source, position }) => addWingsParticleBurst({
+                    kind,
+                    source,
+                    position,
+                    layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+                    followTarget: false,
+                  })}
                 />
               </Suspense>
             ))}

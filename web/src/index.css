@@ -3872,6 +3872,7 @@ html[data-orientation='landscape'] .combat-action-cooldown-count {
   background: linear-gradient(90deg, #cc1100, #ff6600, #ffdd00);
   border-radius: 12px;
   transition: width 0.05s linear;
+  will-change: width;
 }
 .charge-bar-label {
   position: absolute;
