@@ -1615,6 +1615,49 @@ html[data-chat-open='true'] .game-chat-panel {
   pointer-events: auto;
 }
 
+.customize-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.customize-tab-btn {
+  border: 0;
+  border-radius: 14px;
+  height: 52px;
+  padding: 0 14px;
+  background: rgba(14, 23, 34, 0.86);
+  color: #f8fbff;
+  font-size: 14px;
+  font-weight: 900;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.customize-tab-btn.active {
+  background: #f2c14e;
+  color: #17202a;
+}
+
+.customize-tab-btn.view {
+  background: rgba(70, 108, 148, 0.9);
+}
+
+.customize-tab-btn.view.active {
+  background: #75d5ff;
+  color: #17202a;
+}
+
+.customize-tab-hint {
+  color: #f8fbff;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(14, 23, 34, 0.72);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
 .customize-opening-size {
   display: flex;
   align-items: center;

@@ -5,7 +5,7 @@ import {
   resolveInteriorWallCollision,
   syncInteriorWallColliders,
 } from './interiorCollision'
-import { addInteriorWallToHousePlan, createDefaultHousePlan } from '../world/house/housePlan'
+import { addHouseOpeningToWall, addInteriorWallToHousePlan, createDefaultHousePlan, setHouseOpeningVertical } from '../world/house/housePlan'
 import { deriveHouseLayout } from '../world/house/deriveHouseLayout'
 
 const PLAYER_RADIUS = 0.35
@@ -39,6 +39,17 @@ describe('interiorCollision', () => {
     expect(collidesWithInteriorWalls(-5, doorZ, 0.3)).toBe(false)
     // Sur le mur plein a cote : bloque.
     expect(collidesWithInteriorWalls(-5, doorZ + 2.5, 0.3)).toBe(true)
+  })
+
+  it('bloque le joueur sur une vitre descendue au sol', () => {
+    const withWindow = addHouseOpeningToWall(createDefaultHousePlan(), 'wall_main_north', 0.5, { type: 'window' })
+    const window = Object.values(withWindow.openings).find((opening) => opening.type === 'window')
+    // Allège à 0 : plus de soubassement, seul le verre sépare de l'extérieur.
+    const floorWindow = setHouseOpeningVertical(withWindow, window.id, { bottom: 0, height: 2.4 })
+    syncInteriorWallColliders(buildInteriorWallColliderBoxes(deriveHouseLayout(floorWindow)))
+
+    // Au centre de la vitre (mur nord, z = 5) : bloqué par le verre.
+    expect(collidesWithInteriorWalls(0, 5, 0.3)).toBe(true)
   })
 
   it('fait glisser le mouvement le long du mur', () => {

@@ -209,6 +209,33 @@ describe('housePlan', () => {
     expect(layout.rooms).toHaveLength(2)
   })
 
+  it('aligne une cloison sur les bords de cellules pour separer les espaces', () => {
+    // Points snappés à 0.25 par l'éditeur : la cloison doit être ramenée sur
+    // la grille entière, sinon la détection d'espaces ne la voit pas.
+    const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-4.75, 2.25], [5.25, 2.25])
+    const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
+
+    expect(partition).toMatchObject({ from: [-5, 2], to: [5, 2] })
+    expect(deriveHouseLayout(plan).rooms).toHaveLength(2)
+  })
+
+  it('applique une tapisserie differente sur chaque cote d une cloison', () => {
+    const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-5, 0], [5, 0])
+    const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
+    const painted = setHouseWallSideStyle(
+      setHouseWallSideStyle(plan, partition.id, 'left', 'wall-briques-01'),
+      partition.id,
+      'right',
+      'wall-brun-mat',
+    )
+    const layoutWall = deriveHouseLayout(painted).walls.find((wall) => wall.id === partition.id)
+    const leftSide = layoutWall.sideA.sideKey === 'left' ? layoutWall.sideA : layoutWall.sideB
+    const rightSide = layoutWall.sideA.sideKey === 'right' ? layoutWall.sideA : layoutWall.sideB
+
+    expect(leftSide.styleId).toBe('wall-briques-01')
+    expect(rightSide.styleId).toBe('wall-brun-mat')
+  })
+
   it('deplace une porte sur son mur', () => {
     const plan = createDefaultHousePlan()
     const moved = moveHouseOpening(plan, 'door_entrance', 'wall_main_west', 0.35)

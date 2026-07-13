@@ -13,26 +13,41 @@ const BLOCKING_MIN_TOP = 0.05
 
 const wallColliderBoxes = []
 
+function pushTransformAsBox(boxes, transform) {
+  const [halfLength, halfHeight, halfThickness] = transform.args
+  const centerY = transform.position[1]
+  if (centerY - halfHeight > BLOCKING_MAX_BOTTOM) return
+  if (centerY + halfHeight < BLOCKING_MIN_TOP) return
+
+  const cos = Math.abs(Math.cos(transform.rotation[1]))
+  const sin = Math.abs(Math.sin(transform.rotation[1]))
+  const halfX = halfLength * cos + halfThickness * sin
+  const halfZ = halfLength * sin + halfThickness * cos
+  boxes.push({
+    minX: transform.position[0] - halfX,
+    maxX: transform.position[0] + halfX,
+    minZ: transform.position[2] - halfZ,
+    maxZ: transform.position[2] + halfZ,
+  })
+}
+
 export function buildInteriorWallColliderBoxes(layout) {
   const boxes = []
   ;(layout.walls ?? []).forEach((wall) => {
     splitWallIntoSolidRects(wall).forEach((rect) => {
-      const transform = getWallColliderTransform(wall, rect)
-      const [halfLength, halfHeight, halfThickness] = transform.args
-      const centerY = transform.position[1]
-      if (centerY - halfHeight > BLOCKING_MAX_BOTTOM) return
-      if (centerY + halfHeight < BLOCKING_MIN_TOP) return
+      pushTransformAsBox(boxes, getWallColliderTransform(wall, rect))
+    })
 
-      const cos = Math.abs(Math.cos(transform.rotation[1]))
-      const sin = Math.abs(Math.sin(transform.rotation[1]))
-      const halfX = halfLength * cos + halfThickness * sin
-      const halfZ = halfLength * sin + halfThickness * cos
-      boxes.push({
-        minX: transform.position[0] - halfX,
-        maxX: transform.position[0] + halfX,
-        minZ: transform.position[2] - halfZ,
-        maxZ: transform.position[2] + halfZ,
-      })
+    // Le verre bloque aussi : une vitre descendue au sol (allège 0) ne doit
+    // pas laisser passer le joueur comme une porte.
+    ;(wall.openings ?? []).filter((opening) => opening.type === 'window').forEach((opening) => {
+      const bottom = (wall.bottom ?? 0) + (opening.bottom ?? 0)
+      pushTransformAsBox(boxes, getWallColliderTransform(wall, {
+        center: opening.center,
+        y: bottom + opening.height * 0.5,
+        width: opening.width,
+        height: opening.height,
+      }))
     })
   })
   return boxes

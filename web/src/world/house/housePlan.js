@@ -725,7 +725,9 @@ export function setHouseFloorStyleForCells(plan, cellKeys, styleId) {
 export function setHouseWallSideStyle(plan, wallId, side, styleId) {
   const normalized = normalizeHousePlan(plan)
   if (!normalized.walls[wallId]) return normalized
-  if (side !== 'inside' && side !== 'outside') return normalized
+  // 'left'/'right' : côtés géométriques (cloisons entre deux pièces).
+  // 'inside'/'outside' : clés historiques, gardées pour compat.
+  if (!['inside', 'outside', 'left', 'right'].includes(side)) return normalized
 
   const key = `${wallId}:${side}`
   const wallBySide = { ...normalized.styles.wallBySide }
@@ -834,9 +836,15 @@ export function removeHouseWall(plan, wallId) {
 
 export function addInteriorWallToHousePlan(plan, start, end) {
   const normalized = normalizeHousePlan(plan)
-  const from = normalizePoint(start, null)
-  const rawTo = normalizePoint(end, null)
-  if (!from || !rawTo) return normalized
+  const rawFrom = normalizePoint(start, null)
+  const rawEnd = normalizePoint(end, null)
+  if (!rawFrom || !rawEnd) return normalized
+
+  // Les cloisons s'alignent sur les bords de cellules (grille entière) : la
+  // détection d'espaces raisonne par cellule, une cloison à x=2.25 ne
+  // séparerait aucune pièce.
+  const from = [Math.round(rawFrom[0]), Math.round(rawFrom[1])]
+  const rawTo = [Math.round(rawEnd[0]), Math.round(rawEnd[1])]
 
   const dx = rawTo[0] - from[0]
   const dz = rawTo[1] - from[1]

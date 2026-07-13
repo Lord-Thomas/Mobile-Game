@@ -36,15 +36,21 @@ function getWallSides(wall, plan, spaceLookup) {
   const leftNormal = [-direction.z, 0, direction.x]
   const rightNormal = [direction.z, 0, -direction.x]
 
-  return [leftNormal, rightNormal].map((normal) => {
+  return [
+    { normal: leftNormal, sideKey: 'left' },
+    { normal: rightNormal, sideKey: 'right' },
+  ].map(({ normal, sideKey }) => {
     const cellKey = getNearbyCellKey(wall, normal)
     const roomId = spaceLookup.get(cellKey)
+    const wallBySide = plan.styles?.wallBySide ?? {}
     if (!plan.floorCells[cellKey] || !roomId) {
       return {
         type: 'outside',
         material: 'facade_main',
         color: DEFAULT_HOUSE_EXTERIOR_COLOR,
-        styleId: plan.styles?.wallBySide?.[`${wall.id}:outside`] ?? null,
+        // Clé géométrique en priorité, clé historique ':outside' en secours.
+        styleId: wallBySide[`${wall.id}:${sideKey}`] ?? wallBySide[`${wall.id}:outside`] ?? null,
+        sideKey,
         normal,
       }
     }
@@ -54,7 +60,8 @@ function getWallSides(wall, plan, spaceLookup) {
       roomId,
       material: 'active_wall',
       color: DEFAULT_HOUSE_INTERIOR_COLOR,
-      styleId: plan.styles?.wallBySide?.[`${wall.id}:inside`] ?? null,
+      styleId: wallBySide[`${wall.id}:${sideKey}`] ?? wallBySide[`${wall.id}:inside`] ?? null,
+      sideKey,
       normal,
     }
   })
