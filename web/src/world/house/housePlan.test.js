@@ -340,6 +340,14 @@ describe('housePlan', () => {
     expect(deriveHouseLayout(resized).rooms).toHaveLength(1)
   })
 
+  it('redimensionne une extremite avec une precision au quart d unite', () => {
+    const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-5, 0], [5, 0])
+    const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
+    const resized = resizeHouseWallEnd(plan, partition.id, 'to', 2.25)
+
+    expect(resized.walls[partition.id].to).toEqual([2.25, 0])
+  })
+
   it('refuse de redimensionner par une extremite partagee avec un autre mur', () => {
     const plan = createDefaultHousePlan()
     const unchanged = resizeHouseWallEnd(plan, 'wall_main_east', 'to', 2)
@@ -357,6 +365,17 @@ describe('housePlan', () => {
 
     expect(jointValues.filter((value) => value === 2)).toHaveLength(2)
     expect(deriveHouseLayout(moved).rooms).toHaveLength(1)
+  })
+
+  it('deplace un raccord avec une precision au quart d unite', () => {
+    const segmented = splitHouseWallSegment(createDefaultHousePlan(), 'wall_main_east', 0.5)
+    const segments = Object.values(segmented.walls)
+      .filter((wall) => wall.id.startsWith('wall_main_east_'))
+    const moved = moveHouseWallJoint(segmented, segments[0].id, segments[1].id, 2.25)
+    const jointValues = [moved.walls[segments[0].id], moved.walls[segments[1].id]]
+      .flatMap((wall) => [wall.from[1], wall.to[1]])
+
+    expect(jointValues.filter((value) => value === 2.25)).toHaveLength(2)
   })
 
   it('empeche un point de segment de traverser une porte', () => {

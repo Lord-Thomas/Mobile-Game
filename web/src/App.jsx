@@ -8596,6 +8596,12 @@ const CUSTOMIZE_ORBIT_PITCH_MIN = 0.22
 const CUSTOMIZE_ORBIT_PITCH_MAX = 1.35
 const CUSTOMIZE_ORBIT_DISTANCE_MIN = 9
 const CUSTOMIZE_ORBIT_DISTANCE_MAX = 46
+const CUSTOMIZE_HISTORY_LIMIT = 50
+
+function cloneCustomizationValue(value) {
+  if (typeof structuredClone === 'function') return structuredClone(value)
+  return JSON.parse(JSON.stringify(value))
+}
 
 function resetCustomizeOrbit() {
   Object.assign(CUSTOMIZE_ORBIT, CUSTOMIZE_ORBIT_DEFAULT)
@@ -12944,22 +12950,6 @@ function houseCornersMatch(a, b) {
   return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.z - b.z) < 0.001
 }
 
-function findNearestHouseWallToPoint(walls, point) {
-  return walls.reduce((closest, wall) => {
-    const dx = wall.endCorner.x - wall.startCorner.x
-    const dz = wall.endCorner.z - wall.startCorner.z
-    const lengthSq = dx * dx + dz * dz || 1
-    const t = Math.min(1, Math.max(0, (
-      (point.x - wall.startCorner.x) * dx + (point.z - wall.startCorner.z) * dz
-    ) / lengthSq))
-    const nearestX = wall.startCorner.x + dx * t
-    const nearestZ = wall.startCorner.z + dz * t
-    const distance = Math.hypot(point.x - nearestX, point.z - nearestZ)
-    if (closest && closest.distance <= distance) return closest
-    return { wall, distance }
-  }, null)
-}
-
 function HouseBuildHandles({
   layout,
   view = 'top',
@@ -12979,8 +12969,12 @@ function HouseBuildHandles({
   onAddOpening,
   onAddRoom,
   onCompleteBuildTool,
+  onBeginChange,
+  onEndChange,
+  onCancelChange,
 }) {
   const [activeDrag, setActiveDrag] = useState(null)
+  const [hoveredTarget, setHoveredTarget] = useState(null)
   const activeDragRef = useRef(null)
   const walls = layout.walls ?? []
 
@@ -13043,7 +13037,7 @@ function HouseBuildHandles({
     }
 
     if (drag.type === 'wallEnd' || drag.type === 'joint') {
-      const value = Math.round(drag.axis === 'z' ? event.point.z : event.point.x)
+      const value = Math.round((drag.axis === 'z' ? event.point.z : event.point.x) * 4) / 4
       if (value === drag.lastValue) return
       drag.lastValue = value
       if (drag.type === 'wallEnd') onResizeWallEnd(drag.wallId, drag.end, value)
@@ -13082,13 +13076,13 @@ function HouseBuildHandles({
     }
 
     if (drag.type === 'opening') {
-      // La porte peut passer sur un autre mur si le pointeur s'en approche.
-      const nearest = findNearestHouseWallToPoint(walls, event.point)
-      const targetWall = nearest && nearest.distance <= 0.9 ? nearest.wall : drag.wall
+      // Une ouverture reste sur son mur pendant le drag. Le changement
+      // automatique de mur rendait la manipulation imprévisible.
+      const targetWall = drag.wall
       const offset = getWallOffsetFromPoint(targetWall, event.point)
-      const snappedOffset = Math.round(offset * 20) / 20
-      if (targetWall.id !== drag.wall.id || Math.abs(snappedOffset - drag.lastOffset) >= 0.001) {
-        drag.wall = targetWall
+      const wallLength = Math.max(0.001, targetWall.length)
+      const snappedOffset = (Math.round(offset * wallLength * 10) / 10) / wallLength
+      if (Math.abs(snappedOffset - drag.lastOffset) >= 0.001) {
         drag.lastOffset = snappedOffset
         onMoveOpening(drag.openingId, targetWall.id, snappedOffset)
       }
@@ -13097,15 +13091,45 @@ function HouseBuildHandles({
 
   const finishActiveDrag = (event) => {
     if (!activeDragRef.current) return
-    event.stopPropagation()
+    event?.stopPropagation?.()
     activeDragRef.current = null
     setActiveDrag(null)
+    onEndChange?.()
+  }
+
+  const cancelActiveDrag = (event) => {
+    if (!activeDragRef.current) return
+    event?.stopPropagation?.()
+    activeDragRef.current = null
+    setActiveDrag(null)
+    onCancelChange?.()
   }
 
   const beginDrag = (drag) => {
+    onBeginChange?.()
     activeDragRef.current = drag
     setActiveDrag(drag)
   }
+
+  useEffect(() => {
+    if (!activeDrag) return undefined
+    const onPointerUp = (event) => finishActiveDrag(event)
+    const onPointerCancel = (event) => cancelActiveDrag(event)
+    const onBlur = () => cancelActiveDrag()
+    const onKeyDown = (event) => {
+      if (getKeyboardKey(event) === 'escape') cancelActiveDrag(event)
+    }
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [activeDrag])
 
   return (
     <group visible userData={{ debugCategory: 'house-build-handles' }}>
@@ -13128,11 +13152,7 @@ function HouseBuildHandles({
             : [0, 0.18, 0]}
           onPointerMove={updateActiveDrag}
           onPointerUp={finishActiveDrag}
-          onPointerCancel={(event) => {
-            event.stopPropagation()
-            activeDragRef.current = null
-            setActiveDrag(null)
-          }}
+          onPointerCancel={cancelActiveDrag}
         >
           <planeGeometry args={[PLAYER_PLOT_SIZE + 12, PLAYER_PLOT_SIZE + 12]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
@@ -13145,8 +13165,15 @@ function HouseBuildHandles({
         return (
           <group key={`build-wall-${wall.id}`}>
             <mesh
-              position={transform.position}
+              position={view === '3d'
+                ? [transform.position[0], (wall.bottom ?? 0) + wall.height * 0.5, transform.position[2]]
+                : transform.position}
               rotation={transform.rotation}
+              onPointerOver={(event) => {
+                event.stopPropagation()
+                setHoveredTarget(`wall:${wall.id}`)
+              }}
+              onPointerOut={() => setHoveredTarget((current) => current === `wall:${wall.id}` ? null : current)}
               onPointerDown={(event) => {
                 event.stopPropagation()
                 const offset = getWallOffsetFromPoint(wall, event.point)
@@ -13173,62 +13200,70 @@ function HouseBuildHandles({
                 const midZ = (wall.startCorner.z + wall.endCorner.z) * 0.5
                 const sideDot = (event.point.x - midX) * -direction2.z + (event.point.z - midZ) * direction2.x
                 onSelectElement({ type: 'wall', id: wall.id, side: sideDot >= 0 ? 'left' : 'right' })
-                // Hors onglet Construire (ex. Décorer), un mur se sélectionne
-                // mais ne se déplace pas — pas de modification accidentelle.
-                if (!canEditStructure) return
-                if (outsideNormal) {
-                  beginDrag({
-                    type: 'resize',
-                    wallId: wall.id,
-                    startX: event.point.x,
-                    startZ: event.point.z,
-                    normal: outsideNormal,
-                    appliedAmount: 0,
-                  })
-                  return
-                }
-                const direction = getWallDirection(wall)
-                beginDrag({
-                  type: 'moveInterior',
-                  wallId: wall.id,
-                  startX: event.point.x,
-                  startZ: event.point.z,
-                  normal: [-direction.z, 0, direction.x],
-                  appliedAmount: 0,
-                })
               }}
             >
-              <boxGeometry args={[Math.max(0.2, transform.length), 0.1, selected ? 1.12 : 0.86]} />
+              <boxGeometry args={view === '3d'
+                ? [Math.max(0.2, transform.length), Math.max(0.4, wall.height), 0.16]
+                : [Math.max(0.2, transform.length), 0.1, selected ? 0.72 : 0.5]} />
               <meshBasicMaterial
                 color={
                   buildTool === 'segment' ? '#f2c14e'
                     : buildTool === 'door' ? '#65f2a3'
                       : buildTool === 'window' ? '#8fd7ff'
                         : buildTool === 'room' ? (outsideNormal ? '#75d5ff' : '#4a5560')
-                          : selected ? '#f2c14e' : outsideNormal ? '#75d5ff' : '#ff8e6e'
+                          : selected ? '#f2c14e'
+                            : hoveredTarget === `wall:${wall.id}` ? '#d8efff'
+                              : outsideNormal ? '#75d5ff' : '#ff8e6e'
                 }
                 transparent
                 opacity={
                   buildTool === 'room' && !outsideNormal ? 0.12
-                    : buildTool || selected ? 0.62 : 0.34
+                    : buildTool || selected ? 0.46
+                      : hoveredTarget === `wall:${wall.id}` ? 0.28 : view === '3d' ? 0.035 : 0.18
                 }
                 depthWrite={false}
               />
             </mesh>
-            {selected && canEditStructure && ['start', 'end'].map((endKey) => {
+            {selected && canEditStructure && !buildTool && (() => {
+              const direction = getWallDirection(wall)
+              const moveNormal = outsideNormal ?? [-direction.z, 0, direction.x]
+              return (
+                <mesh
+                  position={[transform.position[0], getHandleY(wall) + 0.2, transform.position[2]]}
+                  rotation={transform.rotation}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    beginDrag({
+                      type: outsideNormal ? 'resize' : 'moveInterior',
+                      wallId: wall.id,
+                      startX: event.point.x,
+                      startZ: event.point.z,
+                      normal: moveNormal,
+                      appliedAmount: 0,
+                    })
+                  }}
+                >
+                  <boxGeometry args={[Math.min(0.72, Math.max(0.38, transform.length * 0.22)), 0.16, 0.32]} />
+                  <meshBasicMaterial color="#4fb9ff" transparent opacity={0.95} depthWrite={false} />
+                </mesh>
+              )
+            })()}
+            {selected && canEditStructure && !buildTool && ['start', 'end'].map((endKey) => {
               const corner = endKey === 'start' ? wall.startCorner : wall.endCorner
+              const connectedWalls = walls.filter((candidate) => (
+                candidate.id !== wall.id &&
+                (houseCornersMatch(candidate.startCorner, corner) || houseCornersMatch(candidate.endCorner, corner))
+              ))
+              const colinearNeighbor = connectedWalls.find((candidate) => (
+                candidate.axis === wall.axis && Math.abs(candidate.constant - wall.constant) < 0.001
+              ))
+              if (connectedWalls.length > 0 && !colinearNeighbor) return null
               return (
                 <mesh
                   key={`build-wall-end-${wall.id}-${endKey}`}
                   position={[corner.x, view === '3d' ? getHandleY(wall) + 0.12 : 0.2, corner.z]}
                   onPointerDown={(event) => {
                     event.stopPropagation()
-                    const colinearNeighbor = walls.find((candidate) => (
-                      candidate.id !== wall.id &&
-                      candidate.axis === wall.axis &&
-                      Math.abs(candidate.constant - wall.constant) < 0.001 &&
-                      (houseCornersMatch(candidate.startCorner, corner) || houseCornersMatch(candidate.endCorner, corner))
-                    ))
                     if (colinearNeighbor) {
                       beginDrag({
                         type: 'joint',
@@ -13248,7 +13283,7 @@ function HouseBuildHandles({
                     })
                   }}
                 >
-                  <sphereGeometry args={[0.34, 16, 12]} />
+                  <sphereGeometry args={[0.18, 14, 10]} />
                   <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
                 </mesh>
               )
@@ -13259,34 +13294,59 @@ function HouseBuildHandles({
               return (
                 <group key={`build-opening-${opening.id}`}>
                   <mesh
-                    position={doorTransform.position}
+                    position={view === '3d'
+                      ? [
+                          doorTransform.position[0],
+                          (wall.bottom ?? 0) + (opening.bottom ?? 0) + opening.height * 0.5,
+                          doorTransform.position[2],
+                        ]
+                      : doorTransform.position}
                     rotation={doorTransform.rotation}
+                    onPointerOver={(event) => {
+                      event.stopPropagation()
+                      setHoveredTarget(`opening:${opening.id}`)
+                    }}
+                    onPointerOut={() => setHoveredTarget((current) => current === `opening:${opening.id}` ? null : current)}
                     onPointerDown={(event) => {
                       event.stopPropagation()
                       activeDragRef.current = null
                       setActiveDrag(null)
                       onSelectElement({ type: 'opening', id: opening.id })
-                      if (!canEditStructure) return
-                      beginDrag({
-                        type: 'opening',
-                        openingId: opening.id,
-                        wall,
-                        lastOffset: opening.center / Math.max(0.001, wall.length),
-                      })
                     }}
                   >
-                    <boxGeometry args={[Math.max(0.45, opening.width), 0.12, 1.12]} />
+                    <boxGeometry args={view === '3d'
+                      ? [Math.max(0.45, opening.width), Math.max(0.4, opening.height), 0.2]
+                      : [Math.max(0.45, opening.width), 0.12, 0.62]} />
                     <meshBasicMaterial
                       color={
                         doorSelected ? '#f2c14e'
+                          : hoveredTarget === `opening:${opening.id}` ? '#ffffff'
                           : opening.role === 'entrance' ? '#5aa0ff'
                             : opening.type === 'window' ? '#8fd7ff' : '#65f2a3'
                       }
                       transparent
-                      opacity={doorSelected ? 0.72 : 0.44}
+                      opacity={doorSelected ? 0.48 : hoveredTarget === `opening:${opening.id}` ? 0.35 : view === '3d' ? 0.04 : 0.3}
                       depthWrite={false}
                     />
                   </mesh>
+                  {doorSelected && canEditStructure && !buildTool && (
+                    <mesh
+                      position={[doorTransform.position[0], getHandleY(wall) + 0.22, doorTransform.position[2]]}
+                      rotation={doorTransform.rotation}
+                      onPointerDown={(event) => {
+                        event.stopPropagation()
+                        beginDrag({
+                          type: 'opening',
+                          openingId: opening.id,
+                          wall,
+                          lastOffset: opening.center / Math.max(0.001, wall.length),
+                        })
+                      }}
+                    >
+                      <boxGeometry args={[Math.min(0.5, Math.max(0.3, opening.width * 0.35)), 0.16, 0.3]} />
+                      <meshBasicMaterial color="#65f2a3" transparent opacity={0.96} depthWrite={false} />
+                    </mesh>
+                  )}
                   {doorSelected && canEditStructure && view === '3d' && (() => {
                     const centerPoint = getWallPointAt(wall, opening.center)
                     const wallBottom = wall.bottom ?? 0
@@ -13307,7 +13367,7 @@ function HouseBuildHandles({
                             })
                           }}
                         >
-                          <sphereGeometry args={[0.3, 16, 12]} />
+                          <sphereGeometry args={[0.16, 14, 10]} />
                           <meshBasicMaterial color="#8fd7ff" transparent opacity={0.95} depthWrite={false} />
                         </mesh>
                         {opening.type === 'window' && (
@@ -13325,7 +13385,7 @@ function HouseBuildHandles({
                               })
                             }}
                           >
-                            <sphereGeometry args={[0.3, 16, 12]} />
+                            <sphereGeometry args={[0.16, 14, 10]} />
                             <meshBasicMaterial color="#ffd447" transparent opacity={0.95} depthWrite={false} />
                           </mesh>
                         )}
@@ -13349,7 +13409,7 @@ function HouseBuildHandles({
                           })
                         }}
                       >
-                        <sphereGeometry args={[0.34, 16, 12]} />
+                        <sphereGeometry args={[0.18, 14, 10]} />
                         <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
                       </mesh>
                     )
@@ -13400,6 +13460,9 @@ function CustomizationLayer({
   onAddBuildOpening,
   onAddBuildRoom,
   onCompleteBuildTool,
+  onBeginBuildChange,
+  onEndBuildChange,
+  onCancelBuildChange,
   registerCombatTarget,
   onTrainingDummyDefeated,
 }) {
@@ -13611,6 +13674,9 @@ function CustomizationLayer({
           onAddOpening={onAddBuildOpening}
           onAddRoom={onAddBuildRoom}
           onCompleteBuildTool={onCompleteBuildTool}
+          onBeginChange={onBeginBuildChange}
+          onEndChange={onEndBuildChange}
+          onCancelChange={onCancelBuildChange}
         />
       )}
       {visiblePlacedObjects.map((object) => (
@@ -17298,6 +17364,7 @@ function App() {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !authUser || !hasLoadedCloudProgressRef.current) return undefined
+    if (mode === 'customize') return undefined
     if (skipNextCloudSaveRef.current) {
       skipNextCloudSaveRef.current = false
       return undefined
@@ -17320,16 +17387,16 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
-      if (document.visibilityState === 'hidden') {
+      if (mode !== 'customize' && document.visibilityState === 'hidden') {
         saveCurrentProgressToCloud()
       }
     }
     const saveOnPageHide = () => {
-      saveCurrentProgressToCloud()
+      if (mode !== 'customize') saveCurrentProgressToCloud()
     }
 
     document.addEventListener('visibilitychange', saveBeforeLeaving)
@@ -17338,7 +17405,7 @@ function App() {
       document.removeEventListener('visibilitychange', saveBeforeLeaving)
       window.removeEventListener('pagehide', saveOnPageHide)
     }
-  }, [progressScope])
+  }, [mode, progressScope])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -17763,11 +17830,20 @@ function App() {
   const floorPaintBrushId = paintFloorSkinId ?? activeFloorSkinId
   const [customizeView, setCustomizeView] = useState('top')
   const [customizeTab, setCustomizeTab] = useState('build')
+  const customizationHistoryRef = useRef({ initial: null, undo: [], redo: [], transaction: null })
+  const [customizationHistoryState, setCustomizationHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    dirty: false,
+  })
   const selectedBuildOpeningWall = selectedBuildElement?.type === 'opening'
     ? activeHouseLayout.walls.find((wall) => (wall.openings ?? []).some((opening) => opening.id === selectedBuildElement.id))
     : null
   const selectedBuildOpening = selectedBuildOpeningWall
     ? (selectedBuildOpeningWall.openings ?? []).find((opening) => opening.id === selectedBuildElement.id)
+    : null
+  const selectedBuildWall = selectedBuildElement?.type === 'wall'
+    ? activeHouseLayout.walls.find((wall) => wall.id === selectedBuildElement.id)
     : null
   const selectedBuildOpeningIsEntrance = selectedBuildElement?.type === 'opening' &&
     selectedBuildElement.id === activeHouseLayout.plan.entranceDoorId
@@ -17793,6 +17869,107 @@ function App() {
     }
     return counts
   }, {})
+
+  const captureCustomizationSnapshot = () => {
+    const state = useGameStore.getState()
+    return {
+      housePlan: cloneCustomizationValue(state.house.housePlan),
+      editableObjects: cloneCustomizationValue(state.editor.editableObjects),
+    }
+  }
+
+  const customizationSnapshotsMatch = (left, right) => (
+    Boolean(left && right) && JSON.stringify(left) === JSON.stringify(right)
+  )
+  const canDeleteSelectedBuildElement = Boolean(
+    (selectedBuildElement?.type === 'opening' && !selectedBuildOpeningIsEntrance) ||
+    (selectedBuildElement?.type === 'wall' && selectedBuildWall &&
+      selectedBuildWall.sideA?.type !== 'outside' && selectedBuildWall.sideB?.type !== 'outside'),
+  )
+
+  const applyCustomizationSnapshot = (snapshot) => {
+    if (!snapshot) return
+    setHouse('housePlan',cloneCustomizationValue(snapshot.housePlan))
+    setEditor('editableObjects',cloneCustomizationValue(snapshot.editableObjects))
+  }
+
+  const refreshCustomizationHistoryState = (currentSnapshot = null) => {
+    const history = customizationHistoryRef.current
+    const current = currentSnapshot ?? captureCustomizationSnapshot()
+    setCustomizationHistoryState({
+      canUndo: history.undo.length > 0,
+      canRedo: history.redo.length > 0,
+      dirty: Boolean(history.initial && !customizationSnapshotsMatch(history.initial, current)),
+    })
+  }
+
+  const beginCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (history.transaction) return
+    history.transaction = captureCustomizationSnapshot()
+  }
+
+  const endCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    const before = history.transaction
+    if (!before) return
+    history.transaction = null
+    const after = captureCustomizationSnapshot()
+    if (!customizationSnapshotsMatch(before, after)) {
+      history.undo.push(before)
+      if (history.undo.length > CUSTOMIZE_HISTORY_LIMIT) history.undo.shift()
+      history.redo = []
+    }
+    refreshCustomizationHistoryState(after)
+  }
+
+  const cancelCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (!history.transaction) return
+    const before = history.transaction
+    history.transaction = null
+    applyCustomizationSnapshot(before)
+    refreshCustomizationHistoryState(before)
+  }
+
+  const runCustomizationChange = (change) => {
+    beginCustomizationChange()
+    change()
+    endCustomizationChange()
+  }
+
+  const undoCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (history.transaction) endCustomizationChange()
+    const previous = history.undo.pop()
+    if (!previous) return
+    const current = captureCustomizationSnapshot()
+    history.redo.push(current)
+    applyCustomizationSnapshot(previous)
+    refreshCustomizationHistoryState(previous)
+  }
+
+  const redoCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (history.transaction) endCustomizationChange()
+    const next = history.redo.pop()
+    if (!next) return
+    const current = captureCustomizationSnapshot()
+    history.undo.push(current)
+    applyCustomizationSnapshot(next)
+    refreshCustomizationHistoryState(next)
+  }
+
+  const startCustomizationSession = () => {
+    const initial = captureCustomizationSnapshot()
+    customizationHistoryRef.current = { initial, undo: [], redo: [], transaction: null }
+    setCustomizationHistoryState({ canUndo: false, canRedo: false, dirty: false })
+  }
+
+  const finishCustomizationSession = () => {
+    customizationHistoryRef.current = { initial: null, undo: [], redo: [], transaction: null }
+    setCustomizationHistoryState({ canUndo: false, canRedo: false, dirty: false })
+  }
 
   const openSkinMenu = () => {
     setInventory('previewSkinId',selectedSkinId)
@@ -17947,31 +18124,38 @@ function App() {
     }
     if (selectedBuildElement?.type === 'wall') {
       // Applique au côté cliqué du mur (une cloison a deux faces distinctes).
-      setHouse('housePlan',(current) => setHouseWallSideStyle(
-        current,
-        selectedBuildElement.id,
-        selectedBuildElement.side ?? 'inside',
-        skin.id,
-      ))
+      runCustomizationChange(() => {
+        setHouse('housePlan',(current) => setHouseWallSideStyle(
+          current,
+          selectedBuildElement.id,
+          selectedBuildElement.side ?? 'inside',
+          skin.id,
+        ))
+      })
     }
   }
 
   const resetHousePlan = () => {
     if (!canModifyWorld) return
-    setSelectedBuildElement(null)
-    setActiveBuildTool(null)
-    setPartitionStart(null)
-    setHouse('housePlan',createDefaultHousePlan())
+    if (!window.confirm('Réinitialiser toute la maison ? Cette action pourra ensuite être annulée avec Retour.')) return
+    runCustomizationChange(() => {
+      setSelectedBuildElement(null)
+      setActiveBuildTool(null)
+      setPartitionStart(null)
+      setHouse('housePlan',createDefaultHousePlan())
+    })
   }
 
   const deleteSelectedBuildElement = () => {
     if (!canModifyWorld || !selectedBuildElement) return
-    setHouse('housePlan',(current) => (
-      selectedBuildElement.type === 'opening'
-        ? removeHouseOpening(current, selectedBuildElement.id)
-        : removeHouseWall(current, selectedBuildElement.id)
-    ))
-    setSelectedBuildElement(null)
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => (
+        selectedBuildElement.type === 'opening'
+          ? removeHouseOpening(current, selectedBuildElement.id)
+          : removeHouseWall(current, selectedBuildElement.id)
+      ))
+      setSelectedBuildElement(null)
+    })
   }
 
   const beginSegmentTool = () => {
@@ -18017,8 +18201,10 @@ function App() {
 
   const splitBuildWallAtOffset = (wallId, offset) => {
     if (!canModifyWorld) return
-    setHouse('housePlan',(current) => splitHouseWallSegment(current, wallId, offset))
-    setSelectedBuildElement(null)
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => splitHouseWallSegment(current, wallId, offset))
+      setSelectedBuildElement(null)
+    })
   }
 
   const resizeSelectedBuildWall = (wallId, amount) => {
@@ -18033,7 +18219,9 @@ function App() {
 
   const addBuildOpening = (wallId, offset, type = 'door') => {
     if (!canModifyWorld) return
-    setHouse('housePlan',(current) => addHouseOpeningToWall(current, wallId, offset, { type }))
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => addHouseOpeningToWall(current, wallId, offset, { type }))
+    })
   }
 
   const resizeBuildOpeningSpan = (openingId, offset, width) => {
@@ -18056,13 +18244,15 @@ function App() {
 
   const adjustSelectedOpeningBottom = (delta) => {
     if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
-    setHouse('housePlan',(current) => {
-      const opening = current.openings?.[selectedBuildElement.id]
-      if (!opening) return current
-      // Le haut reste fixe : bouger l'allège compense sur la hauteur.
-      return setHouseOpeningVertical(current, opening.id, {
-        bottom: opening.bottom + delta,
-        height: opening.height - delta,
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        // Le haut reste fixe : bouger l'allège compense sur la hauteur.
+        return setHouseOpeningVertical(current, opening.id, {
+          bottom: opening.bottom + delta,
+          height: opening.height - delta,
+        })
       })
     })
   }
@@ -18079,19 +18269,23 @@ function App() {
   // 3D restent disponibles à la souris).
   const adjustSelectedOpeningWidth = (delta) => {
     if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
-    setHouse('housePlan',(current) => {
-      const opening = current.openings?.[selectedBuildElement.id]
-      if (!opening) return current
-      return setHouseOpeningSpan(current, opening.id, opening.offset, opening.width + delta)
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        return setHouseOpeningSpan(current, opening.id, opening.offset, opening.width + delta)
+      })
     })
   }
 
   const adjustSelectedOpeningHeight = (delta) => {
     if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
-    setHouse('housePlan',(current) => {
-      const opening = current.openings?.[selectedBuildElement.id]
-      if (!opening) return current
-      return setHouseOpeningVertical(current, opening.id, { height: opening.height + delta })
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        return setHouseOpeningVertical(current, opening.id, { height: opening.height + delta })
+      })
     })
   }
 
@@ -18112,13 +18306,17 @@ function App() {
 
   const addBuildRoom = (direction) => {
     if (!canModifyWorld) return
-    setSelectedBuildElement(null)
-    setHouse('housePlan',(current) => addRoomToHousePlan(current, { direction }))
+    runCustomizationChange(() => {
+      setSelectedBuildElement(null)
+      setHouse('housePlan',(current) => addRoomToHousePlan(current, { direction }))
+    })
   }
 
   const setBuildEntrance = () => {
     if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
-    setHouse('housePlan',(current) => setHouseEntranceDoor(current, selectedBuildElement.id))
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => setHouseEntranceDoor(current, selectedBuildElement.id))
+    })
   }
 
   const handleBuildFloorClick = (point) => {
@@ -18127,7 +18325,9 @@ function App() {
       const cellKey = `${Math.floor(point.x)},${Math.floor(point.z)}`
       const space = activeHouseLayout.spaces.find((candidate) => candidate.cells.includes(cellKey))
       if (!space) return
-      setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, floorPaintBrushId))
+      runCustomizationChange(() => {
+        setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, floorPaintBrushId))
+      })
       return
     }
     if (activeBuildTool !== 'partition') return
@@ -18136,11 +18336,13 @@ function App() {
       setPartitionStart(snappedPoint)
       return
     }
-    setHouse('housePlan',(current) => addInteriorWallToHousePlan(
-      current,
-      [partitionStart.x, partitionStart.z],
-      [snappedPoint.x, snappedPoint.z],
-    ))
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => addInteriorWallToHousePlan(
+        current,
+        [partitionStart.x, partitionStart.z],
+        [snappedPoint.x, snappedPoint.z],
+      ))
+    })
     setPartitionStart(null)
     setActiveBuildTool(null)
   }
@@ -18641,6 +18843,7 @@ function App() {
 
   const openCustomizationMode = () => {
     if (!canModifyWorld) return
+    startCustomizationSession()
     setMenuOpen('skin', false)
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
@@ -18659,6 +18862,44 @@ function App() {
   }
 
   const closeCustomizationMode = () => {
+    endCustomizationChange()
+    finishCustomizationSession()
+    setCustomizeView('top')
+    setView('mode','play')
+    setMenuOpen('customizationChoice', false)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
+    setUi('objectInventoryOpen',false)
+    setNear('customizationStation', false)
+  }
+
+  const adjustSelectedOpeningPosition = (delta) => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening' || !selectedBuildOpeningWall) return
+    const wallLength = Math.max(0.001, selectedBuildOpeningWall.length)
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        return setHouseOpeningSpan(
+          current,
+          opening.id,
+          opening.offset + delta / wallLength,
+          opening.width,
+        )
+      })
+    })
+  }
+
+  const cancelCustomizationMode = () => {
+    const initial = customizationHistoryRef.current.initial
+    if (initial) applyCustomizationSnapshot(initial)
+    finishCustomizationSession()
+    setSelectedBuildElement(null)
+    setActiveBuildTool(null)
+    setPartitionStart(null)
     setCustomizeView('top')
     setView('mode','play')
     setMenuOpen('customizationChoice', false)
@@ -18681,15 +18922,17 @@ function App() {
   const storeSelectedObject = () => {
     if (!canModifyWorld) return
     if (!selectedObject?.canStore) return
-    setEditor('editableObjects',(current) =>
-      current.map((object) =>
-        object.id === selectedObject.id
-          ? { ...object, status: 'stored', position: null }
-          : object,
-      ),
-    )
-    setEditor('selectedObjectId',null)
-    setEditor('draggingObjectId',null)
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) =>
+        current.map((object) =>
+          object.id === selectedObject.id
+            ? { ...object, status: 'stored', position: null }
+            : object,
+        ),
+      )
+      setEditor('selectedObjectId',null)
+      setEditor('draggingObjectId',null)
+    })
   }
 
   const beginPlaceObject = (id) => {
@@ -18724,22 +18967,24 @@ function App() {
   const confirmPlacement = () => {
     if (!canModifyWorld) return
     if (!placingObjectId || !placementPreview?.isValid) return
-    setEditor('editableObjects',(current) =>
-      current.map((object) =>
-        object.id === placingObjectId
-          ? {
-            ...object,
-            status: 'placed',
-            position: placementPreview.position,
-            rotationY: placementPreview.rotationY,
-          }
-          : object,
-      ),
-    )
-    setEditor('selectedObjectId',placingObjectId)
-    setEditor('placingObjectId',null)
-    setEditor('placementLocked',false)
-    setEditor('placementPreview',null)
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) =>
+        current.map((object) =>
+          object.id === placingObjectId
+            ? {
+              ...object,
+              status: 'placed',
+              position: placementPreview.position,
+              rotationY: placementPreview.rotationY,
+            }
+            : object,
+        ),
+      )
+      setEditor('selectedObjectId',placingObjectId)
+      setEditor('placingObjectId',null)
+      setEditor('placementLocked',false)
+      setEditor('placementPreview',null)
+    })
   }
 
   const cancelPlacement = () => {
@@ -18758,13 +19003,47 @@ function App() {
       return
     }
     if (!selectedObjectId) return
-    setEditor('editableObjects',(current) =>
-      current.map((object) => {
-        if (object.id !== selectedObjectId || !object.canRotate) return object
-        return { ...object, rotationY: object.rotationY + direction * angle }
-      }),
-    )
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) =>
+        current.map((object) => {
+          if (object.id !== selectedObjectId || !object.canRotate) return object
+          return { ...object, rotationY: object.rotationY + direction * angle }
+        }),
+      )
+    })
   }
+
+  useEffect(() => {
+    if (mode !== 'customize') return undefined
+    const onCustomizeKeyDown = (event) => {
+      if (isTextInputEvent(event)) return
+      const key = getKeyboardKey(event)
+      if ((event.ctrlKey || event.metaKey) && key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) redoCustomizationChange()
+        else undoCustomizationChange()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && key === 'y') {
+        event.preventDefault()
+        redoCustomizationChange()
+        return
+      }
+      if (key === 'escape') {
+        event.preventDefault()
+        if (customizationHistoryRef.current.transaction) {
+          cancelCustomizationChange()
+          return
+        }
+        setSelectedBuildElement(null)
+        setActiveBuildTool(null)
+        setPartitionStart(null)
+        setEditor('selectedObjectId',null)
+      }
+    }
+    window.addEventListener('keydown', onCustomizeKeyDown)
+    return () => window.removeEventListener('keydown', onCustomizeKeyDown)
+  })
 
   const requestVisitPlayer = async (player) => {
     if (!authUser || multiplayerRole !== 'solo') return
@@ -19222,8 +19501,14 @@ function App() {
               setSelectedBuildElement(null)
               setEditor('selectedObjectId', id)
             }}
-            onStartDragging={(id) => setEditor('draggingObjectId', id)}
-            onStopDragging={() => setEditor('draggingObjectId',null)}
+            onStartDragging={(id) => {
+              beginCustomizationChange()
+              setEditor('draggingObjectId', id)
+            }}
+            onStopDragging={() => {
+              setEditor('draggingObjectId',null)
+              endCustomizationChange()
+            }}
             onUpdatePosition={updateEditableObjectPosition}
             onUpdatePlacementPreview={updatePlacementPreview}
             onLockPlacement={() => setEditor('placementLocked',true)}
@@ -19244,6 +19529,9 @@ function App() {
             onAddBuildOpening={addBuildOpening}
             onAddBuildRoom={addBuildRoom}
             onCompleteBuildTool={completeBuildTool}
+            onBeginBuildChange={beginCustomizationChange}
+            onEndBuildChange={endCustomizationChange}
+            onCancelBuildChange={cancelCustomizationChange}
             registerCombatTarget={registerCombatTarget}
             onTrainingDummyDefeated={handleTrainingDummyDefeated}
           />
@@ -19844,20 +20132,33 @@ function App() {
             <>
               {selectedBuildElement?.type === 'opening' && (
                 <div className="customize-opening-size">
+                  <span>Position</span>
+                  <button type="button" onClick={() => adjustSelectedOpeningPosition(-0.1)} aria-label="Déplacer vers la gauche">−</button>
+                  <strong>{Math.round((selectedBuildOpening?.offset ?? 0) * (selectedBuildOpeningWall?.length ?? 0) * 10) / 10}</strong>
+                  <button type="button" onClick={() => adjustSelectedOpeningPosition(0.1)} aria-label="Déplacer vers la droite">+</button>
                   <span>Largeur</span>
                   <button type="button" onClick={() => adjustSelectedOpeningWidth(-0.2)} aria-label="Réduire la largeur">-</button>
+                  <strong>{selectedBuildOpening?.width?.toFixed?.(1)}</strong>
                   <button type="button" onClick={() => adjustSelectedOpeningWidth(0.2)} aria-label="Agrandir la largeur">+</button>
                   <span>Hauteur</span>
                   <button type="button" onClick={() => adjustSelectedOpeningHeight(-0.2)} aria-label="Réduire la hauteur">-</button>
+                  <strong>{selectedBuildOpening?.height?.toFixed?.(1)}</strong>
                   <button type="button" onClick={() => adjustSelectedOpeningHeight(0.2)} aria-label="Agrandir la hauteur">+</button>
                   {selectedBuildOpening?.type === 'window' && (
                     <>
                       <span>Bas</span>
                       <button type="button" onClick={() => adjustSelectedOpeningBottom(-0.2)} aria-label="Descendre le bas">-</button>
+                      <strong>{selectedBuildOpening?.bottom?.toFixed?.(1)}</strong>
                       <button type="button" onClick={() => adjustSelectedOpeningBottom(0.2)} aria-label="Remonter le bas">+</button>
                     </>
                   )}
                 </div>
+              )}
+              {selectedBuildElement?.type === 'wall' && !activeBuildTool && (
+                <span className="customize-tab-hint">Mur sélectionné · poignée bleue pour déplacer · points blancs pour la longueur</span>
+              )}
+              {selectedBuildElement?.type === 'opening' && !activeBuildTool && (
+                <span className="customize-tab-hint">Ouverture sélectionnée · poignée verte pour déplacer · points blancs pour redimensionner</span>
               )}
               <div className="customize-build-actions">
                 <button
@@ -19900,7 +20201,7 @@ function App() {
                     Entrée
                   </button>
                 )}
-                {selectedBuildElement && !selectedBuildOpeningIsEntrance && (
+                {canDeleteSelectedBuildElement && (
                   <button type="button" className="customize-build-button danger" onClick={deleteSelectedBuildElement}>
                     Supprimer
                   </button>
@@ -19981,6 +20282,26 @@ function App() {
             <div className="customize-tabbar">
               <button
                 type="button"
+                className="customize-tab-btn history"
+                onClick={undoCustomizationChange}
+                disabled={!customizationHistoryState.canUndo}
+                aria-label="Annuler la dernière action"
+                title="Annuler (Ctrl+Z)"
+              >
+                ↶
+              </button>
+              <button
+                type="button"
+                className="customize-tab-btn history"
+                onClick={redoCustomizationChange}
+                disabled={!customizationHistoryState.canRedo}
+                aria-label="Rétablir la dernière action"
+                title="Rétablir (Ctrl+Y)"
+              >
+                ↷
+              </button>
+              <button
+                type="button"
                 className={`customize-tab-btn ${customizeTab === 'build' ? 'active' : ''}`}
                 onClick={() => selectCustomizeTab('build')}
               >
@@ -20010,7 +20331,14 @@ function App() {
                 {customizeView === '3d' ? 'Vue dessus' : 'Vue 3D'}
               </button>
               <button className="customize-done" type="button" onClick={closeCustomizationMode}>
-                Valider
+                {customizationHistoryState.dirty ? 'Valider *' : 'Valider'}
+              </button>
+              <button
+                className="customize-cancel"
+                type="button"
+                onClick={cancelCustomizationMode}
+              >
+                Abandonner
               </button>
             </div>
           )}

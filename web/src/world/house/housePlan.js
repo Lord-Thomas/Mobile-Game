@@ -1111,7 +1111,7 @@ export function resizeHouseWallEnd(plan, wallId, end, targetValue) {
 
   const axisInfo = getWallAxis(wall)
   const fixedValue = end === 'from' ? axisInfo.to : axisInfo.from
-  let nextValue = Math.round(normalizeNumber(targetValue, NaN))
+  let nextValue = Math.round(normalizeNumber(targetValue, NaN) * 4) / 4
   if (!Number.isFinite(nextValue)) return normalized
   if (Math.abs(nextValue - fixedValue) < 1) return normalized
 
@@ -1149,7 +1149,7 @@ export function moveHouseWallJoint(plan, wallIdA, wallIdB, targetValue) {
   const axisB = getWallAxis(wallB)
   const fixedA = jointOnA === 'to' ? axisA.from : axisA.to
   const fixedB = jointOnB === 'to' ? axisB.from : axisB.to
-  let nextValue = Math.round(normalizeNumber(targetValue, NaN))
+  let nextValue = Math.round(normalizeNumber(targetValue, NaN) * 4) / 4
   if (!Number.isFinite(nextValue)) return normalized
 
   // Chaque segment garde une longueur d'au moins 1.
