@@ -8617,11 +8617,52 @@ const PLACEABLE_PLAY_FREEZE_PAUSE_MS = 1000
 
 function CustomizationCamera({ active, view = 'top' }) {
   const { gl } = useThree()
+  const getThreeState = useThree((state) => state.get)
+  const setThreeState = useThree((state) => state.set)
   const camRef = useRef()
   const orbitCamRef = useRef()
+  const gameplayCamRef = useRef(null)
   const zoomRef = useRef(CUSTOMIZE_ZOOM_DEFAULT)
   const pinchDistRef = useRef(null)
   const is3D = view === '3d'
+
+  // Les deux caméras de personnalisation restent montées et la caméra de jeu
+  // est mémorisée explicitement. Empiler plusieurs `makeDefault` peut restaurer
+  // l'orthographique quand la perspective 3D se démonte pendant la validation.
+  useLayoutEffect(() => {
+    const topCamera = camRef.current
+    const orbitCamera = orbitCamRef.current
+    if (!topCamera || !orbitCamera) return
+
+    const currentCamera = getThreeState().camera
+    if (active) {
+      if (currentCamera !== topCamera && currentCamera !== orbitCamera) {
+        gameplayCamRef.current = currentCamera
+      }
+      const nextCamera = is3D ? orbitCamera : topCamera
+      if (currentCamera !== nextCamera) setThreeState({ camera: nextCamera })
+      return
+    }
+
+    if (
+      gameplayCamRef.current &&
+      (currentCamera === topCamera || currentCamera === orbitCamera)
+    ) {
+      setThreeState({ camera: gameplayCamRef.current })
+    }
+  }, [active, getThreeState, is3D, setThreeState])
+
+  useEffect(() => () => {
+    const topCamera = camRef.current
+    const orbitCamera = orbitCamRef.current
+    const currentCamera = getThreeState().camera
+    if (
+      gameplayCamRef.current &&
+      (currentCamera === topCamera || currentCamera === orbitCamera)
+    ) {
+      setThreeState({ camera: gameplayCamRef.current })
+    }
+  }, [getThreeState, setThreeState])
 
   useEffect(() => {
     if (active) zoomRef.current = CUSTOMIZE_ZOOM_DEFAULT
@@ -8696,7 +8737,7 @@ function CustomizationCamera({ active, view = 'top' }) {
       camRef.current.updateProjectionMatrix()
     }
     const orbitCam = orbitCamRef.current
-    if (orbitCam && is3D) {
+    if (orbitCam && active && is3D) {
       const { yaw, pitch, distance } = CUSTOMIZE_ORBIT
       const horizontal = Math.cos(pitch) * distance
       orbitCam.position.set(
@@ -8712,22 +8753,18 @@ function CustomizationCamera({ active, view = 'top' }) {
     <>
       <OrthographicCamera
         ref={camRef}
-        makeDefault={active && !is3D}
         position={[0, 18, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         zoom={CUSTOMIZE_ZOOM_DEFAULT}
         near={0.1}
         far={60}
       />
-      {active && is3D && (
-        <DreiPerspectiveCamera
-          ref={orbitCamRef}
-          makeDefault
-          fov={50}
-          near={0.1}
-          far={220}
-        />
-      )}
+      <DreiPerspectiveCamera
+        ref={orbitCamRef}
+        fov={50}
+        near={0.1}
+        far={220}
+      />
     </>
   )
 }
@@ -12623,7 +12660,10 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
     if (!isCustomizeMode || !object.canMove) return
     event.stopPropagation()
     onSelect(object.id)
-    onStartDragging(object.id)
+    onStartDragging(object.id, {
+      x: (object.position?.[0] ?? 0) - event.point.x,
+      z: (object.position?.[2] ?? 0) - event.point.z,
+    })
   }
 
   return (
@@ -12744,10 +12784,47 @@ function EditableFloor({
   onLockPlacement,
   onStopDragging,
   onClearSelection,
+  dragOffsetRef,
 }) {
   const { camera } = useThree()
   const lastClientRef = useRef(null)
+  const activePointerIdRef = useRef(null)
   const isActive = mode === 'customize'
+
+  const finishPointerInteraction = useCallback((pointerId = null) => {
+    if (
+      pointerId !== null &&
+      activePointerIdRef.current !== null &&
+      pointerId !== activePointerIdRef.current
+    ) return
+    activePointerIdRef.current = null
+    lastClientRef.current = null
+    onStopDragging()
+  }, [onStopDragging])
+
+  useEffect(() => {
+    if (!isActive) {
+      activePointerIdRef.current = null
+      lastClientRef.current = null
+      return undefined
+    }
+
+    const onPointerEnd = (event) => finishPointerInteraction(event.pointerId)
+    const onWindowBlur = () => finishPointerInteraction()
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') finishPointerInteraction()
+    }
+    window.addEventListener('pointerup', onPointerEnd)
+    window.addEventListener('pointercancel', onPointerEnd)
+    window.addEventListener('blur', onWindowBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('pointerup', onPointerEnd)
+      window.removeEventListener('pointercancel', onPointerEnd)
+      window.removeEventListener('blur', onWindowBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [finishPointerInteraction, isActive])
 
   useEffect(() => {
     if (!isActive) {
@@ -12758,8 +12835,11 @@ function EditableFloor({
 
   const getSnappedPlacement = (point, objectId) => {
     const { hx, hz } = getFootprint(objectId)
-    const x = MathUtils.clamp(snap(point.x), -PARCEL_HALF + hx, PARCEL_HALF - hx)
-    const z = MathUtils.clamp(snap(point.z), -PARCEL_HALF + hz, PARCEL_HALF - hz)
+    const dragOffset = objectId === draggingObjectId
+      ? dragOffsetRef.current
+      : { x: 0, z: 0 }
+    const x = MathUtils.clamp(snap(point.x + dragOffset.x), -PARCEL_HALF + hx, PARCEL_HALF - hx)
+    const z = MathUtils.clamp(snap(point.z + dragOffset.z), -PARCEL_HALF + hz, PARCEL_HALF - hz)
     return [x, getPlacementY(x, z, objectId), z]
   }
 
@@ -12777,12 +12857,17 @@ function EditableFloor({
             // Second finger landed — cancel pan to let pinch zoom take over
             lastClientRef.current = null
           } else {
+            activePointerIdRef.current = event.pointerId
             lastClientRef.current = { x: event.clientX, y: event.clientY }
           }
         }
       }}
       onPointerMove={(event) => {
         if (!isActive) return
+        if (
+          activePointerIdRef.current !== null &&
+          event.pointerId !== activePointerIdRef.current
+        ) return
         if (isPanning) {
           if (lastClientRef.current) {
             const dx = event.clientX - lastClientRef.current.x
@@ -12818,14 +12903,12 @@ function EditableFloor({
       }}
       onPointerUp={(event) => {
         if (!isActive) return
-        lastClientRef.current = null
+        finishPointerInteraction(event.pointerId)
         event.stopPropagation()
-        onStopDragging()
       }}
       onPointerMissed={() => {
         if (!isActive) return
-        lastClientRef.current = null
-        onStopDragging()
+        finishPointerInteraction()
         onClearSelection()
       }}
     >
@@ -13411,6 +13494,7 @@ function CustomizationLayer({
   const placingObject = objects.find((object) => object.id === placingObjectId)
   const placeableRefs = useRef(new Map())
   const previewGroupRef = useRef()
+  const dragOffsetRef = useRef({ x: 0, z: 0 })
   const placingObjectIdRef = useRef(placingObjectId)
   useEffect(() => { placingObjectIdRef.current = placingObjectId }, [placingObjectId])
 
@@ -13496,6 +13580,7 @@ function CustomizationLayer({
           onSelectBuildElement(null)
         }}
         onLockPlacement={onLockPlacement}
+        dragOffsetRef={dragOffsetRef}
       />
       <group visible={mode === 'customize'}>
         {mode === 'customize' && <HouseFootprintGrid layout={layout} />}
@@ -13535,7 +13620,10 @@ function CustomizationLayer({
           selected={selectedObjectId === object.id}
           mode={mode}
           onSelect={onSelect}
-          onStartDragging={onStartDragging}
+          onStartDragging={(id, dragOffset) => {
+            dragOffsetRef.current = dragOffset ?? { x: 0, z: 0 }
+            onStartDragging(id)
+          }}
           onObjectRef={registerPlaceableRef}
           registerCombatTarget={registerCombatTarget}
           onTrainingDummyDefeated={onTrainingDummyDefeated}
@@ -18557,6 +18645,7 @@ function App() {
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
+    setCustomizeView('top')
     setView('mode','customize')
     setEditor('selectedObjectId',placedEditableObjects[0]?.id ?? null)
     setEditor('draggingObjectId',null)
@@ -18570,6 +18659,7 @@ function App() {
   }
 
   const closeCustomizationMode = () => {
+    setCustomizeView('top')
     setView('mode','play')
     setMenuOpen('customizationChoice', false)
     setEditor('selectedObjectId',null)
