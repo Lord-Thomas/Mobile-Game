@@ -681,9 +681,19 @@ export function normalizeHousePlan(plan = DEFAULT_HOUSE_PLAN) {
     walls,
     openings,
     styles: {
-      floorByCell: { ...(source.styles?.floorByCell ?? {}) },
-      wallBySide: { ...(source.styles?.wallBySide ?? {}) },
-      ceilingByCell: { ...(source.styles?.ceilingByCell ?? {}) },
+      // Purge des clés orphelines (cellule disparue, mur fusionné/supprimé) :
+      // le plan est persisté, elles s'accumuleraient indéfiniment sinon.
+      floorByCell: Object.fromEntries(
+        Object.entries(source.styles?.floorByCell ?? {}).filter(([key]) => floorCells[key]),
+      ),
+      wallBySide: Object.fromEntries(
+        Object.entries(source.styles?.wallBySide ?? {}).filter(([key]) => (
+          walls[key.slice(0, key.lastIndexOf(':'))]
+        )),
+      ),
+      ceilingByCell: Object.fromEntries(
+        Object.entries(source.styles?.ceilingByCell ?? {}).filter(([key]) => floorCells[key]),
+      ),
     },
   }
 }
@@ -871,6 +881,8 @@ function createDetachedRoomRect(normalized, rect) {
         bottom: 0,
         height: 2.4,
         type: 'door',
+        // Chaque bâtiment détaché a sa porte marquée « entrée » ; l'entrée
+        // PRINCIPALE (spawn/transition) reste celle de entranceDoorId.
         role: 'entrance',
       },
     },

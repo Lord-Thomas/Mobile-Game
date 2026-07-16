@@ -379,6 +379,31 @@ describe('housePlan', () => {
     expect(unchanged.openings[junctionDoor.id].role).toBe('junction')
   })
 
+  it('garde la meme entree principale quand une fondation detachee est posee', () => {
+    const plan = addHouseRoomRect(createDefaultHousePlan(), { minX: 12, maxX: 16, minZ: 12, maxZ: 16 })
+
+    // La fondation a sa porte marquée entrée, mais l'entrée principale
+    // (spawn/transition) reste celle de la maison d'origine.
+    expect(deriveHouseLayout(plan).rooms).toHaveLength(2)
+    expect(plan.entranceDoorId).toBe('door_entrance')
+    expect(getHouseEntranceTransform(deriveHouseLayout(plan)).openingId).toBe('door_entrance')
+  })
+
+  it('purge les styles orphelins (mur supprime, cellule disparue)', () => {
+    const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-5, 0], [5, 0])
+    const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
+    const painted = setHouseWallSideStyle(plan, partition.id, 'left', 'wall-briques-01')
+    const cleared = removeHouseWall(painted, partition.id)
+    const staleFloor = normalizeHousePlan({
+      ...plan,
+      styles: { ...plan.styles, floorByCell: { '99,99': 'floor-tomette' } },
+    })
+
+    expect(painted.styles.wallBySide[`${partition.id}:left`]).toBe('wall-briques-01')
+    expect(cleared.styles.wallBySide).not.toHaveProperty(`${partition.id}:left`)
+    expect(staleFloor.styles.floorByCell).not.toHaveProperty('99,99')
+  })
+
   it('signale un refus en retournant le plan d origine (meme reference)', () => {
     const plan = createDefaultHousePlan()
 
