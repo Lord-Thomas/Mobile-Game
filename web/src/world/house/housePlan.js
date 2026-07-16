@@ -530,14 +530,16 @@ export function addRoomToHousePlan(plan, options = {}) {
     clampInteger(options.doorWidth, 1, Math.min(width, depth), 2),
     direction === 'east' || direction === 'west' ? depth : width,
   )
+  // Convention de refus : retourner l'argument tel quel (même référence)
+  // pour que l'appelant puisse détecter l'échec et prévenir le joueur.
   const bounds = getFloorBounds(normalized.floorCells)
-  if (!Number.isFinite(bounds.minX)) return normalized
+  if (!Number.isFinite(bounds.minX)) return plan
 
   const rect = getRoomRect(bounds, direction, width, depth)
-  if (hasFloorOverlap(normalized.floorCells, rect)) return normalized
+  if (hasFloorOverlap(normalized.floorCells, rect)) return plan
 
   const attachmentWall = findAttachmentWall(normalized, direction, bounds, rect, doorWidth)
-  if (!attachmentWall) return normalized
+  if (!attachmentWall) return plan
 
   const roomBaseId = createUniqueId(
     `room_${makeSafeIdPart(direction)}_${rect.minX}_${rect.minZ}`,
@@ -601,7 +603,7 @@ export function removeLatestJunctionDoor(plan) {
   const junctionDoor = Object.values(normalized.openings)
     .filter((opening) => opening.role === 'junction')
     .at(-1)
-  if (!junctionDoor) return normalized
+  if (!junctionDoor) return plan
 
   const openings = { ...normalized.openings }
   delete openings[junctionDoor.id]
@@ -613,9 +615,9 @@ export function removeLatestJunctionDoor(plan) {
 
 export function removeHouseOpening(plan, openingId) {
   const normalized = normalizeHousePlan(plan)
-  if (!normalized.openings[openingId]) return normalized
+  if (!normalized.openings[openingId]) return plan
   // La maison doit toujours garder une entrée : définir une autre entrée d'abord.
-  if (openingId === normalized.entranceDoorId) return normalized
+  if (openingId === normalized.entranceDoorId) return plan
 
   const openings = { ...normalized.openings }
   delete openings[openingId]
@@ -628,12 +630,12 @@ export function removeHouseOpening(plan, openingId) {
 export function addHouseOpeningToWall(plan, wallId, offset, options = {}) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
-  if (!wall) return normalized
+  if (!wall) return plan
 
   const type = options.type === 'window' ? 'window' : 'door'
   const width = Math.max(0.4, normalizeNumber(options.width, type === 'window' ? 1.6 : 1.2))
   const length = getWallLength(wall)
-  if (length < width + 0.4) return normalized
+  if (length < width + 0.4) return plan
 
   const margin = (width * 0.5 + 0.2) / length
   const nextOffset = Math.min(1 - margin, Math.max(margin, normalizeNumber(offset, 0.5)))
@@ -643,7 +645,7 @@ export function addHouseOpeningToWall(plan, wallId, offset, options = {}) {
     const otherCenter = opening.offset * length
     return Math.abs(otherCenter - center) < (opening.width + width) * 0.5 + 0.2
   })
-  if (overlapsExisting) return normalized
+  if (overlapsExisting) return plan
 
   const id = createUniqueId(`${type}_${makeSafeIdPart(wallId)}`, normalized.openings)
   return normalizeHousePlan({
@@ -670,9 +672,9 @@ export function addHouseOpeningToWall(plan, wallId, offset, options = {}) {
 export function setHouseOpeningSpan(plan, openingId, offset, width) {
   const normalized = normalizeHousePlan(plan)
   const opening = normalized.openings[openingId]
-  if (!opening) return normalized
+  if (!opening) return plan
   const wall = normalized.walls[opening.wallId]
-  if (!wall) return normalized
+  if (!wall) return plan
 
   const length = getWallLength(wall)
   const nextWidth = Math.max(0.4, Math.min(normalizeNumber(width, opening.width), length - 0.4))
@@ -684,7 +686,7 @@ export function setHouseOpeningSpan(plan, openingId, offset, width) {
     const otherCenter = other.offset * length
     return Math.abs(otherCenter - center) < (other.width + nextWidth) * 0.5 + 0.2
   })
-  if (overlapsExisting) return normalized
+  if (overlapsExisting) return plan
 
   return normalizeHousePlan({
     ...normalized,
@@ -704,7 +706,7 @@ export function setHouseOpeningSpan(plan, openingId, offset, width) {
 // styleId null = retour à la texture globale par défaut.
 export function setHouseFloorStyleForCells(plan, cellKeys, styleId) {
   const normalized = normalizeHousePlan(plan)
-  if (!Array.isArray(cellKeys) || !cellKeys.length) return normalized
+  if (!Array.isArray(cellKeys) || !cellKeys.length) return plan
 
   const floorByCell = { ...normalized.styles.floorByCell }
   cellKeys.forEach((key) => {
@@ -724,10 +726,10 @@ export function setHouseFloorStyleForCells(plan, cellKeys, styleId) {
 
 export function setHouseWallSideStyle(plan, wallId, side, styleId) {
   const normalized = normalizeHousePlan(plan)
-  if (!normalized.walls[wallId]) return normalized
+  if (!normalized.walls[wallId]) return plan
   // 'left'/'right' : côtés géométriques (cloisons entre deux pièces).
   // 'inside'/'outside' : clés historiques, gardées pour compat.
-  if (!['inside', 'outside', 'left', 'right'].includes(side)) return normalized
+  if (!['inside', 'outside', 'left', 'right'].includes(side)) return plan
 
   const key = `${wallId}:${side}`
   const wallBySide = { ...normalized.styles.wallBySide }
@@ -748,9 +750,9 @@ export function setHouseWallSideStyle(plan, wallId, side, styleId) {
 export function setHouseOpeningVertical(plan, openingId, options = {}) {
   const normalized = normalizeHousePlan(plan)
   const opening = normalized.openings[openingId]
-  if (!opening) return normalized
+  if (!opening) return plan
   const wall = normalized.walls[opening.wallId]
-  if (!wall) return normalized
+  if (!wall) return plan
 
   const maxTop = wall.height - 0.1
   const bottom = Math.min(maxTop - 0.3, Math.max(0, normalizeNumber(options.bottom, opening.bottom)))
@@ -772,11 +774,11 @@ export function setHouseOpeningVertical(plan, openingId, options = {}) {
 export function setHouseEntranceDoor(plan, openingId) {
   const normalized = normalizeHousePlan(plan)
   const opening = normalized.openings[openingId]
-  if (!opening || opening.type !== 'door') return normalized
-  if (openingId === normalized.entranceDoorId) return normalized
+  if (!opening || opening.type !== 'door') return plan
+  if (openingId === normalized.entranceDoorId) return plan
 
   const wall = normalized.walls[opening.wallId]
-  if (!wall || !getExteriorNormal(normalized, wall)) return normalized
+  if (!wall || !getExteriorNormal(normalized, wall)) return plan
 
   const openings = Object.fromEntries(
     Object.entries(normalized.openings).map(([id, current]) => {
@@ -797,7 +799,7 @@ export function moveHouseOpening(plan, openingId, wallId, offset) {
   const normalized = normalizeHousePlan(plan)
   const opening = normalized.openings[openingId]
   const wall = normalized.walls[wallId]
-  if (!opening || !wall) return normalized
+  if (!opening || !wall) return plan
 
   const length = getWallLength(wall)
   const margin = Math.min(0.45, opening.width * 0.5 / length)
@@ -819,7 +821,7 @@ export function moveHouseOpening(plan, openingId, wallId, offset) {
 export function removeHouseWall(plan, wallId) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
-  if (!wall || !isInteriorWall(normalized, wall)) return normalized
+  if (!wall || !isInteriorWall(normalized, wall)) return plan
 
   const walls = { ...normalized.walls }
   delete walls[wallId]
@@ -838,7 +840,7 @@ export function addInteriorWallToHousePlan(plan, start, end) {
   const normalized = normalizeHousePlan(plan)
   const rawFrom = normalizePoint(start, null)
   const rawEnd = normalizePoint(end, null)
-  if (!rawFrom || !rawEnd) return normalized
+  if (!rawFrom || !rawEnd) return plan
 
   // Les cloisons s'alignent sur les bords de cellules (grille entière) : la
   // détection d'espaces raisonne par cellule, une cloison à x=2.25 ne
@@ -851,7 +853,7 @@ export function addInteriorWallToHousePlan(plan, start, end) {
   const to = Math.abs(dx) >= Math.abs(dz)
     ? [rawTo[0], from[1]]
     : [from[0], rawTo[1]]
-  if (Math.hypot(to[0] - from[0], to[1] - from[1]) < 1) return normalized
+  if (Math.hypot(to[0] - from[0], to[1] - from[1]) < 1) return plan
 
   const id = createUniqueId(`wall_partition_${from[0]}_${from[1]}_${to[0]}_${to[1]}`, normalized.walls)
   return normalizeHousePlan({
@@ -872,7 +874,7 @@ export function splitHouseWallSegment(plan, wallId, offset = 0.5) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
   const splitOffset = Math.min(0.9, Math.max(0.1, Number(offset)))
-  if (!wall || !Number.isFinite(splitOffset)) return normalized
+  if (!wall || !Number.isFinite(splitOffset)) return plan
 
   const splitPoint = getWallPointAtOffset(wall, splitOffset)
   const openingsOnWall = Object.values(normalized.openings).filter((opening) => opening.wallId === wallId)
@@ -885,7 +887,7 @@ export function splitHouseWallSegment(plan, wallId, offset = 0.5) {
     const center = opening.offset * length
     return splitDistance > center - opening.width * 0.5 && splitDistance < center + opening.width * 0.5
   })
-  if (crossingOpening) return normalized
+  if (crossingOpening) return plan
 
   const firstId = createUniqueId(`${wall.id}_a`, normalized.walls)
   const secondId = createUniqueId(`${wall.id}_b`, { ...normalized.walls, [firstId]: true })
@@ -931,7 +933,7 @@ export function removeLatestInteriorWall(plan) {
   const interiorWall = Object.values(normalized.walls)
     .filter((wall) => isInteriorWall(normalized, wall))
     .at(-1)
-  if (!interiorWall) return normalized
+  if (!interiorWall) return plan
 
   const walls = { ...normalized.walls }
   delete walls[interiorWall.id]
@@ -1019,13 +1021,13 @@ export function resizeHouseExteriorWall(plan, wallId, amount) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
   const steps = clampInteger(amount, -4, 4, 0)
-  if (!wall || steps === 0) return normalized
+  if (!wall || steps === 0) return plan
 
   const normal = getExteriorNormal(normalized, wall)
-  if (!normal) return normalized
+  if (!normal) return plan
 
   const floorCells = applyWallResizeCells(normalized.floorCells, wall, normal, steps)
-  if (Object.keys(floorCells).length < MIN_ROOM_SIZE * MIN_ROOM_SIZE) return normalized
+  if (Object.keys(floorCells).length < MIN_ROOM_SIZE * MIN_ROOM_SIZE) return plan
 
   return normalizeHousePlan({
     ...normalized,
@@ -1041,8 +1043,8 @@ export function moveHouseInteriorWall(plan, wallId, amount) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
   const steps = clampInteger(amount, -4, 4, 0)
-  if (!wall || steps === 0) return normalized
-  if (!isInteriorWall(normalized, wall)) return normalized
+  if (!wall || steps === 0) return plan
+  if (!isInteriorWall(normalized, wall)) return plan
 
   const direction = getWallDirection(wall)
   const normal = [-direction.z, 0, direction.x]
@@ -1051,7 +1053,7 @@ export function moveHouseInteriorWall(plan, wallId, amount) {
     walls: shiftWallWithConnections(normalized, wall, normal, steps),
   })
   const movedWall = next.walls[wallId]
-  if (!movedWall || !isInteriorWall(next, movedWall)) return normalized
+  if (!movedWall || !isInteriorWall(next, movedWall)) return plan
   return next
 }
 
@@ -1079,9 +1081,24 @@ function replaceWallSpan(normalized, wall, nextFrom, nextTo) {
       const remapped = remapOpeningToWall(wall, opening, nextWall)
       if (remapped) {
         openings[opening.id] = remapped
-      } else {
-        delete openings[opening.id]
+        return
       }
+      // Cascade façon Sims : avant de supprimer une ouverture qui sort du
+      // nouveau tracé, on tente de la ramener à une position valide dessus.
+      const spanLength = Math.abs(nextTo - nextFrom)
+      if (spanLength >= opening.width + 0.4) {
+        const min = Math.min(nextFrom, nextTo)
+        const max = Math.max(nextFrom, nextTo)
+        const previousCenter = getOpeningCenterOnWall(wall, opening)
+        const clampedCenter = Math.min(max - opening.width * 0.5 - 0.2, Math.max(min + opening.width * 0.5 + 0.2, previousCenter))
+        openings[opening.id] = {
+          ...opening,
+          wallId: nextWall.id,
+          offset: Math.min(1, Math.max(0, (clampedCenter - nextFrom) / ((nextTo - nextFrom) || 1))),
+        }
+        return
+      }
+      delete openings[opening.id]
     })
 
   return normalizeHousePlan({
@@ -1100,20 +1117,20 @@ function replaceWallSpan(normalized, wall, nextFrom, nextTo) {
 export function resizeHouseWallEnd(plan, wallId, end, targetValue) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
-  if (!wall) return normalized
+  if (!wall) return plan
 
   const movingPoint = end === 'from' ? wall.from : wall.to
   const endpointShared = Object.values(normalized.walls).some((candidate) => (
     candidate.id !== wallId &&
     (pointsMatch(candidate.from, movingPoint) || pointsMatch(candidate.to, movingPoint))
   ))
-  if (endpointShared) return normalized
+  if (endpointShared) return plan
 
   const axisInfo = getWallAxis(wall)
   const fixedValue = end === 'from' ? axisInfo.to : axisInfo.from
   let nextValue = Math.round(normalizeNumber(targetValue, NaN) * 4) / 4
-  if (!Number.isFinite(nextValue)) return normalized
-  if (Math.abs(nextValue - fixedValue) < 1) return normalized
+  if (!Number.isFinite(nextValue)) return plan
+  if (Math.abs(nextValue - fixedValue) < 1) return plan
 
   // Ne pas couper une porte existante : l'extrémité s'arrête au bord de l'ouverture.
   Object.values(normalized.openings)
@@ -1138,24 +1155,24 @@ export function moveHouseWallJoint(plan, wallIdA, wallIdB, targetValue) {
   const normalized = normalizeHousePlan(plan)
   const wallA = normalized.walls[wallIdA]
   const wallB = normalized.walls[wallIdB]
-  if (!wallA || !wallB || !wallAxisMatches(wallA, wallB)) return normalized
+  if (!wallA || !wallB || !wallAxisMatches(wallA, wallB)) return plan
 
   const jointOnA = pointsMatch(wallA.to, wallB.from) || pointsMatch(wallA.to, wallB.to) ? 'to' : 'from'
   const jointPoint = jointOnA === 'to' ? wallA.to : wallA.from
   const jointOnB = pointsMatch(wallB.from, jointPoint) ? 'from' : pointsMatch(wallB.to, jointPoint) ? 'to' : null
-  if (!jointOnB) return normalized
+  if (!jointOnB) return plan
 
   const axisA = getWallAxis(wallA)
   const axisB = getWallAxis(wallB)
   const fixedA = jointOnA === 'to' ? axisA.from : axisA.to
   const fixedB = jointOnB === 'to' ? axisB.from : axisB.to
   let nextValue = Math.round(normalizeNumber(targetValue, NaN) * 4) / 4
-  if (!Number.isFinite(nextValue)) return normalized
+  if (!Number.isFinite(nextValue)) return plan
 
   // Chaque segment garde une longueur d'au moins 1.
   const low = Math.min(fixedA, fixedB) + 1
   const high = Math.max(fixedA, fixedB) - 1
-  if (low > high) return normalized
+  if (low > high) return plan
   nextValue = Math.min(high, Math.max(low, nextValue))
 
   // Le point de découpe ne traverse pas une ouverture.
@@ -1173,7 +1190,7 @@ export function moveHouseWallJoint(plan, wallIdA, wallIdB, targetValue) {
   }
   clampAgainstOpenings(wallA)
   clampAgainstOpenings(wallB)
-  if (nextValue < low || nextValue > high) return normalized
+  if (nextValue < low || nextValue > high) return plan
 
   const withResizedA = replaceWallSpan(
     normalized,

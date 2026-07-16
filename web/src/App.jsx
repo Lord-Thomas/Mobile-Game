@@ -56,7 +56,7 @@ import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInter
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
 import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
-import { createFloorRectsGeometryData } from './world/house/floorGeometry'
+import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
 import { getWallColliderTransform, getWallDirection, getWallPointAt, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
@@ -12787,6 +12787,8 @@ function EditableFloor({
   getFootprint,
   onDrag,
   onBuildFloorClick,
+  onBuildFloorHover,
+  onSelectSpaceAt,
   onLockPlacement,
   onStopDragging,
   onClearSelection,
@@ -12890,6 +12892,14 @@ function EditableFloor({
           }
           return
         }
+        if (buildTool) {
+          // Outil actif : le survol alimente la prévisualisation fantôme.
+          if (buildTool === 'partition') {
+            event.stopPropagation()
+            onBuildFloorHover?.(event.point)
+          }
+          return
+        }
         if (placingObjectId && placementLocked) return
         event.stopPropagation()
         const objectId = draggingObjectId ?? placingObjectId
@@ -12900,6 +12910,13 @@ function EditableFloor({
         if (buildTool === 'partition' || buildTool === 'paintFloor') {
           event.stopPropagation()
           onBuildFloorClick(event.point)
+          return
+        }
+        if (!buildTool && !placingObjectId && !draggingObjectId) {
+          // Un tap (pas un pan) sur le sol sélectionne la pièce, façon Sims.
+          if (event.delta > 6) return
+          event.stopPropagation()
+          onSelectSpaceAt?.(event.point)
           return
         }
         if (!placingObjectId || placementLocked) return
@@ -12948,6 +12965,47 @@ function PlacementPreview({ object, preview, groupRef }) {
 
 function houseCornersMatch(a, b) {
   return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.z - b.z) < 0.001
+}
+
+// Fantôme de cloison : pendant l'outil Cloison, montre le tracé (aligné sur
+// l'axe dominant, comme la logique) et sa longueur avant le second clic.
+// Mise à jour par ref dans useFrame — aucun re-render pendant le survol.
+function PartitionGhost({ startPoint, hoverRef }) {
+  const groupRef = useRef()
+  const meshRef = useRef()
+  const labelRef = useRef()
+
+  useFrame(() => {
+    const group = groupRef.current
+    const mesh = meshRef.current
+    if (!group || !mesh) return
+    const from = { x: Math.round(startPoint.x), z: Math.round(startPoint.z) }
+    const hover = hoverRef?.current
+    const raw = hover ? { x: Math.round(hover.x), z: Math.round(hover.z) } : from
+    const to = Math.abs(raw.x - from.x) >= Math.abs(raw.z - from.z)
+      ? { x: raw.x, z: from.z }
+      : { x: from.x, z: raw.z }
+    const length = Math.hypot(to.x - from.x, to.z - from.z)
+    group.position.set((from.x + to.x) * 0.5, 0.12, (from.z + to.z) * 0.5)
+    group.rotation.y = Math.abs(to.x - from.x) >= Math.abs(to.z - from.z) ? 0 : Math.PI * 0.5
+    mesh.visible = length >= 0.5
+    mesh.scale.x = Math.max(0.05, length)
+    if (labelRef.current) {
+      labelRef.current.textContent = length >= 1 ? `${length} m` : 'trop court'
+    }
+  })
+
+  return (
+    <group ref={groupRef}>
+      <mesh ref={meshRef}>
+        <boxGeometry args={[1, 0.4, 0.14]} />
+        <meshBasicMaterial color="#f2c14e" transparent opacity={0.55} depthWrite={false} />
+      </mesh>
+      <Html position={[0, 0.9, 0]} center>
+        <div ref={labelRef} className="build-ghost-label" />
+      </Html>
+    </group>
+  )
 }
 
 function HouseBuildHandles({
@@ -13158,6 +13216,72 @@ function HouseBuildHandles({
           <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
         </mesh>
       )}
+      {/* Sélection de pièce façon Sims : surbrillance de l'espace détecté +
+          poignées au centre de chaque côté pour agrandir/réduire la pièce. */}
+      {selectedElement?.type === 'space' && (() => {
+        const space = (layout.spaces ?? []).find((candidate) => candidate.id === selectedElement.id)
+        if (!space) return null
+        const rects = decomposeCellsIntoRects(space.cells)
+        const bounds = space.bounds
+        const midX = (bounds.minX + bounds.maxX) * 0.5
+        const midZ = (bounds.minZ + bounds.maxZ) * 0.5
+        const sideDefs = [
+          { key: 'east', wallAxis: 'z', constant: bounds.maxX, mid: midZ, position: [bounds.maxX, 0, midZ] },
+          { key: 'west', wallAxis: 'z', constant: bounds.minX, mid: midZ, position: [bounds.minX, 0, midZ] },
+          { key: 'north', wallAxis: 'x', constant: bounds.maxZ, mid: midX, position: [midX, 0, bounds.maxZ] },
+          { key: 'south', wallAxis: 'x', constant: bounds.minZ, mid: midX, position: [midX, 0, bounds.minZ] },
+        ]
+        return (
+          <group>
+            {rects.map((rect) => (
+              <mesh
+                key={`space-fill-${rect.minX}-${rect.minZ}-${rect.maxX}-${rect.maxZ}`}
+                rotation={[-Math.PI / 2, 0, 0]}
+                position={[(rect.minX + rect.maxX) * 0.5, 0.052, (rect.minZ + rect.maxZ) * 0.5]}
+              >
+                <planeGeometry args={[rect.maxX - rect.minX, rect.maxZ - rect.minZ]} />
+                <meshBasicMaterial color="#f2c14e" transparent opacity={0.16} depthWrite={false} />
+              </mesh>
+            ))}
+            {canEditStructure && !buildTool && sideDefs.map((side) => {
+              const wall = walls.find((candidate) => (
+                candidate.axis === side.wallAxis &&
+                Math.abs(candidate.constant - side.constant) < 0.01 &&
+                Math.min(candidate.from, candidate.to) <= side.mid + 0.001 &&
+                Math.max(candidate.from, candidate.to) >= side.mid - 0.001
+              ))
+              if (!wall) return null
+              const outsideNormal = getWallOutsideNormal(wall)
+              const direction = getWallDirection(wall)
+              const moveNormal = outsideNormal ?? [-direction.z, 0, direction.x]
+              return (
+                <mesh
+                  key={`space-side-${side.key}`}
+                  position={[
+                    side.position[0],
+                    view === '3d' ? (wall.bottom ?? 0) + wall.height + 0.2 : 0.24,
+                    side.position[2],
+                  ]}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    beginDrag({
+                      type: outsideNormal ? 'resize' : 'moveInterior',
+                      wallId: wall.id,
+                      startX: event.point.x,
+                      startZ: event.point.z,
+                      normal: moveNormal,
+                      appliedAmount: 0,
+                    })
+                  }}
+                >
+                  <boxGeometry args={side.wallAxis === 'z' ? [0.34, 0.16, 0.72] : [0.72, 0.16, 0.34]} />
+                  <meshBasicMaterial color="#4fb9ff" transparent opacity={0.95} depthWrite={false} />
+                </mesh>
+              )
+            })}
+          </group>
+        )
+      })()}
       {walls.map((wall) => {
         const transform = getWallHitTransform(wall)
         const selected = selectedElement?.type === 'wall' && selectedElement.id === wall.id
@@ -13448,6 +13572,8 @@ function CustomizationLayer({
   onLockPlacement,
   onSelectBuildElement,
   onBuildFloorClick,
+  onSelectBuildSpaceAt,
+  buildFloorHoverRef,
   onSplitBuildWall,
   onResizeBuildWall,
   onMoveBuildOpening,
@@ -13637,6 +13763,10 @@ function CustomizationLayer({
           onUpdatePosition(id, position)
         }}
         onBuildFloorClick={onBuildFloorClick}
+        onBuildFloorHover={(point) => {
+          if (buildFloorHoverRef) buildFloorHoverRef.current = point
+        }}
+        onSelectSpaceAt={onSelectBuildSpaceAt}
         onStopDragging={onStopDragging}
         onClearSelection={() => {
           onSelect(null)
@@ -13652,6 +13782,9 @@ function CustomizationLayer({
             <ringGeometry args={[0.28, 0.36, 24]} />
             <meshBasicMaterial color="#f2c14e" transparent opacity={0.9} depthWrite={false} />
           </mesh>
+        )}
+        {partitionStart && (
+          <PartitionGhost startPoint={partitionStart} hoverRef={buildFloorHoverRef} />
         )}
       </group>
       {mode === 'customize' && showBuildHandles && (
@@ -17830,6 +17963,9 @@ function App() {
   const floorPaintBrushId = paintFloorSkinId ?? activeFloorSkinId
   const [customizeView, setCustomizeView] = useState('top')
   const [customizeTab, setCustomizeTab] = useState('build')
+  const [buildNotice, setBuildNotice] = useState(null)
+  const buildNoticeTimerRef = useRef(null)
+  const buildFloorHoverRef = useRef(null)
   const customizationHistoryRef = useRef({ initial: null, undo: [], redo: [], transaction: null })
   const [customizationHistoryState, setCustomizationHistoryState] = useState({
     canUndo: false,
@@ -17881,6 +18017,9 @@ function App() {
   const customizationSnapshotsMatch = (left, right) => (
     Boolean(left && right) && JSON.stringify(left) === JSON.stringify(right)
   )
+  const selectedBuildSpace = selectedBuildElement?.type === 'space'
+    ? activeHouseLayout.spaces.find((candidate) => candidate.id === selectedBuildElement.id) ?? null
+    : null
   const canDeleteSelectedBuildElement = Boolean(
     (selectedBuildElement?.type === 'opening' && !selectedBuildOpeningIsEntrance) ||
     (selectedBuildElement?.type === 'wall' && selectedBuildWall &&
@@ -17936,6 +18075,36 @@ function App() {
     beginCustomizationChange()
     change()
     endCustomizationChange()
+  }
+
+  const showBuildNotice = (message) => {
+    setBuildNotice(message)
+    if (buildNoticeTimerRef.current) window.clearTimeout(buildNoticeTimerRef.current)
+    buildNoticeTimerRef.current = window.setTimeout(() => setBuildNotice(null), 2600)
+  }
+
+  // Applique une opération du plan ; les refus (même référence retournée)
+  // affichent un message au lieu d'échouer en silence.
+  const applyPlanChange = (operation, failureMessage, onApplied) => {
+    const current = useGameStore.getState().house.housePlan
+    const next = operation(current)
+    if (next === current) {
+      if (failureMessage) showBuildNotice(failureMessage)
+      return false
+    }
+    runCustomizationChange(() => {
+      setHouse('housePlan', next)
+      onApplied?.()
+    })
+    return true
+  }
+
+  const selectBuildSpaceAt = (point) => {
+    if (!canModifyWorld) return
+    const cellKey = `${Math.floor(point.x)},${Math.floor(point.z)}`
+    const space = activeHouseLayout.spaces.find((candidate) => candidate.cells.includes(cellKey))
+    setEditor('selectedObjectId', null)
+    setSelectedBuildElement(space ? { type: 'space', id: space.id } : null)
   }
 
   const undoCustomizationChange = () => {
@@ -18112,6 +18281,15 @@ function App() {
       setInventory('ownedFloorSkins',(current) => [...current, skin.id])
     }
     setPaintFloorSkinId(skin.id)
+    // Une pièce sélectionnée reçoit la texture immédiatement, façon Sims.
+    if (selectedBuildElement?.type === 'space') {
+      const space = activeHouseLayout.spaces.find((candidate) => candidate.id === selectedBuildElement.id)
+      if (space) {
+        runCustomizationChange(() => {
+          setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, skin.id))
+        })
+      }
+    }
   }
 
   const pickWallPaintSkin = async (skin) => {
@@ -18148,14 +18326,18 @@ function App() {
 
   const deleteSelectedBuildElement = () => {
     if (!canModifyWorld || !selectedBuildElement) return
-    runCustomizationChange(() => {
-      setHouse('housePlan',(current) => (
+    if (selectedBuildElement.type === 'space') return
+    applyPlanChange(
+      (current) => (
         selectedBuildElement.type === 'opening'
           ? removeHouseOpening(current, selectedBuildElement.id)
           : removeHouseWall(current, selectedBuildElement.id)
-      ))
-      setSelectedBuildElement(null)
-    })
+      ),
+      selectedBuildElement.type === 'opening'
+        ? "L'entrée principale ne peut pas être supprimée — définis d'abord une autre entrée"
+        : 'Seules les cloisons intérieures peuvent être supprimées',
+      () => setSelectedBuildElement(null),
+    )
   }
 
   const beginSegmentTool = () => {
@@ -18201,10 +18383,11 @@ function App() {
 
   const splitBuildWallAtOffset = (wallId, offset) => {
     if (!canModifyWorld) return
-    runCustomizationChange(() => {
-      setHouse('housePlan',(current) => splitHouseWallSegment(current, wallId, offset))
-      setSelectedBuildElement(null)
-    })
+    applyPlanChange(
+      (current) => splitHouseWallSegment(current, wallId, offset),
+      'Impossible de couper ici : une ouverture gêne',
+      () => setSelectedBuildElement(null),
+    )
   }
 
   const resizeSelectedBuildWall = (wallId, amount) => {
@@ -18219,9 +18402,12 @@ function App() {
 
   const addBuildOpening = (wallId, offset, type = 'door') => {
     if (!canModifyWorld) return
-    runCustomizationChange(() => {
-      setHouse('housePlan',(current) => addHouseOpeningToWall(current, wallId, offset, { type }))
-    })
+    applyPlanChange(
+      (current) => addHouseOpeningToWall(current, wallId, offset, { type }),
+      type === 'window'
+        ? 'Pas de place pour une vitre ici (trop près d\'une autre ouverture)'
+        : 'Pas de place pour une porte ici (trop près d\'une autre ouverture)',
+    )
   }
 
   const resizeBuildOpeningSpan = (openingId, offset, width) => {
@@ -18306,17 +18492,19 @@ function App() {
 
   const addBuildRoom = (direction) => {
     if (!canModifyWorld) return
-    runCustomizationChange(() => {
-      setSelectedBuildElement(null)
-      setHouse('housePlan',(current) => addRoomToHousePlan(current, { direction }))
-    })
+    applyPlanChange(
+      (current) => addRoomToHousePlan(current, { direction }),
+      'Pas de place pour une pièce de ce côté',
+      () => setSelectedBuildElement(null),
+    )
   }
 
   const setBuildEntrance = () => {
     if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
-    runCustomizationChange(() => {
-      setHouse('housePlan',(current) => setHouseEntranceDoor(current, selectedBuildElement.id))
-    })
+    applyPlanChange(
+      (current) => setHouseEntranceDoor(current, selectedBuildElement.id),
+      "L'entrée doit être une porte sur un mur extérieur",
+    )
   }
 
   const handleBuildFloorClick = (point) => {
@@ -18324,7 +18512,10 @@ function App() {
     if (activeBuildTool === 'paintFloor') {
       const cellKey = `${Math.floor(point.x)},${Math.floor(point.z)}`
       const space = activeHouseLayout.spaces.find((candidate) => candidate.cells.includes(cellKey))
-      if (!space) return
+      if (!space) {
+        showBuildNotice('Touche le sol d\'une pièce de la maison')
+        return
+      }
       runCustomizationChange(() => {
         setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, floorPaintBrushId))
       })
@@ -18336,15 +18527,17 @@ function App() {
       setPartitionStart(snappedPoint)
       return
     }
-    runCustomizationChange(() => {
-      setHouse('housePlan',(current) => addInteriorWallToHousePlan(
+    applyPlanChange(
+      (current) => addInteriorWallToHousePlan(
         current,
         [partitionStart.x, partitionStart.z],
         [snappedPoint.x, snappedPoint.z],
-      ))
-    })
+      ),
+      'Cloison trop courte : écarte les deux points d\'au moins une case',
+    )
     setPartitionStart(null)
     setActiveBuildTool(null)
+    buildFloorHoverRef.current = null
   }
 
   const completeBuildTool = () => {
@@ -19517,6 +19710,8 @@ function App() {
               setEditor('selectedObjectId',null)
             }}
             onBuildFloorClick={handleBuildFloorClick}
+            onSelectBuildSpaceAt={selectBuildSpaceAt}
+            buildFloorHoverRef={buildFloorHoverRef}
             onSplitBuildWall={splitBuildWallAtOffset}
             onResizeBuildWall={resizeSelectedBuildWall}
             onMoveBuildOpening={moveBuildOpening}
@@ -20111,6 +20306,16 @@ function App() {
               Aucune entrée définie — sélectionne une porte extérieure puis « Entrée »
             </div>
           )}
+          {buildNotice && (
+            <div className="customize-build-warning customize-build-notice">
+              {buildNotice}
+            </div>
+          )}
+          {selectedBuildSpace && (
+            <span className="customize-tab-hint">
+              {`Pièce · ${selectedBuildSpace.bounds.maxX - selectedBuildSpace.bounds.minX} × ${selectedBuildSpace.bounds.maxZ - selectedBuildSpace.bounds.minZ} · ${selectedBuildSpace.cells.length} m² · poignées bleues pour agrandir`}
+            </span>
+          )}
           {/* Contrôles contextuels d'objet : visibles dès qu'un meuble est
               sélectionné ou en cours de placement, quel que soit l'onglet. */}
           {(selectedObjectId || placingObjectId) && (
@@ -20220,6 +20425,17 @@ function App() {
                   skins={floorSkins}
                   ownedSkinIds={ownedFloorSkins}
                   activeSkinId={floorPaintBrushId}
+                  coins={coins}
+                  hasUnlimitedCoins={isAdminMode}
+                  onPick={pickFloorPaintSkin}
+                />
+              )}
+              {selectedBuildSpace && activeBuildTool !== 'paintFloor' && (
+                <SkinPaintPalette
+                  title="Sol de la pièce sélectionnée"
+                  skins={floorSkins}
+                  ownedSkinIds={ownedFloorSkins}
+                  activeSkinId={housePlan?.styles?.floorByCell?.[selectedBuildSpace.cells[0]] ?? null}
                   coins={coins}
                   hasUnlimitedCoins={isAdminMode}
                   onPick={pickFloorPaintSkin}

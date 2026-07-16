@@ -284,6 +284,15 @@ describe('housePlan', () => {
     expect(unchanged.openings[junctionDoor.id].role).toBe('junction')
   })
 
+  it('signale un refus en retournant le plan d origine (meme reference)', () => {
+    const plan = createDefaultHousePlan()
+
+    // Chevauche l'entree, entree protegee, mur exterieur non supprimable.
+    expect(addHouseOpeningToWall(plan, 'wall_main_west', 0.725)).toBe(plan)
+    expect(removeHouseOpening(plan, 'door_entrance')).toBe(plan)
+    expect(removeHouseWall(plan, 'wall_main_east')).toBe(plan)
+  })
+
   it('ne supprime jamais la porte d entree', () => {
     const plan = createDefaultHousePlan()
     const unchanged = removeHouseOpening(plan, 'door_entrance')
