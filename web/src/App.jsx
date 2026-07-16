@@ -54,7 +54,7 @@ import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biome
 import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
 import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
+import { HOUSE_STRUCTURE_GRID_SIZE, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
 import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
 import { getWallColliderTransform, getWallDirection, getWallPointAt, getWallRenderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -601,7 +601,7 @@ const ENV_STATION_POSITION = { x: 3.5, y: 0.35, z: 1.8 }
 const CUSTOM_STATION_POSITION = { x: 0, y: 0.35, z: 3.55 }
 const PARCEL_HALF = PLAYER_PLOT_SIZE / 2
 const CUSTOM_ROOM_BOUNDS = { minX: -PARCEL_HALF, maxX: PARCEL_HALF, minZ: -PARCEL_HALF, maxZ: PARCEL_HALF }
-const CUSTOM_GRID_SIZE = 0.25
+const CUSTOM_GRID_SIZE = HOUSE_STRUCTURE_GRID_SIZE
 const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const TV_INTERACTION_DISTANCE = 1.35
 const TV_MENU_EVENT = 'lab-tv-open-menu'
@@ -13304,9 +13304,9 @@ function PartitionGhost({ startPoint, hoverRef }) {
     const group = groupRef.current
     const mesh = meshRef.current
     if (!group || !mesh) return
-    const from = { x: Math.round(startPoint.x), z: Math.round(startPoint.z) }
+    const from = { x: snap(startPoint.x), z: snap(startPoint.z) }
     const hover = hoverRef?.current
-    const raw = hover ? { x: Math.round(hover.x), z: Math.round(hover.z) } : from
+    const raw = hover ? { x: snap(hover.x), z: snap(hover.z) } : from
     const to = Math.abs(raw.x - from.x) >= Math.abs(raw.z - from.z)
       ? { x: raw.x, z: from.z }
       : { x: from.x, z: raw.z }
@@ -13478,7 +13478,10 @@ function HouseBuildHandles({
       // mur ne saute plus par pas d'une case. Application au relâchement.
       const dx = event.point.x - drag.startX
       const dz = event.point.z - drag.startZ
-      drag.pendingAmount = Math.round(dx * drag.normal[0] + dz * drag.normal[2])
+      const distance = dx * drag.normal[0] + dz * drag.normal[2]
+      // Les murs extérieurs restent liés aux cellules de fondation de 1 m ;
+      // seules les cloisons utilisent la grille structurelle fine de 0,25 m.
+      drag.pendingAmount = drag.type === 'resize' ? Math.round(distance) : snap(distance)
       return
     }
 
@@ -14328,10 +14331,7 @@ function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect
     : cards.filter((card) => card.category === activeCategory)
 
   return (
-    <div className={`object-inventory-sheet ${open ? 'open' : ''}`}>
-      <button className="object-inventory-handle" type="button" onClick={onToggle}>
-        Objets
-      </button>
+    <div className={`object-inventory-sheet ${open ? 'open' : ''} ${placingObjectId ? 'is-placing' : ''}`}>
       {open && (
         <div className="object-inventory-content">
           <div className="object-inventory-header">
@@ -18488,6 +18488,7 @@ function App() {
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
   const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
+  const showGameplayUi = showCaptureUi && mode === 'play'
   const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
   const furnitureInventoryObjects = isGuestVisit && personalProgressVersion >= 0
@@ -18899,13 +18900,13 @@ function App() {
   // tranches, car la logique borne chaque appel à ±4 cases.
   const applyChunkedWallMove = (plan, wallId, amount, operation) => {
     let next = plan
-    let remaining = Math.round(amount)
-    while (remaining !== 0) {
+    let remaining = snap(amount)
+    while (Math.abs(remaining) >= CUSTOM_GRID_SIZE * 0.5) {
       const step = Math.max(-4, Math.min(4, remaining))
       const result = operation(next, wallId, step)
       if (result === next) break
       next = result
-      remaining -= step
+      remaining = snap(remaining - step)
     }
     return next
   }
@@ -19453,6 +19454,13 @@ function App() {
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
+    setUi('accountOpen',false)
+    setUi('weaponMenuOpen',false)
+    setUi('lightMenuOpen',false)
+    setQuest('journalOpen',false)
+    setQuest('dialogOpen',false)
+    setQuest('vendorOpen',false)
+    setIsGameChatOpen(false)
     setEditor('selectedObjectId',null)
     setEditor('draggingObjectId',null)
     setEditor('placingObjectId',null)
@@ -19708,7 +19716,6 @@ function App() {
       rotationY: object.rotationY ?? 0,
       isValid: true,
     })
-    setUi('objectInventoryOpen',false)
   }
 
   const updatePlacementPreview = (position) => {
@@ -20581,7 +20588,7 @@ function App() {
               />
             </>
           )}
-          {showCaptureUi && <ScorePopups popups={scorePopups} />}
+          {showGameplayUi && <ScorePopups popups={scorePopups} />}
         </Physics>
         </Suspense>
       </Canvas>
@@ -20597,15 +20604,15 @@ function App() {
           </div>
         </div>
       )}
-      {isDebugMode && (
+      {mode === 'play' && isDebugMode && (
         <RenderStatsOverlay
           stats={renderStats}
           toggles={debugToggles}
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
         />
       )}
-      {!isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
-      <GpuWarning visible={showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
+      {mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
+      <GpuWarning visible={mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
       {mode === 'play' && (
         <ControlsOverlay
@@ -20616,10 +20623,10 @@ function App() {
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
       )}
-      {showCaptureUi && <CoinsOverlay coins={coins} />}
-      {showCaptureUi && <AchievementToast toast={achievementToast} />}
+      {showGameplayUi && <CoinsOverlay coins={coins} />}
+      {showGameplayUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
-      {showCaptureUi && isLocalNetwork && freeCameraActive && (
+      {showGameplayUi && isLocalNetwork && freeCameraActive && (
         <div className="free-camera-badge">Camera libre</div>
       )}
       {showCaptureUi && PUBLIC_BUILD_FLAGS.showWeaponInventory && mode === 'play' && (
@@ -20642,13 +20649,13 @@ function App() {
           📜
         </button>
       )}
-      {showCaptureUi && isCharging && (
+      {showGameplayUi && isCharging && (
         <div className="charge-bar-wrap">
           <div className="charge-bar-fill" style={{ width: `${chargeProgress * 100}%` }} />
           <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
         </div>
       )}
-      {showCaptureUi && isLearningMagicSkull && (
+      {showGameplayUi && isLearningMagicSkull && (
         <div className="charge-bar-wrap">
           <div className="charge-bar-fill" style={{ width: `${magicSkullLearnProgress * 100}%` }} />
           <span className="charge-bar-label">💀 {magicSkullLearnProgress >= 1 ? 'Appris !' : 'Apprentissage...'}</span>
@@ -20666,7 +20673,7 @@ function App() {
           onSpellPress={handleSpellPress}
         />
       )}
-      {showCaptureUi && (
+      {showGameplayUi && (
         <CharacterCustomizationMenu
           open={PUBLIC_BUILD_FLAGS.showCharacterCustomization && isCharacterMenuOpen}
           appearance={characterAppearance}
@@ -20674,14 +20681,14 @@ function App() {
           onClose={() => setMenuOpen('character', false)}
         />
       )}
-      {showCaptureUi && canModifyWorld && (
+      {showGameplayUi && canModifyWorld && (
         <CustomizationChoiceMenu
           open={isCustomizationChoiceOpen}
           onChooseRoom={openCustomizationMode}
           onClose={() => setMenuOpen('customizationChoice', false)}
         />
       )}
-      {showCaptureUi && (
+      {showGameplayUi && (
         <BagPanel
           open={PUBLIC_BUILD_FLAGS.showWeaponInventory && isWeaponMenuOpen}
           ownedItems={BAG_ITEM_DEFS
@@ -20705,17 +20712,17 @@ function App() {
           materials={materials}
         />
       )}
-      {showCaptureUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (
+      {showGameplayUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
           +500
         </button>
       )}
-      {showCaptureUi && catActive && cameraOnCat && (isAdminMode || isVerticalFrameMode) && (
+      {showGameplayUi && catActive && cameraOnCat && (isAdminMode || isVerticalFrameMode) && (
         <button className="cat-cam-btn" type="button" onClick={() => setCameraOnCat(false)}>
           🐱 Caméra chat — Retour joueur
         </button>
       )}
-      {showCaptureUi && (
+      {showGameplayUi && (
         <GameMenuPanel
           configured={isSupabaseConfigured}
           user={authUser}
@@ -20805,7 +20812,7 @@ function App() {
         canShow={showCaptureUi && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen}
         onTalk={() => setQuest('dialogOpen',true)}
       />
-      {questDialogOpen && (
+      {showGameplayUi && questDialogOpen && (
         <QuestDialog
           questId={FIRST_QUEST_ID}
           questProgress={questProgress}
@@ -20815,7 +20822,7 @@ function App() {
           onOpenVendor={() => { setQuest('dialogOpen',false); setQuest('vendorOpen',true) }}
         />
       )}
-      {vendorOpen && (
+      {showGameplayUi && vendorOpen && (
         <VendorPanel
           materials={materials}
           onSell={handleSellItem}
@@ -20826,7 +20833,7 @@ function App() {
       {showCaptureUi && mode === 'play' && pinnedQuestId && !questJournalOpen && (
         <QuestTracker questId={pinnedQuestId} questProgress={questProgress} />
       )}
-      {questJournalOpen && (
+      {showGameplayUi && questJournalOpen && (
         <QuestJournal
           questProgress={questProgress}
           pinnedQuestId={pinnedQuestId}
@@ -20869,7 +20876,7 @@ function App() {
           </button>
         </div>
       )}
-      {showCaptureUi && isMultiplayerSession && !blocksBottomGameChat && (
+      {showGameplayUi && isMultiplayerSession && !blocksBottomGameChat && (
         <GameChatPanel
           open={isGameChatOpen}
           value={chatInput}
@@ -20898,6 +20905,11 @@ function App() {
               <button className="customize-more-button" type="button" onClick={() => setCustomizeMoreOpen((current) => !current)} aria-expanded={customizeMoreOpen} aria-label="Plus d’options">•••</button>
               {customizeMoreOpen && (
                 <div className="customize-more-menu">
+                  <div className="customize-more-balance">
+                    <img src="/ui/coins.png" alt="" />
+                    <span>Solde</span>
+                    <strong>{coins}</strong>
+                  </div>
                   <label>
                     <input type="checkbox" checked={applyWallToCeiling} onChange={(event) => setInventory('applyWallToCeiling', event.target.checked)} />
                     <span>Tapisserie au plafond</span>
@@ -21022,7 +21034,7 @@ function App() {
         />
       )}
       <SkinMenu
-        open={showCaptureUi && isSkinMenuOpen}
+        open={showGameplayUi && isSkinMenuOpen}
         coins={coins}
         skins={ballSkins}
         previewIndex={previewIndex}
@@ -21036,7 +21048,7 @@ function App() {
         onRespawn={handleBallRespawn}
       />
       <EnvironmentMenu
-        open={showCaptureUi && isEnvironmentMenuOpen}
+        open={showGameplayUi && isEnvironmentMenuOpen}
         coins={coins}
         hasUnlimitedCoins={isAdminMode}
         activeTab={environmentTab}

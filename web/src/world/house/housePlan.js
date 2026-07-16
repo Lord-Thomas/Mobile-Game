@@ -1,5 +1,6 @@
 export const HOUSE_PLAN_VERSION = 1
-export const DEFAULT_HOUSE_GRID_SIZE = 1
+export const HOUSE_STRUCTURE_GRID_SIZE = 0.25
+export const DEFAULT_HOUSE_GRID_SIZE = HOUSE_STRUCTURE_GRID_SIZE
 export const DEFAULT_HOUSE_WALL_THICKNESS = 0.22
 export const DEFAULT_HOUSE_WALL_HEIGHT = 5
 export const DEFAULT_HOUSE_EXTERIOR_COLOR = '#f3f0e5'
@@ -35,6 +36,19 @@ const defaultFloorCells = createCellsFromRect(-5, -5, 10, 10, { floorStyleId: 'f
 
 function clampInteger(value, min, max, fallback) {
   const next = Math.round(Number(value))
+  if (!Number.isFinite(next)) return fallback
+  return Math.min(max, Math.max(min, next))
+}
+
+export function snapHouseCoordinate(value) {
+  const next = Number(value)
+  if (!Number.isFinite(next)) return next
+  const snapped = Math.round(next / HOUSE_STRUCTURE_GRID_SIZE) * HOUSE_STRUCTURE_GRID_SIZE
+  return Object.is(snapped, -0) ? 0 : snapped
+}
+
+function clampStructureGrid(value, min, max, fallback) {
+  const next = snapHouseCoordinate(value)
   if (!Number.isFinite(next)) return fallback
   return Math.min(max, Math.max(min, next))
 }
@@ -414,7 +428,9 @@ function normalizePoint(point, fallback) {
   if (!Array.isArray(point) || point.length < 2) return fallback
   const x = Number(point[0])
   const z = Number(point[1])
-  return Number.isFinite(x) && Number.isFinite(z) ? [x, z] : fallback
+  return Number.isFinite(x) && Number.isFinite(z)
+    ? [snapHouseCoordinate(x), snapHouseCoordinate(z)]
+    : fallback
 }
 
 function normalizeNumber(value, fallback) {
@@ -490,7 +506,7 @@ function hasWallOnCellEdge(walls, x, z, direction) {
   return Object.values(walls).some((wall) => {
     const axisInfo = getWallAxis(wall)
     return axisInfo.axis === boundaryAxis &&
-      Math.abs(axisInfo.constant - constant) < 0.001 &&
+      Math.abs(Math.round(axisInfo.constant) - constant) < 0.001 &&
       Math.min(axisInfo.from, axisInfo.to) <= min + 0.001 &&
       Math.max(axisInfo.from, axisInfo.to) >= max - 0.001
   })
@@ -1157,11 +1173,11 @@ export function addInteriorWallToHousePlan(plan, start, end) {
   const rawEnd = normalizePoint(end, null)
   if (!rawFrom || !rawEnd) return plan
 
-  // Les cloisons s'alignent sur les bords de cellules (grille entière) : la
-  // détection d'espaces raisonne par cellule, une cloison à x=2.25 ne
-  // séparerait aucune pièce.
-  const from = [Math.round(rawFrom[0]), Math.round(rawFrom[1])]
-  const rawTo = [Math.round(rawEnd[0]), Math.round(rawEnd[1])]
+  // Création, déplacement et poignées partagent exactement la même grille.
+  // La topologie rattache ensuite la ligne fine au bord de cellule le plus
+  // proche, sans déplacer visuellement la cloison.
+  const from = [snapHouseCoordinate(rawFrom[0]), snapHouseCoordinate(rawFrom[1])]
+  const rawTo = [snapHouseCoordinate(rawEnd[0]), snapHouseCoordinate(rawEnd[1])]
 
   const dx = rawTo[0] - from[0]
   const dz = rawTo[1] - from[1]
@@ -1358,7 +1374,7 @@ export function resizeHouseExteriorWall(plan, wallId, amount) {
 export function moveHouseInteriorWall(plan, wallId, amount) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
-  const steps = clampInteger(amount, -4, 4, 0)
+  const steps = clampStructureGrid(amount, -4, 4, 0)
   if (!wall || steps === 0) return plan
   if (!isInteriorWall(normalized, wall)) return plan
 

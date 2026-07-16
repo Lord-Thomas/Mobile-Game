@@ -22,14 +22,14 @@ function wallBlocksCellEdge(wall, cell, direction) {
 
   if (vertical) {
     const boundaryX = direction.dx > 0 ? cell.x + 1 : cell.x
-    if (Math.abs(ax - boundaryX) > 0.001) return false
+    if (Math.abs(Math.round(ax) - boundaryX) > 0.001) return false
     const minZ = Math.min(az, bz)
     const maxZ = Math.max(az, bz)
     return Math.max(cell.z, minZ) < Math.min(cell.z + 1, maxZ)
   }
 
   const boundaryZ = direction.dz > 0 ? cell.z + 1 : cell.z
-  if (Math.abs(az - boundaryZ) > 0.001) return false
+  if (Math.abs(Math.round(az) - boundaryZ) > 0.001) return false
   const minX = Math.min(ax, bx)
   const maxX = Math.max(ax, bx)
   return Math.max(cell.x, minX) < Math.min(cell.x + 1, maxX)

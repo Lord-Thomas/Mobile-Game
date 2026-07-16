@@ -94,6 +94,20 @@ describe('housePlan', () => {
     expect(plan.openings.door_overlap).toMatchObject({ wallId: 'wall_first', offset: 4 / 6 })
   })
 
+  it('canonise les coordonnees proches sur la grille avant de fusionner les murs', () => {
+    const plan = normalizeHousePlan({
+      floorCells: { '0,0': true },
+      walls: {
+        wall_first: { from: [0, 2.249999], to: [4, 2.249999], height: 5 },
+        wall_overlap: { from: [2, 2.250001], to: [6, 2.250001], height: 5 },
+      },
+      openings: {},
+    })
+
+    expect(Object.keys(plan.walls)).toEqual(['wall_first'])
+    expect(plan.walls.wall_first).toMatchObject({ from: [0, 2.25], to: [6, 2.25] })
+  })
+
   it('detecte la piece principale par defaut', () => {
     const spaces = detectHouseSpaces(createDefaultHousePlan())
 
@@ -292,13 +306,11 @@ describe('housePlan', () => {
     expect(layout.rooms).toHaveLength(2)
   })
 
-  it('aligne une cloison sur les bords de cellules pour separer les espaces', () => {
-    // Points snappés à 0.25 par l'éditeur : la cloison doit être ramenée sur
-    // la grille entière, sinon la détection d'espaces ne la voit pas.
+  it('conserve la position au quart de metre tout en separant les espaces', () => {
     const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-4.75, 2.25], [5.25, 2.25])
     const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
 
-    expect(partition).toMatchObject({ from: [-5, 2], to: [5, 2] })
+    expect(partition).toMatchObject({ from: [-4.75, 2.25], to: [5.25, 2.25] })
     expect(deriveHouseLayout(plan).rooms).toHaveLength(2)
   })
 
@@ -392,6 +404,15 @@ describe('housePlan', () => {
 
     expect(movedPartition.from[1]).toBe(2)
     expect(movedPartition.to[1]).toBe(2)
+    expect(deriveHouseLayout(moved).rooms).toHaveLength(2)
+  })
+
+  it('deplace une cloison sur la meme grille au quart de metre que sa creation', () => {
+    const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-5, 0], [5, 0])
+    const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
+    const moved = moveHouseInteriorWall(plan, partition.id, 0.25)
+
+    expect(moved.walls[partition.id]).toMatchObject({ from: [-5, 0.25], to: [5, 0.25] })
     expect(deriveHouseLayout(moved).rooms).toHaveLength(2)
   })
 
