@@ -13185,6 +13185,22 @@ function WallMoveGhost({ dragRef, view }) {
   )
 }
 
+function OpeningResizeHandle({ position, color, onPointerDown }) {
+  return (
+    <group position={position} onPointerDown={onPointerDown}>
+      {/* La cible reste large sans transformer la poignée en gros bouton visuel. */}
+      <mesh>
+        <sphereGeometry args={[0.38, 16, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[0.16, 14, 10]} />
+        <meshBasicMaterial color={color} transparent opacity={0.95} depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
 function HouseBuildHandles({
   layout,
   view = 'top',
@@ -13346,6 +13362,12 @@ function HouseBuildHandles({
     onBeginChange?.()
     activeDragRef.current = drag
     setActiveDrag(drag)
+  }
+
+  const beginHandleDrag = (event, drag) => {
+    event.stopPropagation()
+    event.target?.setPointerCapture?.(event.pointerId)
+    beginDrag(drag)
   }
 
   useEffect(() => {
@@ -13693,11 +13715,11 @@ function HouseBuildHandles({
                     const topY = bottomY + opening.height
                     return (
                       <>
-                        <mesh
+                        <OpeningResizeHandle
                           position={[centerPoint.x, topY, centerPoint.z]}
+                          color="#8fd7ff"
                           onPointerDown={(event) => {
-                            event.stopPropagation()
-                            beginDrag({
+                            beginHandleDrag(event, {
                               type: 'openingHeight',
                               openingId: opening.id,
                               wall,
@@ -13705,16 +13727,13 @@ function HouseBuildHandles({
                               lastHeight: null,
                             })
                           }}
-                        >
-                          <sphereGeometry args={[0.16, 14, 10]} />
-                          <meshBasicMaterial color="#8fd7ff" transparent opacity={0.95} depthWrite={false} />
-                        </mesh>
+                        />
                         {opening.type === 'window' && (
-                          <mesh
+                          <OpeningResizeHandle
                             position={[centerPoint.x, Math.max(0.18, bottomY), centerPoint.z]}
+                            color="#ffd447"
                             onPointerDown={(event) => {
-                              event.stopPropagation()
-                              beginDrag({
+                              beginHandleDrag(event, {
                                 type: 'openingBottom',
                                 openingId: opening.id,
                                 wall,
@@ -13723,10 +13742,7 @@ function HouseBuildHandles({
                                 lastBottom: null,
                               })
                             }}
-                          >
-                            <sphereGeometry args={[0.16, 14, 10]} />
-                            <meshBasicMaterial color="#ffd447" transparent opacity={0.95} depthWrite={false} />
-                          </mesh>
+                          />
                         )}
                       </>
                     )
@@ -13734,7 +13750,7 @@ function HouseBuildHandles({
                   {doorSelected && canEditStructure && [-1, 1].map((side) => {
                     const endPoint = getWallPointAt(wall, opening.center + side * opening.width * 0.5)
                     return (
-                      <mesh
+                      <OpeningResizeHandle
                         key={`build-opening-end-${opening.id}-${side}`}
                         // En 3D : sur les bords verticaux de l'ouverture,
                         // à mi-hauteur — la vitre a ses poignées sur ses 4 côtés.
@@ -13746,8 +13762,7 @@ function HouseBuildHandles({
                           endPoint.z,
                         ]}
                         onPointerDown={(event) => {
-                          event.stopPropagation()
-                          beginDrag({
+                          beginHandleDrag(event, {
                             type: 'openingSpan',
                             openingId: opening.id,
                             wall,
@@ -13755,10 +13770,8 @@ function HouseBuildHandles({
                             lastDistance: null,
                           })
                         }}
-                      >
-                        <sphereGeometry args={[0.18, 14, 10]} />
-                        <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
-                      </mesh>
+                        color="#ffffff"
+                      />
                     )
                   })}
                 </group>
