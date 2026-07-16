@@ -193,20 +193,30 @@ export function getWallRenderTransform(wall, rect, walls = []) {
   const direction = getWallDirection(wall)
   const rectStart = Number.isFinite(rect.start) ? rect.start : rect.center - rect.width * 0.5
   const rectEnd = Number.isFinite(rect.end) ? rect.end : rect.center + rect.width * 0.5
-  const connectedPerpendicularly = (corner) => walls.some((candidate) => {
-    if (candidate.id === wall.id) return false
-    const sharesCorner = cornersMatch(candidate.startCorner, corner) || cornersMatch(candidate.endCorner, corner)
-    if (!sharesCorner) return false
-    const otherDirection = getWallDirection(candidate)
-    return Math.abs(direction.x * otherDirection.z - direction.z * otherDirection.x) > 0.001
-  })
   const jointExtension = wall.thickness * 0.5
-  const startExtension = rectStart <= 0.0001 && connectedPerpendicularly(wall.startCorner)
-    ? jointExtension
-    : 0
-  const endExtension = rectEnd >= direction.length - 0.0001 && connectedPerpendicularly(wall.endCorner)
-    ? jointExtension
-    : 0
+  const getJointExtension = (corner) => {
+    const connections = walls.filter((candidate) => (
+      candidate.id !== wall.id &&
+      (cornersMatch(candidate.startCorner, corner) || cornersMatch(candidate.endCorner, corner))
+    ))
+    const directions = connections.map(getWallDirection)
+    const hasCollinearContinuation = directions.some((otherDirection) => (
+      Math.abs(direction.x * otherDirection.z - direction.z * otherDirection.x) <= 0.001
+    ))
+    const perpendicularCount = directions.filter((otherDirection) => (
+      Math.abs(direction.x * otherDirection.z - direction.z * otherDirection.x) > 0.001
+    )).length
+
+    // Jonction en T : les deux segments du mur principal restent bord à bord.
+    // La cloison qui arrive perpendiculairement s'arrête contre leur face au
+    // lieu de traverser le volume, ce qui supprimme la texture visible par
+    // transparence au point de raccord.
+    if (hasCollinearContinuation) return 0
+    if (perpendicularCount >= 2) return -jointExtension
+    return perpendicularCount === 1 ? jointExtension : 0
+  }
+  const startExtension = rectStart <= 0.0001 ? getJointExtension(wall.startCorner) : 0
+  const endExtension = rectEnd >= direction.length - 0.0001 ? getJointExtension(wall.endCorner) : 0
 
   return getWallColliderTransform(wall, rect, {
     extendJoints: false,
