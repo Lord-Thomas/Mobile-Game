@@ -12822,17 +12822,39 @@ function EditableFloor({
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') finishPointerInteraction()
     }
+    // Pan/orbite au niveau fenêtre (deltas écran) : les événements ne se
+    // coupent plus quand le pointeur sort du mesh du sol pendant un drag
+    // rapide — l'orbite 3D reste fluide.
+    const onWindowPointerMove = (event) => {
+      if (!lastClientRef.current) return
+      if (
+        activePointerIdRef.current !== null &&
+        event.pointerId !== activePointerIdRef.current
+      ) return
+      const dx = event.clientX - lastClientRef.current.x
+      const dy = event.clientY - lastClientRef.current.y
+      lastClientRef.current = { x: event.clientX, y: event.clientY }
+      if (view === '3d') {
+        applyCustomizeOrbitDrag(dx, dy)
+        return
+      }
+      const worldPerPixel = 1 / camera.zoom
+      camera.position.x = MathUtils.clamp(camera.position.x - dx * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minX, CUSTOMIZE_PAN_BOUNDS.maxX)
+      camera.position.z = MathUtils.clamp(camera.position.z - dy * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minZ, CUSTOMIZE_PAN_BOUNDS.maxZ)
+    }
     window.addEventListener('pointerup', onPointerEnd)
     window.addEventListener('pointercancel', onPointerEnd)
+    window.addEventListener('pointermove', onWindowPointerMove)
     window.addEventListener('blur', onWindowBlur)
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       window.removeEventListener('pointerup', onPointerEnd)
       window.removeEventListener('pointercancel', onPointerEnd)
+      window.removeEventListener('pointermove', onWindowPointerMove)
       window.removeEventListener('blur', onWindowBlur)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [finishPointerInteraction, isActive])
+  }, [camera, finishPointerInteraction, isActive, view])
 
   useEffect(() => {
     if (!isActive) {
@@ -12876,22 +12898,10 @@ function EditableFloor({
           activePointerIdRef.current !== null &&
           event.pointerId !== activePointerIdRef.current
         ) return
-        if (isPanning) {
-          if (lastClientRef.current) {
-            const dx = event.clientX - lastClientRef.current.x
-            const dy = event.clientY - lastClientRef.current.y
-            lastClientRef.current = { x: event.clientX, y: event.clientY }
-            if (view === '3d') {
-              // En vue 3D, le drag du sol fait tourner la caméra autour de la maison.
-              applyCustomizeOrbitDrag(dx, dy)
-              return
-            }
-            const worldPerPixel = 1 / camera.zoom
-            camera.position.x = MathUtils.clamp(camera.position.x - dx * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minX, CUSTOMIZE_PAN_BOUNDS.maxX)
-            camera.position.z = MathUtils.clamp(camera.position.z - dy * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minZ, CUSTOMIZE_PAN_BOUNDS.maxZ)
-          }
-          return
-        }
+        // Le pan (vue dessus) et l'orbite (3D) sont gérés au niveau fenêtre
+        // (onWindowPointerMove) : ici on ne traite que ce qui a besoin du
+        // point 3D issu du raycast.
+        if (isPanning) return
         if (buildTool) {
           // Outil actif : le survol alimente la prévisualisation fantôme.
           if (buildTool === 'partition') {
@@ -12915,6 +12925,10 @@ function EditableFloor({
         if (!buildTool && !placingObjectId && !draggingObjectId) {
           // Un tap (pas un pan) sur le sol sélectionne la pièce, façon Sims.
           if (event.delta > 6) return
+          // Si le clic a d'abord touché une poignée/un élément au-dessus du
+          // sol, ne pas écraser la sélection qui vient d'être faite.
+          const firstHit = event.intersections?.[0]
+          if (firstHit && firstHit.eventObject !== event.eventObject) return
           event.stopPropagation()
           onSelectSpaceAt?.(event.point)
           return
@@ -12932,7 +12946,9 @@ function EditableFloor({
       onPointerMissed={() => {
         if (!isActive) return
         finishPointerInteraction()
-        onClearSelection()
+        // Ne PAS effacer la sélection ici : en 3D, un clic sur un mur haut
+        // peut rater le sol et ce callback effaçait la sélection à peine
+        // faite. La désélection passe par un tap sur le sol hors maison.
       }}
     >
       <planeGeometry args={[PLAYER_PLOT_SIZE + 4, PLAYER_PLOT_SIZE + 4]} />
@@ -13002,6 +13018,51 @@ function PartitionGhost({ startPoint, hoverRef }) {
         <meshBasicMaterial color="#f2c14e" transparent opacity={0.55} depthWrite={false} />
       </mesh>
       <Html position={[0, 0.9, 0]} center>
+        <div ref={labelRef} className="build-ghost-label" />
+      </Html>
+    </group>
+  )
+}
+
+// Fantôme de déplacement de mur : suit le pointeur (pas de saut par case)
+// pendant un drag resize/moveInterior ; le mur réel ne bouge qu'au relâchement.
+function WallMoveGhost({ dragRef, view }) {
+  const groupRef = useRef()
+  const meshRef = useRef()
+  const labelRef = useRef()
+
+  useFrame(() => {
+    const group = groupRef.current
+    const mesh = meshRef.current
+    const drag = dragRef.current
+    if (!group || !mesh) return
+    const active = drag && (drag.type === 'resize' || drag.type === 'moveInterior') && drag.wall
+    group.visible = Boolean(active)
+    if (!active) return
+    const wall = drag.wall
+    const amount = drag.pendingAmount ?? 0
+    group.position.set(
+      (wall.startCorner.x + wall.endCorner.x) * 0.5 + drag.normal[0] * amount,
+      0,
+      (wall.startCorner.z + wall.endCorner.z) * 0.5 + drag.normal[2] * amount,
+    )
+    group.rotation.y = -Math.atan2(
+      wall.endCorner.z - wall.startCorner.z,
+      wall.endCorner.x - wall.startCorner.x,
+    )
+    mesh.scale.x = Math.max(0.2, wall.length)
+    if (labelRef.current) {
+      labelRef.current.textContent = amount === 0 ? '' : `${amount > 0 ? '+' : ''}${amount} m`
+    }
+  })
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh ref={meshRef} position={[0, view === '3d' ? 1.4 : 0.16, 0]}>
+        <boxGeometry args={[1, view === '3d' ? 2.8 : 0.3, 0.18]} />
+        <meshBasicMaterial color="#4fb9ff" transparent opacity={0.4} depthWrite={false} />
+      </mesh>
+      <Html position={[0, view === '3d' ? 3.2 : 1, 0]} center>
         <div ref={labelRef} className="build-ghost-label" />
       </Html>
     </group>
@@ -13082,15 +13143,11 @@ function HouseBuildHandles({
     if (!drag) return
     event.stopPropagation()
     if (drag.type === 'resize' || drag.type === 'moveInterior') {
+      // Prévisualisation fantôme : rien n'est appliqué pendant le drag, le
+      // mur ne saute plus par pas d'une case. Application au relâchement.
       const dx = event.point.x - drag.startX
       const dz = event.point.z - drag.startZ
-      const totalAmount = Math.round(dx * drag.normal[0] + dz * drag.normal[2])
-      const delta = totalAmount - drag.appliedAmount
-      if (delta !== 0) {
-        drag.appliedAmount = totalAmount
-        if (drag.type === 'resize') onResizeWall(drag.wallId, delta)
-        else onMoveInteriorWall(drag.wallId, delta)
-      }
+      drag.pendingAmount = Math.round(dx * drag.normal[0] + dz * drag.normal[2])
       return
     }
 
@@ -13148,8 +13205,14 @@ function HouseBuildHandles({
   }
 
   const finishActiveDrag = (event) => {
-    if (!activeDragRef.current) return
+    const drag = activeDragRef.current
+    if (!drag) return
     event?.stopPropagation?.()
+    // Les drags à fantôme appliquent leur total au relâchement seulement.
+    if ((drag.type === 'resize' || drag.type === 'moveInterior') && drag.pendingAmount) {
+      if (drag.type === 'resize') onResizeWall(drag.wallId, drag.pendingAmount)
+      else onMoveInteriorWall(drag.wallId, drag.pendingAmount)
+    }
     activeDragRef.current = null
     setActiveDrag(null)
     onEndChange?.()
@@ -13216,6 +13279,7 @@ function HouseBuildHandles({
           <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
         </mesh>
       )}
+      <WallMoveGhost dragRef={activeDragRef} view={view} />
       {/* Sélection de pièce façon Sims : surbrillance de l'espace détecté +
           poignées au centre de chaque côté pour agrandir/réduire la pièce. */}
       {selectedElement?.type === 'space' && (() => {
@@ -13267,10 +13331,11 @@ function HouseBuildHandles({
                     beginDrag({
                       type: outsideNormal ? 'resize' : 'moveInterior',
                       wallId: wall.id,
+                      wall,
                       startX: event.point.x,
                       startZ: event.point.z,
                       normal: moveNormal,
-                      appliedAmount: 0,
+                      pendingAmount: 0,
                     })
                   }}
                 >
@@ -13360,10 +13425,11 @@ function HouseBuildHandles({
                     beginDrag({
                       type: outsideNormal ? 'resize' : 'moveInterior',
                       wallId: wall.id,
+                      wall,
                       startX: event.point.x,
                       startZ: event.point.z,
                       normal: moveNormal,
-                      appliedAmount: 0,
+                      pendingAmount: 0,
                     })
                   }}
                 >
@@ -13455,7 +13521,15 @@ function HouseBuildHandles({
                   </mesh>
                   {doorSelected && canEditStructure && !buildTool && (
                     <mesh
-                      position={[doorTransform.position[0], getHandleY(wall) + 0.22, doorTransform.position[2]]}
+                      // En 3D, la poignée de déplacement est posée SUR
+                      // l'ouverture (mi-hauteur), pas au sommet du mur.
+                      position={view === '3d'
+                        ? [
+                            doorTransform.position[0],
+                            (wall.bottom ?? 0) + (opening.bottom ?? 0) + opening.height * 0.5,
+                            doorTransform.position[2],
+                          ]
+                        : [doorTransform.position[0], 0.22, doorTransform.position[2]]}
                       rotation={doorTransform.rotation}
                       onPointerDown={(event) => {
                         event.stopPropagation()
@@ -13467,7 +13541,9 @@ function HouseBuildHandles({
                         })
                       }}
                     >
-                      <boxGeometry args={[Math.min(0.5, Math.max(0.3, opening.width * 0.35)), 0.16, 0.3]} />
+                      <boxGeometry args={view === '3d'
+                        ? [Math.min(0.5, Math.max(0.3, opening.width * 0.35)), 0.5, 0.34]
+                        : [Math.min(0.5, Math.max(0.3, opening.width * 0.35)), 0.16, 0.3]} />
                       <meshBasicMaterial color="#65f2a3" transparent opacity={0.96} depthWrite={false} />
                     </mesh>
                   )}
@@ -13521,7 +13597,15 @@ function HouseBuildHandles({
                     return (
                       <mesh
                         key={`build-opening-end-${opening.id}-${side}`}
-                        position={[endPoint.x, view === '3d' ? getHandleY(wall) + 0.16 : 0.24, endPoint.z]}
+                        // En 3D : sur les bords verticaux de l'ouverture,
+                        // à mi-hauteur — la vitre a ses poignées sur ses 4 côtés.
+                        position={[
+                          endPoint.x,
+                          view === '3d'
+                            ? (wall.bottom ?? 0) + (opening.bottom ?? 0) + opening.height * 0.5
+                            : 0.24,
+                          endPoint.z,
+                        ]}
                         onPointerDown={(event) => {
                           event.stopPropagation()
                           beginDrag({
@@ -18390,9 +18474,24 @@ function App() {
     )
   }
 
+  // Applique un déplacement total (fantôme validé au relâchement) par
+  // tranches, car la logique borne chaque appel à ±4 cases.
+  const applyChunkedWallMove = (plan, wallId, amount, operation) => {
+    let next = plan
+    let remaining = Math.round(amount)
+    while (remaining !== 0) {
+      const step = Math.max(-4, Math.min(4, remaining))
+      const result = operation(next, wallId, step)
+      if (result === next) break
+      next = result
+      remaining -= step
+    }
+    return next
+  }
+
   const resizeSelectedBuildWall = (wallId, amount) => {
     if (!canModifyWorld) return
-    setHouse('housePlan',(current) => resizeHouseExteriorWall(current, wallId, amount))
+    setHouse('housePlan',(current) => applyChunkedWallMove(current, wallId, amount, resizeHouseExteriorWall))
   }
 
   const moveBuildOpening = (openingId, wallId, offset) => {
@@ -18477,7 +18576,7 @@ function App() {
 
   const moveBuildInteriorWall = (wallId, amount) => {
     if (!canModifyWorld) return
-    setHouse('housePlan',(current) => moveHouseInteriorWall(current, wallId, amount))
+    setHouse('housePlan',(current) => applyChunkedWallMove(current, wallId, amount, moveHouseInteriorWall))
   }
 
   const resizeBuildWallEnd = (wallId, end, value) => {
