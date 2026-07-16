@@ -32,7 +32,7 @@ import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
-import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
+import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts, syncPlayerHouseOutdoorColliders } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { collisionReady } from './world/mapObjectCollisionData'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
@@ -482,6 +482,38 @@ function syncHouseEntranceRuntime(entrance) {
   OUTDOOR_ENTRY_POSITION.z = entrance.outsidePosition.z
   PLAYER_SPAWNS.outside = [entrance.outsidePosition.x, PLAYER_HEIGHT, entrance.outsidePosition.z]
   PLAYER_SPAWNS.interior = [entrance.insidePosition.x, PLAYER_HEIGHT, entrance.insidePosition.z]
+}
+
+function isInsideHouseFloor(layout, position) {
+  if (!layout?.plan?.floorCells || !position) return false
+  return Boolean(layout.plan.floorCells[`${Math.floor(position.x)},${Math.floor(position.z)}`])
+}
+
+function getSafeHousePosition(layout, preferredPosition = null, reserved = []) {
+  if (isInsideHouseFloor(layout, preferredPosition)) {
+    const tooClose = reserved.some((position) => Math.hypot(
+      position.x - preferredPosition.x,
+      position.z - preferredPosition.z,
+    ) < 0.75)
+    if (!tooClose) return { x: preferredPosition.x, z: preferredPosition.z }
+  }
+
+  const candidates = Object.keys(layout?.plan?.floorCells ?? {}).map((key) => {
+    const [x, z] = key.split(',').map(Number)
+    return { x: x + 0.5, z: z + 0.5 }
+  })
+  if (candidates.length === 0) return { x: 0, z: 0 }
+
+  const reference = preferredPosition ?? candidates[0]
+  return candidates
+    .filter((candidate) => !reserved.some((position) => Math.hypot(
+      position.x - candidate.x,
+      position.z - candidate.z,
+    ) < 0.75))
+    .sort((left, right) => (
+      Math.hypot(left.x - reference.x, left.z - reference.z) -
+      Math.hypot(right.x - reference.x, right.z - reference.z)
+    ))[0] ?? candidates[0]
 }
 
 function getUserDisplayName(user) {
@@ -1775,6 +1807,11 @@ function getWallMaterialSlots(wall) {
   return slots
 }
 
+// Référence partagée entre les poignées d'édition et le rendu de la maison.
+// Pendant un déplacement, elle permet de remplacer visuellement le mur source
+// par son unique aperçu, au lieu d'afficher deux positions concurrentes.
+const activeWallMovePreviewRef = { current: null }
+
 function WallVolume({ wall, rect, wallTexture, exteriorTexture, cutaway = false }) {
   const groupRef = useRef()
   const transform = getWallColliderTransform(wall, rect)
@@ -1801,7 +1838,12 @@ function WallVolume({ wall, rect, wallTexture, exteriorTexture, cutaway = false 
       exteriorNormal[0] * (camera.position.x - transform.position[0]) +
       exteriorNormal[2] * (camera.position.z - transform.position[2]) > 0.18
     )
-    const visible = !(cutaway && facesCamera)
+    const activePreview = activeWallMovePreviewRef.current
+    const replacedByPreview = activePreview &&
+      (activePreview.type === 'resize' || activePreview.type === 'moveInterior') &&
+      activePreview.wallId === wall.id &&
+      activePreview.pendingAmount !== 0
+    const visible = !(cutaway && facesCamera) && !replacedByPreview
     if (groupRef.current.visible !== visible) groupRef.current.visible = visible
   })
 
@@ -13209,10 +13251,16 @@ function WallMoveGhost({ dragRef, view }) {
     const drag = dragRef.current
     if (!group || !mesh) return
     const active = drag && (drag.type === 'resize' || drag.type === 'moveInterior') && drag.wall
-    group.visible = Boolean(active)
-    if (!active) return
+    const amount = drag?.pendingAmount ?? 0
+    // À 0 m, le fantôme serait exactement sur le mur réel : deux surfaces
+    // coplanaires provoquent un clignotement. Il ne s'affiche donc qu'après
+    // le premier déplacement effectif et son libellé est toujours effacé.
+    group.visible = Boolean(active && amount !== 0)
+    if (!active || amount === 0) {
+      if (labelRef.current) labelRef.current.textContent = ''
+      return
+    }
     const wall = drag.wall
-    const amount = drag.pendingAmount ?? 0
     group.position.set(
       (wall.startCorner.x + wall.endCorner.x) * 0.5 + drag.normal[0] * amount,
       0,
@@ -13402,6 +13450,7 @@ function HouseBuildHandles({
       else onMoveInteriorWall(drag.wallId, drag.pendingAmount)
     }
     activeDragRef.current = null
+    activeWallMovePreviewRef.current = null
     setActiveDrag(null)
     onEndChange?.()
   }
@@ -13410,6 +13459,7 @@ function HouseBuildHandles({
     if (!activeDragRef.current) return
     event?.stopPropagation?.()
     activeDragRef.current = null
+    activeWallMovePreviewRef.current = null
     setActiveDrag(null)
     onCancelChange?.()
   }
@@ -13417,6 +13467,7 @@ function HouseBuildHandles({
   const beginDrag = (drag) => {
     onBeginChange?.()
     activeDragRef.current = drag
+    activeWallMovePreviewRef.current = drag
     setActiveDrag(drag)
   }
 
@@ -18257,7 +18308,31 @@ function App() {
     syncHouseEntranceRuntime(houseEntrance)
     syncPlayerHouseTerrainFootprint(activeHouseLayout.footprintRects)
     syncInteriorWallColliders(buildInteriorWallColliderBoxes(activeHouseLayout))
-  }, [activeHouseLayout, houseEntrance])
+    syncPlayerHouseOutdoorColliders(activeHouseLayout)
+
+    // Les stations ne peuvent jamais rester sur une ancienne cellule supprimée.
+    // On conserve leur emplacement quand il est encore valide, sinon on les
+    // replace dans les cellules de sol les plus proches, sans les empiler.
+    const reservedStations = []
+    ;[SKIN_STATION_POSITION, ENV_STATION_POSITION, CUSTOM_STATION_POSITION].forEach((station) => {
+      const safePosition = getSafeHousePosition(activeHouseLayout, station, reservedStations)
+      station.x = safePosition.x
+      station.z = safePosition.z
+      reservedStations.push(safePosition)
+    })
+
+    // Une réduction peut retirer la cellule sous le joueur. Son corps Rapier et
+    // son visuel sont alors téléportés ensemble vers une cellule intérieure
+    // valide, avant la prochaine frame de déplacement.
+    if (currentZone !== ZONES.outside && !isInsideHouseFloor(activeHouseLayout, playerPositionRef.current)) {
+      const safePosition = getSafeHousePosition(activeHouseLayout, houseEntrance?.insidePosition, reservedStations)
+      setSpawnRequest({
+        zone: currentZone,
+        position: [safePosition.x, PLAYER_HEIGHT, safePosition.z],
+        token: Date.now(),
+      })
+    }
+  }, [activeHouseLayout, currentZone, houseEntrance, playerPositionRef])
   const [selectedBuildElement, setSelectedBuildElement] = useState(null)
   const [activeBuildTool, setActiveBuildTool] = useState(null)
   const [partitionStart, setPartitionStart] = useState(null)
@@ -18324,6 +18399,15 @@ function App() {
   const selectedBuildSpace = selectedBuildElement?.type === 'space'
     ? activeHouseLayout.spaces.find((candidate) => candidate.id === selectedBuildElement.id) ?? null
     : null
+  const selectedBuildSpaceObjectCount = useMemo(() => {
+    if (!selectedBuildSpace) return 0
+    const cellSet = new Set(selectedBuildSpace.cells)
+    return editableObjects.filter((object) => {
+      if (!object.canStore || object.status === 'stored' || !object.position) return false
+      const [x, , z] = object.position
+      return cellSet.has(`${Math.floor(x)},${Math.floor(z)}`)
+    }).length
+  }, [editableObjects, selectedBuildSpace])
   const canDeleteSelectedBuildElement = Boolean(
     (selectedBuildElement?.type === 'opening' && !selectedBuildOpeningIsEntrance) ||
     (selectedBuildElement?.type === 'wall' && selectedBuildWall &&
@@ -18881,7 +18965,6 @@ function App() {
       'Cloison trop courte : écarte les deux points d\'au moins une case',
     )
     setPartitionStart(null)
-    setActiveBuildTool(null)
     buildFloorHoverRef.current = null
   }
 
@@ -19469,6 +19552,25 @@ function App() {
             : object,
         ),
       )
+      setEditor('selectedObjectId',null)
+      setEditor('draggingObjectId',null)
+    })
+  }
+
+  const storeSelectedSpaceObjects = () => {
+    if (!canModifyWorld || !selectedBuildSpace || selectedBuildSpaceObjectCount === 0) return
+    const label = selectedBuildSpaceObjectCount === 1 ? 'ce meuble' : `ces ${selectedBuildSpaceObjectCount} meubles`
+    if (!window.confirm(`Ranger ${label} dans l'inventaire ?`)) return
+    if (!window.confirm('Confirmation finale : tous les meubles de cette pièce vont être rangés.')) return
+    const cellSet = new Set(selectedBuildSpace.cells)
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) => current.map((object) => {
+        if (!object.canStore || object.status === 'stored' || !object.position) return object
+        const [x, , z] = object.position
+        return cellSet.has(`${Math.floor(x)},${Math.floor(z)}`)
+          ? { ...object, status: 'stored', position: null }
+          : object
+      }))
       setEditor('selectedObjectId',null)
       setEditor('draggingObjectId',null)
     })
@@ -20764,6 +20866,16 @@ function App() {
                     Supprimer
                   </button>
                 )}
+                {selectedBuildSpace && (
+                  <button
+                    type="button"
+                    className="customize-build-button"
+                    onClick={storeSelectedSpaceObjects}
+                    disabled={selectedBuildSpaceObjectCount === 0}
+                  >
+                    Tout ranger{selectedBuildSpaceObjectCount > 0 ? ` (${selectedBuildSpaceObjectCount})` : ''}
+                  </button>
+                )}
                 <button type="button" className="customize-build-button" onClick={resetHousePlan}>
                   Reset
                 </button>
@@ -20827,6 +20939,16 @@ function App() {
                 >
                   Peindre sol
                 </button>
+                {selectedBuildSpace && (
+                  <button
+                    type="button"
+                    className="customize-build-button"
+                    onClick={storeSelectedSpaceObjects}
+                    disabled={selectedBuildSpaceObjectCount === 0}
+                  >
+                    Tout ranger{selectedBuildSpaceObjectCount > 0 ? ` (${selectedBuildSpaceObjectCount})` : ''}
+                  </button>
+                )}
                 {!selectedBuildElement && activeBuildTool !== 'paintFloor' && (
                   <span className="customize-tab-hint">Touche un mur pour changer sa tapisserie</span>
                 )}

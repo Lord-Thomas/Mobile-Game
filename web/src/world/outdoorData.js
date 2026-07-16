@@ -285,7 +285,19 @@ function createNeighborHouseColliders(house) {
   })
 }
 
+let playerHouseColliderCount = 0
+
 export const OUTDOOR_PLAYER_COLLIDERS = [
   ...createHouseWallColliders(houseLayout.walls),
   ...NEIGHBOR_HOUSES.flatMap((house) => createNeighborHouseColliders(house)),
 ]
+playerHouseColliderCount = OUTDOOR_PLAYER_COLLIDERS.length - NEIGHBOR_HOUSES.flatMap((house) => createNeighborHouseColliders(house)).length
+
+// Le plan de la maison du joueur peut être modifié en personnalisation. La
+// collection reste mutée en place, car les boucles de collision la lisent à
+// chaque frame sans devoir recréer leurs callbacks.
+export function syncPlayerHouseOutdoorColliders(layout) {
+  const next = createHouseWallColliders(layout?.walls ?? houseLayout.walls)
+  OUTDOOR_PLAYER_COLLIDERS.splice(0, playerHouseColliderCount, ...next)
+  playerHouseColliderCount = next.length
+}

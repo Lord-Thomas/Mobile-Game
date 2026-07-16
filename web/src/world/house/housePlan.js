@@ -480,6 +480,84 @@ function normalizeOpenings(openings, walls) {
   return normalized
 }
 
+function hasWallOnCellEdge(walls, x, z, direction) {
+  const boundaryAxis = direction === 'east' || direction === 'west' ? 'z' : 'x'
+  const constant = direction === 'east' ? x + 1
+    : direction === 'west' ? x
+      : direction === 'north' ? z + 1 : z
+  const min = boundaryAxis === 'z' ? z : x
+  const max = min + 1
+  return Object.values(walls).some((wall) => {
+    const axisInfo = getWallAxis(wall)
+    return axisInfo.axis === boundaryAxis &&
+      Math.abs(axisInfo.constant - constant) < 0.001 &&
+      Math.min(axisInfo.from, axisInfo.to) <= min + 0.001 &&
+      Math.max(axisInfo.from, axisInfo.to) >= max - 0.001
+  })
+}
+
+// Cherche les cellules qui ne peuvent pas rejoindre l'extérieur sans traverser
+// un mur. Elles correspondent à une nouvelle pièce fermée tracée avec les
+// cloisons et reçoivent alors le sol de base automatiquement.
+function addFloorsForEnclosedWallCells(plan) {
+  const wallPoints = Object.values(plan.walls).flatMap((wall) => [wall.from, wall.to])
+  if (wallPoints.length < 4) return plan
+  const bounds = wallPoints.reduce((current, [x, z]) => ({
+    minX: Math.min(current.minX, x),
+    maxX: Math.max(current.maxX, x),
+    minZ: Math.min(current.minZ, z),
+    maxZ: Math.max(current.maxZ, z),
+  }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity })
+  const minX = Math.floor(bounds.minX) - 1
+  const maxX = Math.ceil(bounds.maxX)
+  const minZ = Math.floor(bounds.minZ) - 1
+  const maxZ = Math.ceil(bounds.maxZ)
+  const keyFor = (x, z) => `${x},${z}`
+  const exterior = new Set()
+  const queue = []
+  const enqueue = (x, z) => {
+    const key = keyFor(x, z)
+    if (exterior.has(key)) return
+    exterior.add(key)
+    queue.push([x, z])
+  }
+
+  for (let x = minX; x <= maxX; x += 1) {
+    enqueue(x, minZ)
+    enqueue(x, maxZ)
+  }
+  for (let z = minZ; z <= maxZ; z += 1) {
+    enqueue(minX, z)
+    enqueue(maxX, z)
+  }
+
+  const directions = [
+    ['east', 1, 0], ['west', -1, 0], ['north', 0, 1], ['south', 0, -1],
+  ]
+  while (queue.length > 0) {
+    const [x, z] = queue.shift()
+    directions.forEach(([direction, dx, dz]) => {
+      const nextX = x + dx
+      const nextZ = z + dz
+      if (nextX < minX || nextX > maxX || nextZ < minZ || nextZ > maxZ) return
+      if (hasWallOnCellEdge(plan.walls, x, z, direction)) return
+      enqueue(nextX, nextZ)
+    })
+  }
+
+  const floorCells = { ...plan.floorCells }
+  let added = false
+  for (let x = minX + 1; x < maxX; x += 1) {
+    for (let z = minZ + 1; z < maxZ; z += 1) {
+      const key = keyFor(x, z)
+      if (exterior.has(key) || floorCells[key]) continue
+      floorCells[key] = { enabled: true, floorStyleId: 'floor-classic' }
+      added = true
+    }
+  }
+  return added ? normalizeHousePlan({ ...plan, floorCells }) : plan
+}
+
 // Évite les doubles épaisseurs lorsqu'un outil crée un segment sur un mur déjà
 // existant. Seuls les segments réellement superposés, sur la même ligne et à
 // la même hauteur, sont réunis ; les murs simplement adjacents gardent leur
@@ -1093,7 +1171,7 @@ export function addInteriorWallToHousePlan(plan, start, end) {
   if (Math.hypot(to[0] - from[0], to[1] - from[1]) < 1) return plan
 
   const id = createUniqueId(`wall_partition_${from[0]}_${from[1]}_${to[0]}_${to[1]}`, normalized.walls)
-  return normalizeHousePlan({
+  const nextPlan = normalizeHousePlan({
     ...normalized,
     walls: {
       ...normalized.walls,
@@ -1105,6 +1183,7 @@ export function addInteriorWallToHousePlan(plan, start, end) {
       },
     },
   })
+  return addFloorsForEnclosedWallCells(nextPlan)
 }
 
 export function splitHouseWallSegment(plan, wallId, offset = 0.5) {

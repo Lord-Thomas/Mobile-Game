@@ -178,6 +178,25 @@ describe('housePlan', () => {
     expect(overlapping).toBe(plan)
   })
 
+  it('ajoute le sol lorsquun carre de cloisons ferme un nouvel espace', () => {
+    const emptyPlan = normalizeHousePlan({
+      floorCells: {},
+      walls: {},
+      openings: {},
+    })
+    const withSouth = addInteriorWallToHousePlan(emptyPlan, [0, 0], [2, 0])
+    const withEast = addInteriorWallToHousePlan(withSouth, [2, 0], [2, 2])
+    const withNorth = addInteriorWallToHousePlan(withEast, [2, 2], [0, 2])
+    const enclosed = addInteriorWallToHousePlan(withNorth, [0, 2], [0, 0])
+
+    expect(enclosed.floorCells).toMatchObject({
+      '0,0': { enabled: true },
+      '0,1': { enabled: true },
+      '1,0': { enabled: true },
+      '1,1': { enabled: true },
+    })
+  })
+
   it('supprime la derniere porte de jonction sans fusionner les espaces', () => {
     const plan = addRoomToHousePlan(createDefaultHousePlan(), {
       direction: 'east',
