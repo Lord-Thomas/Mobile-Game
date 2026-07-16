@@ -63,6 +63,37 @@ describe('housePlan', () => {
     expect(plan.openings).not.toHaveProperty('orphan')
   })
 
+  it('fusionne les murs colineaires qui se superposent et conserve leurs ouvertures', () => {
+    const plan = normalizeHousePlan({
+      floorCells: {
+        '0,0': true,
+        '1,0': true,
+        '2,0': true,
+        '3,0': true,
+        '4,0': true,
+        '5,0': true,
+      },
+      walls: {
+        wall_first: { from: [0, 0], to: [4, 0], height: 5 },
+        wall_overlap: { from: [2, 0], to: [6, 0], height: 5 },
+      },
+      openings: {
+        door_overlap: {
+          wallId: 'wall_overlap',
+          offset: 0.5,
+          width: 1,
+          bottom: 0,
+          height: 2.4,
+          type: 'door',
+        },
+      },
+    })
+
+    expect(Object.keys(plan.walls)).toEqual(['wall_first'])
+    expect(plan.walls.wall_first).toMatchObject({ from: [0, 0], to: [6, 0] })
+    expect(plan.openings.door_overlap).toMatchObject({ wallId: 'wall_first', offset: 4 / 6 })
+  })
+
   it('detecte la piece principale par defaut', () => {
     const spaces = detectHouseSpaces(createDefaultHousePlan())
 
@@ -129,12 +160,21 @@ describe('housePlan', () => {
     expect(newSpace.cells).toHaveLength(12)
   })
 
-  it('refuse un rectangle de piece qui ne touche pas la maison', () => {
+  it('construit une fondation independante avec sa propre entree', () => {
     const plan = createDefaultHousePlan()
     const detached = addHouseRoomRect(plan, { minX: 8, maxX: 11, minZ: 8, maxZ: 11 })
     const overlapping = addHouseRoomRect(plan, { minX: 0, maxX: 4, minZ: 0, maxZ: 3 })
+    const layout = deriveHouseLayout(detached)
+    const detachedEntrance = Object.values(detached.openings).find((opening) => opening.id.startsWith('door_entrance_room_foundation_8_8'))
 
-    expect(detached).toBe(plan)
+    expect(detached).not.toBe(plan)
+    expect(layout.rooms).toHaveLength(2)
+    expect(detached.floorCells).toHaveProperty('10,10')
+    expect(detachedEntrance).toMatchObject({
+      type: 'door',
+      role: 'entrance',
+      wallId: 'wall_room_foundation_8_8_south',
+    })
     expect(overlapping).toBe(plan)
   })
 

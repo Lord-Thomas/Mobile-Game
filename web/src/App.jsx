@@ -12814,6 +12814,11 @@ function getDraggedCellRect(start, end) {
 function RoomRectGhost({ startPoint, hoverRef, layout }) {
   const groupRef = useRef()
   const meshRef = useRef()
+  const northWallRef = useRef()
+  const eastWallRef = useRef()
+  const southWallRef = useRef()
+  const westWallRef = useRef()
+  const doorRef = useRef()
   const labelRef = useRef()
 
   useFrame(() => {
@@ -12844,14 +12849,25 @@ function RoomRectGhost({ startPoint, hoverRef, layout }) {
     for (let z = rect.minZ; z < rect.maxZ && !touches; z += 1) {
       if (floorCells[`${rect.minX - 1},${z}`] || floorCells[`${rect.maxX},${z}`]) touches = true
     }
-    const valid = width >= 2 && depth >= 2 && width <= 14 && depth <= 14 && !overlaps && touches
+    const valid = width >= 2 && depth >= 2 && width <= 14 && depth <= 14 && !overlaps
+    const wallHeight = layout.plan?.defaultWallHeight ?? 5
 
     group.position.set((rect.minX + rect.maxX) * 0.5, 0.11, (rect.minZ + rect.maxZ) * 0.5)
     mesh.scale.set(Math.max(0.05, width), 1, Math.max(0.05, depth))
     mesh.material.color.set(valid ? '#66ff9a' : '#ff5f5f')
+    northWallRef.current?.position.set(0, wallHeight * 0.5, depth * 0.5)
+    northWallRef.current?.scale.set(width, wallHeight, 1)
+    eastWallRef.current?.position.set(width * 0.5, wallHeight * 0.5, 0)
+    eastWallRef.current?.scale.set(depth, wallHeight, 1)
+    southWallRef.current?.position.set(0, wallHeight * 0.5, -depth * 0.5)
+    southWallRef.current?.scale.set(width, wallHeight, 1)
+    westWallRef.current?.position.set(-width * 0.5, wallHeight * 0.5, 0)
+    westWallRef.current?.scale.set(depth, wallHeight, 1)
+    doorRef.current?.position.set(0, 1.2, -depth * 0.5 - 0.09)
+    doorRef.current?.scale.set(Math.min(1.2, width - 0.4), 2.4, 1)
     if (labelRef.current) {
       labelRef.current.textContent = width > 0 && depth > 0
-        ? `${width} × ${depth} — ${width * depth} m²`
+        ? `${width} × ${depth} — ${width * depth} m²${touches ? ' · extension' : ' · fondation + entrée'}`
         : ''
     }
   })
@@ -12862,7 +12878,27 @@ function RoomRectGhost({ startPoint, hoverRef, layout }) {
         <planeGeometry args={[1, 1]} />
         <meshBasicMaterial color="#66ff9a" transparent opacity={0.3} depthWrite={false} />
       </mesh>
-      <Html position={[0, 1, 0]} center>
+      <mesh ref={northWallRef}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={eastWallRef} rotation={[0, Math.PI * 0.5, 0]}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={southWallRef}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={westWallRef} rotation={[0, Math.PI * 0.5, 0]}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={doorRef}>
+        <boxGeometry args={[1, 1, 0.18]} />
+        <meshBasicMaterial color="#65f2a3" transparent opacity={0.85} depthWrite={false} />
+      </mesh>
+      <Html position={[0, 5.7, 0]} center>
         <div ref={labelRef} className="build-ghost-label" />
       </Html>
     </group>
@@ -18804,7 +18840,7 @@ function App() {
     if (rect.maxX - rect.minX <= 1 && rect.maxZ - rect.minZ <= 1) return
     applyPlanChange(
       (current) => addHouseRoomRect(current, rect),
-      'La pièce doit faire au moins 2 × 2, toucher la maison et ne rien chevaucher',
+      'La fondation doit faire au moins 2 × 2 et ne rien chevaucher',
     )
   }
 

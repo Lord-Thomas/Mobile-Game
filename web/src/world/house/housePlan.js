@@ -480,10 +480,87 @@ function normalizeOpenings(openings, walls) {
   return normalized
 }
 
+// Évite les doubles épaisseurs lorsqu'un outil crée un segment sur un mur déjà
+// existant. Seuls les segments réellement superposés, sur la même ligne et à
+// la même hauteur, sont réunis ; les murs simplement adjacents gardent leur
+// joint manipulable.
+function mergeOverlappingCollinearWalls(walls, openings) {
+  const groups = new Map()
+  Object.values(walls).forEach((wall) => {
+    const axisInfo = getWallAxis(wall)
+    const key = [
+      axisInfo.axis,
+      Math.round(axisInfo.constant * 1000) / 1000,
+      Math.round((wall.bottom ?? 0) * 1000) / 1000,
+      Math.round(wall.height * 1000) / 1000,
+    ].join(':')
+    const group = groups.get(key) ?? []
+    group.push({ wall, axisInfo, min: Math.min(axisInfo.from, axisInfo.to), max: Math.max(axisInfo.from, axisInfo.to) })
+    groups.set(key, group)
+  })
+
+  const mergedWalls = {}
+  const wallTargets = new Map()
+  groups.forEach((group) => {
+    group.sort((left, right) => left.min - right.min || left.max - right.max || left.wall.id.localeCompare(right.wall.id))
+    let active = null
+    const flush = () => {
+      if (!active) return
+      const { wall, axisInfo, min, max, sourceIds } = active
+      const forward = axisInfo.to >= axisInfo.from
+      mergedWalls[wall.id] = {
+        ...wall,
+        from: axisInfo.axis === 'z'
+          ? [axisInfo.constant, forward ? min : max]
+          : [forward ? min : max, axisInfo.constant],
+        to: axisInfo.axis === 'z'
+          ? [axisInfo.constant, forward ? max : min]
+          : [forward ? max : min, axisInfo.constant],
+      }
+      sourceIds.forEach((id) => wallTargets.set(id, wall.id))
+      active = null
+    }
+
+    group.forEach((entry) => {
+      if (!active) {
+        active = { ...entry, sourceIds: [entry.wall.id] }
+        return
+      }
+      if (entry.min < active.max - 0.001) {
+        active.min = Math.min(active.min, entry.min)
+        active.max = Math.max(active.max, entry.max)
+        active.sourceIds.push(entry.wall.id)
+        return
+      }
+      flush()
+      active = { ...entry, sourceIds: [entry.wall.id] }
+    })
+    flush()
+  })
+
+  const mergedOpenings = Object.fromEntries(Object.entries(openings).map(([id, opening]) => {
+    const sourceWall = walls[opening.wallId]
+    const targetWallId = wallTargets.get(opening.wallId) ?? opening.wallId
+    const targetWall = mergedWalls[targetWallId]
+    if (!sourceWall || !targetWall) return [id, opening]
+    const center = getOpeningCenterOnWall(sourceWall, opening)
+    const targetAxis = getWallAxis(targetWall)
+    const length = targetAxis.to - targetAxis.from || 1
+    return [id, {
+      ...opening,
+      wallId: targetWallId,
+      offset: Math.min(1, Math.max(0, (center - targetAxis.from) / length)),
+    }]
+  }))
+
+  return { walls: mergedWalls, openings: mergedOpenings }
+}
+
 export function normalizeHousePlan(plan = DEFAULT_HOUSE_PLAN) {
   const source = plan && typeof plan === 'object' ? plan : DEFAULT_HOUSE_PLAN
-  const walls = normalizeWalls(source.walls)
-  const openings = normalizeOpenings(source.openings, walls)
+  const normalizedWalls = normalizeWalls(source.walls)
+  const normalizedOpenings = normalizeOpenings(source.openings, normalizedWalls)
+  const { walls, openings } = mergeOverlappingCollinearWalls(normalizedWalls, normalizedOpenings)
   const floorCells = normalizeFloorCells(source.floorCells)
   let entranceDoorId = typeof source.entranceDoorId === 'string' && openings[source.entranceDoorId]
     ? source.entranceDoorId
@@ -664,6 +741,48 @@ export function addRoomToHousePlan(plan, options = {}) {
   return attachRoomRect(plan, normalized, rect, direction, attachmentWall, doorWidth)
 }
 
+// Une fondation peut être posée loin de la maison existante. Contrairement à
+// une extension, elle est fermée sur ses quatre côtés et reçoit sa propre
+// porte extérieure afin de rester immédiatement utilisable.
+function createDetachedRoomRect(normalized, rect) {
+  const roomBaseId = createUniqueId(
+    `room_foundation_${rect.minX}_${rect.minZ}`,
+    normalized.walls,
+  )
+  const width = rect.maxX - rect.minX
+  const depth = rect.maxZ - rect.minZ
+  const floorCells = { ...normalized.floorCells }
+  Object.entries(createCellsFromRect(rect.minX, rect.minZ, width, depth, { floorStyleId: 'floor-classic' })).forEach(([key, cell]) => {
+    floorCells[key] = cell
+  })
+
+  const roomWalls = createRoomWalls(roomBaseId, rect, null, normalized.defaultWallHeight)
+  const entranceWallId = `wall_${roomBaseId}_south`
+  const doorId = createUniqueId(`door_entrance_${roomBaseId}`, normalized.openings)
+
+  return normalizeHousePlan({
+    ...normalized,
+    floorCells,
+    walls: {
+      ...normalized.walls,
+      ...roomWalls,
+    },
+    openings: {
+      ...normalized.openings,
+      [doorId]: {
+        id: doorId,
+        wallId: entranceWallId,
+        offset: 0.5,
+        width: Math.min(1.2, width - 0.4),
+        bottom: 0,
+        height: 2.4,
+        type: 'door',
+        role: 'entrance',
+      },
+    },
+  })
+}
+
 // Pièce rectangulaire tracée librement (outil de dessin façon Sims).
 // Le rectangle doit toucher la maison le long d'un mur existant ; le côté
 // retenu est celui offrant le plus long recouvrement avec un mur mitoyen.
@@ -706,7 +825,7 @@ export function addHouseRoomRect(plan, rectInput) {
       if (!best || overlap > best.overlap) best = { direction, wall, overlap }
     })
   })
-  if (!best) return plan
+  if (!best) return createDetachedRoomRect(normalized, rect)
 
   const doorWidth = best.overlap >= 2.5 ? 2 : 1
   return attachRoomRect(plan, normalized, rect, best.direction, best.wall, doorWidth)
@@ -1185,7 +1304,7 @@ function getOpeningAxisSpan(wall, opening) {
   }
 }
 
-function replaceWallSpan(normalized, wall, nextFrom, nextTo) {
+function replaceWallSpan(normalized, wall, nextFrom, nextTo, shouldNormalize = true) {
   const axisInfo = getWallAxis(wall)
   const nextWall = {
     ...wall,
@@ -1219,14 +1338,15 @@ function replaceWallSpan(normalized, wall, nextFrom, nextTo) {
       delete openings[opening.id]
     })
 
-  return normalizeHousePlan({
+  const nextPlan = {
     ...normalized,
     walls: {
       ...normalized.walls,
       [wall.id]: nextWall,
     },
     openings,
-  })
+  }
+  return shouldNormalize ? normalizeHousePlan(nextPlan) : nextPlan
 }
 
 // Redimensionne une cloison en déplaçant une extrémité libre le long de son axe.
@@ -1315,6 +1435,7 @@ export function moveHouseWallJoint(plan, wallIdA, wallIdB, targetValue) {
     wallA,
     jointOnA === 'from' ? nextValue : axisA.from,
     jointOnA === 'to' ? nextValue : axisA.to,
+    false,
   )
   const wallBAfter = withResizedA.walls[wallIdB]
   const axisBAfter = getWallAxis(wallBAfter)
