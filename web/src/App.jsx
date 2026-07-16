@@ -1497,7 +1497,7 @@ function HouseFloorMesh({ rects, texturePath }) {
   )
 }
 
-function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false, layout = houseLayout }) {
+function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false, cutawayWalls = false, layout = houseLayout }) {
   const wallColorMap = useGameTexture(wallTexturePath)
   const ceilingColorMap = useGameTexture(ceilingTexturePath)
   const exteriorWallTexture = useTexture(EXTERIOR_WALL_TEXTURE)
@@ -1531,7 +1531,7 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
         <MergedPlayerExteriorShell layout={layout} />
       </group>
       <group visible={!exteriorOnly}>
-        <HouseWalls wallTexture={wallColorMap} layout={layout} />
+        <HouseWalls wallTexture={wallColorMap} layout={layout} cutaway={cutawayWalls} />
         <mesh geometry={ceilingGeometry} position={[0, wallTopY - 0.02, 0]} visible={!hideCeiling}>
           <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
         </mesh>
@@ -1775,9 +1775,14 @@ function getWallMaterialSlots(wall) {
   return slots
 }
 
-function WallVolume({ wall, rect, wallTexture, exteriorTexture }) {
+function WallVolume({ wall, rect, wallTexture, exteriorTexture, cutaway = false }) {
+  const groupRef = useRef()
   const transform = getWallColliderTransform(wall, rect)
   const materialSlots = useMemo(() => getWallMaterialSlots(wall), [wall])
+  const exteriorNormal = useMemo(() => {
+    const exteriorSide = wall.sideA?.type === 'outside' ? wall.sideA : wall.sideB?.type === 'outside' ? wall.sideB : null
+    return exteriorSide?.normal ?? null
+  }, [wall])
   const args = [
     transform.args[0] * 2,
     transform.args[1] * 2,
@@ -1788,26 +1793,40 @@ function WallVolume({ wall, rect, wallTexture, exteriorTexture }) {
   const hasExterior = materialSlots.some((side) => side?.type === 'outside')
   const capColor = hasExterior ? EXTERIOR_WALL_COLOR : '#d8d0c4'
 
+  useFrame(({ camera }) => {
+    if (!groupRef.current) return
+    // Découpe façon Sims : seules les façades entre la caméra et la maison se
+    // retirent. Les cloisons et les murs opposés restent visibles.
+    const facesCamera = exteriorNormal && (
+      exteriorNormal[0] * (camera.position.x - transform.position[0]) +
+      exteriorNormal[2] * (camera.position.z - transform.position[2]) > 0.18
+    )
+    const visible = !(cutaway && facesCamera)
+    if (groupRef.current.visible !== visible) groupRef.current.visible = visible
+  })
+
   return (
-    <mesh position={transform.position} rotation={transform.rotation} castShadow receiveShadow>
-      <boxGeometry args={args} />
-      {materialSlots.map((side, index) => (
-        <WallBlockMaterial
-          key={`${rect.id}-material-${index}`}
-          attach={`material-${index}`}
-          side={side}
-          width={textureWidth}
-          height={textureHeight}
-          wallTexture={wallTexture}
-          exteriorTexture={exteriorTexture}
-          capColor={capColor}
-        />
-      ))}
-    </mesh>
+    <group ref={groupRef}>
+      <mesh position={transform.position} rotation={transform.rotation} castShadow receiveShadow>
+        <boxGeometry args={args} />
+        {materialSlots.map((side, index) => (
+          <WallBlockMaterial
+            key={`${rect.id}-material-${index}`}
+            attach={`material-${index}`}
+            side={side}
+            width={textureWidth}
+            height={textureHeight}
+            wallTexture={wallTexture}
+            exteriorTexture={exteriorTexture}
+            capColor={capColor}
+          />
+        ))}
+      </mesh>
+    </group>
   )
 }
 
-function HouseWalls({ wallTexture, layout = houseLayout }) {
+function HouseWalls({ wallTexture, layout = houseLayout, cutaway = false }) {
   const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   const walls = layout.walls ?? houseLayout.walls
 
@@ -1821,6 +1840,7 @@ function HouseWalls({ wallTexture, layout = houseLayout }) {
             rect={rect}
             wallTexture={wallTexture}
             exteriorTexture={exteriorTexture}
+            cutaway={cutaway}
           />
         )),
       )}
@@ -19898,6 +19918,7 @@ function App() {
               hideCeiling={mode === 'customize'}
               hideRoof={mode === 'customize' || currentZone !== ZONES.outside}
               exteriorOnly={currentZone === ZONES.outside}
+              cutawayWalls={mode === 'customize' && customizeView === '3d'}
               layout={activeHouseLayout}
             />
             <group visible={showInteriorHouseDetails} userData={{ debugCategory: 'house-interior' }}>
