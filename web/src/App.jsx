@@ -7085,11 +7085,17 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   }
 
   const setCameraDistance = (distance) => {
+    const maxDistance = isLikelyMobileDevice() ? 11 : CAMERA_MAX_DISTANCE
     touchRef.current.cameraDistance = MathUtils.clamp(
       distance,
       CAMERA_MIN_DISTANCE,
-      CAMERA_MAX_DISTANCE,
+      maxDistance,
     )
+  }
+
+  const changeCameraDistance = (delta) => {
+    const currentDistance = touchRef.current.cameraDistance ?? CAMERA_DISTANCE
+    setCameraDistance(currentDistance + delta)
   }
 
   const getPinchDistance = () => {
@@ -7374,6 +7380,26 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
         >
           <span className="action-symbol">{mountFlying ? '\u25b2' : '\u2423'}</span>
         </button>
+      )}
+      {!uiHidden && isLikelyMobileDevice() && (
+        <div className="camera-zoom-controls" aria-label="Zoom caméra">
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => changeCameraDistance(-1)}
+            aria-label="Rapprocher la caméra"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => changeCameraDistance(1)}
+            aria-label="Éloigner la caméra"
+          >
+            +
+          </button>
+        </div>
       )}
       {!uiHidden && mountFlying && (
         <button
@@ -14289,6 +14315,18 @@ function InventoryThumbnail({ card }) {
 }
 
 function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect }) {
+  const [activeCategory, setActiveCategory] = useState('all')
+  const categoryOptions = useMemo(() => ([
+    { id: 'all', label: 'Tous' },
+    { id: 'furniture', label: 'Meubles' },
+    { id: 'decoration', label: 'Déco' },
+    { id: 'rugs', label: 'Tapis' },
+    { id: 'electronics', label: 'Électronique' },
+  ]).filter((option) => option.id === 'all' || cards.some((card) => card.category === option.id)), [cards])
+  const visibleCards = activeCategory === 'all'
+    ? cards
+    : cards.filter((card) => card.category === activeCategory)
+
   return (
     <div className={`object-inventory-sheet ${open ? 'open' : ''}`}>
       <button className="object-inventory-handle" type="button" onClick={onToggle}>
@@ -14300,16 +14338,22 @@ function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect
             <h2>Objets</h2>
             <button type="button" aria-label="Fermer" onClick={onToggle}>×</button>
           </div>
-          <div className="object-inventory-tabs">
-            <button type="button" className="active">Tous</button>
-            <button type="button">Meubles</button>
-            <button type="button">Lumières</button>
-            <button type="button">Déco</button>
-            <button type="button">Sols</button>
-            <button type="button">Murs</button>
+          <div className="object-inventory-tabs" role="tablist" aria-label="Catégories d’objets">
+            {categoryOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="tab"
+                aria-selected={activeCategory === option.id}
+                className={activeCategory === option.id ? 'active' : ''}
+                onClick={() => setActiveCategory(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
           <div className="object-inventory-grid">
-            {cards.map((card) => {
+            {visibleCards.map((card) => {
               const isAvailable = card.stored > 0
               return (
                 <button
@@ -18411,6 +18455,7 @@ function App() {
   const floorPaintBrushId = paintFloorSkinId ?? activeFloorSkinId
   const [customizeView, setCustomizeView] = useState('top')
   const [customizeTab, setCustomizeTab] = useState('build')
+  const [customizeMoreOpen, setCustomizeMoreOpen] = useState(false)
   const [buildNotice, setBuildNotice] = useState(null)
   const [roomDragStart, setRoomDragStart] = useState(null)
   const buildNoticeTimerRef = useRef(null)
@@ -18773,7 +18818,8 @@ function App() {
 
   const resetHousePlan = () => {
     if (!canModifyWorld) return
-    if (!window.confirm('Réinitialiser toute la maison ? Cette action pourra ensuite être annulée avec Retour.')) return
+    if (!window.confirm('Réinitialiser toute la maison ? Les murs, ouvertures et revêtements seront restaurés.')) return
+    if (!window.confirm('Confirmation finale : réinitialiser maintenant toute la maison ?')) return
     runCustomizationChange(() => {
       setSelectedBuildElement(null)
       setActiveBuildTool(null)
@@ -19541,8 +19587,9 @@ function App() {
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
     setCustomizeView('top')
+    setCustomizeMoreOpen(false)
     setView('mode','customize')
-    setEditor('selectedObjectId',placedEditableObjects[0]?.id ?? null)
+    setEditor('selectedObjectId',null)
     setEditor('draggingObjectId',null)
     setEditor('placingObjectId',null)
     setEditor('placementLocked',false)
@@ -19557,6 +19604,7 @@ function App() {
     endCustomizationChange()
     finishCustomizationSession()
     setCustomizeView('top')
+    setCustomizeMoreOpen(false)
     setView('mode','play')
     setMenuOpen('customizationChoice', false)
     setEditor('selectedObjectId',null)
@@ -19593,6 +19641,7 @@ function App() {
     setActiveBuildTool(null)
     setPartitionStart(null)
     setCustomizeView('top')
+    setCustomizeMoreOpen(false)
     setView('mode','play')
     setMenuOpen('customizationChoice', false)
     setEditor('selectedObjectId',null)
@@ -19702,6 +19751,17 @@ function App() {
     setEditor('placingObjectId',null)
     setEditor('placementLocked',false)
     setEditor('placementPreview',null)
+  }
+
+  const leaveCustomizationContext = () => {
+    if (placingObjectId) cancelPlacement()
+    setActiveBuildTool(null)
+    setPartitionStart(null)
+    setRoomDragStart(null)
+    setSelectedBuildElement(null)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setCustomizeMoreOpen(false)
   }
 
   const rotateSelectedObject = (direction) => {
@@ -20822,288 +20882,135 @@ function App() {
         />
       )}
       {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
-        <div className="customize-ui">
-          {!activeHouseLayout.plan.entranceDoorId && (
-            <div className="customize-build-warning">
-              Aucune entrée définie — sélectionne une porte extérieure puis « Entrée »
-            </div>
-          )}
-          {buildNotice && (
-            <div className="customize-build-warning customize-build-notice">
-              {buildNotice}
-            </div>
-          )}
-          {selectedBuildSpace && (
-            <span className="customize-tab-hint">
-              {`Pièce · ${selectedBuildSpace.bounds.maxX - selectedBuildSpace.bounds.minX} × ${selectedBuildSpace.bounds.maxZ - selectedBuildSpace.bounds.minZ} · ${selectedBuildSpace.cells.length} m² · poignées bleues pour agrandir`}
-            </span>
-          )}
-          {/* Contrôles contextuels d'objet : visibles dès qu'un meuble est
-              sélectionné ou en cours de placement, quel que soit l'onglet. */}
-          {(selectedObjectId || placingObjectId) && (
-            <div className="customize-rotation">
-              <button type="button" onClick={() => rotateSelectedObject(-1)}>
-                {'<'}
+        <>
+          <div className="customize-topbar">
+            <button className="customize-topbar-done" type="button" onClick={closeCustomizationMode}>
+              {customizationHistoryState.dirty ? 'Terminer •' : 'Terminer'}
+            </button>
+            <div className="customize-topbar-history" aria-label="Historique et vue">
+              <button type="button" onClick={undoCustomizationChange} disabled={!customizationHistoryState.canUndo} aria-label="Annuler" title="Annuler (Ctrl+Z)">↶</button>
+              <button type="button" onClick={redoCustomizationChange} disabled={!customizationHistoryState.canRedo} aria-label="Rétablir" title="Rétablir (Ctrl+Y)">↷</button>
+              <button type="button" className={customizeView === '3d' ? 'active' : ''} onClick={() => setCustomizeView((current) => current === '3d' ? 'top' : '3d')}>
+                {customizeView === '3d' ? 'Dessus' : '3D'}
               </button>
-              <button type="button" onClick={() => rotateSelectedObject(1)}>
-                {'>'}
-              </button>
-              {PUBLIC_BUILD_FLAGS.showObjectInventory && selectedObject?.canStore && !placingObjectId && (
-                <button type="button" onClick={storeSelectedObject}>
-                  Ranger
-                </button>
-              )}
             </div>
-          )}
-          {customizeTab === 'build' && (
-            <>
-              {selectedBuildElement?.type === 'opening' && (
-                <div className="customize-opening-size">
-                  <span>Position</span>
-                  <button type="button" onClick={() => adjustSelectedOpeningPosition(-0.1)} aria-label="Déplacer vers la gauche">−</button>
-                  <strong>{Math.round((selectedBuildOpening?.offset ?? 0) * (selectedBuildOpeningWall?.length ?? 0) * 10) / 10}</strong>
-                  <button type="button" onClick={() => adjustSelectedOpeningPosition(0.1)} aria-label="Déplacer vers la droite">+</button>
-                  <span>Largeur</span>
-                  <button type="button" onClick={() => adjustSelectedOpeningWidth(-0.2)} aria-label="Réduire la largeur">-</button>
-                  <strong>{selectedBuildOpening?.width?.toFixed?.(1)}</strong>
-                  <button type="button" onClick={() => adjustSelectedOpeningWidth(0.2)} aria-label="Agrandir la largeur">+</button>
-                  <span>Hauteur</span>
-                  <button type="button" onClick={() => adjustSelectedOpeningHeight(-0.2)} aria-label="Réduire la hauteur">-</button>
-                  <strong>{selectedBuildOpening?.height?.toFixed?.(1)}</strong>
-                  <button type="button" onClick={() => adjustSelectedOpeningHeight(0.2)} aria-label="Agrandir la hauteur">+</button>
-                  {selectedBuildOpening?.type === 'window' && (
-                    <>
-                      <span>Bas</span>
-                      <button type="button" onClick={() => adjustSelectedOpeningBottom(-0.2)} aria-label="Descendre le bas">-</button>
-                      <strong>{selectedBuildOpening?.bottom?.toFixed?.(1)}</strong>
-                      <button type="button" onClick={() => adjustSelectedOpeningBottom(0.2)} aria-label="Remonter le bas">+</button>
-                    </>
-                  )}
+            <div className="customize-more-wrap">
+              <button className="customize-more-button" type="button" onClick={() => setCustomizeMoreOpen((current) => !current)} aria-expanded={customizeMoreOpen} aria-label="Plus d’options">•••</button>
+              {customizeMoreOpen && (
+                <div className="customize-more-menu">
+                  <label>
+                    <input type="checkbox" checked={applyWallToCeiling} onChange={(event) => setInventory('applyWallToCeiling', event.target.checked)} />
+                    <span>Tapisserie au plafond</span>
+                  </label>
+                  <button type="button" onClick={() => { setCustomizeMoreOpen(false); resetHousePlan() }}>Réinitialiser la maison</button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => {
+                      if (!customizationHistoryState.dirty || window.confirm('Abandonner toutes les modifications de cette session ?')) cancelCustomizationMode()
+                    }}
+                  >
+                    Abandonner les modifications
+                  </button>
                 </div>
               )}
-              {activeBuildTool === 'room' && (
-                <span className="customize-tab-hint">Trace un rectangle collé à la maison, relâche pour construire</span>
-              )}
-              {selectedBuildElement?.type === 'wall' && !activeBuildTool && (
-                <span className="customize-tab-hint">Mur sélectionné · poignée bleue pour déplacer · points blancs pour la longueur</span>
-              )}
-              {selectedBuildElement?.type === 'opening' && !activeBuildTool && (
-                <span className="customize-tab-hint">Ouverture sélectionnée · poignée verte pour déplacer · points blancs pour redimensionner</span>
-              )}
-              <div className="customize-build-actions">
-                <button
-                  type="button"
-                  className={`customize-build-button ${activeBuildTool === 'room' ? 'active' : ''}`}
-                  onClick={beginRoomTool}
-                >
-                  Pièce
-                </button>
-                <button
-                  type="button"
-                  className={`customize-build-button ${activeBuildTool === 'segment' ? 'active' : ''}`}
-                  onClick={beginSegmentTool}
-                >
-                  Segment
-                </button>
-                <button
-                  type="button"
-                  className={`customize-build-button ${activeBuildTool === 'partition' ? 'active' : ''}`}
-                  onClick={beginPartitionTool}
-                >
-                  Cloison
-                </button>
-                <button
-                  type="button"
-                  className={`customize-build-button ${activeBuildTool === 'door' ? 'active' : ''}`}
-                  onClick={beginDoorTool}
-                >
-                  Porte
-                </button>
-                <button
-                  type="button"
-                  className={`customize-build-button ${activeBuildTool === 'window' ? 'active' : ''}`}
-                  onClick={beginWindowTool}
-                >
-                  Vitre
-                </button>
-                {canSetBuildEntrance && (
-                  <button type="button" className="customize-build-button" onClick={setBuildEntrance}>
-                    Entrée
-                  </button>
-                )}
-                {canDeleteSelectedBuildElement && (
-                  <button type="button" className="customize-build-button danger" onClick={deleteSelectedBuildElement}>
-                    Supprimer
-                  </button>
-                )}
-                {selectedBuildSpace && (
-                  <button
-                    type="button"
-                    className="customize-build-button"
-                    onClick={storeSelectedSpaceObjects}
-                    disabled={selectedBuildSpaceObjectCount === 0}
-                  >
-                    Tout ranger{selectedBuildSpaceObjectCount > 0 ? ` (${selectedBuildSpaceObjectCount})` : ''}
-                  </button>
-                )}
-                <button type="button" className="customize-build-button" onClick={resetHousePlan}>
-                  Reset
-                </button>
-              </div>
-            </>
-          )}
-          {customizeTab === 'decorate' && (
-            <>
-              {activeBuildTool === 'paintFloor' && (
-                <SkinPaintPalette
-                  title="Sol — choisis une texture puis clique une pièce"
-                  skins={floorSkins}
-                  ownedSkinIds={ownedFloorSkins}
-                  activeSkinId={floorPaintBrushId}
-                  coins={coins}
-                  hasUnlimitedCoins={isAdminMode}
-                  onPick={pickFloorPaintSkin}
-                />
-              )}
-              {selectedBuildSpace && activeBuildTool !== 'paintFloor' && (
-                <SkinPaintPalette
-                  title="Sol de la pièce sélectionnée"
-                  skins={floorSkins}
-                  ownedSkinIds={ownedFloorSkins}
-                  activeSkinId={housePlan?.styles?.floorByCell?.[selectedBuildSpace.cells[0]] ?? null}
-                  coins={coins}
-                  hasUnlimitedCoins={isAdminMode}
-                  onPick={pickFloorPaintSkin}
-                />
-              )}
-              {selectedBuildElement?.type === 'wall' && (
-                <>
-                  <SkinPaintPalette
-                    title="Tapisserie — côté cliqué du mur"
-                    skins={availableWallSkins}
-                    ownedSkinIds={ownedWallSkins}
-                    activeSkinId={
-                      housePlan?.styles?.wallBySide?.[`${selectedBuildElement.id}:${selectedBuildElement.side ?? 'inside'}`]
-                      ?? housePlan?.styles?.wallBySide?.[`${selectedBuildElement.id}:inside`]
-                      ?? null
-                    }
-                    coins={coins}
-                    hasUnlimitedCoins={isAdminMode}
-                    onPick={pickWallPaintSkin}
-                  />
-                  <label className="env-ceiling-toggle customize-ceiling-toggle">
-                    <input
-                      type="checkbox"
-                      checked={applyWallToCeiling}
-                      onChange={(event) => setInventory('applyWallToCeiling', event.target.checked)}
-                    />
-                    <span>Appliquer la tapisserie au plafond</span>
-                  </label>
-                </>
-              )}
-              <div className="customize-build-actions">
-                <button
-                  type="button"
-                  className={`customize-build-button ${activeBuildTool === 'paintFloor' ? 'active' : ''}`}
-                  onClick={beginPaintFloorTool}
-                >
-                  Peindre sol
-                </button>
-                {selectedBuildSpace && (
-                  <button
-                    type="button"
-                    className="customize-build-button"
-                    onClick={storeSelectedSpaceObjects}
-                    disabled={selectedBuildSpaceObjectCount === 0}
-                  >
-                    Tout ranger{selectedBuildSpaceObjectCount > 0 ? ` (${selectedBuildSpaceObjectCount})` : ''}
-                  </button>
-                )}
-                {!selectedBuildElement && activeBuildTool !== 'paintFloor' && (
-                  <span className="customize-tab-hint">Touche un mur pour changer sa tapisserie</span>
-                )}
-              </div>
-            </>
-          )}
-          {placingObjectId ? (
-            <div className="customize-placement-actions">
-              <button
-                className="customize-done"
-                type="button"
-                onClick={confirmPlacement}
-                disabled={!placementPreview?.isValid || !placementLocked}
-              >
-                Poser
-              </button>
-              <button className="customize-cancel" type="button" onClick={cancelPlacement}>
-                Annuler
-              </button>
             </div>
-          ) : (
-            <div className="customize-tabbar">
-              <button
-                type="button"
-                className="customize-tab-btn history"
-                onClick={undoCustomizationChange}
-                disabled={!customizationHistoryState.canUndo}
-                aria-label="Annuler la dernière action"
-                title="Annuler (Ctrl+Z)"
-              >
-                ↶
-              </button>
-              <button
-                type="button"
-                className="customize-tab-btn history"
-                onClick={redoCustomizationChange}
-                disabled={!customizationHistoryState.canRedo}
-                aria-label="Rétablir la dernière action"
-                title="Rétablir (Ctrl+Y)"
-              >
-                ↷
-              </button>
-              <button
-                type="button"
-                className={`customize-tab-btn ${customizeTab === 'build' ? 'active' : ''}`}
-                onClick={() => selectCustomizeTab('build')}
-              >
-                Construire
-              </button>
-              <button
-                type="button"
-                className={`customize-tab-btn ${customizeTab === 'decorate' ? 'active' : ''}`}
-                onClick={() => selectCustomizeTab('decorate')}
-              >
-                Décorer
-              </button>
-              {PUBLIC_BUILD_FLAGS.showObjectInventory && (
-                <button
-                  type="button"
-                  className={`customize-tab-btn ${customizeTab === 'furniture' ? 'active' : ''}`}
-                  onClick={() => selectCustomizeTab('furniture')}
-                >
-                  Meubles
-                </button>
-              )}
-              <button
-                type="button"
-                className={`customize-tab-btn view ${customizeView === '3d' ? 'active' : ''}`}
-                onClick={() => setCustomizeView((current) => current === '3d' ? 'top' : '3d')}
-              >
-                {customizeView === '3d' ? 'Vue dessus' : 'Vue 3D'}
-              </button>
-              <button className="customize-done" type="button" onClick={closeCustomizationMode}>
-                {customizationHistoryState.dirty ? 'Valider *' : 'Valider'}
-              </button>
-              <button
-                className="customize-cancel"
-                type="button"
-                onClick={cancelCustomizationMode}
-              >
-                Abandonner
-              </button>
-            </div>
-          )}
-        </div>
+          </div>
+
+          <div className={`customize-ui ${(activeBuildTool || placingObjectId || selectedObjectId || selectedBuildElement) ? 'is-contextual' : 'is-navigation'}`}>
+            {!activeHouseLayout.plan.entranceDoorId && <div className="customize-build-warning">Aucune entrée définie · sélectionne une porte extérieure</div>}
+            {buildNotice && <div className="customize-build-warning customize-build-notice">{buildNotice}</div>}
+
+            {placingObjectId ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading"><strong>Placer le meuble</strong><span>Déplace-le dans la scène</span></div>
+                <div className="customize-context-actions">
+                  <button type="button" onClick={() => rotateSelectedObject(-1)}>Tourner ↶</button>
+                  <button type="button" onClick={() => rotateSelectedObject(1)}>Tourner ↷</button>
+                  <button className="primary" type="button" onClick={confirmPlacement} disabled={!placementPreview?.isValid || !placementLocked}>Poser</button>
+                  <button type="button" onClick={cancelPlacement}>Annuler</button>
+                </div>
+              </div>
+            ) : activeBuildTool ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading">
+                  <strong>{({ room: 'Créer un espace', segment: 'Couper un mur', partition: 'Tracer une cloison', door: 'Ajouter une porte', window: 'Ajouter une fenêtre', paintFloor: 'Peindre le sol' })[activeBuildTool]}</strong>
+                  <span>{({ room: 'Glisse pour tracer les fondations', segment: 'Touche le mur à couper', partition: 'Touche le départ puis l’arrivée', door: 'Touche un mur', window: 'Touche un mur', paintFloor: 'Choisis une texture puis touche une pièce' })[activeBuildTool]}</span>
+                </div>
+                {activeBuildTool === 'paintFloor' && (
+                  <SkinPaintPalette title="Textures de sol" skins={floorSkins} ownedSkinIds={ownedFloorSkins} activeSkinId={floorPaintBrushId} coins={coins} hasUnlimitedCoins={isAdminMode} onPick={pickFloorPaintSkin} />
+                )}
+                <div className="customize-context-actions"><button type="button" onClick={leaveCustomizationContext}>Quitter l’outil</button></div>
+              </div>
+            ) : selectedObjectId ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading"><strong>{selectedObject?.name ?? 'Meuble sélectionné'}</strong><span>Glisse le meuble pour le déplacer</span></div>
+                <div className="customize-context-actions">
+                  <button type="button" onClick={() => rotateSelectedObject(-1)}>Tourner ↶</button>
+                  <button type="button" onClick={() => rotateSelectedObject(1)}>Tourner ↷</button>
+                  {selectedObject?.canStore && <button type="button" onClick={storeSelectedObject}>Ranger</button>}
+                  <button type="button" onClick={leaveCustomizationContext}>Retour</button>
+                </div>
+              </div>
+            ) : selectedBuildElement ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading">
+                  <strong>{selectedBuildElement.type === 'wall' ? 'Mur sélectionné' : selectedBuildElement.type === 'opening' ? (selectedBuildOpening?.type === 'window' ? 'Fenêtre sélectionnée' : 'Porte sélectionnée') : 'Espace sélectionné'}</strong>
+                  <span>{selectedBuildSpace ? `${selectedBuildSpace.cells.length} m² · poignées bleues pour redimensionner` : 'Les actions affichées concernent uniquement cette sélection'}</span>
+                </div>
+
+                {selectedBuildElement.type === 'opening' && (
+                  <div className="customize-opening-size">
+                    <span>Position</span><button type="button" onClick={() => adjustSelectedOpeningPosition(-0.1)}>−</button><strong>{Math.round((selectedBuildOpening?.offset ?? 0) * (selectedBuildOpeningWall?.length ?? 0) * 10) / 10}</strong><button type="button" onClick={() => adjustSelectedOpeningPosition(0.1)}>+</button>
+                    <span>Largeur</span><button type="button" onClick={() => adjustSelectedOpeningWidth(-0.2)}>−</button><strong>{selectedBuildOpening?.width?.toFixed?.(1)}</strong><button type="button" onClick={() => adjustSelectedOpeningWidth(0.2)}>+</button>
+                    <span>Hauteur</span><button type="button" onClick={() => adjustSelectedOpeningHeight(-0.2)}>−</button><strong>{selectedBuildOpening?.height?.toFixed?.(1)}</strong><button type="button" onClick={() => adjustSelectedOpeningHeight(0.2)}>+</button>
+                    {selectedBuildOpening?.type === 'window' && <><span>Bas</span><button type="button" onClick={() => adjustSelectedOpeningBottom(-0.2)}>−</button><strong>{selectedBuildOpening?.bottom?.toFixed?.(1)}</strong><button type="button" onClick={() => adjustSelectedOpeningBottom(0.2)}>+</button></>}
+                  </div>
+                )}
+
+                {customizeTab === 'decorate' && selectedBuildSpace && (
+                  <SkinPaintPalette title="Sol de cette pièce" skins={floorSkins} ownedSkinIds={ownedFloorSkins} activeSkinId={housePlan?.styles?.floorByCell?.[selectedBuildSpace.cells[0]] ?? null} coins={coins} hasUnlimitedCoins={isAdminMode} onPick={pickFloorPaintSkin} />
+                )}
+                {customizeTab === 'decorate' && selectedBuildElement.type === 'wall' && (
+                  <SkinPaintPalette title="Tapisserie du côté sélectionné" skins={availableWallSkins} ownedSkinIds={ownedWallSkins} activeSkinId={housePlan?.styles?.wallBySide?.[`${selectedBuildElement.id}:${selectedBuildElement.side ?? 'inside'}`] ?? housePlan?.styles?.wallBySide?.[`${selectedBuildElement.id}:inside`] ?? null} coins={coins} hasUnlimitedCoins={isAdminMode} onPick={pickWallPaintSkin} />
+                )}
+
+                <div className="customize-context-actions">
+                  {customizeTab === 'build' && selectedBuildElement.type === 'wall' && <><button type="button" onClick={beginSegmentTool}>Couper</button><button type="button" onClick={beginDoorTool}>Porte</button><button type="button" onClick={beginWindowTool}>Fenêtre</button></>}
+                  {customizeTab === 'decorate' && selectedBuildSpace && <button type="button" onClick={beginPaintFloorTool}>Peindre un autre sol</button>}
+                  {canSetBuildEntrance && <button type="button" onClick={setBuildEntrance}>Définir comme entrée</button>}
+                  {selectedBuildSpace && <button type="button" onClick={storeSelectedSpaceObjects} disabled={selectedBuildSpaceObjectCount === 0}>Tout ranger{selectedBuildSpaceObjectCount > 0 ? ` (${selectedBuildSpaceObjectCount})` : ''}</button>}
+                  {canDeleteSelectedBuildElement && <button type="button" className="danger" onClick={deleteSelectedBuildElement}>Supprimer</button>}
+                  <button type="button" onClick={leaveCustomizationContext}>Retour</button>
+                </div>
+              </div>
+            ) : (
+              <div className="customize-navigation-panel">
+                <div className="customize-primary-nav" role="tablist" aria-label="Mode de personnalisation">
+                  <button type="button" className={customizeTab === 'build' ? 'active' : ''} onClick={() => selectCustomizeTab('build')}>Construire</button>
+                  <button type="button" className={customizeTab === 'decorate' ? 'active' : ''} onClick={() => selectCustomizeTab('decorate')}>Décorer</button>
+                  {PUBLIC_BUILD_FLAGS.showObjectInventory && <button type="button" className={customizeTab === 'furniture' ? 'active' : ''} onClick={() => selectCustomizeTab('furniture')}>Meubler</button>}
+                </div>
+                {customizeTab === 'build' && (
+                  <div className="customize-tool-grid">
+                    <button type="button" onClick={beginRoomTool}><span>▣</span>Espace</button>
+                    <button type="button" onClick={beginPartitionTool}><span>╱</span>Cloison</button>
+                    <button type="button" onClick={beginDoorTool}><span>▯</span>Porte</button>
+                    <button type="button" onClick={beginWindowTool}><span>▤</span>Fenêtre</button>
+                    <button type="button" onClick={beginSegmentTool}><span>✂</span>Couper</button>
+                  </div>
+                )}
+                {customizeTab === 'decorate' && (
+                  <div className="customize-tool-grid decorate">
+                    <button type="button" onClick={beginPaintFloorTool}><span>▦</span>Sol</button>
+                    <button type="button" onClick={() => showBuildNotice('Touche un mur dans la scène pour choisir sa tapisserie')}><span>▥</span>Mur</button>
+                  </div>
+                )}
+                {customizeTab === 'furniture' && <p className="customize-navigation-hint">Choisis un meuble dans le catalogue, puis place-le dans la scène.</p>}
+              </div>
+            )}
+          </div>
+        </>
       )}
       {showCaptureUi && PUBLIC_BUILD_FLAGS.showObjectInventory && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && customizeTab === 'furniture' && (
         <ObjectInventorySheet
