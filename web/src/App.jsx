@@ -54,7 +54,7 @@ import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biome
 import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
 import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment } from './world/house/housePlan'
+import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
 import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
 import { getWallColliderTransform, getWallDirection, getWallPointAt, splitWallIntoSolidRects } from './world/house/wallUtils'
@@ -12776,6 +12776,102 @@ function HouseFootprintGrid({ layout, gridSize = CUSTOM_GRID_SIZE }) {
   )
 }
 
+// Rectangle de cellules couvert par un geste de tracé : chaque cellule
+// touchée par le doigt est incluse (floor → floor+1). Partagé entre le
+// fantôme de prévisualisation et la construction pour qu'ils coïncident.
+function getDraggedCellRect(start, end) {
+  return {
+    minX: Math.floor(Math.min(start.x, end.x)),
+    maxX: Math.floor(Math.max(start.x, end.x)) + 1,
+    minZ: Math.floor(Math.min(start.z, end.z)),
+    maxZ: Math.floor(Math.max(start.z, end.z)) + 1,
+  }
+}
+
+// Tracé de pièce façon Sims : pendant le drag de l'outil Pièce, montre le
+// rectangle (vert = constructible, rouge = invalide) avec ses dimensions.
+// La pièce n'est construite qu'au relâchement.
+function RoomRectGhost({ startPoint, hoverRef, layout }) {
+  const groupRef = useRef()
+  const meshRef = useRef()
+  const labelRef = useRef()
+
+  useFrame(() => {
+    const group = groupRef.current
+    const mesh = meshRef.current
+    if (!group || !mesh) return
+    const hover = hoverRef?.current
+    const rect = getDraggedCellRect(startPoint, hover ?? startPoint)
+    const width = rect.maxX - rect.minX
+    const depth = rect.maxZ - rect.minZ
+    group.visible = width > 0 && depth > 0
+    if (!group.visible) return
+
+    const floorCells = layout.plan?.floorCells ?? {}
+    let overlaps = false
+    let touches = false
+    for (let x = rect.minX; x < rect.maxX && !overlaps; x += 1) {
+      for (let z = rect.minZ; z < rect.maxZ; z += 1) {
+        if (floorCells[`${x},${z}`]) {
+          overlaps = true
+          break
+        }
+      }
+    }
+    for (let x = rect.minX; x < rect.maxX && !touches; x += 1) {
+      if (floorCells[`${x},${rect.minZ - 1}`] || floorCells[`${x},${rect.maxZ}`]) touches = true
+    }
+    for (let z = rect.minZ; z < rect.maxZ && !touches; z += 1) {
+      if (floorCells[`${rect.minX - 1},${z}`] || floorCells[`${rect.maxX},${z}`]) touches = true
+    }
+    const valid = width >= 2 && depth >= 2 && width <= 14 && depth <= 14 && !overlaps && touches
+
+    group.position.set((rect.minX + rect.maxX) * 0.5, 0.11, (rect.minZ + rect.maxZ) * 0.5)
+    mesh.scale.set(Math.max(0.05, width), 1, Math.max(0.05, depth))
+    mesh.material.color.set(valid ? '#66ff9a' : '#ff5f5f')
+    if (labelRef.current) {
+      labelRef.current.textContent = width > 0 && depth > 0
+        ? `${width} × ${depth} — ${width * depth} m²`
+        : ''
+    }
+  })
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial color="#66ff9a" transparent opacity={0.3} depthWrite={false} />
+      </mesh>
+      <Html position={[0, 1, 0]} center>
+        <div ref={labelRef} className="build-ghost-label" />
+      </Html>
+    </group>
+  )
+}
+
+// Curseur de sol : petit anneau qui suit le pointeur sur la parcelle,
+// pour toujours voir où l'on pointe (surtout en 3D et sur mobile).
+function FloorCursor({ hoverRef }) {
+  const meshRef = useRef()
+
+  useFrame(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    const hover = hoverRef?.current
+    const fresh = hover && Number.isFinite(hover.x) && (performance.now() - (hover.time ?? 0)) < 450
+    mesh.visible = Boolean(fresh)
+    if (!fresh) return
+    mesh.position.set(snap(hover.x), 0.065, snap(hover.z))
+  })
+
+  return (
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+      <ringGeometry args={[0.14, 0.22, 24]} />
+      <meshBasicMaterial color="#f2c14e" transparent opacity={0.85} depthWrite={false} />
+    </mesh>
+  )
+}
+
 function EditableFloor({
   mode,
   view = 'top',
@@ -12789,6 +12885,8 @@ function EditableFloor({
   onBuildFloorClick,
   onBuildFloorHover,
   onSelectSpaceAt,
+  onRoomDragStart,
+  onRoomDragEnd,
   onLockPlacement,
   onStopDragging,
   onClearSelection,
@@ -12817,7 +12915,10 @@ function EditableFloor({
       return undefined
     }
 
-    const onPointerEnd = (event) => finishPointerInteraction(event.pointerId)
+    const onPointerEnd = (event) => {
+      if (buildTool === 'room') onRoomDragEnd?.(null)
+      finishPointerInteraction(event.pointerId)
+    }
     const onWindowBlur = () => finishPointerInteraction()
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') finishPointerInteraction()
@@ -12831,6 +12932,13 @@ function EditableFloor({
         activePointerIdRef.current !== null &&
         event.pointerId !== activePointerIdRef.current
       ) return
+      // Revérifie l'état de drag au moment du move (l'état React peut avoir
+      // changé après le pointerdown) : déplacer un meuble ne doit pas orbiter.
+      const editorState = useGameStore.getState().editor
+      if (editorState.draggingObjectId || editorState.placingObjectId) {
+        lastClientRef.current = null
+        return
+      }
       const dx = event.clientX - lastClientRef.current.x
       const dy = event.clientY - lastClientRef.current.y
       lastClientRef.current = { x: event.clientX, y: event.clientY }
@@ -12854,7 +12962,7 @@ function EditableFloor({
       window.removeEventListener('blur', onWindowBlur)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [camera, finishPointerInteraction, isActive, view])
+  }, [buildTool, camera, finishPointerInteraction, isActive, onRoomDragEnd, view])
 
   useEffect(() => {
     if (!isActive) {
@@ -12882,6 +12990,13 @@ function EditableFloor({
       visible={isActive}
       onPointerDown={(event) => {
         if (!isActive) return
+        if (buildTool === 'room') {
+          // Tracé de pièce : le coin de départ se pose au doigt/clic.
+          event.stopPropagation()
+          onBuildFloorHover?.(event.point)
+          onRoomDragStart?.(event.point)
+          return
+        }
         if (isPanning) {
           if (event.pointerType === 'touch' && lastClientRef.current) {
             // Second finger landed — cancel pan to let pinch zoom take over
@@ -12898,18 +13013,14 @@ function EditableFloor({
           activePointerIdRef.current !== null &&
           event.pointerId !== activePointerIdRef.current
         ) return
+        // Le survol alimente le curseur de sol et les fantômes (cloison,
+        // tracé de pièce) — simple écriture de ref, aucun re-render.
+        onBuildFloorHover?.(event.point)
         // Le pan (vue dessus) et l'orbite (3D) sont gérés au niveau fenêtre
         // (onWindowPointerMove) : ici on ne traite que ce qui a besoin du
         // point 3D issu du raycast.
         if (isPanning) return
-        if (buildTool) {
-          // Outil actif : le survol alimente la prévisualisation fantôme.
-          if (buildTool === 'partition') {
-            event.stopPropagation()
-            onBuildFloorHover?.(event.point)
-          }
-          return
-        }
+        if (buildTool) return
         if (placingObjectId && placementLocked) return
         event.stopPropagation()
         const objectId = draggingObjectId ?? placingObjectId
@@ -12940,6 +13051,11 @@ function EditableFloor({
       }}
       onPointerUp={(event) => {
         if (!isActive) return
+        if (buildTool === 'room') {
+          event.stopPropagation()
+          onRoomDragEnd?.(event.point)
+          return
+        }
         finishPointerInteraction(event.pointerId)
         event.stopPropagation()
       }}
@@ -13254,23 +13370,31 @@ function HouseBuildHandles({
 
   return (
     <group visible userData={{ debugCategory: 'house-build-handles' }}>
-      {activeDrag && (
+      {activeDrag && (() => {
+        // Plan de capture du drag. En 3D, tous les drags d'ouvertures passent
+        // par un plan VERTICAL aligné au mur (le pointeur est sur l'ouverture,
+        // pas au sol : projeter sur le sol créait une grosse parallaxe).
+        // Les drags horizontaux utilisent un plan à la hauteur de la poignée.
+        const useWallPlane = activeDrag.wall && (
+          activeDrag.type === 'openingHeight' ||
+          activeDrag.type === 'openingBottom' ||
+          (view === '3d' && (activeDrag.type === 'opening' || activeDrag.type === 'openingSpan'))
+        )
+        return (
         <mesh
-          // Plan de capture du drag : vertical et aligné au mur pour la hauteur
-          // (vue 3D), horizontal pour tous les déplacements dans le plan XZ.
-          rotation={activeDrag.type === 'openingHeight' || activeDrag.type === 'openingBottom'
+          rotation={useWallPlane
             ? [0, -Math.atan2(
                 activeDrag.wall.endCorner.z - activeDrag.wall.startCorner.z,
                 activeDrag.wall.endCorner.x - activeDrag.wall.startCorner.x,
               ), 0]
             : [-Math.PI / 2, 0, 0]}
-          position={activeDrag.type === 'openingHeight' || activeDrag.type === 'openingBottom'
+          position={useWallPlane
             ? [
                 (activeDrag.wall.startCorner.x + activeDrag.wall.endCorner.x) * 0.5,
                 4,
                 (activeDrag.wall.startCorner.z + activeDrag.wall.endCorner.z) * 0.5,
               ]
-            : [0, 0.18, 0]}
+            : [0, activeDrag.planeY ?? 0.18, 0]}
           onPointerMove={updateActiveDrag}
           onPointerUp={finishActiveDrag}
           onPointerCancel={cancelActiveDrag}
@@ -13278,7 +13402,8 @@ function HouseBuildHandles({
           <planeGeometry args={[PLAYER_PLOT_SIZE + 12, PLAYER_PLOT_SIZE + 12]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
         </mesh>
-      )}
+        )
+      })()}
       <WallMoveGhost dragRef={activeDragRef} view={view} />
       {/* Sélection de pièce façon Sims : surbrillance de l'espace détecté +
           poignées au centre de chaque côté pour agrandir/réduire la pièce. */}
@@ -13335,6 +13460,7 @@ function HouseBuildHandles({
                       startX: event.point.x,
                       startZ: event.point.z,
                       normal: moveNormal,
+                      planeY: event.point.y,
                       pendingAmount: 0,
                     })
                   }}
@@ -13359,11 +13485,17 @@ function HouseBuildHandles({
                 : transform.position}
               rotation={transform.rotation}
               onPointerOver={(event) => {
+                // Pas de survol pendant un drag : stopPropagation volerait des
+                // événements au plan de capture et le setState re-rendrait.
+                if (activeDragRef.current) return
                 event.stopPropagation()
                 setHoveredTarget(`wall:${wall.id}`)
               }}
               onPointerOut={() => setHoveredTarget((current) => current === `wall:${wall.id}` ? null : current)}
               onPointerDown={(event) => {
+                // Outil Pièce : on laisse l'événement traverser jusqu'au sol,
+                // qui gère le tracé du rectangle.
+                if (buildTool === 'room') return
                 event.stopPropagation()
                 const offset = getWallOffsetFromPoint(wall, event.point)
                 if (buildTool === 'segment') {
@@ -13373,12 +13505,6 @@ function HouseBuildHandles({
                 }
                 if (buildTool === 'door' || buildTool === 'window') {
                   onAddOpening(wall.id, offset, buildTool)
-                  onCompleteBuildTool()
-                  return
-                }
-                if (buildTool === 'room') {
-                  if (!outsideNormal) return
-                  onAddRoom(getRoomDirectionFromNormal(outsideNormal))
                   onCompleteBuildTool()
                   return
                 }
@@ -13399,14 +13525,13 @@ function HouseBuildHandles({
                   buildTool === 'segment' ? '#f2c14e'
                     : buildTool === 'door' ? '#65f2a3'
                       : buildTool === 'window' ? '#8fd7ff'
-                        : buildTool === 'room' ? (outsideNormal ? '#75d5ff' : '#4a5560')
-                          : selected ? '#f2c14e'
-                            : hoveredTarget === `wall:${wall.id}` ? '#d8efff'
-                              : outsideNormal ? '#75d5ff' : '#ff8e6e'
+                        : selected ? '#f2c14e'
+                          : hoveredTarget === `wall:${wall.id}` ? '#d8efff'
+                            : outsideNormal ? '#75d5ff' : '#ff8e6e'
                 }
                 transparent
                 opacity={
-                  buildTool === 'room' && !outsideNormal ? 0.12
+                  buildTool === 'room' ? 0.05
                     : buildTool || selected ? 0.46
                       : hoveredTarget === `wall:${wall.id}` ? 0.28 : view === '3d' ? 0.035 : 0.18
                 }
@@ -13429,6 +13554,7 @@ function HouseBuildHandles({
                       startX: event.point.x,
                       startZ: event.point.z,
                       normal: moveNormal,
+                      planeY: event.point.y,
                       pendingAmount: 0,
                     })
                   }}
@@ -13460,6 +13586,7 @@ function HouseBuildHandles({
                         wallIdA: wall.id,
                         wallIdB: colinearNeighbor.id,
                         axis: wall.axis === 'x' ? 'x' : 'z',
+                        planeY: event.point.y,
                         lastValue: null,
                       })
                       return
@@ -13469,6 +13596,7 @@ function HouseBuildHandles({
                       wallId: wall.id,
                       end: endKey === 'start' ? 'from' : 'to',
                       axis: wall.axis === 'x' ? 'x' : 'z',
+                      planeY: event.point.y,
                       lastValue: null,
                     })
                   }}
@@ -13493,6 +13621,7 @@ function HouseBuildHandles({
                       : doorTransform.position}
                     rotation={doorTransform.rotation}
                     onPointerOver={(event) => {
+                      if (activeDragRef.current) return
                       event.stopPropagation()
                       setHoveredTarget(`opening:${opening.id}`)
                     }}
@@ -13502,6 +13631,16 @@ function HouseBuildHandles({
                       activeDragRef.current = null
                       setActiveDrag(null)
                       onSelectElement({ type: 'opening', id: opening.id })
+                      // Saisir l'ouverture la déplace directement (façon Sims) :
+                      // pas besoin de viser la petite poignée.
+                      if (canEditStructure && !buildTool) {
+                        beginDrag({
+                          type: 'opening',
+                          openingId: opening.id,
+                          wall,
+                          lastOffset: opening.center / Math.max(0.001, wall.length),
+                        })
+                      }
                     }}
                   >
                     <boxGeometry args={view === '3d'
@@ -13658,6 +13797,9 @@ function CustomizationLayer({
   onBuildFloorClick,
   onSelectBuildSpaceAt,
   buildFloorHoverRef,
+  roomDragStart,
+  onRoomDragStart,
+  onRoomDragEnd,
   onSplitBuildWall,
   onResizeBuildWall,
   onMoveBuildOpening,
@@ -13848,9 +13990,13 @@ function CustomizationLayer({
         }}
         onBuildFloorClick={onBuildFloorClick}
         onBuildFloorHover={(point) => {
-          if (buildFloorHoverRef) buildFloorHoverRef.current = point
+          if (buildFloorHoverRef) {
+            buildFloorHoverRef.current = { x: point.x, z: point.z, time: performance.now() }
+          }
         }}
         onSelectSpaceAt={onSelectBuildSpaceAt}
+        onRoomDragStart={onRoomDragStart}
+        onRoomDragEnd={onRoomDragEnd}
         onStopDragging={onStopDragging}
         onClearSelection={() => {
           onSelect(null)
@@ -13870,6 +14016,10 @@ function CustomizationLayer({
         {partitionStart && (
           <PartitionGhost startPoint={partitionStart} hoverRef={buildFloorHoverRef} />
         )}
+        {buildTool === 'room' && roomDragStart && (
+          <RoomRectGhost startPoint={roomDragStart} hoverRef={buildFloorHoverRef} layout={layout} />
+        )}
+        <FloorCursor hoverRef={buildFloorHoverRef} />
       </group>
       {mode === 'customize' && showBuildHandles && (
         <HouseBuildHandles
@@ -18048,6 +18198,7 @@ function App() {
   const [customizeView, setCustomizeView] = useState('top')
   const [customizeTab, setCustomizeTab] = useState('build')
   const [buildNotice, setBuildNotice] = useState(null)
+  const [roomDragStart, setRoomDragStart] = useState(null)
   const buildNoticeTimerRef = useRef(null)
   const buildFloorHoverRef = useRef(null)
   const customizationHistoryRef = useRef({ initial: null, undo: [], redo: [], transaction: null })
@@ -18448,6 +18599,7 @@ function App() {
     if (!canModifyWorld) return
     setActiveBuildTool((current) => current === 'room' ? null : 'room')
     setPartitionStart(null)
+    setRoomDragStart(null)
     setSelectedBuildElement(null)
   }
 
@@ -18546,6 +18698,7 @@ function App() {
     setCustomizeTab(tab)
     setActiveBuildTool(null)
     setPartitionStart(null)
+    setRoomDragStart(null)
     setSelectedBuildElement(null)
     setUi('objectInventoryOpen', tab === 'furniture')
   }
@@ -18598,6 +18751,30 @@ function App() {
     )
   }
 
+  // Tracé de pièce façon Sims : coin posé au pointerdown, rectangle
+  // prévisualisé pendant le drag, construction au relâchement.
+  // Le rectangle couvre les CELLULES touchées par le geste (floor → floor+1),
+  // pas les coins les plus proches : ce que le doigt balaye est ce qui se
+  // construit, sans décalage d'une demi-case.
+  const startRoomDrag = (point) => {
+    if (!canModifyWorld) return
+    setRoomDragStart({ x: point.x, z: point.z })
+  }
+
+  const endRoomDrag = (point) => {
+    if (!roomDragStart) return
+    const endSource = point ?? buildFloorHoverRef.current
+    setRoomDragStart(null)
+    if (!endSource) return
+    const rect = getDraggedCellRect(roomDragStart, endSource)
+    // Simple tap : on annule sans message.
+    if (rect.maxX - rect.minX <= 1 && rect.maxZ - rect.minZ <= 1) return
+    applyPlanChange(
+      (current) => addHouseRoomRect(current, rect),
+      'La pièce doit faire au moins 2 × 2, toucher la maison et ne rien chevaucher',
+    )
+  }
+
   const setBuildEntrance = () => {
     if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
     applyPlanChange(
@@ -18642,6 +18819,7 @@ function App() {
   const completeBuildTool = () => {
     setActiveBuildTool(null)
     setPartitionStart(null)
+    setRoomDragStart(null)
   }
 
   const buyCat = async () => {
@@ -19811,6 +19989,9 @@ function App() {
             onBuildFloorClick={handleBuildFloorClick}
             onSelectBuildSpaceAt={selectBuildSpaceAt}
             buildFloorHoverRef={buildFloorHoverRef}
+            roomDragStart={roomDragStart}
+            onRoomDragStart={startRoomDrag}
+            onRoomDragEnd={endRoomDrag}
             onSplitBuildWall={splitBuildWallAtOffset}
             onResizeBuildWall={resizeSelectedBuildWall}
             onMoveBuildOpening={moveBuildOpening}
@@ -20457,6 +20638,9 @@ function App() {
                     </>
                   )}
                 </div>
+              )}
+              {activeBuildTool === 'room' && (
+                <span className="customize-tab-hint">Trace un rectangle collé à la maison, relâche pour construire</span>
               )}
               {selectedBuildElement?.type === 'wall' && !activeBuildTool && (
                 <span className="customize-tab-hint">Mur sélectionné · poignée bleue pour déplacer · points blancs pour la longueur</span>

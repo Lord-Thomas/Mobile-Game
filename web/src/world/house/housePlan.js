@@ -521,26 +521,50 @@ export function createDefaultHousePlan() {
   return normalizeHousePlan(DEFAULT_HOUSE_PLAN)
 }
 
-export function addRoomToHousePlan(plan, options = {}) {
-  const normalized = normalizeHousePlan(plan)
-  const direction = normalizeDirection(options.direction)
-  const width = clampInteger(options.width, MIN_ROOM_SIZE, MAX_ROOM_SIZE, 4)
-  const depth = clampInteger(options.depth, MIN_ROOM_SIZE, MAX_ROOM_SIZE, 6)
-  const doorWidth = Math.min(
-    clampInteger(options.doorWidth, 1, Math.min(width, depth), 2),
-    direction === 'east' || direction === 'west' ? depth : width,
-  )
-  // Convention de refus : retourner l'argument tel quel (même référence)
-  // pour que l'appelant puisse détecter l'échec et prévenir le joueur.
-  const bounds = getFloorBounds(normalized.floorCells)
-  if (!Number.isFinite(bounds.minX)) return plan
+// Intervalle du côté attaché du rectangle (le long du mur mitoyen).
+function getAttachedSideSpan(direction, rect) {
+  return direction === 'east' || direction === 'west'
+    ? { axis: 'z', constant: direction === 'east' ? rect.minX : rect.maxX, min: rect.minZ, max: rect.maxZ }
+    : { axis: 'x', constant: direction === 'north' ? rect.minZ : rect.maxZ, min: rect.minX, max: rect.maxX }
+}
 
-  const rect = getRoomRect(bounds, direction, width, depth)
-  if (hasFloorOverlap(normalized.floorCells, rect)) return plan
+function getWallsOnLine(walls, side) {
+  return Object.values(walls).filter((wall) => {
+    const axisInfo = getWallAxis(wall)
+    if (axisInfo.axis !== side.axis) return false
+    if (Math.abs(axisInfo.constant - side.constant) > 0.001) return false
+    return Math.min(axisInfo.from, axisInfo.to) < side.max - 0.001 &&
+      Math.max(axisInfo.from, axisInfo.to) > side.min + 0.001
+  })
+}
 
-  const attachmentWall = findAttachmentWall(normalized, direction, bounds, rect, doorWidth)
-  if (!attachmentWall) return plan
+// Portions du côté attaché non couvertes par un mur existant : le rectangle
+// peut être plus large que le mur mitoyen, il faut fermer les trous.
+function getUncoveredSideIntervals(side, wallsOnLine) {
+  const covered = wallsOnLine
+    .map((wall) => {
+      const axisInfo = getWallAxis(wall)
+      return [
+        Math.max(side.min, Math.min(axisInfo.from, axisInfo.to)),
+        Math.min(side.max, Math.max(axisInfo.from, axisInfo.to)),
+      ]
+    })
+    .filter(([a, b]) => b - a > 0.001)
+    .sort((left, right) => left[0] - right[0])
 
+  const gaps = []
+  let cursor = side.min
+  covered.forEach(([a, b]) => {
+    if (a > cursor + 0.001) gaps.push([cursor, a])
+    cursor = Math.max(cursor, b)
+  })
+  if (cursor < side.max - 0.001) gaps.push([cursor, side.max])
+  return gaps
+}
+
+// Cœur commun : accole un rectangle de pièce à la maison via un mur mitoyen
+// existant (découpe du mur, cloison + porte de jonction, murs manquants).
+function attachRoomRect(plan, normalized, rect, direction, attachmentWall, doorWidth) {
   const roomBaseId = createUniqueId(
     `room_${makeSafeIdPart(direction)}_${rect.minX}_${rect.minZ}`,
     normalized.walls,
@@ -569,6 +593,23 @@ export function addRoomToHousePlan(plan, options = {}) {
   })
   const roomWalls = createRoomWalls(roomBaseId, rect, direction, normalized.defaultWallHeight)
 
+  // Ferme les portions du côté attaché sans mur existant (touche partielle).
+  const side = getAttachedSideSpan(direction, rect)
+  const wallsOnLine = getWallsOnLine({ ...wallsWithoutAttachment, ...splitWall.walls }, side)
+  getUncoveredSideIntervals(side, wallsOnLine).forEach(([a, b], index) => {
+    const id = createUniqueId(`wall_${roomBaseId}_fill_${index}`, {
+      ...wallsWithoutAttachment,
+      ...splitWall.walls,
+      ...roomWalls,
+    })
+    roomWalls[id] = {
+      id,
+      from: side.axis === 'z' ? [side.constant, a] : [a, side.constant],
+      to: side.axis === 'z' ? [side.constant, b] : [b, side.constant],
+      height: normalized.defaultWallHeight,
+    }
+  })
+
   return normalizeHousePlan({
     ...normalized,
     floorCells,
@@ -583,7 +624,13 @@ export function addRoomToHousePlan(plan, options = {}) {
       [openingId]: {
         id: openingId,
         wallId: splitWall.sharedSegment.id,
-        offset: getOpeningOffset(splitWall.sharedSegment, direction, rect),
+        // Bornée dans le segment partagé : en touche partielle, le centre du
+        // rectangle peut se projeter hors de la cloison de jonction.
+        offset: (() => {
+          const segmentLength = getWallLength(splitWall.sharedSegment)
+          const margin = Math.min(0.45, (doorWidth * 0.5) / Math.max(0.001, segmentLength))
+          return Math.min(1 - margin, Math.max(margin, getOpeningOffset(splitWall.sharedSegment, direction, rect)))
+        })(),
         width: doorWidth,
         bottom: 0,
         height: 2.4,
@@ -592,6 +639,77 @@ export function addRoomToHousePlan(plan, options = {}) {
       },
     },
   })
+}
+
+export function addRoomToHousePlan(plan, options = {}) {
+  const normalized = normalizeHousePlan(plan)
+  const direction = normalizeDirection(options.direction)
+  const width = clampInteger(options.width, MIN_ROOM_SIZE, MAX_ROOM_SIZE, 4)
+  const depth = clampInteger(options.depth, MIN_ROOM_SIZE, MAX_ROOM_SIZE, 6)
+  const doorWidth = Math.min(
+    clampInteger(options.doorWidth, 1, Math.min(width, depth), 2),
+    direction === 'east' || direction === 'west' ? depth : width,
+  )
+  // Convention de refus : retourner l'argument tel quel (même référence)
+  // pour que l'appelant puisse détecter l'échec et prévenir le joueur.
+  const bounds = getFloorBounds(normalized.floorCells)
+  if (!Number.isFinite(bounds.minX)) return plan
+
+  const rect = getRoomRect(bounds, direction, width, depth)
+  if (hasFloorOverlap(normalized.floorCells, rect)) return plan
+
+  const attachmentWall = findAttachmentWall(normalized, direction, bounds, rect, doorWidth)
+  if (!attachmentWall) return plan
+
+  return attachRoomRect(plan, normalized, rect, direction, attachmentWall, doorWidth)
+}
+
+// Pièce rectangulaire tracée librement (outil de dessin façon Sims).
+// Le rectangle doit toucher la maison le long d'un mur existant ; le côté
+// retenu est celui offrant le plus long recouvrement avec un mur mitoyen.
+export function addHouseRoomRect(plan, rectInput) {
+  const normalized = normalizeHousePlan(plan)
+  const rawMinX = Math.round(Number(rectInput?.minX))
+  const rawMaxX = Math.round(Number(rectInput?.maxX))
+  const rawMinZ = Math.round(Number(rectInput?.minZ))
+  const rawMaxZ = Math.round(Number(rectInput?.maxZ))
+  if (![rawMinX, rawMaxX, rawMinZ, rawMaxZ].every(Number.isFinite)) return plan
+
+  const rect = {
+    minX: Math.min(rawMinX, rawMaxX),
+    maxX: Math.max(rawMinX, rawMaxX),
+    minZ: Math.min(rawMinZ, rawMaxZ),
+    maxZ: Math.max(rawMinZ, rawMaxZ),
+  }
+  const width = rect.maxX - rect.minX
+  const depth = rect.maxZ - rect.minZ
+  if (width < 2 || depth < 2) return plan
+  if (width > MAX_ROOM_SIZE || depth > MAX_ROOM_SIZE) return plan
+  if (hasFloorOverlap(normalized.floorCells, rect)) return plan
+
+  let best = null
+  HOUSE_ROOM_DIRECTIONS.forEach((direction) => {
+    const side = getAttachedSideSpan(direction, rect)
+    getWallsOnLine(normalized.walls, side).forEach((wall) => {
+      const axisInfo = getWallAxis(wall)
+      const overlapStart = Math.max(side.min, Math.min(axisInfo.from, axisInfo.to))
+      const overlapEnd = Math.min(side.max, Math.max(axisInfo.from, axisInfo.to))
+      const overlap = overlapEnd - overlapStart
+      if (overlap < 1 - 0.001) return
+      // Le mur mitoyen doit border du sol existant de l'autre côté.
+      const mid = (overlapStart + overlapEnd) * 0.5
+      const probeKey = direction === 'east' ? getCellKey(rect.minX - 1, Math.floor(mid))
+        : direction === 'west' ? getCellKey(rect.maxX, Math.floor(mid))
+          : direction === 'north' ? getCellKey(Math.floor(mid), rect.minZ - 1)
+            : getCellKey(Math.floor(mid), rect.maxZ)
+      if (!normalized.floorCells[probeKey]) return
+      if (!best || overlap > best.overlap) best = { direction, wall, overlap }
+    })
+  })
+  if (!best) return plan
+
+  const doorWidth = best.overlap >= 2.5 ? 2 : 1
+  return attachRoomRect(plan, normalized, rect, best.direction, best.wall, doorWidth)
 }
 
 export function addPrototypeEastRoom(plan) {

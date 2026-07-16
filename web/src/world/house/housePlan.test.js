@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { deriveHouseLayout, getHouseEntranceTransform } from './deriveHouseLayout'
 import {
   addHouseOpeningToWall,
+  addHouseRoomRect,
   addInteriorWallToHousePlan,
   addPrototypeEastRoom,
   addRoomToHousePlan,
@@ -112,6 +113,29 @@ describe('housePlan', () => {
     expect(northPlan.floorCells).toHaveProperty('0,5')
     expect(Object.keys(northPlan.walls).some((id) => id.includes('shared'))).toBe(true)
     expect(Object.values(northPlan.openings).filter((opening) => opening.role === 'junction')).toHaveLength(2)
+  })
+
+  it('construit une piece rectangulaire tracee librement contre la maison', () => {
+    // Rectangle 4x3 collé partiellement au mur est (z de -1 à 2).
+    const plan = addHouseRoomRect(createDefaultHousePlan(), { minX: 5, maxX: 9, minZ: -1, maxZ: 2 })
+    const layout = deriveHouseLayout(plan)
+    const junctionDoor = Object.values(plan.openings).find((opening) => opening.role === 'junction')
+
+    expect(layout.rooms).toHaveLength(2)
+    expect(plan.floorCells).toHaveProperty('8,1')
+    expect(junctionDoor).toBeTruthy()
+    // Chaque piece detectee est fermee : aucune cellule du rectangle ne fuit.
+    const newSpace = layout.spaces.find((space) => space.cells.includes('6,0'))
+    expect(newSpace.cells).toHaveLength(12)
+  })
+
+  it('refuse un rectangle de piece qui ne touche pas la maison', () => {
+    const plan = createDefaultHousePlan()
+    const detached = addHouseRoomRect(plan, { minX: 8, maxX: 11, minZ: 8, maxZ: 11 })
+    const overlapping = addHouseRoomRect(plan, { minX: 0, maxX: 4, minZ: 0, maxZ: 3 })
+
+    expect(detached).toBe(plan)
+    expect(overlapping).toBe(plan)
   })
 
   it('supprime la derniere porte de jonction sans fusionner les espaces', () => {
