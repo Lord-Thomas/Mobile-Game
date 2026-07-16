@@ -57,7 +57,7 @@ import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } 
 import { addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
 import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
-import { getWallColliderTransform, getWallDirection, getWallPointAt, splitWallIntoSolidRects } from './world/house/wallUtils'
+import { getWallColliderTransform, getWallDirection, getWallPointAt, getWallRenderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
@@ -1663,7 +1663,7 @@ function createPlayerExteriorShellGeometry(layout = houseLayout) {
   layout.walls.forEach((wall) => {
     const color = getWallExteriorColor(wall)
     splitWallIntoSolidRects(wall).forEach((rect) => {
-      const transform = getWallColliderTransform(wall, rect)
+      const transform = getWallRenderTransform(wall, rect, layout.walls)
       pushColoredBox(
         collector,
         transform.position,
@@ -1812,9 +1812,9 @@ function getWallMaterialSlots(wall) {
 // par son unique aperçu, au lieu d'afficher deux positions concurrentes.
 const activeWallMovePreviewRef = { current: null }
 
-function WallVolume({ wall, rect, wallTexture, exteriorTexture, cutaway = false }) {
+function WallVolume({ wall, rect, walls, wallTexture, exteriorTexture, cutaway = false }) {
   const groupRef = useRef()
-  const transform = getWallColliderTransform(wall, rect)
+  const transform = getWallRenderTransform(wall, rect, walls)
   const materialSlots = useMemo(() => getWallMaterialSlots(wall), [wall])
   const exteriorNormal = useMemo(() => {
     const exteriorSide = wall.sideA?.type === 'outside' ? wall.sideA : wall.sideB?.type === 'outside' ? wall.sideB : null
@@ -1880,6 +1880,7 @@ function HouseWalls({ wallTexture, layout = houseLayout, cutaway = false }) {
             key={rect.id}
             wall={wall}
             rect={rect}
+            walls={walls}
             wallTexture={wallTexture}
             exteriorTexture={exteriorTexture}
             cutaway={cutaway}
