@@ -1201,6 +1201,56 @@ function clampCameraInPlayableVolume(x, y, z, currentZone = ZONES.interior) {
   return { x: clampedX, y: clampedY, z: clampedZ }
 }
 
+// La caméra intérieure est contrainte à l'espace détecté sous le joueur, pas
+// seulement à l'enveloppe globale de la maison.
+const interiorCameraSpaces = []
+const interiorCameraTransition = { current: null, previous: null, changedAt: 0 }
+const INTERIOR_CAMERA_DOORWAY_GRACE_MS = 420
+
+function syncInteriorCameraSpaces(layout) {
+  interiorCameraSpaces.length = 0
+  ;(layout?.spaces ?? []).forEach((space) => interiorCameraSpaces.push(new Set(space.cells)))
+}
+
+function constrainInteriorCameraToPlayerSpace(focusX, focusY, focusZ, targetX, targetY, targetZ) {
+  const startCell = `${Math.floor(focusX)},${Math.floor(focusZ)}`
+  const playerSpace = interiorCameraSpaces.find((cells) => cells.has(startCell))
+  if (!playerSpace) return { x: targetX, y: targetY, z: targetZ }
+  if (interiorCameraTransition.current !== playerSpace) {
+    interiorCameraTransition.previous = interiorCameraTransition.current
+    interiorCameraTransition.current = playerSpace
+    interiorCameraTransition.changedAt = performance.now()
+  }
+  const containsAt = (progress) => playerSpace.has(
+    `${Math.floor(focusX + (targetX - focusX) * progress)},${Math.floor(focusZ + (targetZ - focusZ) * progress)}`,
+  )
+  if (containsAt(1)) return { x: targetX, y: targetY, z: targetZ }
+
+  // Juste après le franchissement d'une porte, autoriser brièvement la caméra
+  // à finir son mouvement dans la pièce précédente. Ce délai empêche le zoom
+  // brutal au seuil, puis la contrainte de la nouvelle pièce reprend seule.
+  const previousSpace = interiorCameraTransition.previous
+  const inDoorwayGrace = performance.now() - interiorCameraTransition.changedAt < INTERIOR_CAMERA_DOORWAY_GRACE_MS
+  const targetCell = `${Math.floor(targetX)},${Math.floor(targetZ)}`
+  if (inDoorwayGrace && previousSpace?.has(targetCell)) {
+    return { x: targetX, y: targetY, z: targetZ }
+  }
+
+  let low = 0
+  let high = 1
+  for (let index = 0; index < 12; index += 1) {
+    const middle = (low + high) * 0.5
+    if (containsAt(middle)) low = middle
+    else high = middle
+  }
+  const safe = Math.max(0.08, low - 0.015)
+  return {
+    x: focusX + (targetX - focusX) * safe,
+    y: focusY + (targetY - focusY) * safe,
+    z: focusZ + (targetZ - focusZ) * safe,
+  }
+}
+
 function getSegmentExpandedBoxHitT(startX, startZ, endX, endZ, collider, clearance) {
   const rotationY = collider.rotationY ?? 0
   const cos = Math.cos(-rotationY)
@@ -4706,11 +4756,29 @@ function Player({
       targetZ = constrainedTarget.z
     }
 
+    if (currentZone !== ZONES.outside) {
+      const constrainedTarget = constrainInteriorCameraToPlayerSpace(
+        focusX, originY, focusZ, targetX, targetY, targetZ,
+      )
+      targetX = constrainedTarget.x
+      targetY = constrainedTarget.y
+      targetZ = constrainedTarget.z
+    }
+
     const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ, currentZone)
     const cameraDamping = towerCameraContext ? 20 : 12
-    camera.position.x = MathUtils.damp(camera.position.x, clampedTarget.x, cameraDamping, delta)
-    camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, cameraDamping, delta)
-    camera.position.z = MathUtils.damp(camera.position.z, clampedTarget.z, cameraDamping, delta)
+    let nextCameraX = MathUtils.damp(camera.position.x, clampedTarget.x, cameraDamping, delta)
+    let nextCameraY = MathUtils.damp(camera.position.y, clampedTarget.y, cameraDamping, delta)
+    let nextCameraZ = MathUtils.damp(camera.position.z, clampedTarget.z, cameraDamping, delta)
+    if (currentZone !== ZONES.outside) {
+      const constrainedCamera = constrainInteriorCameraToPlayerSpace(
+        focusX, originY, focusZ, nextCameraX, nextCameraY, nextCameraZ,
+      )
+      nextCameraX = constrainedCamera.x
+      nextCameraY = constrainedCamera.y
+      nextCameraZ = constrainedCamera.z
+    }
+    camera.position.set(nextCameraX, nextCameraY, nextCameraZ)
 
     cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, focusX, 16, delta)
     cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, focusY + lookHeight, 16, delta)
@@ -18310,6 +18378,7 @@ function App() {
     syncPlayerHouseTerrainFootprint(activeHouseLayout.footprintRects)
     syncInteriorWallColliders(buildInteriorWallColliderBoxes(activeHouseLayout))
     syncPlayerHouseOutdoorColliders(activeHouseLayout)
+    syncInteriorCameraSpaces(activeHouseLayout)
 
     // Les stations ne peuvent jamais rester sur une ancienne cellule supprimée.
     // On conserve leur emplacement quand il est encore valide, sinon on les
