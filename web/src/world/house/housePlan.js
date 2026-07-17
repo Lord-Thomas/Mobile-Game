@@ -1275,27 +1275,54 @@ export function addInteriorWallToHousePlan(plan, start, end) {
     : [from[0], rawTo[1]]
   if (Math.hypot(to[0] - from[0], to[1] - from[1]) < 1) return plan
 
-  const id = createUniqueId(`wall_partition_${from[0]}_${from[1]}_${to[0]}_${to[1]}`, normalized.walls)
+  // Une cloison qui rejoint le milieu d'un mur transforme cette coordonnée en
+  // vraie jonction structurelle. Le grand mur est donc découpé à chaque point
+  // de contact : les portions qui bordent des pièces différentes deviennent
+  // sélectionnables et personnalisables indépendamment.
+  const splitWallsAtPoint = (sourcePlan, point) => {
+    const wallIds = Object.values(sourcePlan.walls)
+      .filter((wall) => {
+        const axisInfo = getWallAxis(wall)
+        const value = axisInfo.axis === 'z' ? point[1] : point[0]
+        const perpendicular = axisInfo.axis === 'z' ? point[0] : point[1]
+        const min = Math.min(axisInfo.from, axisInfo.to)
+        const max = Math.max(axisInfo.from, axisInfo.to)
+        return Math.abs(perpendicular - axisInfo.constant) < 0.001 && value > min + 0.001 && value < max - 0.001
+      })
+      .map((wall) => wall.id)
+
+    return wallIds.reduce((current, wallId) => {
+      const wall = current.walls[wallId]
+      if (!wall) return current
+      const axisInfo = getWallAxis(wall)
+      const value = axisInfo.axis === 'z' ? point[1] : point[0]
+      const offset = (value - axisInfo.from) / (axisInfo.to - axisInfo.from || 1)
+      return splitHouseWallAtOffset(current, wallId, offset)
+    }, sourcePlan)
+  }
+
+  const prepared = splitWallsAtPoint(splitWallsAtPoint(normalized, from), to)
+  const id = createUniqueId(`wall_partition_${from[0]}_${from[1]}_${to[0]}_${to[1]}`, prepared.walls)
   const nextPlan = normalizeHousePlan({
-    ...normalized,
+    ...prepared,
     walls: {
-      ...normalized.walls,
+      ...prepared.walls,
       [id]: {
         id,
         from,
         to,
-        height: normalized.defaultWallHeight,
+        height: prepared.defaultWallHeight,
       },
     },
   })
   return addFloorsForEnclosedWallCells(nextPlan)
 }
 
-export function splitHouseWallSegment(plan, wallId, offset = 0.5) {
+function splitHouseWallAtOffset(plan, wallId, offset) {
   const normalized = normalizeHousePlan(plan)
   const wall = normalized.walls[wallId]
-  const splitOffset = Math.min(0.9, Math.max(0.1, Number(offset)))
-  if (!wall || !Number.isFinite(splitOffset)) return plan
+  const splitOffset = Number(offset)
+  if (!wall || !Number.isFinite(splitOffset) || splitOffset <= 0.001 || splitOffset >= 0.999) return plan
 
   const splitPoint = getWallPointAtOffset(wall, splitOffset)
   const openingsOnWall = Object.values(normalized.openings).filter((opening) => opening.wallId === wallId)
@@ -1335,6 +1362,19 @@ export function splitHouseWallSegment(plan, wallId, offset = 0.5) {
     if (remapped) remappedOpenings[remapped.id] = remapped
   })
 
+  // Une découpe ne doit pas effacer la décoration existante. Chaque nouveau
+  // segment hérite des quatre clés de côté possibles ; ils pourront ensuite
+  // diverger quand le joueur repeint uniquement l'un d'eux.
+  const wallBySide = { ...normalized.styles.wallBySide }
+  ;['inside', 'outside', 'left', 'right'].forEach((side) => {
+    const previousKey = `${wallId}:${side}`
+    const styleId = wallBySide[previousKey]
+    delete wallBySide[previousKey]
+    if (!styleId) return
+    wallBySide[`${firstId}:${side}`] = styleId
+    wallBySide[`${secondId}:${side}`] = styleId
+  })
+
   return normalizeHousePlan({
     ...normalized,
     walls: {
@@ -1346,7 +1386,17 @@ export function splitHouseWallSegment(plan, wallId, offset = 0.5) {
       ...openingsWithoutWall,
       ...remappedOpenings,
     },
+    styles: {
+      ...normalized.styles,
+      wallBySide,
+    },
   })
+}
+
+export function splitHouseWallSegment(plan, wallId, offset = 0.5) {
+  const requestedOffset = Number(offset)
+  if (!Number.isFinite(requestedOffset)) return plan
+  return splitHouseWallAtOffset(plan, wallId, Math.min(0.9, Math.max(0.1, requestedOffset)))
 }
 
 export function removeLatestInteriorWall(plan) {
@@ -1542,10 +1592,22 @@ export function resizeHouseWallEnd(plan, wallId, end, targetValue) {
   if (!wall) return plan
 
   const movingPoint = end === 'from' ? wall.from : wall.to
-  const endpointShared = Object.values(normalized.walls).some((candidate) => (
+  const connectedWalls = Object.values(normalized.walls).filter((candidate) => (
     candidate.id !== wallId &&
     (pointsMatch(candidate.from, movingPoint) || pointsMatch(candidate.to, movingPoint))
   ))
+  // La découpe automatique d'un grand mur crée deux segments colinéaires au
+  // point où arrive une cloison (jonction en T). Cette cloison doit conserver
+  // son ancienne poignée libre : la raccourcir la détache simplement du mur.
+  const throughWallJoint = connectedWalls.length === 2 && (() => {
+    const firstAxis = getWallAxis(connectedWalls[0])
+    const secondAxis = getWallAxis(connectedWalls[1])
+    const movingAxis = getWallAxis(wall)
+    return firstAxis.axis === secondAxis.axis &&
+      firstAxis.axis !== movingAxis.axis &&
+      Math.abs(firstAxis.constant - secondAxis.constant) < 0.001
+  })()
+  const endpointShared = connectedWalls.length > 0 && !throughWallJoint
   if (endpointShared) return plan
 
   const axisInfo = getWallAxis(wall)

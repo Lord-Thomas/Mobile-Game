@@ -332,6 +332,43 @@ describe('housePlan', () => {
     expect(layout.rooms).toHaveLength(2)
   })
 
+  it('decoupe automatiquement un grand mur aux jonctions d une nouvelle piece', () => {
+    const first = addInteriorWallToHousePlan(createDefaultHousePlan(), [-5, 0], [0, 0])
+    const second = addInteriorWallToHousePlan(first, [0, 0], [0, 3])
+    const enclosed = addInteriorWallToHousePlan(second, [0, 3], [-5, 3])
+    const westSegments = Object.values(enclosed.walls)
+      .filter((wall) => wall.from[0] === -5 && wall.to[0] === -5)
+      .sort((left, right) => Math.min(left.from[1], left.to[1]) - Math.min(right.from[1], right.to[1]))
+
+    expect(westSegments).toHaveLength(3)
+    expect(westSegments.map((wall) => [
+      Math.min(wall.from[1], wall.to[1]),
+      Math.max(wall.from[1], wall.to[1]),
+    ])).toEqual([[-5, 0], [0, 3], [3, 5]])
+    expect(deriveHouseLayout(enclosed).rooms).toHaveLength(2)
+    expect(enclosed.openings.door_entrance.wallId).toBe(westSegments[0].id)
+  })
+
+  it('conserve la tapisserie lors de la decoupe puis personnalise une seule portion', () => {
+    const painted = setHouseWallSideStyle(createDefaultHousePlan(), 'wall_main_west', 'inside', 'wall-briques-01')
+    const first = addInteriorWallToHousePlan(painted, [-5, 0], [0, 0])
+    const enclosed = addInteriorWallToHousePlan(first, [0, 3], [-5, 3])
+    const westSegments = Object.values(enclosed.walls)
+      .filter((wall) => wall.from[0] === -5 && wall.to[0] === -5)
+    const middle = westSegments.find((wall) => (
+      Math.min(wall.from[1], wall.to[1]) === 0 && Math.max(wall.from[1], wall.to[1]) === 3
+    ))
+    const customized = setHouseWallSideStyle(enclosed, middle.id, 'right', 'wall-brun-mat')
+
+    westSegments.forEach((wall) => {
+      expect(enclosed.styles.wallBySide[`${wall.id}:inside`]).toBe('wall-briques-01')
+    })
+    expect(customized.styles.wallBySide[`${middle.id}:right`]).toBe('wall-brun-mat')
+    westSegments.filter((wall) => wall.id !== middle.id).forEach((wall) => {
+      expect(customized.styles.wallBySide).not.toHaveProperty(`${wall.id}:right`)
+    })
+  })
+
   // Le sol est fait de cellules de 1 unite : une cloison posee entre deux
   // bords de cellule serait rattachee au plus proche par la topologie et le
   // sol paraitrait decale d'un quart. Les murs collent donc a la grille.
