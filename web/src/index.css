@@ -5518,9 +5518,11 @@ html[data-orientation='landscape'] .quest-journal-btn {
   left: max(14px, env(safe-area-inset-left));
   z-index: 10;
   display: grid;
-  /* Terminer à gauche, historique/vue à droite : le centre reste libre pour
-     le compteur de pièces, qui doit rester lisible pendant la construction. */
-  grid-template-columns: auto 1fr;
+  /* Trois colonnes pour les trois groupes (Terminer / historique / •••).
+     L'historique est poussé à droite contre le bouton ••• : le centre reste
+     libre pour le compteur de pièces, et rien ne passe en 2e rangée — le
+     menu ••• doit rester ancré en haut à droite pour ne pas sortir de l'écran. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
   gap: 12px;
   pointer-events: none;
@@ -5896,7 +5898,7 @@ html[data-orientation='landscape'] .customize-ui {
     top: max(8px, env(safe-area-inset-top));
     right: max(8px, env(safe-area-inset-right));
     left: max(8px, env(safe-area-inset-left));
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 7px;
   }
 

@@ -17,6 +17,7 @@ import {
   moveHouseWallJoint,
   normalizeHousePlan,
   removeHouseOpening,
+  removeHouseSpace,
   removeHouseWall,
   removeLatestInteriorWall,
   removeLatestJunctionDoor,
@@ -471,18 +472,50 @@ describe('housePlan', () => {
   it('signale un refus en retournant le plan d origine (meme reference)', () => {
     const plan = createDefaultHousePlan()
 
-    // Chevauche l'entree, entree protegee, mur exterieur non supprimable.
+    // Chevauche l'entree ; mur exterieur non supprimable (ouvrirait l'enveloppe).
     expect(addHouseOpeningToWall(plan, 'wall_main_west', 0.725)).toBe(plan)
-    expect(removeHouseOpening(plan, 'door_entrance')).toBe(plan)
     expect(removeHouseWall(plan, 'wall_main_east')).toBe(plan)
   })
 
-  it('ne supprime jamais la porte d entree', () => {
+  // Rien n'est verrouille : retirer une porte referme simplement le mur, donc
+  // l'enveloppe reste close et le plan se retrouve sans entree definie.
+  it('supprime la porte d entree et laisse le plan sans entree', () => {
     const plan = createDefaultHousePlan()
-    const unchanged = removeHouseOpening(plan, 'door_entrance')
+    const removed = removeHouseOpening(plan, 'door_entrance')
 
-    expect(unchanged.openings).toHaveProperty('door_entrance')
-    expect(unchanged.entranceDoorId).toBe('door_entrance')
+    expect(removed.openings).not.toHaveProperty('door_entrance')
+    expect(removed.entranceDoorId).toBeNull()
+    expect(deriveHouseLayout(removed).rooms).toHaveLength(1)
+  })
+
+  it('supprime un espace entier sans ouvrir l enveloppe du reste', () => {
+    const plan = addRoomToHousePlan(createDefaultHousePlan(), {
+      direction: 'east',
+      width: 4,
+      depth: 6,
+    })
+    const layout = deriveHouseLayout(plan)
+    const extension = layout.spaces.find((space) => space.cells.includes('6,0'))
+    const removed = removeHouseSpace(plan, extension.cells)
+    const removedLayout = deriveHouseLayout(removed)
+
+    // L'extension disparait, la piece principale reste fermee.
+    expect(removedLayout.rooms).toHaveLength(1)
+    expect(removed.floorCells).not.toHaveProperty('6,0')
+    expect(removed.floorCells).toHaveProperty('0,0')
+    // Les murs de l'extension ne flottent plus dehors.
+    expect(Object.values(removed.walls).some((wall) => wall.from[0] > 5 || wall.to[0] > 5)).toBe(false)
+  })
+
+  it('vide entierement la maison quand on supprime le dernier espace', () => {
+    const plan = createDefaultHousePlan()
+    const spaces = detectHouseSpaces(plan)
+    const emptied = removeHouseSpace(plan, spaces[0].cells)
+
+    expect(Object.keys(emptied.floorCells)).toHaveLength(0)
+    expect(Object.keys(emptied.walls)).toHaveLength(0)
+    expect(Object.keys(emptied.openings)).toHaveLength(0)
+    expect(detectHouseSpaces(emptied)).toHaveLength(0)
   })
 
   it('deplace une cloison interieure perpendiculairement', () => {

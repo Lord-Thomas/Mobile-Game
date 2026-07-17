@@ -1001,8 +1001,9 @@ export function removeLatestJunctionDoor(plan) {
 export function removeHouseOpening(plan, openingId) {
   const normalized = normalizeHousePlan(plan)
   if (!normalized.openings[openingId]) return plan
-  // La maison doit toujours garder une entrée : définir une autre entrée d'abord.
-  if (openingId === normalized.entranceDoorId) return plan
+  // Y compris la porte d'entrée : rien n'est verrouillé côté suppression.
+  // Retirer une porte referme le mur, l'enveloppe reste donc close ; le plan
+  // se retrouve simplement sans entrée définie (l'UI le signale).
 
   const openings = { ...normalized.openings }
   delete openings[openingId]
@@ -1218,6 +1219,40 @@ export function removeHouseWall(plan, wallId) {
     ...normalized,
     walls,
     openings,
+  })
+}
+
+// Supprime un espace entier : son sol, les murs qui ne bordent plus aucune
+// cellule (donc devenus flottants) et leurs ouvertures. Les murs qui gardent
+// du sol d'un côté restent : ils deviennent la façade de ce qui subsiste, et
+// l'enveloppe ne s'ouvre jamais. Supprimer le dernier espace vide la maison.
+export function removeHouseSpace(plan, cellKeys) {
+  const normalized = normalizeHousePlan(plan)
+  const removedCells = (Array.isArray(cellKeys) ? cellKeys : [])
+    .filter((key) => normalized.floorCells[key])
+  if (!removedCells.length) return plan
+
+  const floorCells = { ...normalized.floorCells }
+  removedCells.forEach((key) => delete floorCells[key])
+
+  // Un mur sans sol d'aucun côté ne borde plus rien : il flotterait dehors.
+  const keptWalls = Object.fromEntries(
+    Object.entries(normalized.walls).filter(([, wall]) => {
+      const direction = getWallDirection(wall)
+      const leftKey = getNearbyCellKey(wall, [-direction.z, 0, direction.x])
+      const rightKey = getNearbyCellKey(wall, [direction.z, 0, -direction.x])
+      return Boolean(floorCells[leftKey] || floorCells[rightKey])
+    }),
+  )
+  const keptOpenings = Object.fromEntries(
+    Object.entries(normalized.openings).filter(([, opening]) => keptWalls[opening.wallId]),
+  )
+
+  return normalizeHousePlan({
+    ...normalized,
+    floorCells,
+    walls: keptWalls,
+    openings: keptOpenings,
   })
 }
 

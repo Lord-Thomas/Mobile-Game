@@ -54,7 +54,7 @@ import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biome
 import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
 import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { HOUSE_STRUCTURE_GRID_SIZE, HOUSE_DOOR_COST, HOUSE_FLOOR_COST_PER_CELL, HOUSE_WALL_COST_PER_UNIT, HOUSE_WINDOW_COST, snapHouseCoordinate, getHousePlanValue, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
+import { HOUSE_STRUCTURE_GRID_SIZE, HOUSE_DOOR_COST, HOUSE_FLOOR_COST_PER_CELL, HOUSE_WALL_COST_PER_UNIT, HOUSE_WINDOW_COST, snapHouseCoordinate, getHousePlanValue, removeHouseSpace, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
 import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
 import {
@@ -18564,8 +18564,12 @@ function App() {
       return cellSet.has(`${Math.floor(x)},${Math.floor(z)}`)
     }).length
   }, [editableObjects, selectedBuildSpace])
+  // Tout est supprimable — y compris un espace entier ou la porte d'entrée.
+  // Seule exception : un mur qui ferme la maison sur l'extérieur, dont le
+  // retrait laisserait un trou dans l'enveloppe.
   const canDeleteSelectedBuildElement = Boolean(
-    (selectedBuildElement?.type === 'opening' && !selectedBuildOpeningIsEntrance) ||
+    selectedBuildElement?.type === 'opening' ||
+    selectedBuildElement?.type === 'space' ||
     (selectedBuildElement?.type === 'wall' && selectedBuildWall &&
       selectedBuildWall.sideA?.type !== 'outside' && selectedBuildWall.sideB?.type !== 'outside'),
   )
@@ -18893,7 +18897,31 @@ function App() {
 
   const deleteSelectedBuildElement = () => {
     if (!canModifyWorld || !selectedBuildElement) return
-    if (selectedBuildElement.type === 'space') return
+    // Un espace emporte son sol, ses murs devenus flottants et leurs
+    // ouvertures ; on peut vider la maison entièrement.
+    if (selectedBuildElement.type === 'space') {
+      const space = activeHouseLayout.spaces.find((candidate) => candidate.id === selectedBuildElement.id)
+      if (!space) return
+      const cellSet = new Set(space.cells)
+      applyPlanChange(
+        (current) => removeHouseSpace(current, space.cells),
+        null,
+        () => {
+          // Les meubles de l'espace supprimé retournent à l'inventaire : on ne
+          // perd jamais silencieusement un objet acheté.
+          setEditor('editableObjects',(current) => current.map((object) => {
+            if (!object.canStore || object.status === 'stored' || !object.position) return object
+            const [x, , z] = object.position
+            return cellSet.has(`${Math.floor(x)},${Math.floor(z)}`)
+              ? { ...object, status: 'stored', position: null }
+              : object
+          }))
+          setEditor('selectedObjectId',null)
+          setSelectedBuildElement(null)
+        },
+      )
+      return
+    }
     applyPlanChange(
       (current) => (
         selectedBuildElement.type === 'opening'
@@ -18901,8 +18929,8 @@ function App() {
           : removeHouseWall(current, selectedBuildElement.id)
       ),
       selectedBuildElement.type === 'opening'
-        ? "L'entrée principale ne peut pas être supprimée — définis d'abord une autre entrée"
-        : 'Seules les cloisons intérieures peuvent être supprimées',
+        ? null
+        : "Ce mur ferme la maison sur l'extérieur — supprime plutôt l'espace entier",
       () => setSelectedBuildElement(null),
     )
   }
@@ -19868,6 +19896,15 @@ function App() {
       if ((event.ctrlKey || event.metaKey) && key === 'y') {
         event.preventDefault()
         redoCustomizationChange()
+        return
+      }
+      // Suppr : supprime la sélection courante (élément de structure ou
+      // meuble), comme le bouton Supprimer du panneau.
+      if (key === 'delete' || key === 'backspace') {
+        if (!selectedBuildElement && !selectedObjectId) return
+        event.preventDefault()
+        if (selectedBuildElement) deleteSelectedBuildElement()
+        else storeSelectedObject()
         return
       }
       if (key === 'escape') {
@@ -21058,7 +21095,7 @@ function App() {
                   {customizeTab === 'decorate' && selectedBuildSpace && <button type="button" onClick={beginPaintFloorTool}>Peindre un autre sol</button>}
                   {canSetBuildEntrance && <button type="button" onClick={setBuildEntrance}>Définir comme entrée</button>}
                   {selectedBuildSpace && <button type="button" onClick={storeSelectedSpaceObjects} disabled={selectedBuildSpaceObjectCount === 0}>Tout ranger{selectedBuildSpaceObjectCount > 0 ? ` (${selectedBuildSpaceObjectCount})` : ''}</button>}
-                  {canDeleteSelectedBuildElement && <button type="button" className="danger" onClick={deleteSelectedBuildElement}>Supprimer</button>}
+                  {canDeleteSelectedBuildElement && <button type="button" className="danger" onClick={deleteSelectedBuildElement}>{selectedBuildElement.type === 'space' ? 'Supprimer l’espace' : 'Supprimer'}</button>}
                   <button type="button" onClick={leaveCustomizationContext}>Retour</button>
                 </div>
               </div>
