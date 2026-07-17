@@ -65,6 +65,17 @@ Start Command: npm run multiplayer
 Health Check Path: /health
 ```
 
+Pour alimenter le cadre mural YouTube (nom, photo et nombre d'abonnes), activer
+YouTube Data API v3 dans Google Cloud puis ajouter ces variables uniquement sur
+le service serveur (jamais dans les variables `VITE_` du frontend):
+
+```bash
+YOUTUBE_API_KEY=cle-api-youtube
+YOUTUBE_CHANNEL_HANDLE=@Thoms_gail
+```
+
+Le serveur garde la reponse en cache 15 minutes afin de limiter le quota API.
+
 Le serveur ecoute `PORT` en production et `COLYSEUS_PORT` ou `2567` en local.
 
 Configuration Vercel:

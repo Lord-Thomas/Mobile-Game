@@ -23,6 +23,8 @@ import { GENERATED_ENEMY_DEFINITIONS } from './enemies/enemyDefinitions.generate
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
+import YouTubeSubscriberFrame from './gameObjects/YouTubeSubscriberFrame'
+import { getWallMountTargets, getWallMountTransform } from './gameObjects/wallPlacement'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
@@ -55,7 +57,7 @@ import { getItemDefinition, getSlimePetDefinitions } from './items/itemDefinitio
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight } from './world/terrain/terrainGeometry'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
+import { getWallColliderTransform, getWallSideTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
@@ -9324,6 +9326,9 @@ function PlaceableModel({ objectId, type, placedObjectId }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
   if (type === 'rug' || catalogItem?.type === 'rug') return <RugModel objectId={objectId} />
+  if (catalogItem?.type === 'youtube_subscriber_frame') {
+    return <YouTubeSubscriberFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} />
+  }
   if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} placedObjectId={placedObjectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
   if (type === 'sofa' || catalogItem?.type === 'sofa') return <SofaModel />
@@ -13003,6 +13008,7 @@ function RoomBorder({ width, depth, posX = 0, posZ = 0, visible = true }) {
 
 function EditableFloor({
   mode,
+  disabled = false,
   draggingObjectId,
   placingObjectId,
   placementLocked,
@@ -13015,7 +13021,7 @@ function EditableFloor({
 }) {
   const { camera } = useThree()
   const lastClientRef = useRef(null)
-  const isActive = mode === 'customize'
+  const isActive = mode === 'customize' && !disabled
 
   useEffect(() => {
     if (!isActive) {
@@ -13093,6 +13099,53 @@ function EditableFloor({
   )
 }
 
+function WallPlacementSurfaces({ object, placementLocked, isPlacing, onTransform, onLockPlacement, onStopDragging }) {
+  const catalogItem = objectCatalog[object?.objectId]
+  const width = catalogItem?.width ?? 1.5
+  const height = catalogItem?.height ?? 0.86
+  const depth = catalogItem?.depth ?? 0.07
+  const targets = useMemo(
+    () => getWallMountTargets(houseLayout, width, height),
+    [height, width],
+  )
+
+  if (!object || catalogItem?.placementSurface !== 'wall') return null
+
+  const updateTransform = (event, target) => {
+    if (isPlacing && placementLocked) return
+    event.stopPropagation()
+    onTransform(getWallMountTransform(target, event.point, width, height, depth))
+  }
+
+  return (
+    <group>
+      {targets.map((target) => {
+        const surface = getWallSideTransform(target.wall, target.rect, target.wall.sideA)
+        return (
+          <mesh
+            key={target.id}
+            position={surface.position}
+            rotation={surface.rotation}
+            onPointerMove={(event) => updateTransform(event, target)}
+            onClick={(event) => {
+              if (!isPlacing || placementLocked) return
+              updateTransform(event, target)
+              onLockPlacement()
+            }}
+            onPointerUp={(event) => {
+              event.stopPropagation()
+              if (!isPlacing) onStopDragging()
+            }}
+          >
+            <planeGeometry args={[surface.width, surface.height]} />
+            <meshBasicMaterial color="#ff365f" transparent opacity={0.045} depthWrite={false} side={DoubleSide} />
+          </mesh>
+        )
+      })}
+    </group>
+  )
+}
+
 function PlacementPreview({ object, preview, groupRef }) {
   if (!object || !preview) return null
 
@@ -13104,8 +13157,8 @@ function PlacementPreview({ object, preview, groupRef }) {
         </Suspense>
       </group>
       <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0.045, 0]}
+        rotation={objectCatalog[object.objectId]?.placementSurface === 'wall' ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
+        position={objectCatalog[object.objectId]?.placementSurface === 'wall' ? [0, 0, 0.055] : [0, 0.045, 0]}
         userData={{ ignorePlacementSupport: true }}
       >
         <ringGeometry args={[1.08, 1.16, 40]} />
@@ -13128,6 +13181,7 @@ function CustomizationLayer({
   onStartDragging,
   onStopDragging,
   onUpdatePosition,
+  onUpdateTransform,
   onUpdatePlacementPreview,
   onLockPlacement,
   registerCombatTarget,
@@ -13221,6 +13275,8 @@ function CustomizationLayer({
     ? renderablePlacedObjects.slice(0, visiblePlaceableCount)
     : renderablePlacedObjects
   const placingObject = objects.find((object) => object.id === placingObjectId)
+  const movingObject = objects.find((object) => object.id === (draggingObjectId ?? placingObjectId))
+  const isMovingWallObject = objectCatalog[movingObject?.objectId]?.placementSurface === 'wall'
   const placeableRefs = useRef(new Map())
   const previewGroupRef = useRef()
   const placingObjectIdRef = useRef(placingObjectId)
@@ -13287,6 +13343,7 @@ function CustomizationLayer({
       <CustomizationCamera active={mode === 'customize'} />
       <EditableFloor
         mode={mode}
+        disabled={isMovingWallObject}
         draggingObjectId={draggingObjectId}
         placingObjectId={placingObjectId}
         placementLocked={placementLocked}
@@ -13303,6 +13360,22 @@ function CustomizationLayer({
         onClearSelection={() => onSelect(null)}
         onLockPlacement={onLockPlacement}
       />
+      {isMovingWallObject && (
+        <WallPlacementSurfaces
+          object={movingObject}
+          isPlacing={Boolean(placingObjectId)}
+          placementLocked={placementLocked}
+          onTransform={(transform) => {
+            if (placingObjectId) {
+              onUpdatePlacementPreview(transform.position, transform.rotationY, transform.wallId)
+              return
+            }
+            onUpdateTransform(movingObject.id, transform)
+          }}
+          onLockPlacement={onLockPlacement}
+          onStopDragging={onStopDragging}
+        />
+      )}
       <group visible={mode === 'customize'}>
         <gridHelper
           args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
@@ -18290,6 +18363,22 @@ function App() {
     )
   }
 
+  const updateEditableObjectTransform = (id, transform) => {
+    if (!canModifyWorld) return
+    setEditor('editableObjects',(current) =>
+      current.map((object) => (
+        object.id === id
+          ? {
+            ...object,
+            position: transform.position,
+            rotationY: transform.rotationY,
+            wallId: transform.wallId,
+          }
+          : object
+      )),
+    )
+  }
+
   const storeSelectedObject = () => {
     if (!canModifyWorld) return
     if (!selectedObject?.canStore) return
@@ -18312,18 +18401,28 @@ function App() {
     setEditor('draggingObjectId',null)
     setEditor('placingObjectId',id)
     setEditor('placementLocked',false)
+    const isWallObject = objectCatalog[object.objectId]?.placementSurface === 'wall'
     setEditor('placementPreview',{
-      position: [0, 0, 0],
+      position: isWallObject ? [0, 2, 0] : [0, 0, 0],
       rotationY: object.rotationY ?? 0,
-      isValid: true,
+      isValid: !isWallObject,
     })
     setUi('objectInventoryOpen',false)
   }
 
-  const updatePlacementPreview = (position) => {
+  const updatePlacementPreview = (position, rotationY = null, wallId = null) => {
     if (!canModifyWorld) return
     setEditor('placementPreview',(current) => {
       if (!current) return current
+      if (Number.isFinite(rotationY)) {
+        return {
+          ...current,
+          position,
+          rotationY,
+          wallId,
+          isValid: true,
+        }
+      }
       const [x, z] = clampToCustomRoom(position[0], position[2])
       return {
         ...current,
@@ -18344,6 +18443,7 @@ function App() {
             status: 'placed',
             position: placementPreview.position,
             rotationY: placementPreview.rotationY,
+            wallId: placementPreview.wallId ?? null,
           }
           : object,
       ),
@@ -18364,6 +18464,8 @@ function App() {
     if (!canModifyWorld) return
     const angle = Math.PI / 4
     if (placingObjectId) {
+      const placingObject = editableObjects.find((object) => object.id === placingObjectId)
+      if (objectCatalog[placingObject?.objectId]?.placementSurface === 'wall') return
       setEditor('placementPreview',(current) => (
         current ? { ...current, rotationY: current.rotationY + direction * angle } : current
       ))
@@ -18832,6 +18934,7 @@ function App() {
             onStartDragging={(id) => setEditor('draggingObjectId', id)}
             onStopDragging={() => setEditor('draggingObjectId',null)}
             onUpdatePosition={updateEditableObjectPosition}
+            onUpdateTransform={updateEditableObjectTransform}
             onUpdatePlacementPreview={updatePlacementPreview}
             onLockPlacement={() => setEditor('placementLocked',true)}
             registerCombatTarget={registerCombatTarget}
@@ -19426,10 +19529,10 @@ function App() {
       {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
         <div className="customize-ui">
           <div className="customize-rotation">
-            <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={!selectedObjectId && !placingObjectId}>
+            <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={(!selectedObjectId && !placingObjectId) || objectCatalog[(selectedObject ?? editableObjects.find((object) => object.id === placingObjectId))?.objectId]?.placementSurface === 'wall'}>
               {'<'}
             </button>
-            <button type="button" onClick={() => rotateSelectedObject(1)} disabled={!selectedObjectId && !placingObjectId}>
+            <button type="button" onClick={() => rotateSelectedObject(1)} disabled={(!selectedObjectId && !placingObjectId) || objectCatalog[(selectedObject ?? editableObjects.find((object) => object.id === placingObjectId))?.objectId]?.placementSurface === 'wall'}>
               {'>'}
             </button>
             {PUBLIC_BUILD_FLAGS.showObjectInventory && selectedObject?.canStore && !placingObjectId && (
