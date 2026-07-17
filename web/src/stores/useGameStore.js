@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import { CHARACTER_DEFAULT_APPEARANCE } from '../game/characterAppearance'
 import { defaultEditableObjects } from '../gameObjects/placeableObjects'
 import { createDefaultHousePlan, normalizeHousePlan } from '../world/house/housePlan'
+import {
+  DEFAULT_FLOOR_SKIN_ID,
+  DEFAULT_OWNED_FLOOR_SKIN_IDS,
+  DEFAULT_OWNED_WALL_SKIN_IDS,
+  DEFAULT_WALL_SKIN_ID,
+} from '../world/house/houseDefaults'
 
 // Même check que lib/supabase.isSupabaseConfigured, mais inliné pour NE PAS
 // importer le client Supabase (createClient touche window au chargement → casse
@@ -108,12 +114,12 @@ export const useGameStore = create((set) => ({
     ownedSkins: ['classic'],
     selectedSkinId: 'classic',
     previewSkinId: 'classic',
-    ownedFloorSkins: ['floor-classic'],
-    ownedWallSkins: ['wall-classic'],
-    selectedFloorSkinId: 'floor-classic',
-    selectedWallSkinId: 'wall-classic',
-    previewFloorSkinId: 'floor-classic',
-    previewWallSkinId: 'wall-classic',
+    ownedFloorSkins: [...DEFAULT_OWNED_FLOOR_SKIN_IDS],
+    ownedWallSkins: [...DEFAULT_OWNED_WALL_SKIN_IDS],
+    selectedFloorSkinId: DEFAULT_FLOOR_SKIN_ID,
+    selectedWallSkinId: DEFAULT_WALL_SKIN_ID,
+    previewFloorSkinId: DEFAULT_FLOOR_SKIN_ID,
+    previewWallSkinId: DEFAULT_WALL_SKIN_ID,
     applyWallToCeiling: false,
     ownedCat: false,
     catActive: false,

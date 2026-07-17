@@ -1,4 +1,10 @@
 import { isSupabaseConfigured, supabase, supabaseRedirectUrl } from '../lib/supabase'
+import {
+  DEFAULT_FLOOR_SKIN_ID,
+  DEFAULT_OWNED_FLOOR_SKIN_IDS,
+  DEFAULT_OWNED_WALL_SKIN_IDS,
+  DEFAULT_WALL_SKIN_ID,
+} from '../world/house/houseDefaults'
 
 function getInventory(objects) {
   return objects.reduce((inventory, object) => {
@@ -20,6 +26,11 @@ function normalizeStringList(values) {
 
 function normalizeCount(value) {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+}
+
+function normalizeNumber(value, fallback) {
+  const next = Number(value)
+  return Number.isFinite(next) ? next : fallback
 }
 
 function mergeEditableObjects(existingObjects = [], currentObjects = []) {
@@ -183,7 +194,30 @@ async function saveLegacyAdminProgress(userId, progress) {
   return true
 }
 
-function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT_PROGRESS_SCOPE } = {}) {
+// État de la maison persisté dans world_settings. Le plan est la construction
+// du joueur : il doit survivre au round-trip cloud comme le reste du monde.
+// (Il était absent des deux writers, la maison repartait donc par défaut.)
+function toHouseWorldSettings(progress) {
+  return {
+    housePlan: progress.housePlan && typeof progress.housePlan === 'object' ? progress.housePlan : null,
+    roomLightOn: progress.roomLightOn ?? true,
+    lightColor: typeof progress.lightColor === 'string' ? progress.lightColor : '#ffffff',
+    lightIntensity: normalizeNumber(progress.lightIntensity, 2),
+  }
+}
+
+function fromHouseWorldSettings(worldSettings) {
+  return {
+    housePlan: worldSettings?.housePlan && typeof worldSettings.housePlan === 'object'
+      ? worldSettings.housePlan
+      : null,
+    roomLightOn: worldSettings?.roomLightOn ?? true,
+    lightColor: typeof worldSettings?.lightColor === 'string' ? worldSettings.lightColor : '#ffffff',
+    lightIntensity: normalizeNumber(worldSettings?.lightIntensity, 2),
+  }
+}
+
+export function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT_PROGRESS_SCOPE } = {}) {
   const row = {
     user_id: userId,
     progress_scope: normalizeProgressScope(scope),
@@ -193,6 +227,7 @@ function toProgressRow(userId, progress, { includeCoins = false, scope = DEFAULT
     equipped_skin: progress.selectedSkinId,
     world_settings: {
       displayName: progress.displayName || '',
+      ...toHouseWorldSettings(progress),
       ownedFloorSkins: progress.ownedFloorSkins,
       ownedWallSkins: progress.ownedWallSkins,
       selectedFloorSkinId: progress.selectedFloorSkinId,
@@ -234,6 +269,7 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
     equipped_skin: progress.selectedSkinId,
     world_settings: {
       displayName: progress.displayName || '',
+      ...toHouseWorldSettings(progress),
       ownedFloorSkins: progress.ownedFloorSkins,
       ownedWallSkins: progress.ownedWallSkins,
       selectedFloorSkinId: progress.selectedFloorSkinId,
@@ -273,16 +309,17 @@ export function fromProgressRow(row) {
   return {
     coins: row.coins ?? 0,
     displayName: row.world_settings?.displayName ?? row.display_name ?? '',
+    ...fromHouseWorldSettings(row.world_settings),
     ownedSkins: Array.isArray(row.owned_skins) ? row.owned_skins : ['classic'],
     selectedSkinId: row.equipped_skin ?? 'classic',
     ownedFloorSkins: Array.isArray(row.world_settings?.ownedFloorSkins)
       ? row.world_settings.ownedFloorSkins
-      : ['floor-classic'],
+      : [...DEFAULT_OWNED_FLOOR_SKIN_IDS],
     ownedWallSkins: Array.isArray(row.world_settings?.ownedWallSkins)
       ? row.world_settings.ownedWallSkins
-      : ['wall-classic'],
-    selectedFloorSkinId: row.world_settings?.selectedFloorSkinId ?? 'floor-classic',
-    selectedWallSkinId: row.world_settings?.selectedWallSkinId ?? 'wall-classic',
+      : [...DEFAULT_OWNED_WALL_SKIN_IDS],
+    selectedFloorSkinId: row.world_settings?.selectedFloorSkinId ?? DEFAULT_FLOOR_SKIN_ID,
+    selectedWallSkinId: row.world_settings?.selectedWallSkinId ?? DEFAULT_WALL_SKIN_ID,
     applyWallToCeiling: Boolean(row.world_settings?.applyWallToCeiling),
     ownedCat: Boolean(row.world_settings?.ownedCat),
     catActive: Boolean(row.world_settings?.catActive),

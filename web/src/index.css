@@ -1710,15 +1710,27 @@ html[data-chat-open='true'] .game-chat-panel {
   color: #ffd447;
 }
 
+/* Étiquette de tracé : elle porte le prix, elle doit se lire d'un coup d'œil
+   au-dessus de la scène 3D, y compris sur mobile. */
 .build-ghost-label {
-  background: rgba(14, 23, 34, 0.9);
+  background: rgba(10, 17, 26, 0.96);
   color: #ffd447;
-  border-radius: 8px;
-  padding: 3px 8px;
-  font-size: 13px;
-  font-weight: 800;
+  border: 2px solid rgba(255, 212, 71, 0.85);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
   white-space: nowrap;
   pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* Hors budget : le prix passe en rouge avant même de relâcher. */
+.build-ghost-label.is-unaffordable {
+  color: #ffd9d5;
+  border-color: rgba(255, 95, 95, 0.95);
+  background: rgba(122, 26, 26, 0.96);
 }
 
 .build-ghost-label:empty {
@@ -5506,7 +5518,9 @@ html[data-orientation='landscape'] .quest-journal-btn {
   left: max(14px, env(safe-area-inset-left));
   z-index: 10;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* Terminer à gauche, historique/vue à droite : le centre reste libre pour
+     le compteur de pièces, qui doit rester lisible pendant la construction. */
+  grid-template-columns: auto 1fr;
   align-items: start;
   gap: 12px;
   pointer-events: none;
@@ -5541,6 +5555,7 @@ html[data-orientation='landscape'] .quest-journal-btn {
 
 .customize-topbar-history {
   display: flex;
+  justify-self: end;
   gap: 8px;
   pointer-events: auto;
 }
@@ -5749,6 +5764,15 @@ html[data-orientation='landscape'] .customize-ui {
   color: #9edcff;
 }
 
+/* Tarif de l'outil : visible avant même de tracer. */
+.customize-tool-grid button em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffd447;
+  opacity: 0.95;
+}
+
 .customize-context-heading {
   display: grid;
   gap: 3px;
@@ -5872,7 +5896,7 @@ html[data-orientation='landscape'] .customize-ui {
     top: max(8px, env(safe-area-inset-top));
     right: max(8px, env(safe-area-inset-right));
     left: max(8px, env(safe-area-inset-left));
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto 1fr;
     gap: 7px;
   }
 
@@ -5886,7 +5910,7 @@ html[data-orientation='landscape'] .customize-ui {
   }
 
   .customize-topbar-history {
-    justify-self: center;
+    justify-self: end;
     gap: 5px;
   }
 

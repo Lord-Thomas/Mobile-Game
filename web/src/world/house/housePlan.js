@@ -1,5 +1,11 @@
 export const HOUSE_PLAN_VERSION = 1
-export const HOUSE_STRUCTURE_GRID_SIZE = 0.25
+// Grille de la STRUCTURE (murs, cloisons). Elle doit rester alignée sur les
+// cellules de sol, qui font 1 unité : une cloison posée entre deux bords de
+// cellule ne serait rattachée qu'au plus proche par la topologie, et le sol
+// apparaîtrait décalé de la cloison (il dépasse d'un côté, n'atteint pas de
+// l'autre). Comme dans Les Sims, les murs suivent la grille ; le quart de
+// case (CUSTOM_GRID_SIZE) reste réservé au placement des meubles.
+export const HOUSE_STRUCTURE_GRID_SIZE = 1
 export const DEFAULT_HOUSE_GRID_SIZE = HOUSE_STRUCTURE_GRID_SIZE
 export const DEFAULT_HOUSE_WALL_THICKNESS = 0.22
 export const DEFAULT_HOUSE_WALL_HEIGHT = 5
@@ -32,7 +38,7 @@ function createCellsFromRect(minX, minZ, width, depth, data = {}) {
   return cells
 }
 
-const defaultFloorCells = createCellsFromRect(-5, -5, 10, 10, { floorStyleId: 'floor-classic' })
+const defaultFloorCells = createCellsFromRect(-5, -5, 10, 10)
 
 function clampInteger(value, min, max, fallback) {
   const next = Math.round(Number(value))
@@ -211,7 +217,7 @@ function applyWallResizeCells(floorCells, wall, normal, amount) {
           : normal[0] > 0 ? wallX - 1 - step : wallX + step
         const key = getCellKey(x, cursor)
         if (amount > 0) {
-          nextCells[key] = { enabled: true, floorStyleId: 'floor-classic' }
+          nextCells[key] = { enabled: true }
         } else {
           delete nextCells[key]
         }
@@ -224,7 +230,7 @@ function applyWallResizeCells(floorCells, wall, normal, amount) {
         : normal[2] > 0 ? wallZ - 1 - step : wallZ + step
       const key = getCellKey(cursor, z)
       if (amount > 0) {
-        nextCells[key] = { enabled: true, floorStyleId: 'floor-classic' }
+        nextCells[key] = { enabled: true }
       } else {
         delete nextCells[key]
       }
@@ -503,13 +509,26 @@ function hasWallOnCellEdge(walls, x, z, direction) {
       : direction === 'north' ? z + 1 : z
   const min = boundaryAxis === 'z' ? z : x
   const max = min + 1
-  return Object.values(walls).some((wall) => {
+  // Le bord de case est scellé si l'UNION des segments colinéaires posés sur
+  // cette ligne le recouvre entièrement. Un mur seul ne couvre pas forcément
+  // toute la case quand un raccord tombe sur un quart de grille (0,25) : il
+  // faut donc balayer les intervalles, pas tester chaque mur isolément.
+  const segments = []
+  Object.values(walls).forEach((wall) => {
     const axisInfo = getWallAxis(wall)
-    return axisInfo.axis === boundaryAxis &&
-      Math.abs(Math.round(axisInfo.constant) - constant) < 0.001 &&
-      Math.min(axisInfo.from, axisInfo.to) <= min + 0.001 &&
-      Math.max(axisInfo.from, axisInfo.to) >= max - 0.001
+    if (axisInfo.axis !== boundaryAxis) return
+    if (Math.abs(Math.round(axisInfo.constant) - constant) > 0.001) return
+    segments.push([Math.min(axisInfo.from, axisInfo.to), Math.max(axisInfo.from, axisInfo.to)])
   })
+  if (!segments.length) return false
+  segments.sort((left, right) => left[0] - right[0])
+  let covered = min
+  for (const [segMin, segMax] of segments) {
+    if (segMin > covered + 0.001) break // trou avant ce segment
+    covered = Math.max(covered, segMax)
+    if (covered >= max - 0.001) return true
+  }
+  return covered >= max - 0.001
 }
 
 // Cherche les cellules qui ne peuvent pas rejoindre l'extérieur sans traverser
@@ -567,7 +586,7 @@ function addFloorsForEnclosedWallCells(plan) {
     for (let z = minZ + 1; z < maxZ; z += 1) {
       const key = keyFor(x, z)
       if (exterior.has(key) || floorCells[key]) continue
-      floorCells[key] = { enabled: true, floorStyleId: 'floor-classic' }
+      floorCells[key] = { enabled: true }
       added = true
     }
   }
@@ -702,6 +721,29 @@ export function createDefaultHousePlan() {
   return normalizeHousePlan(DEFAULT_HOUSE_PLAN)
 }
 
+// Tarifs de construction. La valeur d'une maison est une fonction PURE de son
+// plan : l'économie se règle sur la différence de valeur entre deux plans.
+// Construire coûte la différence, supprimer la rembourse, et annuler revient
+// mécaniquement au montant précédent — sans compter les actions une à une.
+export const HOUSE_FLOOR_COST_PER_CELL = 5
+export const HOUSE_WALL_COST_PER_UNIT = 4
+export const HOUSE_DOOR_COST = 25
+export const HOUSE_WINDOW_COST = 35
+
+export function getHousePlanValue(plan) {
+  const normalized = normalizeHousePlan(plan)
+  const floorValue = Object.keys(normalized.floorCells).length * HOUSE_FLOOR_COST_PER_CELL
+  const wallValue = Object.values(normalized.walls).reduce(
+    (total, wall) => total + getWallLength(wall) * HOUSE_WALL_COST_PER_UNIT,
+    0,
+  )
+  const openingValue = Object.values(normalized.openings).reduce(
+    (total, opening) => total + (opening.type === 'window' ? HOUSE_WINDOW_COST : HOUSE_DOOR_COST),
+    0,
+  )
+  return Math.round(floorValue + wallValue + openingValue)
+}
+
 // Intervalle du côté attaché du rectangle (le long du mur mitoyen).
 function getAttachedSideSpan(direction, rect) {
   return direction === 'east' || direction === 'west'
@@ -765,7 +807,7 @@ function attachRoomRect(plan, normalized, rect, direction, attachmentWall, doorW
     Object.entries(normalized.openings).filter(([, opening]) => opening.wallId !== attachmentWall.id),
   )
   const floorCells = { ...normalized.floorCells }
-  Object.entries(createCellsFromRect(rect.minX, rect.minZ, rect.maxX - rect.minX, rect.maxZ - rect.minZ, { floorStyleId: 'floor-classic' })).forEach(([key, cell]) => {
+  Object.entries(createCellsFromRect(rect.minX, rect.minZ, rect.maxX - rect.minX, rect.maxZ - rect.minZ)).forEach(([key, cell]) => {
     floorCells[key] = cell
   })
   const openingId = createUniqueId(`door_to_${roomBaseId}`, {
@@ -856,7 +898,7 @@ function createDetachedRoomRect(normalized, rect) {
   const width = rect.maxX - rect.minX
   const depth = rect.maxZ - rect.minZ
   const floorCells = { ...normalized.floorCells }
-  Object.entries(createCellsFromRect(rect.minX, rect.minZ, width, depth, { floorStyleId: 'floor-classic' })).forEach(([key, cell]) => {
+  Object.entries(createCellsFromRect(rect.minX, rect.minZ, width, depth)).forEach(([key, cell]) => {
     floorCells[key] = cell
   })
 
@@ -1473,7 +1515,7 @@ export function resizeHouseWallEnd(plan, wallId, end, targetValue) {
 
   const axisInfo = getWallAxis(wall)
   const fixedValue = end === 'from' ? axisInfo.to : axisInfo.from
-  let nextValue = Math.round(normalizeNumber(targetValue, NaN) * 4) / 4
+  let nextValue = snapHouseCoordinate(normalizeNumber(targetValue, NaN))
   if (!Number.isFinite(nextValue)) return plan
   if (Math.abs(nextValue - fixedValue) < 1) return plan
 
@@ -1511,7 +1553,7 @@ export function moveHouseWallJoint(plan, wallIdA, wallIdB, targetValue) {
   const axisB = getWallAxis(wallB)
   const fixedA = jointOnA === 'to' ? axisA.from : axisA.to
   const fixedB = jointOnB === 'to' ? axisB.from : axisB.to
-  let nextValue = Math.round(normalizeNumber(targetValue, NaN) * 4) / 4
+  let nextValue = snapHouseCoordinate(normalizeNumber(targetValue, NaN))
   if (!Number.isFinite(nextValue)) return plan
 
   // Chaque segment garde une longueur d'au moins 1.

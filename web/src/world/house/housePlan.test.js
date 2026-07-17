@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { deriveHouseLayout, getHouseEntranceTransform } from './deriveHouseLayout'
 import {
+  HOUSE_DOOR_COST,
+  HOUSE_FLOOR_COST_PER_CELL,
+  HOUSE_WALL_COST_PER_UNIT,
+  HOUSE_WINDOW_COST,
+  getHousePlanValue,
   addHouseOpeningToWall,
   addHouseRoomRect,
   addInteriorWallToHousePlan,
@@ -105,7 +110,7 @@ describe('housePlan', () => {
     })
 
     expect(Object.keys(plan.walls)).toEqual(['wall_first'])
-    expect(plan.walls.wall_first).toMatchObject({ from: [0, 2.25], to: [6, 2.25] })
+    expect(plan.walls.wall_first).toMatchObject({ from: [0, 2], to: [6, 2] })
   })
 
   it('detecte la piece principale par defaut', () => {
@@ -211,6 +216,26 @@ describe('housePlan', () => {
     })
   })
 
+  it('scelle le sol malgre un raccord de cloison sur un quart de grille', () => {
+    const emptyPlan = normalizeHousePlan({ floorCells: {}, walls: {}, openings: {} })
+    // Cote sud trace en deux segments se rejoignant a x=1.5 : aucun segment ne
+    // couvre seul la case (1,0), mais leur union scelle le bord.
+    const p1 = addInteriorWallToHousePlan(emptyPlan, [0, 0], [1.5, 0])
+    const p2 = addInteriorWallToHousePlan(p1, [1.5, 0], [3, 0])
+    const p3 = addInteriorWallToHousePlan(p2, [3, 0], [3, 2])
+    const p4 = addInteriorWallToHousePlan(p3, [3, 2], [0, 2])
+    const enclosed = addInteriorWallToHousePlan(p4, [0, 2], [0, 0])
+
+    expect(enclosed.floorCells).toMatchObject({
+      '0,0': { enabled: true },
+      '1,0': { enabled: true },
+      '2,0': { enabled: true },
+      '0,1': { enabled: true },
+      '1,1': { enabled: true },
+      '2,1': { enabled: true },
+    })
+  })
+
   it('supprime la derniere porte de jonction sans fusionner les espaces', () => {
     const plan = addRoomToHousePlan(createDefaultHousePlan(), {
       direction: 'east',
@@ -306,12 +331,20 @@ describe('housePlan', () => {
     expect(layout.rooms).toHaveLength(2)
   })
 
-  it('conserve la position au quart de metre tout en separant les espaces', () => {
+  // Le sol est fait de cellules de 1 unite : une cloison posee entre deux
+  // bords de cellule serait rattachee au plus proche par la topologie et le
+  // sol paraitrait decale d'un quart. Les murs collent donc a la grille.
+  it('aligne une cloison sur les bords de cellule pour coller au sol', () => {
     const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-4.75, 2.25], [5.25, 2.25])
     const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
+    const layout = deriveHouseLayout(plan)
+    const spaceBelow = layout.spaces.find((space) => space.cells.includes('0,1'))
 
-    expect(partition).toMatchObject({ from: [-4.75, 2.25], to: [5.25, 2.25] })
-    expect(deriveHouseLayout(plan).rooms).toHaveLength(2)
+    expect(partition).toMatchObject({ from: [-5, 2], to: [5, 2] })
+    expect(layout.rooms).toHaveLength(2)
+    // La frontiere du sol tombe exactement sur la cloison (z = 2).
+    expect(spaceBelow.bounds.maxZ).toBe(2)
+    expect(spaceBelow.cells).not.toContain('0,2')
   })
 
   it('applique une tapisserie differente sur chaque cote d une cloison', () => {
@@ -404,6 +437,37 @@ describe('housePlan', () => {
     expect(staleFloor.styles.floorByCell).not.toHaveProperty('99,99')
   })
 
+  it('valorise un plan a partir du sol, des murs et des ouvertures', () => {
+    const plan = createDefaultHousePlan()
+    const value = getHousePlanValue(plan)
+
+    // 100 cellules + 40 m de murs + 1 porte.
+    expect(value).toBe(
+      100 * HOUSE_FLOOR_COST_PER_CELL + 40 * HOUSE_WALL_COST_PER_UNIT + HOUSE_DOOR_COST,
+    )
+  })
+
+  // L'economie se deduit de la difference de valeur : ajouter coute, retirer
+  // rembourse exactement le meme montant.
+  it('facture puis rembourse le meme montant pour une vitre', () => {
+    const plan = createDefaultHousePlan()
+    const withWindow = addHouseOpeningToWall(plan, 'wall_main_north', 0.5, { type: 'window' })
+    const window = Object.values(withWindow.openings).find((opening) => opening.type === 'window')
+    const removed = removeHouseOpening(withWindow, window.id)
+
+    expect(getHousePlanValue(withWindow) - getHousePlanValue(plan)).toBe(HOUSE_WINDOW_COST)
+    expect(getHousePlanValue(removed)).toBe(getHousePlanValue(plan))
+  })
+
+  it('facture une piece ajoutee proportionnellement a sa surface', () => {
+    const plan = createDefaultHousePlan()
+    const withRoom = addHouseRoomRect(plan, { minX: 5, maxX: 9, minZ: -1, maxZ: 2 })
+    const delta = getHousePlanValue(withRoom) - getHousePlanValue(plan)
+
+    // 12 m² de sol ajoutes, plus les murs et la porte de jonction.
+    expect(delta).toBeGreaterThan(12 * HOUSE_FLOOR_COST_PER_CELL)
+  })
+
   it('signale un refus en retournant le plan d origine (meme reference)', () => {
     const plan = createDefaultHousePlan()
 
@@ -432,13 +496,17 @@ describe('housePlan', () => {
     expect(deriveHouseLayout(moved).rooms).toHaveLength(2)
   })
 
-  it('deplace une cloison sur la meme grille au quart de metre que sa creation', () => {
+  it('deplace une cloison d une cellule entiere, jamais d un quart', () => {
     const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-5, 0], [5, 0])
     const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
-    const moved = moveHouseInteriorWall(plan, partition.id, 0.25)
+    const moved = moveHouseInteriorWall(plan, partition.id, 1)
+    // Sous une demi-cellule, le deplacement est un no-op : la cloison ne peut
+    // pas s'arreter entre deux bords de cellule sans decaler le sol.
+    const unmoved = moveHouseInteriorWall(plan, partition.id, 0.25)
 
-    expect(moved.walls[partition.id]).toMatchObject({ from: [-5, 0.25], to: [5, 0.25] })
+    expect(moved.walls[partition.id]).toMatchObject({ from: [-5, 1], to: [5, 1] })
     expect(deriveHouseLayout(moved).rooms).toHaveLength(2)
+    expect(unmoved).toBe(plan)
   })
 
   it('refuse de deplacer un mur exterieur comme une cloison', () => {
@@ -478,12 +546,12 @@ describe('housePlan', () => {
     expect(deriveHouseLayout(resized).rooms).toHaveLength(1)
   })
 
-  it('redimensionne une extremite avec une precision au quart d unite', () => {
+  it('aligne l extremite redimensionnee sur un bord de cellule', () => {
     const plan = addInteriorWallToHousePlan(createDefaultHousePlan(), [-5, 0], [5, 0])
     const partition = Object.values(plan.walls).find((wall) => wall.id.startsWith('wall_partition'))
     const resized = resizeHouseWallEnd(plan, partition.id, 'to', 2.25)
 
-    expect(resized.walls[partition.id].to).toEqual([2.25, 0])
+    expect(resized.walls[partition.id].to).toEqual([2, 0])
   })
 
   it('refuse de redimensionner par une extremite partagee avec un autre mur', () => {
@@ -505,7 +573,7 @@ describe('housePlan', () => {
     expect(deriveHouseLayout(moved).rooms).toHaveLength(1)
   })
 
-  it('deplace un raccord avec une precision au quart d unite', () => {
+  it('aligne un raccord deplace sur un bord de cellule', () => {
     const segmented = splitHouseWallSegment(createDefaultHousePlan(), 'wall_main_east', 0.5)
     const segments = Object.values(segmented.walls)
       .filter((wall) => wall.id.startsWith('wall_main_east_'))
@@ -513,7 +581,7 @@ describe('housePlan', () => {
     const jointValues = [moved.walls[segments[0].id], moved.walls[segments[1].id]]
       .flatMap((wall) => [wall.from[1], wall.to[1]])
 
-    expect(jointValues.filter((value) => value === 2.25)).toHaveLength(2)
+    expect(jointValues.filter((value) => value === 2)).toHaveLength(2)
   })
 
   it('empeche un point de segment de traverser une porte', () => {

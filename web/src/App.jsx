@@ -54,9 +54,15 @@ import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biome
 import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
 import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { HOUSE_STRUCTURE_GRID_SIZE, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
+import { HOUSE_STRUCTURE_GRID_SIZE, HOUSE_DOOR_COST, HOUSE_FLOOR_COST_PER_CELL, HOUSE_WALL_COST_PER_UNIT, HOUSE_WINDOW_COST, snapHouseCoordinate, getHousePlanValue, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
 import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
+import {
+  DEFAULT_FLOOR_SKIN_ID,
+  DEFAULT_OWNED_FLOOR_SKIN_IDS,
+  DEFAULT_OWNED_WALL_SKIN_IDS,
+  DEFAULT_WALL_SKIN_ID,
+} from './world/house/houseDefaults'
 import { getWallColliderTransform, getWallDirection, getWallPointAt, getWallRenderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
@@ -601,7 +607,10 @@ const ENV_STATION_POSITION = { x: 3.5, y: 0.35, z: 1.8 }
 const CUSTOM_STATION_POSITION = { x: 0, y: 0.35, z: 3.55 }
 const PARCEL_HALF = PLAYER_PLOT_SIZE / 2
 const CUSTOM_ROOM_BOUNDS = { minX: -PARCEL_HALF, maxX: PARCEL_HALF, minZ: -PARCEL_HALF, maxZ: PARCEL_HALF }
-const CUSTOM_GRID_SIZE = HOUSE_STRUCTURE_GRID_SIZE
+// Grille de placement des MEUBLES : quart de case, indépendante de la grille
+// de structure (les murs, eux, suivent les bords de cellule — cf.
+// HOUSE_STRUCTURE_GRID_SIZE).
+const CUSTOM_GRID_SIZE = 0.25
 const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const TV_INTERACTION_DISTANCE = 1.35
 const TV_MENU_EVENT = 'lab-tv-open-menu'
@@ -773,6 +782,15 @@ const CHARACTER_MATERIAL_COLOR_KEYS = {
 }
 
 const floorSkins = [
+  // Texture de base (comme la peinture blanche des murs) : c'est ce que
+  // reçoit toute zone nouvellement construite tant qu'elle n'est pas peinte.
+  {
+    id: 'floor-peinture-blanche',
+    name: 'Peinture Blanche',
+    price: 0,
+    texture: '/textures/environment/walls/mur-paint.png',
+    defaultUnlocked: true,
+  },
   {
     id: 'floor-classic',
     name: 'Parquet Classique',
@@ -821,12 +839,6 @@ const floorSkins = [
     name: 'Chevron Beurre',
     price: 125,
     texture: '/textures/environment/floors/sol-chevron-beurre.png',
-  },
-  {
-    id: 'floor-peinture-blanche',
-    name: 'Peinture Blanche',
-    price: 50,
-    texture: '/textures/environment/walls/mur-paint.png',
   },
   {
     id: 'floor-brun-mat',
@@ -12948,7 +12960,7 @@ function getDraggedCellRect(start, end) {
 // Tracé de pièce façon Sims : pendant le drag de l'outil Pièce, montre le
 // rectangle (vert = constructible, rouge = invalide) avec ses dimensions.
 // La pièce n'est construite qu'au relâchement.
-function RoomRectGhost({ startPoint, hoverRef, layout }) {
+function RoomRectGhost({ startPoint, hoverRef, layout, coins }) {
   const groupRef = useRef()
   const meshRef = useRef()
   const northWallRef = useRef()
@@ -12957,6 +12969,10 @@ function RoomRectGhost({ startPoint, hoverRef, layout }) {
   const westWallRef = useRef()
   const doorRef = useRef()
   const labelRef = useRef()
+  // Prix et validité viennent de la VRAIE opération, pas d'une estimation
+  // parallèle qui finirait par diverger. Mis en cache sur le rectangle : ne
+  // recalcule que quand le tracé change, pas à chaque frame.
+  const previewRef = useRef({ key: null, cost: 0, valid: false })
 
   useFrame(() => {
     const group = groupRef.current
@@ -12969,24 +12985,15 @@ function RoomRectGhost({ startPoint, hoverRef, layout }) {
     group.visible = width > 0 && depth > 0
     if (!group.visible) return
 
-    const floorCells = layout.plan?.floorCells ?? {}
-    let overlaps = false
-    let touches = false
-    for (let x = rect.minX; x < rect.maxX && !overlaps; x += 1) {
-      for (let z = rect.minZ; z < rect.maxZ; z += 1) {
-        if (floorCells[`${x},${z}`]) {
-          overlaps = true
-          break
-        }
-      }
+    const key = `${rect.minX},${rect.minZ},${rect.maxX},${rect.maxZ}`
+    if (previewRef.current.key !== key) {
+      const plan = layout.plan
+      const next = addHouseRoomRect(plan, rect)
+      previewRef.current = next === plan
+        ? { key, cost: 0, valid: false }
+        : { key, cost: getHousePlanValue(next) - getHousePlanValue(plan), valid: true }
     }
-    for (let x = rect.minX; x < rect.maxX && !touches; x += 1) {
-      if (floorCells[`${x},${rect.minZ - 1}`] || floorCells[`${x},${rect.maxZ}`]) touches = true
-    }
-    for (let z = rect.minZ; z < rect.maxZ && !touches; z += 1) {
-      if (floorCells[`${rect.minX - 1},${z}`] || floorCells[`${rect.maxX},${z}`]) touches = true
-    }
-    const valid = width >= 2 && depth >= 2 && width <= 14 && depth <= 14 && !overlaps
+    const { cost, valid } = previewRef.current
     const wallHeight = layout.plan?.defaultWallHeight ?? 5
 
     group.position.set((rect.minX + rect.maxX) * 0.5, 0.11, (rect.minZ + rect.maxZ) * 0.5)
@@ -13003,9 +13010,11 @@ function RoomRectGhost({ startPoint, hoverRef, layout }) {
     doorRef.current?.position.set(0, 1.2, -depth * 0.5 - 0.09)
     doorRef.current?.scale.set(Math.min(1.2, width - 0.4), 2.4, 1)
     if (labelRef.current) {
-      labelRef.current.textContent = width > 0 && depth > 0
-        ? `${width} × ${depth} — ${width * depth} m²${touches ? ' · extension' : ' · fondation + entrée'}`
-        : ''
+      const affordable = cost <= coins
+      labelRef.current.textContent = valid
+        ? `${width} × ${depth} · ${width * depth} m² · ${cost} pièces${affordable ? '' : ' — trop cher'}`
+        : `${width} × ${depth} · emplacement invalide`
+      labelRef.current.className = `build-ghost-label${valid && !affordable ? ' is-unaffordable' : ''}`
     }
   })
 
@@ -13295,18 +13304,25 @@ function houseCornersMatch(a, b) {
 // Fantôme de cloison : pendant l'outil Cloison, montre le tracé (aligné sur
 // l'axe dominant, comme la logique) et sa longueur avant le second clic.
 // Mise à jour par ref dans useFrame — aucun re-render pendant le survol.
-function PartitionGhost({ startPoint, hoverRef }) {
+function PartitionGhost({ startPoint, hoverRef, coins, layout }) {
   const groupRef = useRef()
   const meshRef = useRef()
   const labelRef = useRef()
+  // Comme pour le tracé de pièce : prix réel issu de l'opération. Une cloison
+  // qui referme un espace facture aussi le sol créé — l'ancienne étiquette
+  // n'affichait que le mur et le prix final surprenait.
+  const previewRef = useRef({ key: null, cost: 0, valid: false })
 
   useFrame(() => {
     const group = groupRef.current
     const mesh = meshRef.current
     if (!group || !mesh) return
-    const from = { x: snap(startPoint.x), z: snap(startPoint.z) }
+    // Même grille que la pose : l'aperçu montre exactement le tracé obtenu.
+    const from = { x: snapHouseCoordinate(startPoint.x), z: snapHouseCoordinate(startPoint.z) }
     const hover = hoverRef?.current
-    const raw = hover ? { x: snap(hover.x), z: snap(hover.z) } : from
+    const raw = hover
+      ? { x: snapHouseCoordinate(hover.x), z: snapHouseCoordinate(hover.z) }
+      : from
     const to = Math.abs(raw.x - from.x) >= Math.abs(raw.z - from.z)
       ? { x: raw.x, z: from.z }
       : { x: from.x, z: raw.z }
@@ -13315,8 +13331,23 @@ function PartitionGhost({ startPoint, hoverRef }) {
     group.rotation.y = Math.abs(to.x - from.x) >= Math.abs(to.z - from.z) ? 0 : Math.PI * 0.5
     mesh.visible = length >= 0.5
     mesh.scale.x = Math.max(0.05, length)
+
+    const key = `${from.x},${from.z},${to.x},${to.z}`
+    if (previewRef.current.key !== key) {
+      const plan = layout?.plan
+      const next = plan ? addInteriorWallToHousePlan(plan, [from.x, from.z], [to.x, to.z]) : null
+      previewRef.current = !next || next === plan
+        ? { key, cost: 0, valid: false }
+        : { key, cost: getHousePlanValue(next) - getHousePlanValue(plan), valid: true }
+    }
+    const { cost, valid } = previewRef.current
+
     if (labelRef.current) {
-      labelRef.current.textContent = length >= 1 ? `${length} m` : 'trop court'
+      const affordable = cost <= coins
+      labelRef.current.textContent = valid
+        ? `${length} m · ${cost} pièces${affordable ? '' : ' — trop cher'}`
+        : 'trop court'
+      labelRef.current.className = `build-ghost-label${valid && !affordable ? ' is-unaffordable' : ''}`
     }
   })
 
@@ -13479,14 +13510,14 @@ function HouseBuildHandles({
       const dx = event.point.x - drag.startX
       const dz = event.point.z - drag.startZ
       const distance = dx * drag.normal[0] + dz * drag.normal[2]
-      // Les murs extérieurs restent liés aux cellules de fondation de 1 m ;
-      // seules les cloisons utilisent la grille structurelle fine de 0,25 m.
-      drag.pendingAmount = drag.type === 'resize' ? Math.round(distance) : snap(distance)
+      // Murs et cloisons partagent la grille des cellules : le sol reste
+      // toujours exactement bord à bord avec la cloison.
+      drag.pendingAmount = snapHouseCoordinate(distance)
       return
     }
 
     if (drag.type === 'wallEnd' || drag.type === 'joint') {
-      const value = Math.round((drag.axis === 'z' ? event.point.z : event.point.x) * 4) / 4
+      const value = snapHouseCoordinate(drag.axis === 'z' ? event.point.z : event.point.x)
       if (value === drag.lastValue) return
       drag.lastValue = value
       if (drag.type === 'wallEnd') onResizeWallEnd(drag.wallId, drag.end, value)
@@ -13994,6 +14025,7 @@ function CustomizationLayer({
   view = 'top',
   showBuildHandles = true,
   canEditStructure = true,
+  coins = 0,
   objects,
   layout = houseLayout,
   selectedBuildElement,
@@ -14232,10 +14264,10 @@ function CustomizationLayer({
           </mesh>
         )}
         {partitionStart && (
-          <PartitionGhost startPoint={partitionStart} hoverRef={buildFloorHoverRef} />
+          <PartitionGhost startPoint={partitionStart} hoverRef={buildFloorHoverRef} coins={coins} layout={layout} />
         )}
         {buildTool === 'room' && roomDragStart && (
-          <RoomRectGhost startPoint={roomDragStart} hoverRef={buildFloorHoverRef} layout={layout} />
+          <RoomRectGhost startPoint={roomDragStart} hoverRef={buildFloorHoverRef} layout={layout} coins={coins} />
         )}
         <FloorCursor hoverRef={buildFloorHoverRef} />
       </group>
@@ -17149,12 +17181,12 @@ function App() {
     setHouse('lightColor','#ffffff')
     setHouse('lightIntensity',2)
     setHouse('housePlan',createDefaultHousePlan())
-    setInventory('ownedFloorSkins',['floor-classic'])
-    setInventory('ownedWallSkins',['wall-classic'])
-    setInventory('selectedFloorSkinId','floor-classic')
-    setInventory('selectedWallSkinId','wall-classic')
-    setInventory('previewFloorSkinId','floor-classic')
-    setInventory('previewWallSkinId','wall-classic')
+    setInventory('ownedFloorSkins',[...DEFAULT_OWNED_FLOOR_SKIN_IDS])
+    setInventory('ownedWallSkins',[...DEFAULT_OWNED_WALL_SKIN_IDS])
+    setInventory('selectedFloorSkinId',DEFAULT_FLOOR_SKIN_ID)
+    setInventory('selectedWallSkinId',DEFAULT_WALL_SKIN_ID)
+    setInventory('previewFloorSkinId',DEFAULT_FLOOR_SKIN_ID)
+    setInventory('previewWallSkinId',DEFAULT_WALL_SKIN_ID)
     setInventory('applyWallToCeiling',false)
     setEditor('editableObjects',defaultEditableObjects)
     setEditor('selectedObjectId',null)
@@ -17232,12 +17264,13 @@ function App() {
 
     const validFloorSkinIds = new Set(floorSkins.map((skin) => skin.id))
     const validWallSkinIds = new Set(wallSkins.map((skin) => skin.id))
+    // Les skins gratuits sont toujours possédés, quel que soit l'historique.
     const ownedFloorSkinIds = Array.isArray(parsed.ownedFloorSkins)
-      ? ['floor-classic', ...parsed.ownedFloorSkins.filter((id) => validFloorSkinIds.has(id) && id !== 'floor-classic')]
-      : ['floor-classic']
+      ? [...new Set([...DEFAULT_OWNED_FLOOR_SKIN_IDS, ...parsed.ownedFloorSkins.filter((id) => validFloorSkinIds.has(id))])]
+      : [...DEFAULT_OWNED_FLOOR_SKIN_IDS]
     const ownedWallSkinIds = Array.isArray(parsed.ownedWallSkins)
-      ? ['wall-classic', ...parsed.ownedWallSkins.filter((id) => validWallSkinIds.has(id) && id !== 'wall-classic')]
-      : ['wall-classic']
+      ? [...new Set([...DEFAULT_OWNED_WALL_SKIN_IDS, ...parsed.ownedWallSkins.filter((id) => validWallSkinIds.has(id))])]
+      : [...DEFAULT_OWNED_WALL_SKIN_IDS]
 
     // Owned floor/wall skins are inventory (keep the visitor's own); the
     // selected ones below are the host's house appearance (apply always).
@@ -18409,8 +18442,12 @@ function App() {
       : null
   const remotePresenceTitleId = onlinePlayers.find((player) => player.userId === remoteUserId)?.equippedTitleId ?? null
   const availableWallSkins = (isAdminMode || isLocalNetwork) ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
-  const activeFloorSkinId = selectedFloorSkinId
-  const activeWallSkinId = selectedWallSkinId
+  // Texture des surfaces NON PEINTES = texture de base (peinture blanche).
+  // Un espace fraîchement construit est donc toujours blanc, quoi qu'ait
+  // choisi le joueur ailleurs ; la couleur d'une pièce vient uniquement de sa
+  // peinture explicite (styles.floorByCell / styles.wallBySide du plan).
+  const activeFloorSkinId = DEFAULT_FLOOR_SKIN_ID
+  const activeWallSkinId = DEFAULT_WALL_SKIN_ID
   const activeFloorSkin = floorSkins.find((skin) => skin.id === activeFloorSkinId) || floorSkins[0]
   const activeWallSkin = availableWallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
   const activeCeilingTexturePath = applyWallToCeiling ? activeWallSkin.texture : DEFAULT_CEILING_TEXTURE
@@ -18506,6 +18543,9 @@ function App() {
     return {
       housePlan: cloneCustomizationValue(state.house.housePlan),
       editableObjects: cloneCustomizationValue(state.editor.editableObjects),
+      // Les pièces font partie de l'état annulable : annuler une construction
+      // doit rendre exactement ce qu'elle avait coûté.
+      coins: state.economy.coins,
     }
   }
 
@@ -18534,6 +18574,7 @@ function App() {
     if (!snapshot) return
     setHouse('housePlan',cloneCustomizationValue(snapshot.housePlan))
     setEditor('editableObjects',cloneCustomizationValue(snapshot.editableObjects))
+    if (Number.isFinite(snapshot.coins)) setEconomy('coins', snapshot.coins)
   }
 
   const refreshCustomizationHistoryState = (currentSnapshot = null) => {
@@ -18552,16 +18593,37 @@ function App() {
     history.transaction = captureCustomizationSnapshot()
   }
 
+  // Règle la facture d'une modification du plan : on compare la valeur du plan
+  // avant/après, donc construire débite et supprimer rembourse, quel que soit
+  // le chemin (bouton, drag, outil). Renvoie false si c'est trop cher.
+  const settleHousePlanCost = (beforePlan, afterPlan) => {
+    if (isAdminMode) return true
+    const delta = getHousePlanValue(afterPlan) - getHousePlanValue(beforePlan)
+    if (delta === 0) return true
+    if (delta > useGameStore.getState().economy.coins) return false
+    applyCoinDelta(-delta, { share: false, reason: 'build' })
+    return true
+  }
+
   const endCustomizationChange = () => {
     const history = customizationHistoryRef.current
     const before = history.transaction
     if (!before) return
     history.transaction = null
-    const after = captureCustomizationSnapshot()
+    let after = captureCustomizationSnapshot()
     if (!customizationSnapshotsMatch(before, after)) {
+      // Facture refusée : on rétablit le plan précédent plutôt que de laisser
+      // le joueur construire à découvert.
+      if (!settleHousePlanCost(before.housePlan, after.housePlan)) {
+        applyCustomizationSnapshot(before)
+        showBuildNotice('Pas assez de pièces pour cette construction')
+        refreshCustomizationHistoryState(before)
+        return
+      }
       history.undo.push(before)
       if (history.undo.length > CUSTOMIZE_HISTORY_LIMIT) history.undo.shift()
       history.redo = []
+      after = captureCustomizationSnapshot()
     }
     refreshCustomizationHistoryState(after)
   }
@@ -18900,13 +18962,13 @@ function App() {
   // tranches, car la logique borne chaque appel à ±4 cases.
   const applyChunkedWallMove = (plan, wallId, amount, operation) => {
     let next = plan
-    let remaining = snap(amount)
-    while (Math.abs(remaining) >= CUSTOM_GRID_SIZE * 0.5) {
+    let remaining = snapHouseCoordinate(amount)
+    while (Math.abs(remaining) >= HOUSE_STRUCTURE_GRID_SIZE * 0.5) {
       const step = Math.max(-4, Math.min(4, remaining))
       const result = operation(next, wallId, step)
       if (result === next) break
       next = result
-      remaining = snap(remaining - step)
+      remaining = snapHouseCoordinate(remaining - step)
     }
     return next
   }
@@ -19068,7 +19130,8 @@ function App() {
       return
     }
     if (activeBuildTool !== 'partition') return
-    const snappedPoint = { x: snap(point.x), z: snap(point.z) }
+    // Grille de structure : la cloison se pose sur un bord de cellule.
+    const snappedPoint = { x: snapHouseCoordinate(point.x), z: snapHouseCoordinate(point.z) }
     if (!partitionStart) {
       setPartitionStart(snappedPoint)
       return
@@ -20265,6 +20328,7 @@ function App() {
             view={customizeView}
             showBuildHandles={customizeTab !== 'furniture'}
             canEditStructure={customizeTab === 'build'}
+            coins={coins}
             objects={editableObjects}
             layout={activeHouseLayout}
             selectedBuildElement={selectedBuildElement}
@@ -20623,7 +20687,9 @@ function App() {
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
       )}
-      {showGameplayUi && <CoinsOverlay coins={coins} />}
+      {/* Les pièces restent visibles en construction : on ne peut pas décider
+          d'une dépense sans voir son solde. */}
+      {showCaptureUi && (mode === 'play' || mode === 'customize') && <CoinsOverlay coins={coins} />}
       {showGameplayUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
       {showGameplayUi && isLocalNetwork && freeCameraActive && (
@@ -21005,11 +21071,11 @@ function App() {
                 </div>
                 {customizeTab === 'build' && (
                   <div className="customize-tool-grid">
-                    <button type="button" onClick={beginRoomTool}><span>▣</span>Espace</button>
-                    <button type="button" onClick={beginPartitionTool}><span>╱</span>Cloison</button>
-                    <button type="button" onClick={beginDoorTool}><span>▯</span>Porte</button>
-                    <button type="button" onClick={beginWindowTool}><span>▤</span>Fenêtre</button>
-                    <button type="button" onClick={beginSegmentTool}><span>✂</span>Couper</button>
+                    <button type="button" onClick={beginRoomTool}><span>▣</span>Espace<em>{HOUSE_FLOOR_COST_PER_CELL}/m²</em></button>
+                    <button type="button" onClick={beginPartitionTool}><span>╱</span>Cloison<em>{HOUSE_WALL_COST_PER_UNIT}/m</em></button>
+                    <button type="button" onClick={beginDoorTool}><span>▯</span>Porte<em>{HOUSE_DOOR_COST}</em></button>
+                    <button type="button" onClick={beginWindowTool}><span>▤</span>Fenêtre<em>{HOUSE_WINDOW_COST}</em></button>
+                    <button type="button" onClick={beginSegmentTool}><span>✂</span>Couper<em>gratuit</em></button>
                   </div>
                 )}
                 {customizeTab === 'decorate' && (
