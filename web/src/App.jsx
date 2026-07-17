@@ -24,8 +24,10 @@ import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import YouTubeSubscriberFrame from './gameObjects/YouTubeSubscriberFrame'
+import TikTokCreatorFrame from './gameObjects/TikTokCreatorFrame'
 import { getWallMountTargets, getWallMountTransform } from './gameObjects/wallPlacement'
 import { normalizeYouTubeChannelUrl } from './services/youtubeChannelService'
+import { normalizeTikTokProfileUrl } from './services/tiktokProfileService'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
@@ -9279,7 +9281,8 @@ function YouTubeFrameInteractionTrigger({ playerPositionRef, objects, enabled, o
     let nearestDistance = Infinity
 
     objects.forEach((object) => {
-      if (objectCatalog[object.objectId]?.type !== 'youtube_subscriber_frame' || !object.position) return
+      const type = objectCatalog[object.objectId]?.type
+      if (!['youtube_subscriber_frame', 'tiktok_profile_frame'].includes(type) || !object.position) return
       const distance = Math.hypot(
         playerPosition.x - object.position[0],
         playerPosition.z - object.position[2],
@@ -9852,12 +9855,15 @@ function RugModel({ objectId }) {
   )
 }
 
-function PlaceableModel({ objectId, type, placedObjectId, channelUrl }) {
+function PlaceableModel({ objectId, type, placedObjectId, channelUrl, profileUrl }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
   if (type === 'rug' || catalogItem?.type === 'rug') return <RugModel objectId={objectId} />
   if (catalogItem?.type === 'youtube_subscriber_frame') {
     return <YouTubeSubscriberFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} channelUrl={channelUrl ?? catalogItem.channelUrl} />
+  }
+  if (catalogItem?.type === 'tiktok_profile_frame') {
+    return <TikTokCreatorFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} profileUrl={profileUrl ?? catalogItem.profileUrl} />
   }
   if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} placedObjectId={placedObjectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
@@ -13502,7 +13508,7 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
               onDefeated={onTrainingDummyDefeated}
             />
           ) : (
-            <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} />
+            <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} profileUrl={object.profileUrl} />
           )}
         </Suspense>
       </group>
@@ -13975,7 +13981,7 @@ function PlacementPreview({ object, preview, groupRef }) {
     <group position={preview.position} rotation={[0, preview.rotationY, 0]}>
       <group ref={groupRef} scale={0.96}>
         <Suspense fallback={null}>
-          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} />
+          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} profileUrl={object.profileUrl} />
         </Suspense>
       </group>
       <mesh
@@ -18119,6 +18125,9 @@ function App() {
             rotationY: Number.isFinite(object.rotationY) ? object.rotationY : 0,
             wallId: typeof object.wallId === 'string' ? object.wallId : null,
             channelUrl: typeof object.channelUrl === 'string' ? object.channelUrl : undefined,
+            profileUrl: object.profileUrl === 'https://www.tiktok.com/@tiktok'
+              ? objectCatalog.tiktok_profile_frame.profileUrl
+              : typeof object.profileUrl === 'string' ? object.profileUrl : undefined,
           })
         })
         .filter(Boolean)
@@ -20308,9 +20317,13 @@ function App() {
 
   const requestYouTubeFrameEditor = () => {
     if (!canModifyWorld || !nearbyYouTubeFrame || mode !== 'play') return
+    const platform = objectCatalog[nearbyYouTubeFrame.objectId]?.type === 'tiktok_profile_frame' ? 'tiktok' : 'youtube'
     setYoutubeFrameEditor({
       objectId: nearbyYouTubeFrame.id,
-      value: nearbyYouTubeFrame.channelUrl ?? objectCatalog.youtube_subscriber_frame.channelUrl,
+      platform,
+      value: platform === 'tiktok'
+        ? nearbyYouTubeFrame.profileUrl ?? objectCatalog.tiktok_profile_frame.profileUrl
+        : nearbyYouTubeFrame.channelUrl ?? objectCatalog.youtube_subscriber_frame.channelUrl,
       error: '',
     })
   }
@@ -20319,11 +20332,18 @@ function App() {
     event.preventDefault()
     if (!canModifyWorld || !youtubeFrameEditor) return
     try {
-      const channelUrl = normalizeYouTubeChannelUrl(youtubeFrameEditor.value)
+      const isTikTok = youtubeFrameEditor.platform === 'tiktok'
+      const normalizedUrl = isTikTok
+        ? normalizeTikTokProfileUrl(youtubeFrameEditor.value)
+        : normalizeYouTubeChannelUrl(youtubeFrameEditor.value)
       setEditor('editableObjects', (current) => current.map((object) => (
-        object.id === youtubeFrameEditor.objectId && objectCatalog[object.objectId]?.type === 'youtube_subscriber_frame'
-          ? { ...object, channelUrl }
-          : object
+        object.id !== youtubeFrameEditor.objectId
+          ? object
+          : isTikTok && objectCatalog[object.objectId]?.type === 'tiktok_profile_frame'
+            ? { ...object, profileUrl: normalizedUrl }
+            : !isTikTok && objectCatalog[object.objectId]?.type === 'youtube_subscriber_frame'
+              ? { ...object, channelUrl: normalizedUrl }
+              : object
       )))
       setYoutubeFrameEditor(null)
     } catch (error) {
@@ -21833,23 +21853,23 @@ function App() {
         <div className="youtube-frame-editor-backdrop" role="presentation" onPointerDown={() => setYoutubeFrameEditor(null)}>
           <form className="youtube-frame-editor" onSubmit={saveYouTubeFrameChannel} onPointerDown={(event) => event.stopPropagation()}>
             <button className="youtube-frame-editor-close" type="button" onClick={() => setYoutubeFrameEditor(null)} aria-label="Fermer">×</button>
-            <h2>Chaîne du cadre YouTube</h2>
-            <p>Colle le lien public de la chaîne à afficher.</p>
+            <h2>{youtubeFrameEditor.platform === 'tiktok' ? 'Profil du cadre TikTok' : 'Chaîne du cadre YouTube'}</h2>
+            <p>Colle le lien public {youtubeFrameEditor.platform === 'tiktok' ? 'du profil' : 'de la chaîne'} à afficher.</p>
             <label>
-              <span>Lien de la chaîne</span>
+              <span>{youtubeFrameEditor.platform === 'tiktok' ? 'Lien du profil' : 'Lien de la chaîne'}</span>
               <input
                 type="text"
                 inputMode="url"
                 autoFocus
                 value={youtubeFrameEditor.value}
-                placeholder="https://www.youtube.com/@MaChaine"
+                placeholder={youtubeFrameEditor.platform === 'tiktok' ? 'https://www.tiktok.com/@MonProfil' : 'https://www.youtube.com/@MaChaine'}
                 onChange={(event) => setYoutubeFrameEditor((current) => current ? { ...current, value: event.target.value, error: '' } : current)}
               />
             </label>
             {youtubeFrameEditor.error && <div className="youtube-frame-editor-error" role="alert">{youtubeFrameEditor.error}</div>}
             <div className="youtube-frame-editor-actions">
               <button type="button" onClick={() => setYoutubeFrameEditor(null)}>Annuler</button>
-              <button className="primary" type="submit">Afficher cette chaîne</button>
+              <button className="primary" type="submit">Afficher {youtubeFrameEditor.platform === 'tiktok' ? 'ce profil' : 'cette chaîne'}</button>
             </div>
           </form>
         </div>

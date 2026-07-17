@@ -4,6 +4,7 @@ import { Server } from 'colyseus'
 import { WebSocketTransport } from '@colyseus/ws-transport'
 import { VisitRoom } from './rooms/VisitRoom.js'
 import { createYouTubeChannelHandler } from './youtubeChannel.js'
+import { createTikTokProfileHandler } from './tiktokProfile.js'
 
 try {
   loadEnvFile()
@@ -17,6 +18,7 @@ const handleYouTubeChannel = createYouTubeChannelHandler({
   apiKey: process.env.YOUTUBE_API_KEY,
   handle: process.env.YOUTUBE_CHANNEL_HANDLE,
 })
+const handleTikTokProfile = createTikTokProfileHandler()
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -36,6 +38,10 @@ const server = http.createServer((req, res) => {
   }
   if (new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname === '/youtube-channel' && req.method === 'GET') {
     handleYouTubeChannel(req, res)
+    return
+  }
+  if (new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname === '/tiktok-profile' && req.method === 'GET') {
+    handleTikTokProfile(req, res)
     return
   }
 

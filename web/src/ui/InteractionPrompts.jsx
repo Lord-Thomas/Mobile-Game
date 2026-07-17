@@ -85,7 +85,7 @@ export default function InteractionPrompts({
       )}
       {showCaptureUi && canModifyWorld && nearYouTubeFrame && !youtubeFrameEditorOpen && modePlay && noChoiceMenu && (
         <button className="skin-open-btn youtube-frame-open-btn" type="button" onClick={onEditYouTubeFrame}>
-          Modifier la chaîne
+          {nearYouTubeFrame.objectId === 'tiktok_profile_frame' ? 'Modifier le profil TikTok' : 'Modifier la chaîne'}
         </button>
       )}
       {showCaptureUi && nearSeat && modePlay && !seatedPhase && noChoiceMenu && (

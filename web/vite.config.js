@@ -760,6 +760,10 @@ export default defineConfig({
         target: 'http://127.0.0.1:2567',
         changeOrigin: true,
       },
+      '/tiktok-profile': {
+        target: 'http://127.0.0.1:2567',
+        changeOrigin: true,
+      },
     },
   },
   // Version figée au moment du build : sert à invalider le cache du .bin de terrain
