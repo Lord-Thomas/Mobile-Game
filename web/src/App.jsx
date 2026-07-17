@@ -94,6 +94,7 @@ const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
 const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'settings']
+const DISCORD_INVITE_URL = 'https://discord.gg/d9byDAEaSc'
 const PUBLIC_BUILD_FLAGS = {
   showObjectInventory: true,
   showWeaponInventory: true,
@@ -7979,6 +7980,22 @@ function GameMenuPanel({
                 </>
               )}
               {message && <div className="account-sync-message">{message}</div>}
+              <a
+                className="account-discord-link"
+                href={DISCORD_INVITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Rejoindre le serveur Discord du jeu (s'ouvre dans un nouvel onglet)"
+              >
+                <svg aria-hidden="true" viewBox="0 0 127.14 96.36">
+                  <path fill="currentColor" d="M107.7 8.07A105.2 105.2 0 0 0 81.47 0a72.1 72.1 0 0 0-3.36 6.83 97.7 97.7 0 0 0-29.11 0A72.4 72.4 0 0 0 45.64 0 105.9 105.9 0 0 0 19.39 8.09C2.79 32.65-1.71 56.6.54 80.21a105.7 105.7 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-9.39 68.4 68.4 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.6 75.6 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.7 68.7 0 0 1-10.87 5.19 77.3 77.3 0 0 0 6.89 9.38 105.3 105.3 0 0 0 32.17-16.14c2.64-27.38-4.51-51.11-18.88-72.15ZM42.45 65.69C36.18 65.69 31 59.94 31 52.86s5.06-12.85 11.43-12.85 11.54 5.8 11.43 12.85c0 7.08-5.06 12.83-11.41 12.83Zm42.24 0c-6.28 0-11.44-5.75-11.44-12.83s5.06-12.85 11.44-12.85 11.53 5.8 11.42 12.85c0 7.08-5.04 12.83-11.42 12.83Z" />
+                </svg>
+                <span>
+                  <strong>Rejoindre le Discord</strong>
+                  <small>Actualites, entraide et communaute</small>
+                </span>
+                <span className="account-discord-arrow" aria-hidden="true">↗</span>
+              </a>
             </>
           )}
 

@@ -2663,6 +2663,67 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   font-weight: 900;
 }
 
+.account-discord-link {
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 11px;
+  background: linear-gradient(135deg, #5865f2, #4752c4);
+  box-shadow: 0 6px 18px rgba(71, 82, 196, 0.28);
+  color: #fff;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
+}
+
+.account-discord-link:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 22px rgba(71, 82, 196, 0.4);
+  transform: translateY(-1px);
+}
+
+.account-discord-link:active {
+  transform: translateY(0);
+}
+
+.account-discord-link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.account-discord-link svg {
+  width: 28px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.account-discord-link > span:not(.account-discord-arrow) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.account-discord-link strong {
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.account-discord-link small {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.account-discord-arrow {
+  margin-left: auto;
+  font-size: 17px;
+  font-weight: 900;
+}
+
 .settings-panel {
   display: grid;
   gap: 8px;
