@@ -3783,6 +3783,122 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   touch-action: manipulation;
 }
 
+.youtube-frame-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(4, 6, 10, 0.68);
+  backdrop-filter: blur(5px);
+}
+
+.youtube-frame-editor {
+  position: relative;
+  width: min(460px, 100%);
+  padding: 24px;
+  border: 1px solid rgba(255, 56, 91, 0.55);
+  border-radius: 20px;
+  color: #fff;
+  background: linear-gradient(145deg, rgba(29, 31, 38, 0.98), rgba(9, 10, 14, 0.98));
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.55), 0 0 34px rgba(255, 0, 51, 0.12);
+}
+
+.youtube-frame-editor h2 {
+  margin: 0 34px 7px 0;
+  font-size: 1.25rem;
+}
+
+.youtube-frame-editor p {
+  margin: 0 0 20px;
+  color: #b9bdc8;
+}
+
+.youtube-frame-editor label,
+.youtube-frame-editor label span {
+  display: block;
+}
+
+.youtube-frame-editor label span {
+  margin-bottom: 8px;
+  color: #e7e8ed;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.youtube-frame-editor input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 11px;
+  outline: none;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.youtube-frame-editor input:focus {
+  border-color: #ff365f;
+  box-shadow: 0 0 0 3px rgba(255, 54, 95, 0.16);
+}
+
+.youtube-frame-editor-close {
+  position: absolute;
+  top: 13px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.youtube-frame-editor-error {
+  margin-top: 10px;
+  color: #ff9aad;
+  font-size: 0.86rem;
+}
+
+.youtube-frame-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.youtube-frame-editor-actions button {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.09);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.youtube-frame-editor-actions .primary {
+  border-color: #ff365f;
+  background: #e50032;
+}
+
+@media (max-width: 560px) {
+  .youtube-frame-editor {
+    padding: 21px 17px 17px;
+  }
+
+  .youtube-frame-editor-actions {
+    flex-direction: column-reverse;
+  }
+
+  .youtube-frame-editor-actions button {
+    width: 100%;
+  }
+}
+
 .light-panel-toggle {
   width: 100%;
   border: 0;

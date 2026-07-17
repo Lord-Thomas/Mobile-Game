@@ -89,7 +89,7 @@ function drawChannelCard(canvas, channel, avatar) {
   context.fillText('abonnés', 324, 470)
 }
 
-export default function YouTubeSubscriberFrame({ width = 1.5, height = 0.86, depth = 0.07 }) {
+export default function YouTubeSubscriberFrame({ width = 1.5, height = 0.86, depth = 0.07, channelUrl = YOUTUBE_CHANNEL_FALLBACK.channelUrl }) {
   const [channel, setChannel] = useState(YOUTUBE_CHANNEL_FALLBACK)
   const [avatar, setAvatar] = useState(null)
   const texture = useMemo(() => {
@@ -108,8 +108,10 @@ export default function YouTubeSubscriberFrame({ width = 1.5, height = 0.86, dep
 
   useEffect(() => {
     const controller = new AbortController()
+    setChannel({ ...YOUTUBE_CHANNEL_FALLBACK, channelUrl })
+    setAvatar(null)
     const refresh = () => {
-      loadYouTubeChannel(controller.signal)
+      loadYouTubeChannel(channelUrl, controller.signal)
         .then(setChannel)
         .catch(() => setChannel((current) => current ?? YOUTUBE_CHANNEL_FALLBACK))
     }
@@ -119,7 +121,7 @@ export default function YouTubeSubscriberFrame({ width = 1.5, height = 0.86, dep
       controller.abort()
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [channelUrl])
 
   useEffect(() => {
     if (!channel.thumbnailDataUrl) return undefined

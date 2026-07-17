@@ -29,6 +29,8 @@ export default function InteractionPrompts({
   onOpenEnvironmentMenu,
   onOpenCustomizationChoice,
   onRequestTv,
+  youtubeFrameEditorOpen,
+  onEditYouTubeFrame,
   onRequestSit,
   onRequestStandUp,
 }) {
@@ -38,6 +40,7 @@ export default function InteractionPrompts({
   const nearEnvironmentStation = useGameStore((s) => s.near.environmentStation ?? false)
   const nearCustomizationStation = useGameStore((s) => s.near.customizationStation ?? false)
   const nearTv = useGameStore((s) => s.near.tv ?? null)
+  const nearYouTubeFrame = useGameStore((s) => s.near.youtubeFrame ?? null)
   const nearSeat = useGameStore((s) => s.near.seat ?? null)
 
   const menuSkin = useGameStore((s) => s.menus.skin ?? false)
@@ -78,6 +81,11 @@ export default function InteractionPrompts({
       {showCaptureUi && canModifyWorld && nearTv && modePlay && noChoiceMenu && (
         <button className="skin-open-btn tv-open-btn" type="button" onClick={onRequestTv}>
           TV
+        </button>
+      )}
+      {showCaptureUi && canModifyWorld && nearYouTubeFrame && !youtubeFrameEditorOpen && modePlay && noChoiceMenu && (
+        <button className="skin-open-btn youtube-frame-open-btn" type="button" onClick={onEditYouTubeFrame}>
+          Modifier la chaîne
         </button>
       )}
       {showCaptureUi && nearSeat && modePlay && !seatedPhase && noChoiceMenu && (

@@ -577,6 +577,13 @@ export function createEditableObjectInstance(objectId, overrides = {}) {
     canStore: true,
   }
 
+  if (catalogItem.placementSurface === 'wall') {
+    baseObject.wallId = overrides.wallId ?? null
+  }
+  if (catalogItem.type === 'youtube_subscriber_frame') {
+    baseObject.channelUrl = overrides.channelUrl ?? catalogItem.channelUrl
+  }
+
   if (catalogItem.seating?.kind === 'sofa') {
     baseObject.seats = generateSeats({
       objectId: id,

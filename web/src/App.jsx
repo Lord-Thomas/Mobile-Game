@@ -25,6 +25,7 @@ import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PART
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import YouTubeSubscriberFrame from './gameObjects/YouTubeSubscriberFrame'
 import { getWallMountTargets, getWallMountTransform } from './gameObjects/wallPlacement'
+import { normalizeYouTubeChannelUrl } from './services/youtubeChannelService'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
@@ -683,6 +684,7 @@ const CUSTOM_ROOM_BOUNDS = { minX: -PARCEL_HALF, maxX: PARCEL_HALF, minZ: -PARCE
 const CUSTOM_GRID_SIZE = 0.25
 const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const TV_INTERACTION_DISTANCE = 1.35
+const YOUTUBE_FRAME_INTERACTION_DISTANCE = 1.8
 const TV_MENU_EVENT = 'lab-tv-open-menu'
 let activeNearbyTvId = null
 const MAIN_ROOM = { width: mainRoom.size[0], depth: mainRoom.size[2], height: mainRoom.size[1] }
@@ -9260,6 +9262,44 @@ function TvInteractionTrigger({ playerPositionRef, objects, enabled, onNearbyTvC
   return null
 }
 
+function YouTubeFrameInteractionTrigger({ playerPositionRef, objects, enabled, onNearbyFrameChange }) {
+  const currentFrameIdRef = useRef(null)
+
+  useFrame(() => {
+    if (!enabled) {
+      if (currentFrameIdRef.current !== null) {
+        currentFrameIdRef.current = null
+        onNearbyFrameChange(null)
+      }
+      return
+    }
+
+    const playerPosition = playerPositionRef.current
+    let nearestFrame = null
+    let nearestDistance = Infinity
+
+    objects.forEach((object) => {
+      if (objectCatalog[object.objectId]?.type !== 'youtube_subscriber_frame' || !object.position) return
+      const distance = Math.hypot(
+        playerPosition.x - object.position[0],
+        playerPosition.z - object.position[2],
+      )
+      if (distance <= YOUTUBE_FRAME_INTERACTION_DISTANCE && distance < nearestDistance) {
+        nearestDistance = distance
+        nearestFrame = object
+      }
+    })
+
+    const nextFrameId = nearestFrame?.id ?? null
+    if (nextFrameId !== currentFrameIdRef.current) {
+      currentFrameIdRef.current = nextFrameId
+      onNearbyFrameChange(nearestFrame)
+    }
+  })
+
+  return null
+}
+
 function SeatTargetMarker({ seat }) {
   if (!seat) return null
   return (
@@ -9812,12 +9852,12 @@ function RugModel({ objectId }) {
   )
 }
 
-function PlaceableModel({ objectId, type, placedObjectId }) {
+function PlaceableModel({ objectId, type, placedObjectId, channelUrl }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
   if (type === 'rug' || catalogItem?.type === 'rug') return <RugModel objectId={objectId} />
   if (catalogItem?.type === 'youtube_subscriber_frame') {
-    return <YouTubeSubscriberFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} />
+    return <YouTubeSubscriberFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} channelUrl={channelUrl ?? catalogItem.channelUrl} />
   }
   if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} placedObjectId={placedObjectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
@@ -13462,7 +13502,7 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
               onDefeated={onTrainingDummyDefeated}
             />
           ) : (
-            <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
+            <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} />
           )}
         </Suspense>
       </group>
@@ -13935,7 +13975,7 @@ function PlacementPreview({ object, preview, groupRef }) {
     <group position={preview.position} rotation={[0, preview.rotationY, 0]}>
       <group ref={groupRef} scale={0.96}>
         <Suspense fallback={null}>
-          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
+          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} />
         </Suspense>
       </group>
       <mesh
@@ -17407,6 +17447,8 @@ function App() {
   const playerBodyYawRef = useRef(0) // yaw du corps joueur (mis à jour par Player)
   const nearbySeat = useGameStore((s) => s.near.seat ?? null)
   const nearbyTv = useGameStore((s) => s.near.tv ?? null)
+  const nearbyYouTubeFrame = useGameStore((s) => s.near.youtubeFrame ?? null)
+  const [youtubeFrameEditor, setYoutubeFrameEditor] = useState(null)
   useEffect(() => {
     const interval = window.setInterval(() => setSpellCooldownNow(Date.now()), 100)
     return () => window.clearInterval(interval)
@@ -17510,6 +17552,9 @@ function App() {
   const isHostVisit = multiplayerRole === 'host'
   const isMultiplayerSession = multiplayerRole !== 'solo'
   const canModifyWorld = !isGuestVisit
+  useEffect(() => {
+    if (!canModifyWorld) setYoutubeFrameEditor(null)
+  }, [canModifyWorld])
   const activeVisitExpiry = incomingVisitRequest?.expiresAt || outgoingVisitRequest?.expiresAt
   const visitRemainingSeconds = activeVisitExpiry
     ? Math.max(0, Math.ceil((new Date(activeVisitExpiry).getTime() - visitRequestNow) / 1000))
@@ -18072,6 +18117,8 @@ function App() {
               ? normalizeSavedObjectPosition(position, [0, 0, 0])
               : null,
             rotationY: Number.isFinite(object.rotationY) ? object.rotationY : 0,
+            wallId: typeof object.wallId === 'string' ? object.wallId : null,
+            channelUrl: typeof object.channelUrl === 'string' ? object.channelUrl : undefined,
           })
         })
         .filter(Boolean)
@@ -19277,7 +19324,7 @@ function App() {
   const inventoryCards = getInventoryCards(editableObjects)
   const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
   const showGameplayUi = showCaptureUi && mode === 'play'
-  const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen
+  const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen || Boolean(youtubeFrameEditor)
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
   const furnitureInventoryObjects = isGuestVisit && personalProgressVersion >= 0
     ? personalProgressRef.current?.editableObjects ?? []
@@ -20259,6 +20306,31 @@ function App() {
     window.dispatchEvent(new CustomEvent(TV_MENU_EVENT, { detail: { objectId: nearbyTv.id } }))
   }
 
+  const requestYouTubeFrameEditor = () => {
+    if (!canModifyWorld || !nearbyYouTubeFrame || mode !== 'play') return
+    setYoutubeFrameEditor({
+      objectId: nearbyYouTubeFrame.id,
+      value: nearbyYouTubeFrame.channelUrl ?? objectCatalog.youtube_subscriber_frame.channelUrl,
+      error: '',
+    })
+  }
+
+  const saveYouTubeFrameChannel = (event) => {
+    event.preventDefault()
+    if (!canModifyWorld || !youtubeFrameEditor) return
+    try {
+      const channelUrl = normalizeYouTubeChannelUrl(youtubeFrameEditor.value)
+      setEditor('editableObjects', (current) => current.map((object) => (
+        object.id === youtubeFrameEditor.objectId && objectCatalog[object.objectId]?.type === 'youtube_subscriber_frame'
+          ? { ...object, channelUrl }
+          : object
+      )))
+      setYoutubeFrameEditor(null)
+    } catch (error) {
+      setYoutubeFrameEditor((current) => current ? { ...current, error: error.message } : current)
+    }
+  }
+
   const registerCombatTarget = useCallback((id, target) => {
     if (!id || !target) return undefined
     combatTargetsRef.current.set(id, target)
@@ -20321,6 +20393,8 @@ function App() {
     setNear('magicSkullDiscovery', false)
     setNear('seat', null)
     setNear('tv', null)
+    setNear('youtubeFrame', null)
+    setYoutubeFrameEditor(null)
     setSeatedState(null)
     setView('mode','play')
     setMenuOpen('skin', false)
@@ -20445,6 +20519,11 @@ function App() {
         requestOutdoorTransition()
         return
       }
+      if (nearbyYouTubeFrame && canModifyWorld) {
+        event.preventDefault()
+        requestYouTubeFrameEditor()
+        return
+      }
       if (seatedState?.phase === 'sitting') {
         event.preventDefault()
         requestStandUp()
@@ -20458,7 +20537,7 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [mode, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
+  }, [mode, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbyYouTubeFrame, canModifyWorld, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
 
   const openCustomizationMode = () => {
     if (!canModifyWorld) return
@@ -20478,6 +20557,8 @@ function App() {
     setUi('objectInventoryOpen',false)
     setNear('seat', null)
     setNear('tv', null)
+    setNear('youtubeFrame', null)
+    setYoutubeFrameEditor(null)
     setSeatedState(null)
   }
 
@@ -21014,6 +21095,7 @@ function App() {
     (currentZone !== ZONES.outside && isNearEnvironmentStation) ||
     (canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation) ||
     Boolean(nearbyTv) ||
+    Boolean(nearbyYouTubeFrame) ||
     Boolean(nearbySeat) ||
     seatedState?.phase === 'sitting'
   )
@@ -21502,6 +21584,12 @@ function App() {
             enabled={mode === 'play'}
             onNearbyTvChange={(v) => setNear('tv', v)}
           />
+          <YouTubeFrameInteractionTrigger
+            playerPositionRef={playerPositionRef}
+            objects={placedEditableObjects}
+            enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
+            onNearbyFrameChange={(value) => setNear('youtubeFrame', value)}
+          />
           <LightSwitchTrigger
             playerPositionRef={playerPositionRef}
             enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
@@ -21736,9 +21824,36 @@ function App() {
         onOpenEnvironmentMenu={openEnvironmentMenu}
         onOpenCustomizationChoice={openCustomizationChoice}
         onRequestTv={requestTvMenu}
+        youtubeFrameEditorOpen={Boolean(youtubeFrameEditor)}
+        onEditYouTubeFrame={requestYouTubeFrameEditor}
         onRequestSit={requestSit}
         onRequestStandUp={requestStandUp}
       />
+      {showGameplayUi && canModifyWorld && youtubeFrameEditor && (
+        <div className="youtube-frame-editor-backdrop" role="presentation" onPointerDown={() => setYoutubeFrameEditor(null)}>
+          <form className="youtube-frame-editor" onSubmit={saveYouTubeFrameChannel} onPointerDown={(event) => event.stopPropagation()}>
+            <button className="youtube-frame-editor-close" type="button" onClick={() => setYoutubeFrameEditor(null)} aria-label="Fermer">×</button>
+            <h2>Chaîne du cadre YouTube</h2>
+            <p>Colle le lien public de la chaîne à afficher.</p>
+            <label>
+              <span>Lien de la chaîne</span>
+              <input
+                type="text"
+                inputMode="url"
+                autoFocus
+                value={youtubeFrameEditor.value}
+                placeholder="https://www.youtube.com/@MaChaine"
+                onChange={(event) => setYoutubeFrameEditor((current) => current ? { ...current, value: event.target.value, error: '' } : current)}
+              />
+            </label>
+            {youtubeFrameEditor.error && <div className="youtube-frame-editor-error" role="alert">{youtubeFrameEditor.error}</div>}
+            <div className="youtube-frame-editor-actions">
+              <button type="button" onClick={() => setYoutubeFrameEditor(null)}>Annuler</button>
+              <button className="primary" type="submit">Afficher cette chaîne</button>
+            </div>
+          </form>
+        </div>
+      )}
       <QuestTalkPrompt
         canShow={showCaptureUi && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen}
         onTalk={() => setQuest('dialogOpen',true)}

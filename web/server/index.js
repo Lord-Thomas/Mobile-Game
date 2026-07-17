@@ -34,7 +34,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true }))
     return
   }
-  if (req.url === '/youtube-channel' && req.method === 'GET') {
+  if (new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname === '/youtube-channel' && req.method === 'GET') {
     handleYouTubeChannel(req, res)
     return
   }
