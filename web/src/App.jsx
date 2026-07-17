@@ -69,6 +69,67 @@ import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
+const ignorePointerRaycast = () => null
+
+function useDraggablePanel(enabled = true) {
+  const panelRef = useRef(null)
+  const dragRef = useRef(null)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+
+  useEffect(() => {
+    const finishDrag = (event) => {
+      if (event?.pointerId != null && dragRef.current?.pointerId !== event.pointerId) return
+      dragRef.current = null
+    }
+    const movePanel = (event) => {
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      event.preventDefault()
+      const dx = event.clientX - drag.clientX
+      const dy = event.clientY - drag.clientY
+      const padding = 8
+      const boundedDx = MathUtils.clamp(dx, padding - drag.rect.left, window.innerWidth - padding - drag.rect.right)
+      const boundedDy = MathUtils.clamp(dy, padding - drag.rect.top, window.innerHeight - padding - drag.rect.bottom)
+      setOffset({ x: drag.offset.x + boundedDx, y: drag.offset.y + boundedDy })
+    }
+    const resetOnResize = () => {
+      dragRef.current = null
+      setOffset({ x: 0, y: 0 })
+    }
+    window.addEventListener('pointermove', movePanel, { passive: false })
+    window.addEventListener('pointerup', finishDrag)
+    window.addEventListener('pointercancel', finishDrag)
+    window.addEventListener('blur', finishDrag)
+    window.addEventListener('resize', resetOnResize)
+    return () => {
+      window.removeEventListener('pointermove', movePanel)
+      window.removeEventListener('pointerup', finishDrag)
+      window.removeEventListener('pointercancel', finishDrag)
+      window.removeEventListener('blur', finishDrag)
+      window.removeEventListener('resize', resetOnResize)
+    }
+  }, [])
+
+  const onPointerDown = useCallback((event) => {
+    if (!enabled || event.button !== 0 || !panelRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      offset,
+      rect: panelRef.current.getBoundingClientRect(),
+    }
+  }, [enabled, offset])
+
+  return {
+    panelRef,
+    panelStyle: { translate: `${offset.x}px ${offset.y}px` },
+    dragHandleProps: { onPointerDown },
+  }
+}
+
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
 const PLAYER_GROUNDED_DROP_TO_FALL = 0.85
 const PLAYER_LEDGE_FALL_INITIAL_VELOCITY = -0.35
@@ -13067,7 +13128,7 @@ function FloorCursor({ hoverRef }) {
   })
 
   return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} visible={false} raycast={ignorePointerRaycast}>
       <ringGeometry args={[0.14, 0.22, 24]} />
       <meshBasicMaterial color="#f2c14e" transparent opacity={0.85} depthWrite={false} />
     </mesh>
@@ -13353,11 +13414,11 @@ function PartitionGhost({ startPoint, hoverRef, coins, layout }) {
 
   return (
     <group ref={groupRef}>
-      <mesh ref={meshRef}>
+      <mesh ref={meshRef} raycast={ignorePointerRaycast}>
         <boxGeometry args={[1, 0.4, 0.14]} />
         <meshBasicMaterial color="#f2c14e" transparent opacity={0.55} depthWrite={false} />
       </mesh>
-      <Html position={[0, 0.9, 0]} center>
+      <Html position={[0, 0.9, 0]} center style={{ pointerEvents: 'none' }}>
         <div ref={labelRef} className="build-ghost-label" />
       </Html>
     </group>
@@ -13366,7 +13427,20 @@ function PartitionGhost({ startPoint, hoverRef, coins, layout }) {
 
 // Fantôme de déplacement de mur : suit le pointeur (pas de saut par case)
 // pendant un drag resize/moveInterior ; le mur réel ne bouge qu'au relâchement.
-function WallMoveGhost({ dragRef, view }) {
+function applyChunkedHouseWallMove(plan, wallId, amount, operation) {
+  let next = plan
+  let remaining = snapHouseCoordinate(amount)
+  while (Math.abs(remaining) >= HOUSE_STRUCTURE_GRID_SIZE * 0.5) {
+    const step = Math.max(-4, Math.min(4, remaining))
+    const result = operation(next, wallId, step)
+    if (result === next) break
+    next = result
+    remaining = snapHouseCoordinate(remaining - step)
+  }
+  return next
+}
+
+function WallMoveGhost({ dragRef, view, layout, coins }) {
   const groupRef = useRef()
   const meshRef = useRef()
   const labelRef = useRef()
@@ -13398,17 +13472,25 @@ function WallMoveGhost({ dragRef, view }) {
     )
     mesh.scale.x = Math.max(0.2, wall.length)
     if (labelRef.current) {
-      labelRef.current.textContent = amount === 0 ? '' : `${amount > 0 ? '+' : ''}${amount} m`
+      const plan = layout?.plan
+      const operation = drag.type === 'moveInterior' ? moveHouseInteriorWall : resizeHouseExteriorWall
+      const next = plan ? applyChunkedHouseWallMove(plan, wall.id, amount, operation) : null
+      const cost = next && next !== plan ? getHousePlanValue(next) - getHousePlanValue(plan) : 0
+      const priceLabel = cost > 0
+        ? `coût ${cost} pièces`
+        : cost < 0 ? `remboursement ${Math.abs(cost)} pièces` : '0 pièce'
+      labelRef.current.textContent = `${amount > 0 ? '+' : ''}${amount} m · ${priceLabel}`
+      labelRef.current.className = `build-ghost-label${cost > coins ? ' is-unaffordable' : ''}`
     }
   })
 
   return (
     <group ref={groupRef} visible={false}>
-      <mesh ref={meshRef} position={[0, view === '3d' ? 1.4 : 0.16, 0]}>
+      <mesh ref={meshRef} position={[0, view === '3d' ? 1.4 : 0.16, 0]} raycast={ignorePointerRaycast}>
         <boxGeometry args={[1, view === '3d' ? 2.8 : 0.3, 0.18]} />
         <meshBasicMaterial color="#4fb9ff" transparent opacity={0.4} depthWrite={false} />
       </mesh>
-      <Html position={[0, view === '3d' ? 3.2 : 1, 0]} center>
+      <Html position={[0, view === '3d' ? 3.2 : 1, 0]} center style={{ pointerEvents: 'none' }}>
         <div ref={labelRef} className="build-ghost-label" />
       </Html>
     </group>
@@ -13435,6 +13517,7 @@ function HouseBuildHandles({
   layout,
   view = 'top',
   canEditStructure = true,
+  coins = 0,
   selectedElement,
   buildTool,
   onSelectElement,
@@ -13662,7 +13745,7 @@ function HouseBuildHandles({
         </mesh>
         )
       })()}
-      <WallMoveGhost dragRef={activeDragRef} view={view} />
+      <WallMoveGhost dragRef={activeDragRef} view={view} layout={layout} coins={coins} />
       {/* Sélection de pièce façon Sims : surbrillance de l'espace détecté +
           poignées au centre de chaque côté pour agrandir/réduire la pièce. */}
       {selectedElement?.type === 'space' && (() => {
@@ -14258,7 +14341,7 @@ function CustomizationLayer({
       <group visible={mode === 'customize'}>
         {mode === 'customize' && <HouseFootprintGrid layout={layout} />}
         {partitionStart && (
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[partitionStart.x, 0.08, partitionStart.z]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[partitionStart.x, 0.08, partitionStart.z]} raycast={ignorePointerRaycast}>
             <ringGeometry args={[0.28, 0.36, 24]} />
             <meshBasicMaterial color="#f2c14e" transparent opacity={0.9} depthWrite={false} />
           </mesh>
@@ -14276,6 +14359,7 @@ function CustomizationLayer({
           layout={layout}
           view={view}
           canEditStructure={canEditStructure}
+          coins={coins}
           selectedElement={selectedBuildElement}
           buildTool={buildTool}
           onSelectElement={onSelectBuildElement}
@@ -14593,6 +14677,11 @@ function SkinMenu({
 
 function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   const [local, setLocal] = useState(appearance)
+  const {
+    panelRef: characterMenuPanelRef,
+    panelStyle: characterMenuPanelStyle,
+    dragHandleProps: characterMenuDragHandleProps,
+  } = useDraggablePanel(open)
 
   useEffect(() => { setLocal({ ...CHARACTER_DEFAULT_APPEARANCE, ...appearance }) }, [appearance])
 
@@ -14612,11 +14701,11 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
 
   return (
     <div className="char-menu-overlay">
-      <div className="char-menu">
+      <div ref={characterMenuPanelRef} className="char-menu" style={characterMenuPanelStyle}>
         <button type="button" className="char-menu-close" onClick={onClose} aria-label="Fermer la personnalisation">
           x
         </button>
-        <div className="char-menu-title">Personnage</div>
+        <div className="char-menu-title draggable-panel-handle" {...characterMenuDragHandleProps} title="Glisser pour déplacer">Personnage</div>
         <button
           type="button"
           className={`char-gold-coat-btn char-gold-coat-global${local.goldCoat ? ' selected' : ''}`}
@@ -14745,6 +14834,11 @@ function EnvironmentMenu({
   activeSlimePetId = null,
   onToggleSlimePet,
 }) {
+  const {
+    panelRef: shopMenuPanelRef,
+    panelStyle: shopMenuPanelStyle,
+    dragHandleProps: shopMenuDragHandleProps,
+  } = useDraggablePanel(open)
   if (!open) return null
 
   // La personnalisation sols/murs a déménagé dans la vue personnalisation :
@@ -14769,11 +14863,11 @@ function EnvironmentMenu({
 
   return (
     <div className="skin-menu-overlay environment-shop-overlay">
-      <div className="skin-menu environment-shop-menu">
+      <div ref={shopMenuPanelRef} className="skin-menu environment-shop-menu" style={shopMenuPanelStyle}>
         <button type="button" className="environment-shop-close" onClick={onClose} aria-label="Fermer la boutique">
           x
         </button>
-        <div className="environment-shop-header">
+        <div className="environment-shop-header draggable-panel-handle" {...shopMenuDragHandleProps} title="Glisser pour déplacer">
           <div>
             <span className="environment-shop-kicker">Boutique</span>
             <div className="skin-title">{isCartTab ? 'Panier' : 'Maison'}</div>
@@ -18493,6 +18587,11 @@ function App() {
   const [customizeView, setCustomizeView] = useState('top')
   const [customizeTab, setCustomizeTab] = useState('build')
   const [customizeMoreOpen, setCustomizeMoreOpen] = useState(false)
+  const {
+    panelRef: customizePanelRef,
+    panelStyle: customizePanelStyle,
+    dragHandleProps: customizePanelDragHandleProps,
+  } = useDraggablePanel(mode === 'customize')
   const [buildNotice, setBuildNotice] = useState(null)
   const [roomDragStart, setRoomDragStart] = useState(null)
   const buildNoticeTimerRef = useRef(null)
@@ -18986,24 +19085,9 @@ function App() {
     )
   }
 
-  // Applique un déplacement total (fantôme validé au relâchement) par
-  // tranches, car la logique borne chaque appel à ±4 cases.
-  const applyChunkedWallMove = (plan, wallId, amount, operation) => {
-    let next = plan
-    let remaining = snapHouseCoordinate(amount)
-    while (Math.abs(remaining) >= HOUSE_STRUCTURE_GRID_SIZE * 0.5) {
-      const step = Math.max(-4, Math.min(4, remaining))
-      const result = operation(next, wallId, step)
-      if (result === next) break
-      next = result
-      remaining = snapHouseCoordinate(remaining - step)
-    }
-    return next
-  }
-
   const resizeSelectedBuildWall = (wallId, amount) => {
     if (!canModifyWorld) return
-    setHouse('housePlan',(current) => applyChunkedWallMove(current, wallId, amount, resizeHouseExteriorWall))
+    setHouse('housePlan',(current) => applyChunkedHouseWallMove(current, wallId, amount, resizeHouseExteriorWall))
   }
 
   const moveBuildOpening = (openingId, wallId, offset) => {
@@ -19089,7 +19173,7 @@ function App() {
 
   const moveBuildInteriorWall = (wallId, amount) => {
     if (!canModifyWorld) return
-    setHouse('housePlan',(current) => applyChunkedWallMove(current, wallId, amount, moveHouseInteriorWall))
+    setHouse('housePlan',(current) => applyChunkedHouseWallMove(current, wallId, amount, moveHouseInteriorWall))
   }
 
   const resizeBuildWallEnd = (wallId, end, value) => {
@@ -21032,7 +21116,8 @@ function App() {
             </div>
           </div>
 
-          <div className={`customize-ui ${(activeBuildTool || placingObjectId || selectedObjectId || selectedBuildElement) ? 'is-contextual' : 'is-navigation'}`}>
+          <div ref={customizePanelRef} className={`customize-ui ${(activeBuildTool || placingObjectId || selectedObjectId || selectedBuildElement) ? 'is-contextual' : 'is-navigation'}`} style={customizePanelStyle}>
+            <div className="customize-panel-drag-handle draggable-panel-handle" {...customizePanelDragHandleProps} title="Glisser pour déplacer" aria-label="Déplacer le menu de personnalisation">⋮⋮ Déplacer</div>
             {!activeHouseLayout.plan.entranceDoorId && <div className="customize-build-warning">Aucune entrée définie · sélectionne une porte extérieure</div>}
             {buildNotice && <div className="customize-build-warning customize-build-notice">{buildNotice}</div>}
 
