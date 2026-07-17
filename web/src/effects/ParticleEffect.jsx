@@ -315,11 +315,12 @@ export default function ParticleEffect({
   preset,
   playing = true,
   loop = false,
+  forceOneShot = false,
   playbackId = 0,
   position = [0, 0, 0],
   onComplete,
 }) {
-  const isLoop = loop || preset.loop
+  const isLoop = forceOneShot ? false : (loop || preset.loop)
   const startRef = useRef(null)
   const doneRef = useRef(false)
   const materialsRef = useRef(new Set())

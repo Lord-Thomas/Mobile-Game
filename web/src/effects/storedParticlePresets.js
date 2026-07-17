@@ -3,6 +3,8 @@ import { normalizeParticlePreset } from './particlePresets'
 
 const PARTICLE_LIBRARY_STORAGE_KEY = 'lab_particle_library_v1'
 export const NECRO_WEAPON_PARTICLE_NAME = 'Nécro 01'
+export const SUMMON_START_PARTICLE_NAME = 'Explosion étoiles'
+export const SUMMON_END_PARTICLE_NAME = 'End-fumé'
 
 function normalizeParticleLookupKey(value) {
   return String(value ?? '')

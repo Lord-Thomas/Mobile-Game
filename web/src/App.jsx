@@ -11,6 +11,8 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
+import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
+import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
@@ -19,8 +21,10 @@ import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
 import { useGameStore } from './stores/useGameStore'
 import { GENERATED_ENEMY_DEFINITIONS } from './enemies/enemyDefinitions.generated'
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
-import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
+import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
+import YouTubeSubscriberFrame from './gameObjects/YouTubeSubscriberFrame'
+import { getWallMountTargets, getWallMountTransform } from './gameObjects/wallPlacement'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
@@ -63,7 +67,7 @@ import {
   DEFAULT_OWNED_WALL_SKIN_IDS,
   DEFAULT_WALL_SKIN_ID,
 } from './world/house/houseDefaults'
-import { getWallColliderTransform, getWallDirection, getWallPointAt, getWallRenderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
+import { getWallColliderTransform, getWallDirection, getWallPointAt, getWallRenderTransform, getWallSideTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
@@ -163,6 +167,7 @@ const CHAT_BUBBLE_LIFETIME_MS = 5600
 const CHAT_MAX_LENGTH = 120
 const CHAT_MAX_VISIBLE_BUBBLES = 4
 const SOCIAL_MENU_TABS = ['account', 'achievements', 'social', 'friends', 'settings']
+const DISCORD_INVITE_URL = 'https://discord.gg/d9byDAEaSc'
 const PUBLIC_BUILD_FLAGS = {
   showObjectInventory: true,
   showWeaponInventory: true,
@@ -434,12 +439,16 @@ const FIREBALL_SPEED = 12
 const FIREBALL_LIFETIME_MS = 2500
 const FIREBALL_COOLDOWN_MS = 800
 const FIREBALL_COLLISION_RADIUS = 0.9
+const FIREBALL_GROUND_CLEARANCE = 0.72
 const MAX_ACTIVE_FIREBALLS = 5
 const FIREBALL_PROJECTILE_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
 const FIREBALL_IMPACT_POOL = Array.from({ length: MAX_ACTIVE_FIREBALLS }, (_, index) => index)
 const MAGIC_SKULL_DISCOVERY_CHARGE_MS = 5000
 const CHARGE_TIME_MS = 1200
 const MIN_CHARGE_RATIO = 0.2
+const SPELL_ICON_FIREBALL = '/ui/spell-fireball.png'
+const SPELL_ICON_NECROMANCER = '/ui/spell-necromancer.png'
+const SPELL_ICON_WINGS_BOOST = '/ui/spell-wings-boost.png'
 
 // ── Crâne nécromancien : invocation de squelettes alliés ─────────────────────
 const MAGIC_SKULL_PRICE = 1200
@@ -1439,14 +1448,51 @@ function useCombatActionsAvailability(actionsRef) {
   return actions
 }
 
+// État du sort d'ailes pollé depuis le ref publié par Player() : seul ce
+// composant se re-rend (à ~8 Hz max), jamais l'arbre App.
+function useWingsSpellUi(wingsUiRef) {
+  const [ui, setUi] = useState({ visible: false, canCast: false, flying: false, boostAvailable: false, cooldownSeconds: 0, cooldownAngle: 0 })
+
+  useEffect(() => {
+    if (!wingsUiRef) return undefined
+    const interval = window.setInterval(() => {
+      const next = wingsUiRef.current
+      const cooldownRemaining = Math.max(0, next.cooldownRemaining ?? 0)
+      const cooldownSeconds = Math.ceil(cooldownRemaining)
+      const cooldownRatio = WINGS_CONFIG.cooldown > 0
+        ? Math.min(1, cooldownRemaining / WINGS_CONFIG.cooldown)
+        : 0
+      const cooldownAngle = Math.ceil(cooldownRatio * 360)
+      setUi((current) => (
+        current.visible === next.visible &&
+        current.canCast === next.canCast &&
+        current.flying === next.flying &&
+        current.boostAvailable === next.boostAvailable &&
+        current.cooldownSeconds === cooldownSeconds &&
+        current.cooldownAngle === cooldownAngle
+          ? current
+          : { visible: next.visible, canCast: next.canCast, flying: next.flying, boostAvailable: next.boostAvailable, cooldownSeconds, cooldownAngle }
+      ))
+    }, 120)
+    return () => window.clearInterval(interval)
+  }, [wingsUiRef])
+
+  return ui
+}
+
 function CombatActionDock({
   touchRef,
   canKick,
   canPunch,
   showSpell,
+  spellUi,
   onSpellPress,
+  wingsUiRef,
 }) {
-  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0)
+  const wingsUi = useWingsSpellUi(wingsUiRef)
+  const showWings = wingsUi.visible && !wingsUi.flying
+  const showWingsBoost = wingsUi.visible && wingsUi.flying
+  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
   if (count === 0) return null
 
   const queuePunch = () => {
@@ -1455,6 +1501,14 @@ function CombatActionDock({
 
   const queueKick = () => {
     touchRef.current.kickQueued = true
+  }
+
+  const queueWings = () => {
+    touchRef.current.wingsQueued = true
+  }
+
+  const queueWingsBoost = () => {
+    touchRef.current.wingsBoostQueued = true
   }
 
   return (
@@ -1489,16 +1543,60 @@ function CombatActionDock({
       )}
       {showSpell && (
         <button
-          className="combat-action-btn combat-action-btn--spell"
+          className={`combat-action-btn combat-action-btn--spell combat-action-btn--image-spell${(spellUi?.cooldownAngle ?? 0) > 0 ? ' combat-action-btn--cooling' : ''}`}
           type="button"
-          aria-label="Lancer un sort"
+          aria-label={spellUi?.ariaLabel ?? 'Lancer un sort'}
+          disabled={spellUi?.disabled === true}
+          style={{ '--cooldown-angle': `${spellUi?.cooldownAngle ?? 0}deg` }}
           onPointerDown={(event) => {
             event.preventDefault()
-            onSpellPress?.()
+            if (spellUi?.disabled !== true) onSpellPress?.()
           }}
         >
+          <img className="combat-action-img" src={spellUi?.icon ?? SPELL_ICON_FIREBALL} alt="" aria-hidden="true" draggable="false" />
+          {(spellUi?.cooldownAngle ?? 0) > 0 && <span className="combat-action-cooldown-radial" aria-hidden="true" />}
+          {(spellUi?.cooldownSeconds ?? 0) > 0 && (
+            <span className="combat-action-cooldown-count" aria-hidden="true">
+              {spellUi.cooldownSeconds}
+            </span>
+          )}
           <span className="combat-action-icon" aria-hidden="true">🔥</span>
           <span className="combat-action-label">Sort</span>
+        </button>
+      )}
+      {showWings && (
+        <button
+          className={`combat-action-btn combat-action-btn--wings${wingsUi.cooldownAngle > 0 ? ' combat-action-btn--cooling' : ''}`}
+          type="button"
+          aria-label="Envol Céleste"
+          disabled={!wingsUi.canCast}
+          style={{ '--cooldown-angle': `${wingsUi.cooldownAngle}deg` }}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            if (wingsUi.canCast) queueWings()
+          }}
+        >
+          <img className="combat-action-img" src="/ui/envol-celeste.png" alt="" aria-hidden="true" draggable="false" />
+          {wingsUi.cooldownAngle > 0 && <span className="combat-action-cooldown-radial" aria-hidden="true" />}
+          {wingsUi.cooldownSeconds > 0 && (
+            <span className="combat-action-cooldown-count" aria-hidden="true">
+              {wingsUi.cooldownSeconds}
+            </span>
+          )}
+        </button>
+      )}
+      {showWingsBoost && (
+        <button
+          className="combat-action-btn combat-action-btn--wings-boost combat-action-btn--image-spell"
+          type="button"
+          aria-label="Boost de vol"
+          disabled={!wingsUi.boostAvailable}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            if (wingsUi.boostAvailable) queueWingsBoost()
+          }}
+        >
+          <img className="combat-action-img" src={SPELL_ICON_WINGS_BOOST} alt="" aria-hidden="true" draggable="false" />
         </button>
       )}
     </div>
@@ -3830,6 +3928,8 @@ function Player({
   freeCameraActive = false,
   movementLocked = false,
   dragonRide = null,
+  wingsUiRef = null,
+  onWingsParticleBurst = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -3861,6 +3961,11 @@ function Player({
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
   const wasOnGroundRef = useRef(true)
+  // Sort d'ailes « Envol Céleste » : état simulé à 60 Hz, jamais dans un useState.
+  const wingsSpellRef = useRef(createWingsState())
+  const wingsEndEffectEmittedRef = useRef(true)
+  // Groupe d'inclinaison du corps en vol (l'avatar passe à l'horizontale).
+  const wingsTiltRef = useRef(null)
   const landingPreparedRef = useRef(false)
   const [isPlayerVisible, setIsPlayerVisible] = useState(true)
   const [playerMotion, setPlayerMotion] = useState('idle')
@@ -3916,6 +4021,8 @@ function Player({
     velocityYRef.current = 0
     onGroundRef.current = true
     wasOnGroundRef.current = true
+    Object.assign(wingsSpellRef.current, createWingsState())
+    wingsEndEffectEmittedRef.current = true
     playerBodyRef.current?.setNextKinematicTranslation({ x, y, z })
     visualRef.current?.position.set(x, y, z)
     cameraLookRef.current.x = x
@@ -3970,6 +4077,31 @@ function Player({
     const key = keyboardRef.current
     const touch = touchRef.current
 
+    // Le cast d'ailes est consommé dès le début de frame : si un chemin qui
+    // sort tôt (monture, assis, caméra libre) est actif, la demande est
+    // simplement perdue au lieu de rester en attente et surprendre plus tard.
+    const wantsWings = touch.wingsQueued === true
+    touch.wingsQueued = false
+    const wantsWingsBoost = touch.wingsBoostQueued === true
+    touch.wingsBoostQueued = false
+    const wings = wingsSpellRef.current
+    const emitWingsParticleBurst = (kind, position = playerPosRef.current) => {
+      onWingsParticleBurst?.({
+        kind,
+        layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+        position: [
+          position.x,
+          position.y - PLAYER_HEIGHT + 0.32,
+          position.z,
+        ],
+      })
+    }
+    const emitWingsEndParticleBurst = (position = playerPosRef.current) => {
+      if (wingsEndEffectEmittedRef.current) return
+      wingsEndEffectEmittedRef.current = true
+      emitWingsParticleBurst('end', position)
+    }
+
     if (freeCameraActive || movementLocked) {
       key.forward = false
       key.back = false
@@ -3993,6 +4125,10 @@ function Player({
     }
 
     if (!movementLocked && dragonRide?.active && dragonRide.positionRef && dragonRide.yawRef) {
+      // Monture et ailes ne se cumulent jamais.
+      emitWingsEndParticleBurst()
+      cancelWings(wings, state.clock.elapsedTime)
+      if (wingsUiRef) wingsUiRef.current.visible = false
       const mountConfig = dragonRide.config ?? MOUNT_CONFIGS.dragon
       const flight = dragonFlightInputRef.current
       const pos = dragonRide.positionRef.current
@@ -4387,22 +4523,31 @@ function Player({
       worldZ /= length
     }
 
+    const wingsAirborne = isWingsFlying(wings)
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
     const speed = isMoving
       ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95))
       : 0
-    const targetVelX = worldX * speed
-    const targetVelZ = worldZ * speed
-    const planarDamping = 14
-    planarVelocityRef.current.x +=
-      (targetVelX - planarVelocityRef.current.x) * Math.min(1, planarDamping * delta)
-    planarVelocityRef.current.z +=
-      (targetVelZ - planarVelocityRef.current.z) * Math.min(1, planarDamping * delta)
-    if (Math.abs(targetVelX) < 0.0001 && Math.abs(planarVelocityRef.current.x) < 0.02) {
-      planarVelocityRef.current.x = 0
-    }
-    if (Math.abs(targetVelZ) < 0.0001 && Math.abs(planarVelocityRef.current.z) < 0.02) {
-      planarVelocityRef.current.z = 0
+    if (wingsAirborne) {
+      // Plané : l'avance est dirigée par la caméra (wings.forwardSpeed le long
+      // du forward caméra), le joystick de déplacement est ignoré.
+      const glideBlend = Math.min(1, 8 * delta)
+      planarVelocityRef.current.x += (forwardX * wings.forwardSpeed - planarVelocityRef.current.x) * glideBlend
+      planarVelocityRef.current.z += (forwardZ * wings.forwardSpeed - planarVelocityRef.current.z) * glideBlend
+    } else {
+      const targetVelX = worldX * speed
+      const targetVelZ = worldZ * speed
+      const planarDamping = 14
+      planarVelocityRef.current.x +=
+        (targetVelX - planarVelocityRef.current.x) * Math.min(1, planarDamping * delta)
+      planarVelocityRef.current.z +=
+        (targetVelZ - planarVelocityRef.current.z) * Math.min(1, planarDamping * delta)
+      if (Math.abs(targetVelX) < 0.0001 && Math.abs(planarVelocityRef.current.x) < 0.02) {
+        planarVelocityRef.current.x = 0
+      }
+      if (Math.abs(targetVelZ) < 0.0001 && Math.abs(planarVelocityRef.current.z) < 0.02) {
+        planarVelocityRef.current.z = 0
+      }
     }
 
     const prevX = playerPosRef.current.x
@@ -4410,11 +4555,25 @@ function Player({
     let nextX = prevX + planarVelocityRef.current.x * delta
     let nextZ = prevZ + planarVelocityRef.current.z * delta
 
-    if (isMoving) {
+    if (wingsAirborne) {
+      // En vol, le corps s'aligne sur la direction de vol.
+      const targetYaw = Math.atan2(forwardX, forwardZ)
+      visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 8, delta)
+    } else if (isMoving) {
       const targetYaw = Math.atan2(worldX, worldZ)
       visualRef.current.rotation.y = dampAngle(visualRef.current.rotation.y, targetYaw, 12, delta)
     }
     if (playerBodyYawRef) playerBodyYawRef.current = visualRef.current.rotation.y
+
+    if (wingsTiltRef.current) {
+      // Plané : corps à l'horizontale (π/2), le nez suit le pitch caméra —
+      // regarder le sol pique vers le sol, regarder le ciel redresse vers le
+      // ciel. Hors vol (et pendant la propulsion), retour souple à la verticale.
+      const tiltTarget = wingsAirborne && wings.phase === WINGS_PHASE.GLIDING
+        ? Math.PI / 2 + touch.cameraPitch
+        : 0
+      wingsTiltRef.current.rotation.x = MathUtils.damp(wingsTiltRef.current.rotation.x, tiltTarget, 5, delta)
+    }
 
     const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
     nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
@@ -4572,7 +4731,48 @@ function Player({
     key.kickQueued = false
     touch.emoteQueued = null
 
-    if (!onGroundRef.current) {
+    if (wantsWings && mode === 'play') {
+      const didCast = castWings(wings, {
+        now: state.clock.elapsedTime,
+        grounded: onGroundRef.current,
+        outdoors: currentZone === ZONES.outside,
+        mounted: Boolean(dragonRide?.active),
+        seated: Boolean(seatedState),
+        busy: isEmoting || isAttackLocked,
+      })
+      if (didCast) {
+        onGroundRef.current = false
+        jumpStartUntilRef.current = 0
+        jumpLandUntilRef.current = 0
+        landingPreparedRef.current = false
+        wingsEndEffectEmittedRef.current = false
+        emitWingsParticleBurst('start')
+      }
+    }
+
+    if (isWingsFlying(wings)) {
+      // Vol : quitter la zone extérieure coupe le sort, sinon la simulation
+      // du plané pilote la verticale à la place de la gravité.
+      if (currentZone !== ZONES.outside) {
+        emitWingsEndParticleBurst()
+        cancelWings(wings, state.clock.elapsedTime)
+      } else {
+        if (wantsWingsBoost) {
+          boostWings(wings, { now: state.clock.elapsedTime })
+        }
+        const wingsStep = stepWings(wings, {
+          now: state.clock.elapsedTime,
+          dt: delta,
+          pitch: touch.cameraPitch,
+          grounded: onGroundRef.current,
+        })
+        if (wingsStep === 'landed') emitWingsEndParticleBurst()
+      }
+    }
+    if (isWingsFlying(wings)) {
+      onGroundRef.current = false
+      velocityYRef.current = wings.verticalVelocity
+    } else if (!onGroundRef.current) {
       velocityYRef.current -= 12 * delta
     } else {
       velocityYRef.current = 0
@@ -4601,6 +4801,7 @@ function Player({
     const distanceToGround = Math.max(0, nextY - floorY)
     const shouldPrepareLanding =
       !onGroundRef.current &&
+      !isWingsFlying(wings) &&
       !landingPreparedRef.current &&
       state.clock.elapsedTime >= jumpStartUntilRef.current &&
       velocityYRef.current < -1 &&
@@ -4735,6 +4936,8 @@ function Player({
         ? 'jumpLand'
         : !onGroundRef.current && state.clock.elapsedTime < jumpStartUntilRef.current
           ? 'jumpStart'
+          : wings.phase === WINGS_PHASE.GLIDING
+            ? 'idle'
           : !onGroundRef.current
             ? 'fallingIdle'
             : state.clock.elapsedTime < waveUntilRef.current
@@ -4759,7 +4962,27 @@ function Player({
         rotationY: visualRef.current.rotation.y,
         motion: nextMotion,
         zone: currentZone,
+        wings: isWingsFlying(wings),
       }
+    }
+
+    if (wingsUiRef) {
+      // Instantané basse fréquence pour le bouton du sort (pollé côté DOM,
+      // même pattern que useCombatActionsAvailability).
+      const wingsUi = wingsUiRef.current
+      wingsUi.visible = mode === 'play' && currentZone === ZONES.outside
+      wingsUi.flying = isWingsFlying(wings)
+      wingsUi.boostAvailable = canBoostWings(wings, state.clock.elapsedTime)
+      wingsUi.cooldownRemaining = getWingsCooldownRemaining(wings, state.clock.elapsedTime)
+      wingsUi.energyRatio = getWingsEnergyRatio(wings)
+      wingsUi.canCast = canCastWings(wings, {
+        now: state.clock.elapsedTime,
+        grounded: onGroundRef.current,
+        outdoors: currentZone === ZONES.outside,
+        mounted: Boolean(dragonRide?.active),
+        seated: Boolean(seatedState),
+        busy: isEmoting || isAttackLocked,
+      })
     }
 
     const pitch = touch.cameraPitch
@@ -4975,18 +5198,213 @@ function Player({
         <CapsuleCollider args={[PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS]} />
       </RigidBody>
       <group ref={visualRef} visible={isPlayerVisible}>
-        <PlayerAvatar
-          motion={playerMotion}
-          handBoneRef={handBoneRef}
-          mountProfileRef={dragonRide?.mountProfileRef}
-          equippedWeapon={equippedWeapon}
-          appearance={appearance}
-          currentZone={currentZone}
-        />
-        <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
-        <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+        {/* Groupe intermédiaire : rotation.y (cap) sur visualRef, rotation.x
+            (inclinaison en vol plané) sur wingsTiltRef, pour que le tilt reste
+            dans le repère local du corps quel que soit le cap. */}
+        <group ref={wingsTiltRef}>
+          <PlayerAvatar
+            motion={playerMotion}
+            handBoneRef={handBoneRef}
+            mountProfileRef={dragonRide?.mountProfileRef}
+            equippedWeapon={equippedWeapon}
+            appearance={appearance}
+            currentZone={currentZone}
+          />
+          <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+          <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+          <MagicWings wingsSpellRef={wingsSpellRef} currentZone={currentZone} />
+        </group>
+        <WingsSpeedTrail wingsSpellRef={wingsSpellRef} />
       </group>
     </>
+  )
+}
+
+function WingsSpeedTrail({ wingsSpellRef }) {
+  const groupRef = useRef(null)
+  const materialRefs = useRef([])
+  const trailTexture = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 256
+    const ctx = canvas.getContext('2d')
+    const centerX = canvas.width / 2
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
+    gradient.addColorStop(0, 'rgba(255,255,255,0.0)')
+    gradient.addColorStop(0.14, 'rgba(220,250,255,0.92)')
+    gradient.addColorStop(0.42, 'rgba(98,204,255,0.42)')
+    gradient.addColorStop(1, 'rgba(98,204,255,0.0)')
+    ctx.fillStyle = gradient
+    ctx.beginPath()
+    ctx.moveTo(centerX, 0)
+    ctx.bezierCurveTo(canvas.width * 0.9, canvas.height * 0.22, canvas.width * 0.72, canvas.height * 0.72, centerX, canvas.height)
+    ctx.bezierCurveTo(canvas.width * 0.28, canvas.height * 0.72, canvas.width * 0.1, canvas.height * 0.22, centerX, 0)
+    ctx.closePath()
+    ctx.fill()
+    const texture = new CanvasTexture(canvas)
+    texture.needsUpdate = true
+    return texture
+  }, [])
+
+  useEffect(() => () => trailTexture.dispose(), [trailTexture])
+
+  useFrame((state, delta) => {
+    const wings = wingsSpellRef.current
+    const active = wings.phase === WINGS_PHASE.GLIDING
+    const speedRatio = active
+      ? MathUtils.clamp(
+        (wings.forwardSpeed - WINGS_CONFIG.baseForwardSpeed) /
+          (WINGS_CONFIG.boostedMaxForwardSpeed - WINGS_CONFIG.baseForwardSpeed),
+        0,
+        1,
+      )
+      : 0
+    const targetOpacity = MathUtils.smoothstep(speedRatio, 0.08, 1) * 0.85
+
+    if (groupRef.current) {
+      groupRef.current.visible = targetOpacity > 0.02
+      const length = MathUtils.lerp(0.7, 4.2, speedRatio)
+      const width = MathUtils.lerp(0.16, 0.58, speedRatio)
+      groupRef.current.rotation.x = MathUtils.damp(groupRef.current.rotation.x, Math.PI / 2, 10, delta)
+      groupRef.current.scale.x = MathUtils.damp(groupRef.current.scale.x, width, 12, delta)
+      groupRef.current.scale.y = MathUtils.damp(groupRef.current.scale.y, length, 12, delta)
+    }
+
+    materialRefs.current.forEach((material, index) => {
+      if (!material) return
+      const layerFade = 1 - index * 0.28
+      material.opacity = MathUtils.damp(material.opacity, targetOpacity * layerFade, 16, delta)
+    })
+  })
+
+  return (
+    <group ref={groupRef} position={[0, 0.28, -0.48]} rotation={[Math.PI / 2, 0, 0]} visible={false}>
+      {[0, 1, 2].map((index) => (
+        <mesh key={index} position={[0, -0.72 - index * 0.18, -index * 0.012]} scale={[1 - index * 0.22, 1, 1]} renderOrder={3}>
+          <planeGeometry args={[1, 1]} />
+          <meshBasicMaterial
+            ref={(material) => { materialRefs.current[index] = material }}
+            color={index === 0 ? '#e9fbff' : '#82d8ff'}
+            map={trailTexture}
+            transparent
+            opacity={0}
+            alphaTest={0.02}
+            depthWrite={false}
+            depthTest={false}
+            blending={AdditiveBlending}
+            side={DoubleSide}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+const ANGEL_WINGS_MODEL_URL = '/models/props/angel-wings.glb'
+const ANGEL_WINGS_SPAN = 1.9 // envergure cible (unités monde)
+
+// Mesure de l'envergure RENDUE des ailes : extraite dans
+// src/game/angelWingsBounds.js (logique pure three, testée).
+
+// Modèle GLB des ailes du sort « Envol Céleste », partagé entre joueur local et
+// joueurs distants. flightRef.current = { active, launching } piloté par le
+// parent dans son useFrame.
+//
+// PERF : toujours monté et rendu (opacité 0 au repos), jamais visible={false} —
+// cf. la note FireballFlameShell : un objet invisible ne compile pas ses shaders
+// et ferait payer un freeze au premier cast.
+function AngelWingsModel({ flightRef, currentZone = ZONES.outside }) {
+  const { scene, animations } = useGLTF(ANGEL_WINGS_MODEL_URL)
+  const { wings, materials, mixer, flapAction } = useMemo(() => {
+    const wings = clone(scene)
+    const materials = []
+    wings.traverse((child) => {
+      if (!child.isMesh && !child.isSkinnedMesh) return
+      child.frustumCulled = false
+      // Matériau du GLB (texture plumes, alpha BLEND, double face — réglés à
+      // l'export Blender), cloné par instance pour animer l'opacité sans
+      // toucher aux autres joueurs.
+      const material = child.material.clone()
+      material.transparent = true
+      material.opacity = 0
+      material.depthWrite = false
+      material.side = DoubleSide
+      if ('color' in material) material.color.set('#ffffff')
+      if ('roughness' in material) material.roughness = Math.min(material.roughness ?? 0.86, 0.72)
+      if ('metalness' in material) material.metalness = 0
+      if ('emissive' in material) material.emissive.set('#eaf7ff')
+      if ('emissiveIntensity' in material) material.emissiveIntensity = 0.12
+      if ('envMapIntensity' in material) material.envMapIntensity = Math.max(material.envMapIntensity ?? 1, 1.2)
+      material.needsUpdate = true
+      materials.push(material)
+      child.material = material
+    })
+    // Normalise l'envergure sur la taille réellement rendue et recentre le
+    // modèle sur son pivot (l'export Blender place l'origine ailleurs).
+    const bounds = getAngelWingsBounds(scene, wings)
+    const wingsScale = ANGEL_WINGS_SPAN / bounds.span
+    wings.scale.multiplyScalar(wingsScale)
+    wings.position.set(
+      -bounds.center.x * wingsScale,
+      -bounds.center.y * wingsScale,
+      -bounds.center.z * wingsScale,
+    )
+    const mixer = new AnimationMixer(wings)
+    // L'export Blender produit plusieurs clips (armature + racine) : on joue
+    // celui qui porte le squelette, c.-à-d. celui qui a le plus de pistes.
+    const flapClip = animations.reduce(
+      (best, clip) => (clip.tracks.length > (best?.tracks.length ?? 0) ? clip : best),
+      null,
+    )
+    const flapAction = flapClip ? mixer.clipAction(flapClip) : null
+    if (flapAction) flapAction.play()
+    return { wings, materials, mixer, flapAction }
+  }, [scene, animations])
+
+  const opacityRef = useRef(0)
+
+  useLayoutEffect(() => {
+    const lightingLayer = currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0
+    wings.traverse((object) => {
+      object.layers.set(lightingLayer)
+    })
+  }, [wings, currentZone])
+
+  useFrame((_, delta) => {
+    const flight = flightRef.current
+    const target = flight.active ? 0.96 : 0
+    const opacity = MathUtils.damp(opacityRef.current, target, 9, delta)
+    opacityRef.current = opacity
+    for (const material of materials) material.opacity = opacity
+    if (opacity < 0.01) return // ailes repliées : pas d'animation à payer
+    if (flapAction) flapAction.timeScale = flight.launching ? 2.4 : 0.9
+    mixer.update(delta)
+  })
+
+  // Le décalage dos est porté par un groupe : wings.position sert au recentrage
+  // du pivot (un position sur <primitive> l'écraserait).
+  return (
+    <group position={[0, 0.72, -0.12]}>
+      <primitive object={wings} />
+    </group>
+  )
+}
+
+// Ailes du joueur local : adapte l'état du sort (wingsSpellRef) au modèle.
+function MagicWings({ wingsSpellRef, currentZone }) {
+  const flightRef = useRef({ active: false, launching: false })
+
+  useFrame(() => {
+    const wings = wingsSpellRef.current
+    flightRef.current.active = isWingsFlying(wings)
+    flightRef.current.launching = wings.phase === WINGS_PHASE.LAUNCHING
+  })
+
+  return (
+    <Suspense fallback={null}>
+      <AngelWingsModel flightRef={flightRef} currentZone={currentZone} />
+    </Suspense>
   )
 }
 
@@ -6251,7 +6669,6 @@ function FireballProjectileSlot({ projectile }) {
 
 function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, chargeAimYawRef, chargeProgressRef, chargeStartTimeRef, chargePosRef, setChargeProgress, onCancel, onLaunch }) {
   const groupRef = useRef(null)
-  const frameRef = useRef(0)
   const launchedRef = useRef(false)
   const phase = useMemo(() => Math.random() * Math.PI * 2, [])
 
@@ -6262,15 +6679,17 @@ function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, c
     }
     if (active) {
       launchedRef.current = false
-      frameRef.current = 0
     }
   }, [active])
 
-  useFrame(() => {
+  useFrame((state) => {
     const g = groupRef.current
     if (!g || !active || launchedRef.current) return
-    const elapsed = Date.now() - chargeStartTimeRef.current
-    const progress = Math.min(elapsed / CHARGE_TIME_MS, 1.0)
+    if (chargeStartTimeRef.current <= 0 || chargeStartTimeRef.current > state.clock.elapsedTime) {
+      chargeStartTimeRef.current = state.clock.elapsedTime
+    }
+    const elapsed = state.clock.elapsedTime - chargeStartTimeRef.current
+    const progress = Math.min(elapsed / (CHARGE_TIME_MS / 1000), 1.0)
     chargeProgressRef.current = progress
 
     // Annuler si le joueur bouge
@@ -6295,9 +6714,8 @@ function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, c
     const yaw = center + diff
     chargeAimYawRef.current = yaw
 
-    // Mettre à jour la barre (throttlé)
-    frameRef.current++
-    if (frameRef.current % 2 === 0) setChargeProgress(progress)
+    // Mettre à jour la barre à chaque frame avec l'horloge du renderer.
+    setChargeProgress(progress)
 
     // Positionner la boule dans le cône devant le joueur, plus basse
     g.position.set(pos.x - Math.sin(yaw) * 0.85, pos.y + 0.3, pos.z - Math.cos(yaw) * 0.85)
@@ -6546,7 +6964,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
   return null
 }
 
-function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef = null }) {
+function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef = null, currentZone = ZONES.interior }) {
   const [, setRenderTick] = useState(0)
   const impactsRef = useRef([])
   const hadVisualsRef = useRef(false)
@@ -6561,6 +6979,9 @@ function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef =
       if (now - p.startedAt > FIREBALL_LIFETIME_MS) continue
       const nx = p.x + p.dirX * FIREBALL_SPEED * delta
       const nz = p.z + p.dirZ * FIREBALL_SPEED * delta
+      const ny = currentZone === ZONES.outside
+        ? getTerrainHeight(nx, nz) + FIREBALL_GROUND_CLEARANCE
+        : p.y
       let hit = false
       if (combatTargetsRef?.current) {
         for (const [tid, target] of combatTargetsRef.current) {
@@ -6573,7 +6994,7 @@ function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef =
             hit = true
             impactsRef.current.push({
               id: `imp_${now}_${Math.random().toString(36).slice(2, 5)}`,
-              x: nx, y: p.y + 0.8, z: nz,
+              x: nx, y: ny + 0.25, z: nz,
               createdAt: now,
             })
             break
@@ -6581,7 +7002,10 @@ function FireballManager({ projectilesRef, combatTargetsRef, playerTargetIdRef =
         }
       }
       if (!hit) {
-        next.push({ ...p, x: nx, z: nz })
+        p.x = nx
+        p.y = ny
+        p.z = nz
+        next.push(p)
       }
     }
 
@@ -6733,6 +7157,9 @@ function RemotePlayer({
   const displayedSlimePetIdRef = useRef(typeof stateRef.current?.activeSlimePetId === 'string' ? stateRef.current.activeSlimePetId : null)
   const [displayedSlimePetId, setDisplayedSlimePetId] = useState(typeof stateRef.current?.activeSlimePetId === 'string' ? stateRef.current.activeSlimePetId : null)
   const remoteHandBoneRef = useRef(null)
+  // Ailes du sort Envol Céleste (flag réseau `wings`) + inclinaison du corps.
+  const remoteWingsFlightRef = useRef({ active: false, launching: false })
+  const remoteTiltRef = useRef(null)
 
   // Initialize group position imperatively on mount — never via JSX props
   useLayoutEffect(() => {
@@ -6751,6 +7178,15 @@ function RemotePlayer({
     const state = stateRef.current
     if (rootRef.current) {
       rootRef.current.visible = !state?.zone || state.zone === currentZone
+    }
+    // Ailes distantes : le flag réseau pilote l'apparition du modèle et le
+    // passage du corps à l'horizontale (le pitch caméra distant n'est pas
+    // répliqué, on garde un plané neutre).
+    const remoteWingsActive = state?.wings === true
+    remoteWingsFlightRef.current.active = remoteWingsActive
+    if (remoteTiltRef.current) {
+      const tiltTarget = remoteWingsActive ? Math.PI / 2 : 0
+      remoteTiltRef.current.rotation.x = MathUtils.damp(remoteTiltRef.current.rotation.x, tiltTarget, 5, delta)
     }
     if (state?.position) {
       const seq = state.seq ?? 0
@@ -6972,16 +7408,21 @@ function RemotePlayer({
         </Suspense>
       )}
       <group ref={groupRef}>
-        <PlayerAvatar
-          motion={displayedMotion}
-          handBoneRef={remoteHandBoneRef}
-          mountProfileRef={remoteMountProfileRef}
-          equippedWeapon={displayedEquippedWeapon}
-          appearance={displayedAppearance}
-          currentZone={currentZone}
-        />
-        <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
-        <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+        <group ref={remoteTiltRef}>
+          <PlayerAvatar
+            motion={displayedMotion}
+            handBoneRef={remoteHandBoneRef}
+            mountProfileRef={remoteMountProfileRef}
+            equippedWeapon={displayedEquippedWeapon}
+            appearance={displayedAppearance}
+            currentZone={currentZone}
+          />
+          <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+          <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+          <Suspense fallback={null}>
+            <AngelWingsModel flightRef={remoteWingsFlightRef} currentZone={currentZone} />
+          </Suspense>
+        </group>
         {showOverlays && (
           <Html position={[0, 1.08, 0]} center distanceFactor={8} zIndexRange={WORLD_NAMEPLATE_Z_INDEX_RANGE}>
             <div className="remote-player-nameplate">
@@ -7925,6 +8366,22 @@ function GameMenuPanel({
                 </>
               )}
               {message && <div className="account-sync-message">{message}</div>}
+              <a
+                className="account-discord-link"
+                href={DISCORD_INVITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Rejoindre le serveur Discord du jeu (s'ouvre dans un nouvel onglet)"
+              >
+                <svg aria-hidden="true" viewBox="0 0 127.14 96.36">
+                  <path fill="currentColor" d="M107.7 8.07A105.2 105.2 0 0 0 81.47 0a72.1 72.1 0 0 0-3.36 6.83 97.7 97.7 0 0 0-29.11 0A72.4 72.4 0 0 0 45.64 0 105.9 105.9 0 0 0 19.39 8.09C2.79 32.65-1.71 56.6.54 80.21a105.7 105.7 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-9.39 68.4 68.4 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.6 75.6 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.7 68.7 0 0 1-10.87 5.19 77.3 77.3 0 0 0 6.89 9.38 105.3 105.3 0 0 0 32.17-16.14c2.64-27.38-4.51-51.11-18.88-72.15ZM42.45 65.69C36.18 65.69 31 59.94 31 52.86s5.06-12.85 11.43-12.85 11.54 5.8 11.43 12.85c0 7.08-5.06 12.83-11.41 12.83Zm42.24 0c-6.28 0-11.44-5.75-11.44-12.83s5.06-12.85 11.44-12.85 11.53 5.8 11.42 12.85c0 7.08-5.04 12.83-11.42 12.83Z" />
+                </svg>
+                <span>
+                  <strong>Rejoindre le Discord</strong>
+                  <small>Actualites, entraide et communaute</small>
+                </span>
+                <span className="account-discord-arrow" aria-hidden="true">↗</span>
+              </a>
             </>
           )}
 
@@ -8374,6 +8831,7 @@ function MultiplayerBridge({
         grounded: true,
         motion,
         zone: localPlayerStateRef.current.zone,
+        wings: localPlayerStateRef.current.wings === true,
         mount: mountState
           ? {
               id: mountState.id,
@@ -9358,6 +9816,9 @@ function PlaceableModel({ objectId, type, placedObjectId }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
   if (type === 'rug' || catalogItem?.type === 'rug') return <RugModel objectId={objectId} />
+  if (catalogItem?.type === 'youtube_subscriber_frame') {
+    return <YouTubeSubscriberFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} />
+  }
   if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} placedObjectId={placedObjectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
   if (type === 'sofa' || catalogItem?.type === 'sofa') return <SofaModel />
@@ -10017,16 +10478,25 @@ function RuntimeParticleEffect({
   preset,
   playing = true,
   loop = false,
+  forceOneShot = false,
   playbackId = 0,
   layer = OUTDOOR_LIGHT_LAYER,
 }) {
   const groupRef = useRef()
+  const renderLayers = useMemo(() => {
+    const values = Array.isArray(layer) ? layer : [layer]
+    const finiteLayers = values.filter(Number.isFinite)
+    return finiteLayers.length > 0 ? finiteLayers : [0]
+  }, [layer])
 
   useLayoutEffect(() => {
     groupRef.current?.traverse((object) => {
-      object.layers.set(layer)
+      object.layers.set(renderLayers[0])
+      for (let index = 1; index < renderLayers.length; index += 1) {
+        object.layers.enable(renderLayers[index])
+      }
     })
-  }, [layer])
+  }, [renderLayers])
 
   if (!preset) return null
 
@@ -10036,6 +10506,7 @@ function RuntimeParticleEffect({
         preset={preset}
         playing={playing}
         loop={loop}
+        forceOneShot={forceOneShot}
         playbackId={playbackId}
       />
     </group>
@@ -10072,6 +10543,60 @@ function PlayerHealingAura({ active, playerPositionRef, layer }) {
         preset={HEAL_AURA_PARTICLE_PRESET}
         playing={active || warming}
         loop
+        layer={layer}
+      />
+    </group>
+  )
+}
+
+function SummonSpellParticleBursts({ bursts, onComplete, layer, followTargetRef = null }) {
+  const startPreset = useStoredParticlePreset(SUMMON_START_PARTICLE_NAME)
+  const endPreset = useStoredParticlePreset(SUMMON_END_PARTICLE_NAME)
+
+  return (
+    <>
+      {bursts.map((burst) => (
+        <SummonSpellParticleBurst
+          key={burst.id}
+          burst={burst}
+          preset={burst.kind === 'end' ? endPreset : startPreset}
+          layer={burst.layer === OUTDOOR_LIGHT_LAYER ? [0, OUTDOOR_LIGHT_LAYER] : (burst.layer ?? layer)}
+          followTargetRef={followTargetRef}
+          onComplete={onComplete}
+        />
+      ))}
+    </>
+  )
+}
+
+function SummonSpellParticleBurst({ burst, preset, layer, followTargetRef, onComplete }) {
+  const groupRef = useRef(null)
+
+  useEffect(() => {
+    const durationMs = Math.max(250, (preset?.duration ?? 1) * 1000 + 350)
+    const timeout = window.setTimeout(() => onComplete?.(burst.id), durationMs)
+    return () => window.clearTimeout(timeout)
+  }, [burst.id, onComplete, preset?.duration])
+
+  useFrame(() => {
+    if (!burst.followTarget || !groupRef.current || !followTargetRef?.current) return
+    const position = followTargetRef.current
+    groupRef.current.position.set(
+      position.x,
+      position.y - PLAYER_HEIGHT + 0.32,
+      position.z,
+    )
+  })
+
+  if (!preset) return null
+
+  return (
+    <group ref={groupRef} position={burst.position}>
+      <RuntimeParticleEffect
+        preset={preset}
+        playing
+        forceOneShot
+        playbackId={burst.playbackId}
         layer={layer}
       />
     </group>
@@ -11243,6 +11768,7 @@ function SummonedSkeleton({
   allyTargetsRef = null,
   playerTargetIdRef = null,
   onExpire,
+  onParticleBurst = null,
 }) {
   const cfg = MOB_CONFIGS.skeleton
   const allyId = `summon_${index}`
@@ -11430,10 +11956,19 @@ function SummonedSkeleton({
   const expire = useCallback(() => {
     if (expiredRef.current) return
     expiredRef.current = true
+    onParticleBurst?.({
+      kind: 'end',
+      source: `summon_skeleton_${index}`,
+      position: [
+        currentPositionRef.current.x,
+        currentPositionRef.current.y + 0.4,
+        currentPositionRef.current.z,
+      ],
+    })
     groupPositionsRef?.current?.delete(index)
     setActiveVisual(false)
     onExpire?.(index)
-  }, [index, onExpire, groupPositionsRef, setActiveVisual])
+  }, [index, onExpire, onParticleBurst, groupPositionsRef, setActiveVisual])
 
   useFrame((state, delta) => {
     const slot = slotRef?.current ?? null
@@ -11447,6 +11982,15 @@ function SummonedSkeleton({
         currentPositionRef.current.x = slot.spawnPosition[0]
         currentPositionRef.current.y = slot.spawnPosition[1]
         currentPositionRef.current.z = slot.spawnPosition[2]
+        onParticleBurst?.({
+          kind: 'start',
+          source: `summon_skeleton_${index}`,
+          position: [
+            slot.spawnPosition[0],
+            slot.spawnPosition[1] + 0.4,
+            slot.spawnPosition[2],
+          ],
+        })
         hpRef.current = SUMMON_SKELETON_MAX_HP
         setHp(SUMMON_SKELETON_MAX_HP)
         expiredRef.current = false
@@ -13138,6 +13682,7 @@ function FloorCursor({ hoverRef }) {
 function EditableFloor({
   mode,
   view = 'top',
+  disabled = false,
   draggingObjectId,
   placingObjectId,
   buildTool,
@@ -13158,7 +13703,7 @@ function EditableFloor({
   const { camera } = useThree()
   const lastClientRef = useRef(null)
   const activePointerIdRef = useRef(null)
-  const isActive = mode === 'customize'
+  const isActive = mode === 'customize' && !disabled
 
   const finishPointerInteraction = useCallback((pointerId = null) => {
     if (
@@ -13336,6 +13881,53 @@ function EditableFloor({
   )
 }
 
+function WallPlacementSurfaces({ object, layout, placementLocked, isPlacing, onTransform, onLockPlacement, onStopDragging }) {
+  const catalogItem = objectCatalog[object?.objectId]
+  const width = catalogItem?.width ?? 1.5
+  const height = catalogItem?.height ?? 0.86
+  const depth = catalogItem?.depth ?? 0.07
+  const targets = useMemo(
+    () => getWallMountTargets(layout, width, height),
+    [height, layout, width],
+  )
+
+  if (!object || catalogItem?.placementSurface !== 'wall') return null
+
+  const updateTransform = (event, target) => {
+    if (isPlacing && placementLocked) return
+    event.stopPropagation()
+    onTransform(getWallMountTransform(target, event.point, width, height, depth))
+  }
+
+  return (
+    <group>
+      {targets.map((target) => {
+        const surface = getWallSideTransform(target.wall, target.rect, target.side)
+        return (
+          <mesh
+            key={target.id}
+            position={surface.position}
+            rotation={surface.rotation}
+            onPointerMove={(event) => updateTransform(event, target)}
+            onClick={(event) => {
+              if (!isPlacing || placementLocked) return
+              updateTransform(event, target)
+              onLockPlacement()
+            }}
+            onPointerUp={(event) => {
+              event.stopPropagation()
+              if (!isPlacing) onStopDragging()
+            }}
+          >
+            <planeGeometry args={[surface.width, surface.height]} />
+            <meshBasicMaterial color="#ff365f" transparent opacity={0.045} depthWrite={false} side={DoubleSide} />
+          </mesh>
+        )
+      })}
+    </group>
+  )
+}
+
 function PlacementPreview({ object, preview, groupRef }) {
   if (!object || !preview) return null
 
@@ -13347,8 +13939,8 @@ function PlacementPreview({ object, preview, groupRef }) {
         </Suspense>
       </group>
       <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0.045, 0]}
+        rotation={objectCatalog[object.objectId]?.placementSurface === 'wall' ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
+        position={objectCatalog[object.objectId]?.placementSurface === 'wall' ? [0, 0, 0.055] : [0, 0.045, 0]}
         userData={{ ignorePlacementSupport: true }}
       >
         <ringGeometry args={[1.08, 1.16, 40]} />
@@ -14124,6 +14716,7 @@ function CustomizationLayer({
   onStartDragging,
   onStopDragging,
   onUpdatePosition,
+  onUpdateTransform,
   onUpdatePlacementPreview,
   onLockPlacement,
   onSelectBuildElement,
@@ -14240,6 +14833,8 @@ function CustomizationLayer({
     ? renderablePlacedObjects.slice(0, visiblePlaceableCount)
     : renderablePlacedObjects
   const placingObject = objects.find((object) => object.id === placingObjectId)
+  const movingObject = objects.find((object) => object.id === (draggingObjectId ?? placingObjectId))
+  const isMovingWallObject = objectCatalog[movingObject?.objectId]?.placementSurface === 'wall'
   const placeableRefs = useRef(new Map())
   const previewGroupRef = useRef()
   const dragOffsetRef = useRef({ x: 0, z: 0 })
@@ -14308,6 +14903,7 @@ function CustomizationLayer({
       <EditableFloor
         mode={mode}
         view={view}
+        disabled={isMovingWallObject}
         draggingObjectId={draggingObjectId}
         placingObjectId={placingObjectId}
         buildTool={buildTool}
@@ -14338,6 +14934,23 @@ function CustomizationLayer({
         onLockPlacement={onLockPlacement}
         dragOffsetRef={dragOffsetRef}
       />
+      {isMovingWallObject && (
+        <WallPlacementSurfaces
+          object={movingObject}
+          layout={layout}
+          isPlacing={Boolean(placingObjectId)}
+          placementLocked={placementLocked}
+          onTransform={(transform) => {
+            if (placingObjectId) {
+              onUpdatePlacementPreview(transform.position, transform.rotationY, transform.wallId)
+              return
+            }
+            onUpdateTransform(movingObject.id, transform)
+          }}
+          onLockPlacement={onLockPlacement}
+          onStopDragging={onStopDragging}
+        />
+      )}
       <group visible={mode === 'customize'}>
         {mode === 'customize' && <HouseFootprintGrid layout={layout} />}
         {partitionStart && (
@@ -16530,12 +17143,45 @@ function App() {
     actionQueued: false,
     punchQueued: false,
     kickQueued: false,
+    wingsQueued: false,
+    wingsBoostQueued: false,
     emoteQueued: null,
     mountAscend: false,
     mountDescend: false,
   })
   const playerCombatActionsRef = useRef({ canKick: false, canPunch: false })
   const { canKick, canPunch } = useCombatActionsAvailability(playerCombatActionsRef)
+  // Sort d'ailes : instantané écrit par Player() dans useFrame, pollé par le dock.
+  const wingsUiRef = useRef({ visible: false, canCast: false, flying: false, boostAvailable: false, cooldownRemaining: 0, energyRatio: 0 })
+  const wingsParticleBurstIdRef = useRef(0)
+  const lastWingsParticleBurstRef = useRef({ kind: null, at: 0 })
+  const [wingsParticleBursts, setWingsParticleBursts] = useState([])
+  const addWingsParticleBurst = useCallback(({ kind = 'start', position, layer = OUTDOOR_LIGHT_LAYER, source = 'wings', followTarget = null }) => {
+    if (!Array.isArray(position) || position.length < 3) return
+    const normalizedKind = kind === 'end' ? 'end' : 'start'
+    const normalizedSource = String(source || 'effect')
+    const now = performance.now()
+    const lastBurst = lastWingsParticleBurstRef.current
+    if (lastBurst.key === `${normalizedSource}:${normalizedKind}` && now - lastBurst.at < 900) return
+    lastWingsParticleBurstRef.current = { key: `${normalizedSource}:${normalizedKind}`, at: now }
+    const nextIndex = wingsParticleBurstIdRef.current + 1
+    wingsParticleBurstIdRef.current = nextIndex
+    setWingsParticleBursts((current) => [
+      ...current.filter((burst) => `${burst.source}:${burst.kind}` !== `${normalizedSource}:${normalizedKind}`).slice(-8),
+      {
+        id: `${normalizedSource}_${normalizedKind}_${nextIndex}`,
+        source: normalizedSource,
+        kind: normalizedKind,
+        position,
+        followTarget: followTarget ?? (normalizedSource === 'wings' && normalizedKind !== 'end'),
+        playbackId: nextIndex,
+        layer: Number.isFinite(layer) ? layer : OUTDOOR_LIGHT_LAYER,
+      },
+    ])
+  }, [])
+  const removeWingsParticleBurst = useCallback((id) => {
+    setWingsParticleBursts((current) => current.filter((burst) => burst.id !== id))
+  }, [])
 
   useEffect(() => {
     const resetTouchControls = () => {
@@ -16748,6 +17394,7 @@ function App() {
   const projectilesRef = useRef([])
   const remoteProjectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
+  const [spellCooldownNow, setSpellCooldownNow] = useState(Date.now())
   const isChargingRef = useRef(false)
   const [isCharging, setIsCharging] = useState(false)
   const magicSkullLearnTimerRef = useRef(null)
@@ -16760,6 +17407,10 @@ function App() {
   const playerBodyYawRef = useRef(0) // yaw du corps joueur (mis à jour par Player)
   const nearbySeat = useGameStore((s) => s.near.seat ?? null)
   const nearbyTv = useGameStore((s) => s.near.tv ?? null)
+  useEffect(() => {
+    const interval = window.setInterval(() => setSpellCooldownNow(Date.now()), 100)
+    return () => window.clearInterval(interval)
+  }, [])
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
   const [seatedState, setSeatedState] = useState(null)
   const authUser = useGameStore((s) => s.account.user)
@@ -18622,6 +19273,7 @@ function App() {
   const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
+  const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
   const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
   const showGameplayUi = showCaptureUi && mode === 'play'
@@ -19409,7 +20061,7 @@ function App() {
     if (projectilesRef.current.length >= MAX_ACTIVE_FIREBALLS) return
     isChargingRef.current = true
     setIsCharging(true)
-    chargeStartTimeRef.current = Date.now()
+    chargeStartTimeRef.current = 0
     chargeProgressRef.current = 0
     setChargeProgress(0)
     const pos = playerPositionRef.current
@@ -19427,11 +20079,16 @@ function App() {
     fireballCooldownRef.current = now
     const pos = playerPositionRef.current
     const yaw = chargeAimYawRef.current // direction clampée dans le cône
+    const projectileX = pos.x - Math.sin(yaw) * 0.85
+    const projectileZ = pos.z - Math.cos(yaw) * 0.85
+    const projectileY = currentZone === ZONES.outside
+      ? getTerrainHeight(projectileX, projectileZ) + FIREBALL_GROUND_CLEARANCE
+      : pos.y + 0.3
     const projectile = {
       id: `fb_${now}_${Math.random().toString(36).slice(2, 6)}`,
-      x: pos.x - Math.sin(yaw) * 0.85,
-      y: pos.y + 0.3,
-      z: pos.z - Math.cos(yaw) * 0.85,
+      x: projectileX,
+      y: projectileY,
+      z: projectileZ,
       dirX: -Math.sin(yaw),
       dirZ: -Math.cos(yaw),
       startedAt: now,
@@ -19450,7 +20107,7 @@ function App() {
       sentAt: Date.now(),
       phase: projectile.phase,
     })
-  }, [])
+  }, [currentZone])
 
   const cancelCharge = useCallback(() => {
     if (!isChargingRef.current) return
@@ -19469,6 +20126,33 @@ function App() {
     }
     startCharge()
   }, [equippedWeapon, summonSkeletons, startCharge])
+
+  const spellUi = useMemo(() => {
+    if (equippedWeapon === 'magic_skull') {
+      const remainingMs = Math.max(0, summonCooldownUntil - spellCooldownNow)
+      const totalMs = SUMMON_SKELETON_DURATION_MS + SUMMON_RECAST_EXTRA_MS
+      const cooldownRatio = totalMs > 0 ? Math.min(1, remainingMs / totalMs) : 0
+      return {
+        icon: SPELL_ICON_NECROMANCER,
+        ariaLabel: 'Invocation necromancienne',
+        disabled: remainingMs > 0,
+        cooldownAngle: Math.ceil(cooldownRatio * 360),
+        cooldownSeconds: Math.ceil(remainingMs / 1000),
+      }
+    }
+    if (equippedWeapon === 'magic_book') {
+      const remainingMs = Math.max(0, FIREBALL_COOLDOWN_MS - (spellCooldownNow - fireballCooldownRef.current))
+      const cooldownRatio = FIREBALL_COOLDOWN_MS > 0 ? Math.min(1, remainingMs / FIREBALL_COOLDOWN_MS) : 0
+      return {
+        icon: SPELL_ICON_FIREBALL,
+        ariaLabel: 'Boule de feu',
+        disabled: remainingMs > 0 || isCharging,
+        cooldownAngle: Math.ceil(cooldownRatio * 360),
+        cooldownSeconds: Math.ceil(remainingMs / 1000),
+      }
+    }
+    return null
+  }, [equippedWeapon, isCharging, spellCooldownNow, summonCooldownUntil])
 
   const toggleCat = () => {
     // Summoning your own pet is a personal action (not a world edit), so it is
@@ -19504,6 +20188,13 @@ function App() {
       const pos = dragonRidePositionRef.current
       const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
       if (pos.y - groundY > 0.15) return
+      addWingsParticleBurst({
+        kind: 'end',
+        source: `mount_${mountedMountId}`,
+        position: [pos.x, groundY + 0.55, pos.z],
+        layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+        followTarget: false,
+      })
       if (mountId === mountedMountId) {
         setMountedMountId(null)
         setSpawnRequest({
@@ -19539,6 +20230,13 @@ function App() {
     dragonRideMountProfileRef.current.handTargetsMeasured = false
     dragonRideMountProfileRef.current.seatHeightMeasured = false
     dragonRideRiderTransformRef.current.ready = false
+    addWingsParticleBurst({
+      kind: 'start',
+      source: `mount_${mountId}`,
+      position: [spawnX, groundY + 0.55, spawnZ],
+      layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+      followTarget: false,
+    })
     setMountedMountId(mountId)
   }
 
@@ -19843,6 +20541,22 @@ function App() {
     )
   }
 
+  const updateEditableObjectTransform = (id, transform) => {
+    if (!canModifyWorld) return
+    setEditor('editableObjects',(current) =>
+      current.map((object) => (
+        object.id === id
+          ? {
+            ...object,
+            position: transform.position,
+            rotationY: transform.rotationY,
+            wallId: transform.wallId,
+          }
+          : object
+      )),
+    )
+  }
+
   const storeSelectedObject = () => {
     if (!canModifyWorld) return
     if (!selectedObject?.canStore) return
@@ -19886,17 +20600,27 @@ function App() {
     setEditor('draggingObjectId',null)
     setEditor('placingObjectId',id)
     setEditor('placementLocked',false)
+    const isWallObject = objectCatalog[object.objectId]?.placementSurface === 'wall'
     setEditor('placementPreview',{
-      position: [0, 0, 0],
+      position: isWallObject ? [0, 2, 0] : [0, 0, 0],
       rotationY: object.rotationY ?? 0,
-      isValid: true,
+      isValid: !isWallObject,
     })
   }
 
-  const updatePlacementPreview = (position) => {
+  const updatePlacementPreview = (position, rotationY = null, wallId = null) => {
     if (!canModifyWorld) return
     setEditor('placementPreview',(current) => {
       if (!current) return current
+      if (Number.isFinite(rotationY)) {
+        return {
+          ...current,
+          position,
+          rotationY,
+          wallId,
+          isValid: true,
+        }
+      }
       const [x, z] = clampToCustomRoom(position[0], position[2])
       return {
         ...current,
@@ -19918,6 +20642,7 @@ function App() {
               status: 'placed',
               position: placementPreview.position,
               rotationY: placementPreview.rotationY,
+              wallId: placementPreview.wallId ?? null,
             }
             : object,
         ),
@@ -19950,6 +20675,8 @@ function App() {
     if (!canModifyWorld) return
     const angle = Math.PI / 4
     if (placingObjectId) {
+      const placingObject = editableObjects.find((object) => object.id === placingObjectId)
+      if (objectCatalog[placingObject?.objectId]?.placementSurface === 'wall') return
       setEditor('placementPreview',(current) => (
         current ? { ...current, rotationY: current.rotationY + direction * angle } : current
       ))
@@ -20474,6 +21201,7 @@ function App() {
               endCustomizationChange()
             }}
             onUpdatePosition={updateEditableObjectPosition}
+            onUpdateTransform={updateEditableObjectTransform}
             onUpdatePlacementPreview={updatePlacementPreview}
             onLockPlacement={() => setEditor('placementLocked',true)}
             onSelectBuildElement={(element) => {
@@ -20630,10 +21358,12 @@ function App() {
             projectilesRef={projectilesRef}
             combatTargetsRef={combatTargetsRef}
             playerTargetIdRef={playerTargetIdRef}
+            currentZone={currentZone}
           />
           <FireballManager
             projectilesRef={remoteProjectilesRef}
             combatTargetsRef={null}
+            currentZone={currentZone}
           />
           {/* Pool de squelettes invoqués : monté dès le chargement du monde
               pour précharger modèle/animations/GPU et éviter tout freeze au sort. */}
@@ -20651,6 +21381,13 @@ function App() {
                   allyTargetsRef={allyTargetsRef}
                   playerTargetIdRef={playerTargetIdRef}
                   onExpire={handleSummonExpire}
+                  onParticleBurst={({ kind, source, position }) => addWingsParticleBurst({
+                    kind,
+                    source,
+                    position,
+                    layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+                    followTarget: false,
+                  })}
                 />
               </Suspense>
             ))}
@@ -20706,6 +21443,8 @@ function App() {
               freeCameraActive={isLocalNetwork && freeCameraActive}
               movementLocked={isCharging || isLearningMagicSkull}
               playerCombatActionsRef={playerCombatActionsRef}
+              wingsUiRef={wingsUiRef}
+              onWingsParticleBurst={addWingsParticleBurst}
               onSpawnConsumed={consumeSpawnRequest}
               dragonRide={{
                 active: dragonMounted,
@@ -20722,6 +21461,12 @@ function App() {
             </Profiler>
             </Suspense>
           )}
+          <SummonSpellParticleBursts
+            bursts={wingsParticleBursts}
+            onComplete={removeWingsParticleBurst}
+            layer={currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0}
+            followTargetRef={playerPositionRef}
+          />
           <OutdoorDoorTrigger
             playerPositionRef={playerPositionRef}
             currentZone={currentZone}
@@ -20848,16 +21593,15 @@ function App() {
           <span className="charge-bar-label">💀 {magicSkullLearnProgress >= 1 ? 'Appris !' : 'Apprentissage...'}</span>
         </div>
       )}
-      {showCaptureUi && mode === 'play' && equippedWeapon === 'magic_skull' && (
-        <SummonCooldownBadge until={summonCooldownUntil} />
-      )}
       {showCaptureUi && mode === 'play' && (
         <CombatActionDock
           touchRef={touchRef}
           canKick={canKick}
           canPunch={canPunch}
           showSpell={equippedWeapon === 'magic_book' || equippedWeapon === 'magic_skull'}
+          spellUi={spellUi}
           onSpellPress={handleSpellPress}
+          wingsUiRef={wingsUiRef}
         />
       )}
       {showGameplayUi && (
@@ -21125,8 +21869,8 @@ function App() {
               <div className="customize-context-panel">
                 <div className="customize-context-heading"><strong>Placer le meuble</strong><span>Déplace-le dans la scène</span></div>
                 <div className="customize-context-actions">
-                  <button type="button" onClick={() => rotateSelectedObject(-1)}>Tourner ↶</button>
-                  <button type="button" onClick={() => rotateSelectedObject(1)}>Tourner ↷</button>
+                  <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={placingEditableObject?.canRotate === false}>Tourner ↶</button>
+                  <button type="button" onClick={() => rotateSelectedObject(1)} disabled={placingEditableObject?.canRotate === false}>Tourner ↷</button>
                   <button className="primary" type="button" onClick={confirmPlacement} disabled={!placementPreview?.isValid || !placementLocked}>Poser</button>
                   <button type="button" onClick={cancelPlacement}>Annuler</button>
                 </div>
@@ -21146,8 +21890,8 @@ function App() {
               <div className="customize-context-panel">
                 <div className="customize-context-heading"><strong>{selectedObject?.name ?? 'Meuble sélectionné'}</strong><span>Glisse le meuble pour le déplacer</span></div>
                 <div className="customize-context-actions">
-                  <button type="button" onClick={() => rotateSelectedObject(-1)}>Tourner ↶</button>
-                  <button type="button" onClick={() => rotateSelectedObject(1)}>Tourner ↷</button>
+                  <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={selectedObject?.canRotate === false}>Tourner ↶</button>
+                  <button type="button" onClick={() => rotateSelectedObject(1)} disabled={selectedObject?.canRotate === false}>Tourner ↷</button>
                   {selectedObject?.canStore && <button type="button" onClick={storeSelectedObject}>Ranger</button>}
                   <button type="button" onClick={leaveCustomizationContext}>Retour</button>
                 </div>

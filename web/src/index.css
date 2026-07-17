@@ -2263,6 +2263,16 @@ html[data-orientation='landscape'] .combat-action-dock--count-3 .combat-action-b
   min-height: 48px;
 }
 
+html[data-orientation='landscape'] .combat-action-dock--count-4 .combat-action-btn {
+  width: clamp(52px, 13vw, 64px);
+  min-height: 44px;
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-5 .combat-action-btn {
+  width: clamp(46px, 11vw, 56px);
+  min-height: 40px;
+}
+
 html[data-orientation='landscape'] .combat-action-icon {
   font-size: 1.25rem;
 }
@@ -2908,6 +2918,67 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   background: rgba(255, 255, 255, 0.08);
   color: #9aa8b8;
   font-size: 11px;
+  font-weight: 900;
+}
+
+.account-discord-link {
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 11px;
+  background: linear-gradient(135deg, #5865f2, #4752c4);
+  box-shadow: 0 6px 18px rgba(71, 82, 196, 0.28);
+  color: #fff;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
+}
+
+.account-discord-link:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 22px rgba(71, 82, 196, 0.4);
+  transform: translateY(-1px);
+}
+
+.account-discord-link:active {
+  transform: translateY(0);
+}
+
+.account-discord-link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.account-discord-link svg {
+  width: 28px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.account-discord-link > span:not(.account-discord-arrow) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.account-discord-link strong {
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.account-discord-link small {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.account-discord-arrow {
+  margin-left: auto;
+  font-size: 17px;
   font-weight: 900;
 }
 
@@ -3954,6 +4025,24 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   font-size: 0.56rem;
 }
 
+.combat-action-dock--count-4 .combat-action-btn {
+  width: clamp(60px, 17vw, 72px);
+  min-height: 54px;
+}
+
+.combat-action-dock--count-4 .combat-action-label {
+  font-size: 0.52rem;
+}
+
+.combat-action-dock--count-5 .combat-action-btn {
+  width: clamp(52px, 14vw, 62px);
+  min-height: 50px;
+}
+
+.combat-action-dock--count-5 .combat-action-label {
+  font-size: 0.48rem;
+}
+
 .combat-action-btn--punch {
   border: 2px solid rgba(239, 68, 68, 0.75);
   background: rgba(40, 10, 10, 0.88);
@@ -3973,6 +4062,154 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   background: rgba(40, 15, 5, 0.88);
   color: #fed7aa;
   box-shadow: 0 0 20px rgba(255, 100, 0, 0.45);
+}
+
+.combat-action-btn--wings,
+.combat-action-btn--image-spell {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #cfe6ff;
+  box-shadow: none;
+  backdrop-filter: none;
+  filter: drop-shadow(0 0 12px rgba(125, 180, 255, 0.45));
+}
+
+.combat-action-dock--count-2 .combat-action-btn--wings,
+.combat-action-dock--count-2 .combat-action-btn--image-spell {
+  width: clamp(62px, 20vw, 76px);
+  height: clamp(62px, 20vw, 76px);
+  min-height: 0;
+}
+
+.combat-action-dock--count-3 .combat-action-btn--wings,
+.combat-action-dock--count-3 .combat-action-btn--image-spell {
+  width: clamp(58px, 18vw, 68px);
+  height: clamp(58px, 18vw, 68px);
+  min-height: 0;
+}
+
+.combat-action-dock--count-4 .combat-action-btn--wings,
+.combat-action-dock--count-4 .combat-action-btn--image-spell {
+  width: clamp(52px, 15vw, 62px);
+  height: clamp(52px, 15vw, 62px);
+  min-height: 0;
+}
+
+.combat-action-dock--count-5 .combat-action-btn--wings,
+.combat-action-dock--count-5 .combat-action-btn--image-spell {
+  width: clamp(48px, 13vw, 56px);
+  height: clamp(48px, 13vw, 56px);
+  min-height: 0;
+}
+
+.combat-action-btn--wings:disabled,
+.combat-action-btn--image-spell:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.combat-action-btn--wings:disabled .combat-action-img,
+.combat-action-btn--image-spell:disabled .combat-action-img {
+  filter: grayscale(0.45) saturate(0.65) brightness(0.72);
+  cursor: default;
+}
+
+.combat-action-btn--wings:disabled:active,
+.combat-action-btn--image-spell:disabled:active {
+  transform: none;
+}
+
+.combat-action-img {
+  width: 1.7rem;
+  height: 1.7rem;
+  object-fit: contain;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.combat-action-btn--wings .combat-action-img,
+.combat-action-btn--image-spell .combat-action-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.combat-action-btn--wings .combat-action-label,
+.combat-action-btn--image-spell .combat-action-label,
+.combat-action-btn--image-spell .combat-action-icon {
+  display: none;
+}
+
+.combat-action-cooldown-radial {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(
+    from -90deg,
+    rgba(0, 0, 0, 0.72) 0deg var(--cooldown-angle),
+    rgba(0, 0, 0, 0.04) var(--cooldown-angle) 360deg
+  );
+  pointer-events: none;
+}
+
+.combat-action-cooldown-count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95), 0 0 10px rgba(125, 180, 255, 0.75);
+  pointer-events: none;
+}
+
+html[data-orientation='landscape'] .combat-action-img {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+html[data-orientation='landscape'] .combat-action-btn--wings .combat-action-img,
+html[data-orientation='landscape'] .combat-action-btn--image-spell .combat-action-img {
+  width: 100%;
+  height: 100%;
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-2 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-2 .combat-action-btn--image-spell {
+  width: clamp(52px, 15vw, 64px);
+  height: clamp(52px, 15vw, 64px);
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-3 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-3 .combat-action-btn--image-spell {
+  width: clamp(48px, 13vw, 58px);
+  height: clamp(48px, 13vw, 58px);
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-4 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-4 .combat-action-btn--image-spell {
+  width: clamp(44px, 11vw, 52px);
+  height: clamp(44px, 11vw, 52px);
+}
+
+html[data-orientation='landscape'] .combat-action-dock--count-5 .combat-action-btn--wings,
+html[data-orientation='landscape'] .combat-action-dock--count-5 .combat-action-btn--image-spell {
+  width: clamp(40px, 10vw, 48px);
+  height: clamp(40px, 10vw, 48px);
+}
+
+html[data-orientation='landscape'] .combat-action-cooldown-count {
+  font-size: 0.95rem;
 }
 
 .combat-action-btn--spell:active {
@@ -4002,6 +4239,7 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   background: linear-gradient(90deg, #cc1100, #ff6600, #ffdd00);
   border-radius: 12px;
   transition: width 0.05s linear;
+  will-change: width;
 }
 .charge-bar-label {
   position: absolute;
