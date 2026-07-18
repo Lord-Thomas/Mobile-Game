@@ -1,6 +1,23 @@
 import { getWallPointAt, splitWallIntoSolidRects } from '../world/house/wallUtils'
 
 const WALL_GAP = 0.012
+const CUTAWAY_CAMERA_DOT_THRESHOLD = 0.18
+
+export function isWallCutAwayFromCamera(wall, cameraPosition) {
+  const exteriorSide = wall.sideA?.type === 'outside'
+    ? wall.sideA
+    : wall.sideB?.type === 'outside'
+      ? wall.sideB
+      : null
+  if (!exteriorSide) return false
+
+  const centerX = (wall.startCorner.x + wall.endCorner.x) * 0.5
+  const centerZ = (wall.startCorner.z + wall.endCorner.z) * 0.5
+  return (
+    exteriorSide.normal[0] * (cameraPosition.x - centerX) +
+    exteriorSide.normal[2] * (cameraPosition.z - centerZ)
+  ) > CUTAWAY_CAMERA_DOT_THRESHOLD
+}
 
 export function getWallMountTargets(layout, frameWidth, frameHeight) {
   return layout.walls.flatMap((wall) => (
