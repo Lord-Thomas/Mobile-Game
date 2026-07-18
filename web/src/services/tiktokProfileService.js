@@ -1,3 +1,5 @@
+import { getColyseusUrl } from './colyseusSessionService'
+
 const TIKTOK_HOSTS = new Set(['tiktok.com', 'www.tiktok.com', 'm.tiktok.com'])
 
 export const TIKTOK_PROFILE_FALLBACK = {
@@ -42,8 +44,20 @@ export function normalizeTikTokProfileUrl(value) {
 }
 
 function getProfileEndpoint() {
+  const configuredUrl = import.meta.env.VITE_TIKTOK_PROFILE_URL
+  if (configuredUrl) return configuredUrl
   if (import.meta.env.DEV) return '/tiktok-profile'
-  return import.meta.env.VITE_TIKTOK_PROFILE_URL || '/tiktok-profile'
+
+  try {
+    const url = new URL(getColyseusUrl())
+    url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
+    url.pathname = '/tiktok-profile'
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return '/tiktok-profile'
+  }
 }
 
 export async function loadTikTokProfile(profileUrl, signal) {
