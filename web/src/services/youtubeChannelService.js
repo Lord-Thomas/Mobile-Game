@@ -1,5 +1,3 @@
-import { getColyseusUrl } from './colyseusSessionService'
-
 export const YOUTUBE_CHANNEL_FALLBACK = {
   title: 'Thoms_gail',
   handle: '@Thoms_gail',
@@ -10,20 +8,8 @@ export const YOUTUBE_CHANNEL_FALLBACK = {
 }
 
 function getStatsUrl() {
-  const configuredUrl = import.meta.env.VITE_YOUTUBE_STATS_URL
-  if (configuredUrl) return configuredUrl
   if (import.meta.env.DEV) return '/youtube-channel'
-
-  try {
-    const url = new URL(getColyseusUrl())
-    url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
-    url.pathname = '/youtube-channel'
-    url.search = ''
-    url.hash = ''
-    return url.toString()
-  } catch {
-    return '/youtube-channel'
-  }
+  return '/api/youtube-channel'
 }
 
 export function normalizeYouTubeChannelUrl(value) {

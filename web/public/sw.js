@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lord-thomas-game-v1';
+const CACHE_NAME = 'lord-thomas-game-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -36,6 +36,9 @@ self.addEventListener('fetch', (event) => {
   // Ignorer les requêtes non-GET ou de développement / API externe
   if (
     event.request.method !== 'GET' ||
+    new URL(event.request.url).pathname.startsWith('/api/') ||
+    event.request.url.includes('/youtube-channel') ||
+    event.request.url.includes('/tiktok-profile') ||
     event.request.url.includes('/supabase/') ||
     event.request.url.includes('supabase.co') ||
     event.request.url.includes('localhost') ||
