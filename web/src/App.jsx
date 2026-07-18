@@ -25,7 +25,7 @@ import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PART
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import YouTubeSubscriberFrame from './gameObjects/YouTubeSubscriberFrame'
 import TikTokCreatorFrame from './gameObjects/TikTokCreatorFrame'
-import { getWallMountTargets, getWallMountTransform } from './gameObjects/wallPlacement'
+import { getWallMountTargets, getWallMountTransform, isWallCutAwayFromCamera } from './gameObjects/wallPlacement'
 import { normalizeYouTubeChannelUrl } from './services/youtubeChannelService'
 import { normalizeTikTokProfileUrl } from './services/tiktokProfileService'
 import { isSupabaseConfigured } from './lib/supabase'
@@ -9321,12 +9321,14 @@ const CUSTOMIZE_ZOOM_DEFAULT = 58
 // Orbite de la vue 3D du mode personnalisation. Objet module muté par
 // EditableFloor (drag) et lu par CustomizationCamera dans useFrame — même
 // principe que PLAY_AREA_LIMITS : pas de re-render à chaque frame.
-const CUSTOMIZE_ORBIT_DEFAULT = { yaw: Math.PI * 0.25, pitch: 0.85, distance: 24 }
+const CUSTOMIZE_ORBIT_DEFAULT = { yaw: Math.PI * 0.25, pitch: 0.85, distance: 24, targetX: 0, targetZ: 0 }
 const CUSTOMIZE_ORBIT = { ...CUSTOMIZE_ORBIT_DEFAULT }
 const CUSTOMIZE_ORBIT_PITCH_MIN = 0.22
 const CUSTOMIZE_ORBIT_PITCH_MAX = 1.35
 const CUSTOMIZE_ORBIT_DISTANCE_MIN = 9
 const CUSTOMIZE_ORBIT_DISTANCE_MAX = 46
+const CUSTOMIZE_ORBIT_TARGET_MIN = -24
+const CUSTOMIZE_ORBIT_TARGET_MAX = 24
 const CUSTOMIZE_HISTORY_LIMIT = 50
 
 function cloneCustomizationValue(value) {
@@ -9346,6 +9348,24 @@ function applyCustomizeOrbitDrag(dxPixels, dyPixels) {
     CUSTOMIZE_ORBIT_PITCH_MAX,
   )
 }
+
+function applyCustomizeOrbitPan(dxPixels, dyPixels) {
+  const scale = Math.max(0.012, CUSTOMIZE_ORBIT.distance * 0.0022)
+  const forwardX = Math.sin(CUSTOMIZE_ORBIT.yaw)
+  const forwardZ = Math.cos(CUSTOMIZE_ORBIT.yaw)
+  const rightX = Math.cos(CUSTOMIZE_ORBIT.yaw)
+  const rightZ = -Math.sin(CUSTOMIZE_ORBIT.yaw)
+  CUSTOMIZE_ORBIT.targetX = MathUtils.clamp(
+    CUSTOMIZE_ORBIT.targetX - rightX * dxPixels * scale + forwardX * dyPixels * scale,
+    CUSTOMIZE_ORBIT_TARGET_MIN,
+    CUSTOMIZE_ORBIT_TARGET_MAX,
+  )
+  CUSTOMIZE_ORBIT.targetZ = MathUtils.clamp(
+    CUSTOMIZE_ORBIT.targetZ - rightZ * dxPixels * scale + forwardZ * dyPixels * scale,
+    CUSTOMIZE_ORBIT_TARGET_MIN,
+    CUSTOMIZE_ORBIT_TARGET_MAX,
+  )
+}
 const PLACEABLE_PLAY_INITIAL_RENDER_COUNT = 6
 const PLACEABLE_PLAY_REVEAL_BATCH_SIZE = 3
 const PLACEABLE_PLAY_REVEAL_INTERVAL_MS = 180
@@ -9361,6 +9381,7 @@ function CustomizationCamera({ active, view = 'top' }) {
   const gameplayCamRef = useRef(null)
   const zoomRef = useRef(CUSTOMIZE_ZOOM_DEFAULT)
   const pinchDistRef = useRef(null)
+  const pinchCenterRef = useRef(null)
   const is3D = view === '3d'
 
   // Les deux caméras de personnalisation restent montées et la caméra de jeu
@@ -9440,6 +9461,10 @@ function CustomizationCamera({ active, view = 'top' }) {
           e.touches[0].clientX - e.touches[1].clientX,
           e.touches[0].clientY - e.touches[1].clientY,
         )
+        pinchCenterRef.current = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) * 0.5,
+          y: (e.touches[0].clientY + e.touches[1].clientY) * 0.5,
+        }
       }
     }
 
@@ -9449,15 +9474,30 @@ function CustomizationCamera({ active, view = 'top' }) {
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY,
       )
+      const center = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) * 0.5,
+        y: (e.touches[0].clientY + e.touches[1].clientY) * 0.5,
+      }
+      if (is3D && pinchCenterRef.current) {
+        applyCustomizeOrbitPan(
+          center.x - pinchCenterRef.current.x,
+          center.y - pinchCenterRef.current.y,
+        )
+      }
       applyZoomDelta((dist - pinchDistRef.current) * 0.3)
       pinchDistRef.current = dist
+      pinchCenterRef.current = center
+      e.preventDefault()
     }
 
-    const onTouchEnd = () => { pinchDistRef.current = null }
+    const onTouchEnd = () => {
+      pinchDistRef.current = null
+      pinchCenterRef.current = null
+    }
 
     canvas.addEventListener('wheel', onWheel, { passive: false })
     canvas.addEventListener('touchstart', onTouchStart, { passive: true })
-    canvas.addEventListener('touchmove', onTouchMove, { passive: true })
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false })
     canvas.addEventListener('touchend', onTouchEnd, { passive: true })
 
     return () => {
@@ -9475,14 +9515,14 @@ function CustomizationCamera({ active, view = 'top' }) {
     }
     const orbitCam = orbitCamRef.current
     if (orbitCam && active && is3D) {
-      const { yaw, pitch, distance } = CUSTOMIZE_ORBIT
+      const { yaw, pitch, distance, targetX, targetZ } = CUSTOMIZE_ORBIT
       const horizontal = Math.cos(pitch) * distance
       orbitCam.position.set(
-        Math.sin(yaw) * horizontal,
+        targetX + Math.sin(yaw) * horizontal,
         Math.sin(pitch) * distance,
-        Math.cos(yaw) * horizontal,
+        targetZ + Math.cos(yaw) * horizontal,
       )
-      orbitCam.lookAt(0, 1, 0)
+      orbitCam.lookAt(targetX, 1, targetZ)
     }
   })
 
@@ -13466,6 +13506,7 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
       ? [1.05, 1.12]
       : [0.62, 0.68]
   const groupRef = useRef(null)
+  const touchGestureRef = useRef(null)
 
   useEffect(() => {
     const group = groupRef.current
@@ -13480,10 +13521,40 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
     return () => onObjectRef(object.id, null)
   }, [object.id, onObjectRef])
 
+  useEffect(() => () => {
+    if (touchGestureRef.current?.timer) window.clearTimeout(touchGestureRef.current.timer)
+  }, [])
+
   if (object.type === 'goal') return null
 
   const handlePointerDown = (event) => {
     if (!isCustomizeMode || !object.canMove) return
+    if (event.pointerType === 'touch') {
+      const gesture = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        point: { x: event.point.x, z: event.point.z },
+        target: event.target,
+        moved: false,
+        dragging: false,
+        timer: null,
+      }
+      gesture.target?.setPointerCapture?.(event.pointerId)
+      gesture.timer = window.setTimeout(() => {
+        if (touchGestureRef.current !== gesture || gesture.moved) return
+        gesture.dragging = true
+        onSelect(object.id)
+        onStartDragging(object.id, {
+          x: (object.position?.[0] ?? 0) - gesture.point.x,
+          z: (object.position?.[2] ?? 0) - gesture.point.z,
+        })
+      }, 420)
+      touchGestureRef.current = gesture
+      // Le contact reste propagé jusqu'au sol : un glissement immédiat orbite
+      // la caméra, même lorsque le doigt commence sur un meuble.
+      return
+    }
     event.stopPropagation()
     onSelect(object.id)
     onStartDragging(object.id, {
@@ -13492,11 +13563,32 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
     })
   }
 
+  const handlePointerMove = (event) => {
+    const gesture = touchGestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId || gesture.dragging) return
+    if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 10) {
+      gesture.moved = true
+      window.clearTimeout(gesture.timer)
+    }
+  }
+
+  const finishTouchGesture = (event, cancelled = false) => {
+    const gesture = touchGestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    window.clearTimeout(gesture.timer)
+    if (!cancelled && !gesture.dragging && !gesture.moved) onSelect(object.id)
+    gesture.target?.releasePointerCapture?.(event.pointerId)
+    touchGestureRef.current = null
+  }
+
   return (
     <group
       position={object.position}
       rotation={[0, object.rotationY, 0]}
       onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={(event) => finishTouchGesture(event)}
+      onPointerCancel={(event) => finishTouchGesture(event, true)}
       userData={{ debugCategory: 'placeables' }}
     >
       <group ref={groupRef}>
@@ -13927,7 +14019,48 @@ function EditableFloor({
   )
 }
 
-function WallPlacementSurfaces({ object, layout, placementLocked, isPlacing, onTransform, onLockPlacement, onStopDragging }) {
+function WallPlacementTarget({ target, view, isPlacing, placementLocked, width, height, depth, onTransform, onLockPlacement, onStopDragging }) {
+  const surfaceRef = useRef(null)
+  const surface = useMemo(
+    () => getWallSideTransform(target.wall, target.rect, target.side),
+    [target],
+  )
+
+  useFrame(({ camera }) => {
+    if (!surfaceRef.current) return
+    const visible = view !== '3d' || !isWallCutAwayFromCamera(target.wall, camera.position)
+    if (surfaceRef.current.visible !== visible) surfaceRef.current.visible = visible
+  })
+
+  const updateTransform = (event) => {
+    if (isPlacing && placementLocked) return
+    event.stopPropagation()
+    onTransform(getWallMountTransform(target, event.point, width, height, depth))
+  }
+
+  return (
+    <mesh
+      ref={surfaceRef}
+      position={surface.position}
+      rotation={surface.rotation}
+      onPointerMove={updateTransform}
+      onClick={(event) => {
+        if (!isPlacing || placementLocked) return
+        updateTransform(event)
+        onLockPlacement()
+      }}
+      onPointerUp={(event) => {
+        event.stopPropagation()
+        if (!isPlacing) onStopDragging()
+      }}
+    >
+      <planeGeometry args={[surface.width, surface.height]} />
+      <meshBasicMaterial color="#ff365f" transparent opacity={0.045} depthWrite={false} side={DoubleSide} />
+    </mesh>
+  )
+}
+
+function WallPlacementSurfaces({ object, layout, view, placementLocked, isPlacing, onTransform, onLockPlacement, onStopDragging }) {
   const catalogItem = objectCatalog[object?.objectId]
   const width = catalogItem?.width ?? 1.5
   const height = catalogItem?.height ?? 0.86
@@ -13939,37 +14072,23 @@ function WallPlacementSurfaces({ object, layout, placementLocked, isPlacing, onT
 
   if (!object || catalogItem?.placementSurface !== 'wall') return null
 
-  const updateTransform = (event, target) => {
-    if (isPlacing && placementLocked) return
-    event.stopPropagation()
-    onTransform(getWallMountTransform(target, event.point, width, height, depth))
-  }
-
   return (
     <group>
-      {targets.map((target) => {
-        const surface = getWallSideTransform(target.wall, target.rect, target.side)
-        return (
-          <mesh
-            key={target.id}
-            position={surface.position}
-            rotation={surface.rotation}
-            onPointerMove={(event) => updateTransform(event, target)}
-            onClick={(event) => {
-              if (!isPlacing || placementLocked) return
-              updateTransform(event, target)
-              onLockPlacement()
-            }}
-            onPointerUp={(event) => {
-              event.stopPropagation()
-              if (!isPlacing) onStopDragging()
-            }}
-          >
-            <planeGeometry args={[surface.width, surface.height]} />
-            <meshBasicMaterial color="#ff365f" transparent opacity={0.045} depthWrite={false} side={DoubleSide} />
-          </mesh>
-        )
-      })}
+      {targets.map((target) => (
+        <WallPlacementTarget
+          key={target.id}
+          target={target}
+          view={view}
+          isPlacing={isPlacing}
+          placementLocked={placementLocked}
+          width={width}
+          height={height}
+          depth={depth}
+          onTransform={onTransform}
+          onLockPlacement={onLockPlacement}
+          onStopDragging={onStopDragging}
+        />
+      ))}
     </group>
   )
 }
@@ -14984,6 +15103,7 @@ function CustomizationLayer({
         <WallPlacementSurfaces
           object={movingObject}
           layout={layout}
+          view={view}
           isPlacing={Boolean(placingObjectId)}
           placementLocked={placementLocked}
           onTransform={(transform) => {
@@ -15094,6 +15214,11 @@ function InventoryThumbnail({ card }) {
 
 function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect }) {
   const [activeCategory, setActiveCategory] = useState('all')
+  const {
+    panelRef: inventoryPanelRef,
+    panelStyle: inventoryPanelStyle,
+    dragHandleProps: inventoryDragHandleProps,
+  } = useDraggablePanel(open)
   const categoryOptions = useMemo(() => ([
     { id: 'all', label: 'Tous' },
     { id: 'furniture', label: 'Meubles' },
@@ -15108,9 +15233,17 @@ function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect
   return (
     <div className={`object-inventory-sheet ${open ? 'open' : ''} ${placingObjectId ? 'is-placing' : ''}`}>
       {open && (
-        <div className="object-inventory-content">
+        <div ref={inventoryPanelRef} className="object-inventory-content" style={inventoryPanelStyle}>
           <div className="object-inventory-header">
-            <h2>Objets</h2>
+            <div
+              className="object-inventory-drag-handle draggable-panel-handle"
+              {...inventoryDragHandleProps}
+              title="Glisser pour déplacer"
+              aria-label="Déplacer le catalogue d’objets"
+            >
+              <span aria-hidden="true">⋮⋮</span>
+              <h2>Objets</h2>
+            </div>
             <button type="button" aria-label="Fermer" onClick={onToggle}>×</button>
           </div>
           <div className="object-inventory-tabs" role="tablist" aria-label="Catégories d’objets">
