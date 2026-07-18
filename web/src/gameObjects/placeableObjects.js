@@ -353,6 +353,35 @@ export const objectCatalog = {
       size: [1.16, 0.65],
     },
   },
+  youtube_subscriber_frame: {
+    id: 'youtube_subscriber_frame',
+    type: 'youtube_subscriber_frame',
+    name: 'Cadre YouTube',
+    category: 'decoration',
+    thumbnail: '/ui/object-thumbnails/youtube_subscriber_frame.svg',
+    price: 175,
+    placementSurface: 'wall',
+    width: 1.5,
+    height: 0.86,
+    depth: 0.07,
+    channelHandle: '@YouTube',
+    channelUrl: 'https://www.youtube.com/@YouTube',
+    frontAxis: '+z',
+  },
+  tiktok_profile_frame: {
+    id: 'tiktok_profile_frame',
+    type: 'tiktok_profile_frame',
+    name: 'Cadre TikTok',
+    category: 'decoration',
+    thumbnail: '/ui/object-thumbnails/tiktok_profile_frame.svg',
+    price: 175,
+    placementSurface: 'wall',
+    width: 1.5,
+    height: 0.86,
+    depth: 0.07,
+    profileUrl: 'https://www.tiktok.com/@thoms.gail',
+    frontAxis: '+z',
+  },
   monstera_plant: {
     id: 'monstera_plant',
     type: 'plant',
@@ -535,6 +564,8 @@ export const shopObjectIds = [
   'throne_chair',
   'amber_stool',
   'flat_screen_display',
+  'youtube_subscriber_frame',
+  'tiktok_profile_frame',
   'monstera_plant',
   'crystal_egg',
   'crystal_rock',
@@ -557,8 +588,18 @@ export function createEditableObjectInstance(objectId, overrides = {}) {
     rotationY: overrides.rotationY ?? 0,
     status: overrides.status ?? 'stored',
     canMove: true,
-    canRotate: true,
+    canRotate: catalogItem.placementSurface !== 'wall',
     canStore: true,
+  }
+
+  if (catalogItem.placementSurface === 'wall') {
+    baseObject.wallId = overrides.wallId ?? null
+  }
+  if (catalogItem.type === 'youtube_subscriber_frame') {
+    baseObject.channelUrl = overrides.channelUrl ?? catalogItem.channelUrl
+  }
+  if (catalogItem.type === 'tiktok_profile_frame') {
+    baseObject.profileUrl = overrides.profileUrl ?? catalogItem.profileUrl
   }
 
   if (catalogItem.seating?.kind === 'sofa') {

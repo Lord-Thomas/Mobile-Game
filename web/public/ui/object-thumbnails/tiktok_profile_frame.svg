@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#24262b"/><stop offset="1" stop-color="#08090b"/></linearGradient>
+  </defs>
+  <rect width="640" height="360" rx="28" fill="#101114"/>
+  <rect x="10" y="10" width="620" height="340" rx="23" fill="url(#bg)" stroke="#25f4ee" stroke-width="7"/>
+  <path d="M270 89v116c0 34-26 62-60 62s-62-27-62-61 28-62 62-62c6 0 12 1 18 3v38a28 28 0 1 0 6 21V89h36z" fill="#25f4ee" transform="translate(-7 3)"/>
+  <path d="M270 89c4 31 22 51 53 56v39c-20-1-38-8-53-20v42c0 34-26 62-60 62-23 0-43-13-54-31a62 62 0 0 0 47 21c34 0 60-28 60-62V80h37c4 31 22 51 53 56v39c-37-2-65-18-83-48z" fill="#fe2c55"/>
+  <path d="M263 80v116a28 28 0 1 1-35-27v-39a62 62 0 1 0 72 61v-54c15 12 33 19 53 20v-39c-31-5-49-25-53-56h-37z" fill="#fff"/>
+  <text x="376" y="190" text-anchor="middle" fill="#fff" font-family="Arial,sans-serif" font-size="58" font-weight="700">TikTok</text>
+  <text x="320" y="304" text-anchor="middle" fill="#bfc2c9" font-family="Arial,sans-serif" font-size="30">PROFIL CRÉATEUR</text>
+</svg>

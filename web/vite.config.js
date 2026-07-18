@@ -754,6 +754,18 @@ function saveThumbnailPlugin() {
 export default defineConfig({
   cacheDir: '../.npm-cache/vite-web',
   plugins: [react(), saveThumbnailPlugin()],
+  server: {
+    proxy: {
+      '/youtube-channel': {
+        target: 'http://127.0.0.1:2567',
+        changeOrigin: true,
+      },
+      '/tiktok-profile': {
+        target: 'http://127.0.0.1:2567',
+        changeOrigin: true,
+      },
+    },
+  },
   // Version figée au moment du build : sert à invalider le cache du .bin de terrain
   // à chaque déploiement en prod (cf. terrainGeometry.js). En dev, terrainGeometry
   // utilise plutôt Date.now() à chaque chargement pour toujours lire le .bin frais.

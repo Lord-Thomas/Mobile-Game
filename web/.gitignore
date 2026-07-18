@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
 
 # Knowledge graph généré par graphify (régénérable via `graphify update .`).
 # ~2500 fichiers de cache AST qui changent à chaque update → bruit inutile dans git.

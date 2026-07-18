@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
-import { Html, OrthographicCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
+import { Html, OrthographicCamera, PerspectiveCamera as DreiPerspectiveCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMixer, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -23,6 +23,11 @@ import { GENERATED_ENEMY_DEFINITIONS } from './enemies/enemyDefinitions.generate
 import { BUILTIN_PARTICLE_PRESETS } from './effects/particlePresets'
 import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PARTICLE_NAME, useStoredParticlePreset } from './effects/storedParticlePresets'
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
+import YouTubeSubscriberFrame from './gameObjects/YouTubeSubscriberFrame'
+import TikTokCreatorFrame from './gameObjects/TikTokCreatorFrame'
+import { getWallMountTargets, getWallMountTransform } from './gameObjects/wallPlacement'
+import { normalizeYouTubeChannelUrl } from './services/youtubeChannelService'
+import { normalizeTikTokProfileUrl } from './services/tiktokProfileService'
 import { isSupabaseConfigured } from './lib/supabase'
 import { addPlayerCoins, claimFirstMobDefeatRewards, equipPlayerTitle, getCurrentUser, loadPlayerProgress, loadPlayerPublicWorld, loadPlayerTitles, onAuthStateChange, savePlayerProgress, signInWithPassword, signOut, signUpWithPassword } from './services/progressService'
 import { connectMultiplayerSession, connectOnlinePresence, createSessionFromRequest, createVisitRequest, isMultiplayerAvailable, VISIT_REQUEST_TIMEOUT_MS } from './services/multiplayerService'
@@ -34,7 +39,7 @@ import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
-import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts } from './world/outdoorData'
+import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts, syncPlayerHouseOutdoorColliders } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { collisionReady } from './world/mapObjectCollisionData'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
@@ -53,14 +58,85 @@ import { rollLoot } from './items/lootTable'
 import { addItems, getMaterialEntries, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
 import { getItemDefinition, getSlimePetDefinitions } from './items/itemDefinitions'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
-import { getTerrainHeight } from './world/terrain/terrainGeometry'
+import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
+import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { getWallColliderTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
+import { HOUSE_STRUCTURE_GRID_SIZE, HOUSE_DOOR_COST, HOUSE_FLOOR_COST_PER_CELL, HOUSE_WALL_COST_PER_UNIT, HOUSE_WINDOW_COST, snapHouseCoordinate, getHousePlanValue, removeHouseSpace, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
+import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
+import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
+import {
+  DEFAULT_FLOOR_SKIN_ID,
+  DEFAULT_OWNED_FLOOR_SKIN_IDS,
+  DEFAULT_OWNED_WALL_SKIN_IDS,
+  DEFAULT_WALL_SKIN_ID,
+} from './world/house/houseDefaults'
+import { getWallColliderTransform, getWallDirection, getWallPointAt, getWallRenderTransform, getWallSideTransform, splitWallIntoSolidRects } from './world/house/wallUtils'
 import GableRoof from './world/house/GableRoof'
 import LeanToRoof from './world/house/LeanToRoof'
 import PlayerHouse from './world/house/PlayerHouse'
 
 const ROOM_LIMIT = 4.95
+const ignorePointerRaycast = () => null
+
+function useDraggablePanel(enabled = true) {
+  const panelRef = useRef(null)
+  const dragRef = useRef(null)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+
+  useEffect(() => {
+    const finishDrag = (event) => {
+      if (event?.pointerId != null && dragRef.current?.pointerId !== event.pointerId) return
+      dragRef.current = null
+    }
+    const movePanel = (event) => {
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      event.preventDefault()
+      const dx = event.clientX - drag.clientX
+      const dy = event.clientY - drag.clientY
+      const padding = 8
+      const boundedDx = MathUtils.clamp(dx, padding - drag.rect.left, window.innerWidth - padding - drag.rect.right)
+      const boundedDy = MathUtils.clamp(dy, padding - drag.rect.top, window.innerHeight - padding - drag.rect.bottom)
+      setOffset({ x: drag.offset.x + boundedDx, y: drag.offset.y + boundedDy })
+    }
+    const resetOnResize = () => {
+      dragRef.current = null
+      setOffset({ x: 0, y: 0 })
+    }
+    window.addEventListener('pointermove', movePanel, { passive: false })
+    window.addEventListener('pointerup', finishDrag)
+    window.addEventListener('pointercancel', finishDrag)
+    window.addEventListener('blur', finishDrag)
+    window.addEventListener('resize', resetOnResize)
+    return () => {
+      window.removeEventListener('pointermove', movePanel)
+      window.removeEventListener('pointerup', finishDrag)
+      window.removeEventListener('pointercancel', finishDrag)
+      window.removeEventListener('blur', finishDrag)
+      window.removeEventListener('resize', resetOnResize)
+    }
+  }, [])
+
+  const onPointerDown = useCallback((event) => {
+    if (!enabled || event.button !== 0 || !panelRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      offset,
+      rect: panelRef.current.getBoundingClientRect(),
+    }
+  }, [enabled, offset])
+
+  return {
+    panelRef,
+    panelStyle: { translate: `${offset.x}px ${offset.y}px` },
+    dragHandleProps: { onPointerDown },
+  }
+}
+
 const PLAYER_HEIGHT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
 const PLAYER_GROUNDED_DROP_TO_FALL = 0.85
 const PLAYER_LEDGE_FALL_INITIAL_VELOCITY = -0.35
@@ -450,10 +526,73 @@ const PLAYER_SPAWNS = {
   outside: [OUTDOOR_ENTRY_POSITION.x, PLAYER_HEIGHT, OUTDOOR_ENTRY_POSITION.z],
 }
 const DOOR_INTERACTION_DISTANCE = 1.25
+const PLAY_AREA_WALL_MARGIN = 0.05
 const PLAY_AREA_LIMITS = {
   interior: { minX: -ROOM_LIMIT, maxX: ROOM_LIMIT, minZ: -ROOM_LIMIT, maxZ: ROOM_LIMIT },
   secondRoom: { minX: -ROOM_LIMIT, maxX: ROOM_LIMIT, minZ: -ROOM_LIMIT, maxZ: ROOM_LIMIT },
   outside: { minX: -OUTDOOR_HALF_SIZE + 2, maxX: OUTDOOR_HALF_SIZE - 2, minZ: -OUTDOOR_HALF_SIZE + 2, maxZ: OUTDOOR_HALF_SIZE - 2 },
+}
+
+// Les limites intérieures suivent le plan de la maison (extensions comprises).
+// Mutation volontaire de l'objet module : lu à chaque frame dans les useFrame,
+// sans re-render (cf. PERFORMANCE_NOTES).
+function syncInteriorPlayAreaLimits(bounds) {
+  if (!bounds) return
+  const limits = {
+    minX: bounds.minX + PLAY_AREA_WALL_MARGIN,
+    maxX: bounds.maxX - PLAY_AREA_WALL_MARGIN,
+    minZ: bounds.minZ + PLAY_AREA_WALL_MARGIN,
+    maxZ: bounds.maxZ - PLAY_AREA_WALL_MARGIN,
+  }
+  PLAY_AREA_LIMITS.interior = limits
+  PLAY_AREA_LIMITS.secondRoom = limits
+}
+
+// Aligne les points d'entrée/sortie et les spawns sur la porte d'entrée du plan.
+// Même principe de mutation module que syncInteriorPlayAreaLimits : les handlers
+// de transition lisent ces objets au moment de l'appel.
+function syncHouseEntranceRuntime(entrance) {
+  if (!entrance) return
+  OUTDOOR_DOOR_POSITION.x = entrance.doorPosition.x
+  OUTDOOR_DOOR_POSITION.z = entrance.doorPosition.z
+  OUTDOOR_EXIT_POSITION.x = entrance.insidePosition.x
+  OUTDOOR_EXIT_POSITION.z = entrance.insidePosition.z
+  OUTDOOR_ENTRY_POSITION.x = entrance.outsidePosition.x
+  OUTDOOR_ENTRY_POSITION.z = entrance.outsidePosition.z
+  PLAYER_SPAWNS.outside = [entrance.outsidePosition.x, PLAYER_HEIGHT, entrance.outsidePosition.z]
+  PLAYER_SPAWNS.interior = [entrance.insidePosition.x, PLAYER_HEIGHT, entrance.insidePosition.z]
+}
+
+function isInsideHouseFloor(layout, position) {
+  if (!layout?.plan?.floorCells || !position) return false
+  return Boolean(layout.plan.floorCells[`${Math.floor(position.x)},${Math.floor(position.z)}`])
+}
+
+function getSafeHousePosition(layout, preferredPosition = null, reserved = []) {
+  if (isInsideHouseFloor(layout, preferredPosition)) {
+    const tooClose = reserved.some((position) => Math.hypot(
+      position.x - preferredPosition.x,
+      position.z - preferredPosition.z,
+    ) < 0.75)
+    if (!tooClose) return { x: preferredPosition.x, z: preferredPosition.z }
+  }
+
+  const candidates = Object.keys(layout?.plan?.floorCells ?? {}).map((key) => {
+    const [x, z] = key.split(',').map(Number)
+    return { x: x + 0.5, z: z + 0.5 }
+  })
+  if (candidates.length === 0) return { x: 0, z: 0 }
+
+  const reference = preferredPosition ?? candidates[0]
+  return candidates
+    .filter((candidate) => !reserved.some((position) => Math.hypot(
+      position.x - candidate.x,
+      position.z - candidate.z,
+    ) < 0.75))
+    .sort((left, right) => (
+      Math.hypot(left.x - reference.x, left.z - reference.z) -
+      Math.hypot(right.x - reference.x, right.z - reference.z)
+    ))[0] ?? candidates[0]
 }
 
 function getUserDisplayName(user) {
@@ -541,9 +680,13 @@ const ENV_STATION_POSITION = { x: 3.5, y: 0.35, z: 1.8 }
 const CUSTOM_STATION_POSITION = { x: 0, y: 0.35, z: 3.55 }
 const PARCEL_HALF = PLAYER_PLOT_SIZE / 2
 const CUSTOM_ROOM_BOUNDS = { minX: -PARCEL_HALF, maxX: PARCEL_HALF, minZ: -PARCEL_HALF, maxZ: PARCEL_HALF }
+// Grille de placement des MEUBLES : quart de case, indépendante de la grille
+// de structure (les murs, eux, suivent les bords de cellule — cf.
+// HOUSE_STRUCTURE_GRID_SIZE).
 const CUSTOM_GRID_SIZE = 0.25
 const CUSTOM_PLACEMENT_RAY_START_Y = 30
 const TV_INTERACTION_DISTANCE = 1.35
+const YOUTUBE_FRAME_INTERACTION_DISTANCE = 1.8
 const TV_MENU_EVENT = 'lab-tv-open-menu'
 let activeNearbyTvId = null
 const MAIN_ROOM = { width: mainRoom.size[0], depth: mainRoom.size[2], height: mainRoom.size[1] }
@@ -713,6 +856,15 @@ const CHARACTER_MATERIAL_COLOR_KEYS = {
 }
 
 const floorSkins = [
+  // Texture de base (comme la peinture blanche des murs) : c'est ce que
+  // reçoit toute zone nouvellement construite tant qu'elle n'est pas peinte.
+  {
+    id: 'floor-peinture-blanche',
+    name: 'Peinture Blanche',
+    price: 0,
+    texture: '/textures/environment/walls/mur-paint.png',
+    defaultUnlocked: true,
+  },
   {
     id: 'floor-classic',
     name: 'Parquet Classique',
@@ -761,12 +913,6 @@ const floorSkins = [
     name: 'Chevron Beurre',
     price: 125,
     texture: '/textures/environment/floors/sol-chevron-beurre.png',
-  },
-  {
-    id: 'floor-peinture-blanche',
-    name: 'Peinture Blanche',
-    price: 50,
-    texture: '/textures/environment/walls/mur-paint.png',
   },
   {
     id: 'floor-brun-mat',
@@ -846,6 +992,10 @@ const wallSkins = [
     adminOnly: true,
   },
 ]
+
+const floorSkinTextureById = new Map(floorSkins.map((skin) => [skin.id, skin.texture]))
+const wallSkinTextureById = new Map(wallSkins.map((skin) => [skin.id, skin.texture]))
+const WALL_STYLE_FALLBACK_TEXTURE = wallSkins[0].texture
 
 const placementRaycaster = new Raycaster()
 const placementRayOrigin = new Vector3()
@@ -1130,11 +1280,61 @@ function isTextInputEvent(event) {
 function clampCameraInPlayableVolume(x, y, z, currentZone = ZONES.interior) {
   const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
   const settings = CAMERA_SETTINGS[currentZone] ?? CAMERA_SETTINGS.interior
-  const zMax = currentZone === ZONES.interior || currentZone === ZONES.secondRoom ? 4.94 : limits.maxZ
+  const zMax = currentZone === ZONES.interior || currentZone === ZONES.secondRoom ? limits.maxZ - 0.01 : limits.maxZ
   const clampedX = MathUtils.clamp(x, limits.minX, limits.maxX)
   const clampedY = MathUtils.clamp(y, settings.minY, settings.maxY)
   const clampedZ = MathUtils.clamp(z, limits.minZ, zMax)
   return { x: clampedX, y: clampedY, z: clampedZ }
+}
+
+// La caméra intérieure est contrainte à l'espace détecté sous le joueur, pas
+// seulement à l'enveloppe globale de la maison.
+const interiorCameraSpaces = []
+const interiorCameraTransition = { current: null, previous: null, changedAt: 0 }
+const INTERIOR_CAMERA_DOORWAY_GRACE_MS = 420
+
+function syncInteriorCameraSpaces(layout) {
+  interiorCameraSpaces.length = 0
+  ;(layout?.spaces ?? []).forEach((space) => interiorCameraSpaces.push(new Set(space.cells)))
+}
+
+function constrainInteriorCameraToPlayerSpace(focusX, focusY, focusZ, targetX, targetY, targetZ) {
+  const startCell = `${Math.floor(focusX)},${Math.floor(focusZ)}`
+  const playerSpace = interiorCameraSpaces.find((cells) => cells.has(startCell))
+  if (!playerSpace) return { x: targetX, y: targetY, z: targetZ }
+  if (interiorCameraTransition.current !== playerSpace) {
+    interiorCameraTransition.previous = interiorCameraTransition.current
+    interiorCameraTransition.current = playerSpace
+    interiorCameraTransition.changedAt = performance.now()
+  }
+  const containsAt = (progress) => playerSpace.has(
+    `${Math.floor(focusX + (targetX - focusX) * progress)},${Math.floor(focusZ + (targetZ - focusZ) * progress)}`,
+  )
+  if (containsAt(1)) return { x: targetX, y: targetY, z: targetZ }
+
+  // Juste après le franchissement d'une porte, autoriser brièvement la caméra
+  // à finir son mouvement dans la pièce précédente. Ce délai empêche le zoom
+  // brutal au seuil, puis la contrainte de la nouvelle pièce reprend seule.
+  const previousSpace = interiorCameraTransition.previous
+  const inDoorwayGrace = performance.now() - interiorCameraTransition.changedAt < INTERIOR_CAMERA_DOORWAY_GRACE_MS
+  const targetCell = `${Math.floor(targetX)},${Math.floor(targetZ)}`
+  if (inDoorwayGrace && previousSpace?.has(targetCell)) {
+    return { x: targetX, y: targetY, z: targetZ }
+  }
+
+  let low = 0
+  let high = 1
+  for (let index = 0; index < 12; index += 1) {
+    const middle = (low + high) * 0.5
+    if (containsAt(middle)) low = middle
+    else high = middle
+  }
+  const safe = Math.max(0.08, low - 0.015)
+  return {
+    x: focusX + (targetX - focusX) * safe,
+    y: focusY + (targetY - focusY) * safe,
+    z: focusZ + (targetZ - focusZ) * safe,
+  }
 }
 
 function getSegmentExpandedBoxHitT(startX, startZ, endX, endZ, collider, clearance) {
@@ -1503,29 +1703,79 @@ function useKeyboardInput() {
   return keysRef
 }
 
-function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false }) {
-  const floorColorMap = useGameTexture(floorTexturePath)
+const FLOOR_UV_REPEAT_PER_UNIT = 0.32
+
+function createFloorRectsGeometry(rects, uvScale) {
+  const data = createFloorRectsGeometryData(rects, uvScale)
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(data.positions, 3))
+  geometry.setAttribute('uv', new Float32BufferAttribute(data.uvs, 2))
+  geometry.setIndex(data.indices)
+  geometry.computeVertexNormals()
+  geometry.computeBoundingSphere()
+  return geometry
+}
+
+function getLayoutFootprintRects(layout, rooms) {
+  return layout.footprintRects ?? rooms.map((room) => ({
+    minX: room.position[0] - room.size[0] * 0.5,
+    maxX: room.position[0] + room.size[0] * 0.5,
+    minZ: room.position[2] - room.size[2] * 0.5,
+    maxZ: room.position[2] + room.size[2] * 0.5,
+  }))
+}
+
+// Un maillage de sol par texture : les cellules peintes individuellement
+// (styles.floorByCell) sont regroupées par style dans le layout dérivé.
+function HouseFloorMesh({ rects, texturePath }) {
+  const colorMap = useGameTexture(texturePath)
+  const texture = useMemo(() => {
+    const next = colorMap.clone()
+    next.wrapS = RepeatWrapping
+    next.wrapT = RepeatWrapping
+    next.repeat.set(1, 1)
+    next.colorSpace = SRGBColorSpace
+    next.needsUpdate = true
+    return next
+  }, [colorMap])
+  useEffect(() => () => texture.dispose(), [texture])
+  const geometry = useMemo(() => createFloorRectsGeometry(rects, FLOOR_UV_REPEAT_PER_UNIT), [rects])
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  return (
+    <mesh geometry={geometry}>
+      <meshStandardMaterial
+        map={texture}
+        roughness={0.66}
+        metalness={0.08}
+        color="#b8ad9b"
+      />
+    </mesh>
+  )
+}
+
+function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, hideCeiling, hideRoof, exteriorOnly = false, cutawayWalls = false, layout = houseLayout }) {
   const wallColorMap = useGameTexture(wallTexturePath)
   const ceilingColorMap = useGameTexture(ceilingTexturePath)
   const exteriorWallTexture = useTexture(EXTERIOR_WALL_TEXTURE)
-  floorColorMap.wrapS = RepeatWrapping
-  floorColorMap.wrapT = RepeatWrapping
-  floorColorMap.repeat.set(3.2, 3.2)
-  floorColorMap.colorSpace = SRGBColorSpace
+  const rooms = layout.rooms ?? houseLayout.rooms
+  const footprintRects = useMemo(() => getLayoutFootprintRects(layout, rooms), [layout, rooms])
+  const wallTopY = layout.maxWallHeight ?? MAIN_ROOM.height
   wallColorMap.wrapS = RepeatWrapping
   wallColorMap.wrapT = RepeatWrapping
   wallColorMap.colorSpace = SRGBColorSpace
-  ceilingColorMap.wrapS = RepeatWrapping
-  ceilingColorMap.wrapT = RepeatWrapping
-  ceilingColorMap.colorSpace = SRGBColorSpace
+  // Sol/plafond : géométrie fusionnée sur l'empreinte réelle des cellules
+  // (UVs en coordonnées monde → texture continue, formes en L correctes).
+  const ceilingGeometry = useMemo(() => createFloorRectsGeometry(footprintRects, WALL_REPEAT_X_PER_UNIT), [footprintRects])
+  useEffect(() => () => ceilingGeometry.dispose(), [ceilingGeometry])
+  const floorStyleGroups = useMemo(() => (
+    layout.floorStyleRects ?? [{ styleId: null, rects: footprintRects }]
+  ), [layout.floorStyleRects, footprintRects])
   const ceilingTexture = useMemo(() => {
     const next = ceilingColorMap.clone()
     next.wrapS = RepeatWrapping
     next.wrapT = RepeatWrapping
-    next.repeat.set(
-      Math.max(0.01, MAIN_ROOM.width * WALL_REPEAT_X_PER_UNIT),
-      Math.max(0.01, MAIN_ROOM.depth * WALL_REPEAT_X_PER_UNIT),
-    )
+    next.repeat.set(1, 1)
     next.colorSpace = SRGBColorSpace
     next.needsUpdate = true
     return next
@@ -1533,63 +1783,51 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
   useEffect(() => () => ceilingTexture.dispose(), [ceilingTexture])
 
   return (
-    <group userData={{ debugCategory: exteriorOnly ? 'house-exterior' : 'house-shell' }}>
+      <group userData={{ debugCategory: exteriorOnly ? 'house-exterior' : 'house-shell' }}>
       <group visible={exteriorOnly}>
-        <MergedPlayerExteriorShell />
+        <MergedPlayerExteriorShell layout={layout} />
       </group>
       <group visible={!exteriorOnly}>
-        <HouseWalls wallTexture={wallColorMap} />
-        <mesh position={[0, MAIN_ROOM.height - 0.02, 0]} visible={!hideCeiling}>
-          <boxGeometry args={[MAIN_ROOM.width, 0.1, MAIN_ROOM.depth]} />
+        <HouseWalls wallTexture={wallColorMap} layout={layout} cutaway={cutawayWalls} />
+        <mesh geometry={ceilingGeometry} position={[0, wallTopY - 0.02, 0]} visible={!hideCeiling}>
           <meshStandardMaterial map={ceilingTexture} color="#e6edf6" side={BackSide} />
         </mesh>
-        <mesh position={[secondRoom.position[0], secondRoom.size[1] - 0.02, secondRoom.position[2]]} visible={!hideCeiling}>
-          <boxGeometry args={[secondRoom.size[0], 0.1, secondRoom.size[2]]} />
-          <meshStandardMaterial map={ceilingTexture} color="#edf1f5" side={BackSide} />
-        </mesh>
       </group>
+      {/* Vitres : visibles aussi bien de l'intérieur que de l'extérieur. */}
+      <HouseWindowPanes walls={layout.walls ?? houseLayout.walls} />
       <group visible={!hideRoof}>
-          <GableRoof
-            width={MAIN_ROOM.width}
-            depth={MAIN_ROOM.depth}
-            wallTopY={MAIN_ROOM.height}
-            gableBaseY={MAIN_ROOM.height}
-            pitch={32}
-            overhang={0.42}
-            thickness={0.14}
-            wallThickness={houseLayout.wallThickness}
-            color="#8b4c3f"
-            gableColor={EXTERIOR_WALL_COLOR}
-            gableTexture={exteriorWallTexture}
-          />
-          <group position={secondRoom.position}>
-            <LeanToRoof
-              width={secondRoom.size[0]}
-              depth={secondRoom.size[2]}
-              wallTopY={secondRoom.size[1]}
-              attachSide="south"
-              rise={MAIN_ROOM.height - secondRoom.size[1]}
-              overhang={0.34}
-              overhangAttached={0}
-              thickness={0.12}
-              wallThickness={houseLayout.wallThickness}
+        {footprintRects.map((rect) => (
+          <group
+            key={`roof-${rect.minX}-${rect.minZ}-${rect.maxX}-${rect.maxZ}`}
+            position={[(rect.minX + rect.maxX) * 0.5, 0, (rect.minZ + rect.maxZ) * 0.5]}
+          >
+            <GableRoof
+              width={rect.maxX - rect.minX}
+              depth={rect.maxZ - rect.minZ}
+              wallTopY={wallTopY}
+              gableBaseY={wallTopY}
+              pitch={32}
+              overhang={0.42}
+              thickness={0.14}
+              wallThickness={layout.wallThickness ?? houseLayout.wallThickness}
               color="#8b4c3f"
               gableColor={EXTERIOR_WALL_COLOR}
               gableTexture={exteriorWallTexture}
             />
           </group>
+        ))}
       </group>
 
       <group visible={!exteriorOnly}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-          <planeGeometry args={[MAIN_ROOM.width, MAIN_ROOM.depth]} />
-          <meshStandardMaterial
-            map={floorColorMap}
-            roughness={0.66}
-            metalness={0.08}
-            color="#b8ad9b"
+        {floorStyleGroups.map((group) => (
+          <HouseFloorMesh
+            key={`floor-style-${group.styleId ?? 'default'}`}
+            rects={group.rects}
+            texturePath={group.styleId
+              ? floorSkinTextureById.get(group.styleId) ?? floorTexturePath
+              : floorTexturePath}
           />
-        </mesh>
+        ))}
       </group>
 
       <gridHelper
@@ -1644,13 +1882,13 @@ function getWallExteriorColor(wall) {
       : EXTERIOR_WALL_COLOR
 }
 
-function createPlayerExteriorShellGeometry() {
+function createPlayerExteriorShellGeometry(layout = houseLayout) {
   const collector = createColoredGeometryCollector()
 
-  houseLayout.walls.forEach((wall) => {
+  layout.walls.forEach((wall) => {
     const color = getWallExteriorColor(wall)
     splitWallIntoSolidRects(wall).forEach((rect) => {
-      const transform = getWallColliderTransform(wall, rect)
+      const transform = getWallRenderTransform(wall, rect, layout.walls)
       pushColoredBox(
         collector,
         transform.position,
@@ -1704,8 +1942,8 @@ function createPlayerExteriorShellGeometry() {
   return geometry
 }
 
-function MergedPlayerExteriorShell() {
-  const geometry = useMemo(() => createPlayerExteriorShellGeometry(), [])
+function MergedPlayerExteriorShell({ layout = houseLayout }) {
+  const geometry = useMemo(() => createPlayerExteriorShellGeometry(layout), [layout])
 
   useEffect(() => () => geometry.dispose(), [geometry])
 
@@ -1720,10 +1958,16 @@ function WallBlockMaterial({ attach, side, width, height, wallTexture, exteriorT
   const materialColor = side?.color ?? capColor
   const sideMaterial = side?.material
   const isExterior = side?.type === 'outside'
+  // Texture par côté de mur (styles.wallBySide du plan) : prioritaire sur la
+  // texture globale. Le hook est appelé inconditionnellement (fallback caché).
+  const styleTexturePath = side?.styleId ? wallSkinTextureById.get(side.styleId) ?? null : null
+  const styleSourceTexture = useGameTexture(styleTexturePath ?? WALL_STYLE_FALLBACK_TEXTURE)
   const repeatedTexture = useMemo(() => {
     if (!side) return null
-    const sourceTexture = isExterior ? exteriorTexture : wallTexture
-    if (!isExterior && sideMaterial !== 'active_wall') return null
+    const sourceTexture = styleTexturePath
+      ? styleSourceTexture
+      : isExterior ? exteriorTexture : wallTexture
+    if (!isExterior && !styleTexturePath && sideMaterial !== 'active_wall') return null
     const next = sourceTexture.clone()
     next.wrapS = RepeatWrapping
     next.wrapT = RepeatWrapping
@@ -1734,7 +1978,7 @@ function WallBlockMaterial({ attach, side, width, height, wallTexture, exteriorT
     next.colorSpace = SRGBColorSpace
     next.needsUpdate = true
     return next
-  }, [exteriorTexture, height, isExterior, side, sideMaterial, wallTexture, width])
+  }, [exteriorTexture, height, isExterior, side, sideMaterial, styleSourceTexture, styleTexturePath, wallTexture, width])
 
   useEffect(() => {
     return () => repeatedTexture?.dispose()
@@ -1788,9 +2032,19 @@ function getWallMaterialSlots(wall) {
   return slots
 }
 
-function WallVolume({ wall, rect, wallTexture, exteriorTexture }) {
-  const transform = getWallColliderTransform(wall, rect)
+// Référence partagée entre les poignées d'édition et le rendu de la maison.
+// Pendant un déplacement, elle permet de remplacer visuellement le mur source
+// par son unique aperçu, au lieu d'afficher deux positions concurrentes.
+const activeWallMovePreviewRef = { current: null }
+
+function WallVolume({ wall, rect, walls, wallTexture, exteriorTexture, cutaway = false }) {
+  const groupRef = useRef()
+  const transform = getWallRenderTransform(wall, rect, walls)
   const materialSlots = useMemo(() => getWallMaterialSlots(wall), [wall])
+  const exteriorNormal = useMemo(() => {
+    const exteriorSide = wall.sideA?.type === 'outside' ? wall.sideA : wall.sideB?.type === 'outside' ? wall.sideB : null
+    return exteriorSide?.normal ?? null
+  }, [wall])
   const args = [
     transform.args[0] * 2,
     transform.args[1] * 2,
@@ -1801,28 +2055,47 @@ function WallVolume({ wall, rect, wallTexture, exteriorTexture }) {
   const hasExterior = materialSlots.some((side) => side?.type === 'outside')
   const capColor = hasExterior ? EXTERIOR_WALL_COLOR : '#d8d0c4'
 
+  useFrame(({ camera }) => {
+    if (!groupRef.current) return
+    // Découpe façon Sims : seules les façades entre la caméra et la maison se
+    // retirent. Les cloisons et les murs opposés restent visibles.
+    const facesCamera = exteriorNormal && (
+      exteriorNormal[0] * (camera.position.x - transform.position[0]) +
+      exteriorNormal[2] * (camera.position.z - transform.position[2]) > 0.18
+    )
+    const activePreview = activeWallMovePreviewRef.current
+    const replacedByPreview = activePreview &&
+      (activePreview.type === 'resize' || activePreview.type === 'moveInterior') &&
+      activePreview.wallId === wall.id &&
+      activePreview.pendingAmount !== 0
+    const visible = !(cutaway && facesCamera) && !replacedByPreview
+    if (groupRef.current.visible !== visible) groupRef.current.visible = visible
+  })
+
   return (
-    <mesh position={transform.position} rotation={transform.rotation} castShadow receiveShadow>
-      <boxGeometry args={args} />
-      {materialSlots.map((side, index) => (
-        <WallBlockMaterial
-          key={`${rect.id}-material-${index}`}
-          attach={`material-${index}`}
-          side={side}
-          width={textureWidth}
-          height={textureHeight}
-          wallTexture={wallTexture}
-          exteriorTexture={exteriorTexture}
-          capColor={capColor}
-        />
-      ))}
-    </mesh>
+    <group ref={groupRef}>
+      <mesh position={transform.position} rotation={transform.rotation} castShadow receiveShadow>
+        <boxGeometry args={args} />
+        {materialSlots.map((side, index) => (
+          <WallBlockMaterial
+            key={`${rect.id}-material-${index}`}
+            attach={`material-${index}`}
+            side={side}
+            width={textureWidth}
+            height={textureHeight}
+            wallTexture={wallTexture}
+            exteriorTexture={exteriorTexture}
+            capColor={capColor}
+          />
+        ))}
+      </mesh>
+    </group>
   )
 }
 
-function HouseWalls({ wallTexture }) {
+function HouseWalls({ wallTexture, layout = houseLayout, cutaway = false }) {
   const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
-  const walls = houseLayout.walls
+  const walls = layout.walls ?? houseLayout.walls
 
   return (
     <>
@@ -1832,12 +2105,61 @@ function HouseWalls({ wallTexture }) {
             key={rect.id}
             wall={wall}
             rect={rect}
+            walls={walls}
             wallTexture={wallTexture}
             exteriorTexture={exteriorTexture}
+            cutaway={cutaway}
           />
         )),
       )}
       <HouseOpeningReveals walls={walls} />
+    </>
+  )
+}
+
+function getWindowPaneTransform(wall, opening) {
+  const wallBottom = wall.bottom ?? wall.bottomY ?? 0
+  const bottom = opening.bottom ?? 0
+  return getWallColliderTransform(wall, {
+    center: opening.center,
+    y: wallBottom + bottom + opening.height * 0.5,
+    width: opening.width,
+    height: opening.height,
+  })
+}
+
+function getWallWindowOpenings(wall) {
+  return (wall.openings ?? []).filter((opening) => opening.type === 'window')
+}
+
+// Panneau de verre dans le trou d'une ouverture de type fenêtre — même esprit
+// que la vitre de la pièce du dragon (GlassContainmentRoom), en version légère.
+function HouseWindowPanes({ walls }) {
+  return (
+    <>
+      {walls.flatMap((wall) =>
+        getWallWindowOpenings(wall).map((opening) => {
+          const transform = getWindowPaneTransform(wall, opening)
+          return (
+            <mesh
+              key={`${wall.id}-${opening.id}-glass`}
+              position={transform.position}
+              rotation={transform.rotation}
+            >
+              <boxGeometry args={[opening.width, opening.height, 0.05]} />
+              <meshStandardMaterial
+                color="#bfefff"
+                transparent
+                opacity={0.22}
+                roughness={0.12}
+                metalness={0.05}
+                depthWrite={false}
+                side={DoubleSide}
+              />
+            </mesh>
+          )
+        }),
+      )}
     </>
   )
 }
@@ -2084,20 +2406,38 @@ function LightSwitch({ isOn, isNear, onOpen, mode }) {
   )
 }
 
-function PhysicsBounds() {
-  const wallSegments = houseLayout.walls
+function PhysicsBounds({ layout = houseLayout }) {
+  const wallSegments = (layout.walls ?? houseLayout.walls)
     .flatMap((wall) =>
       splitWallIntoSolidRects(wall).map((rect) => ({
         id: rect.id,
         ...getWallColliderTransform(wall, rect),
       })),
     )
+  const rooms = layout.rooms ?? houseLayout.rooms
+  const floorRects = getLayoutFootprintRects(layout, rooms)
+  const windowPanes = (layout.walls ?? houseLayout.walls).flatMap((wall) =>
+    getWallWindowOpenings(wall).map((opening) => ({
+      id: `${wall.id}-${opening.id}-glass-collider`,
+      ...getWindowPaneTransform(wall, opening),
+      paneArgs: [opening.width * 0.5, opening.height * 0.5, 0.04],
+    })),
+  )
 
   return (
     <RigidBody type="fixed" colliders={false}>
-      <CuboidCollider args={[5, 0.2, 5]} position={[0, -0.2, 0]} />
+      {floorRects.map((rect) => (
+        <CuboidCollider
+          key={`floor-collider-${rect.minX}-${rect.minZ}-${rect.maxX}-${rect.maxZ}`}
+          args={[(rect.maxX - rect.minX) * 0.5, 0.2, (rect.maxZ - rect.minZ) * 0.5]}
+          position={[(rect.minX + rect.maxX) * 0.5, -0.2, (rect.minZ + rect.maxZ) * 0.5]}
+        />
+      ))}
       {wallSegments.map((segment) => (
         <CuboidCollider key={segment.id} args={segment.args} position={segment.position} rotation={segment.rotation} />
+      ))}
+      {windowPanes.map((pane) => (
+        <CuboidCollider key={pane.id} args={pane.paneArgs} position={pane.position} rotation={pane.rotation} />
       ))}
     </RigidBody>
   )
@@ -4243,6 +4583,12 @@ function Player({
     nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
     nextZ = MathUtils.clamp(nextZ, limits.minZ, limits.maxZ)
 
+    if (currentZone !== ZONES.outside) {
+      const resolved = resolveInteriorWallCollision(prevX, prevZ, nextX, nextZ, PLAYER_CAPSULE_RADIUS)
+      nextX = resolved.x
+      nextZ = resolved.z
+    }
+
     const playerYaw = visualRef.current.rotation.y
     const punchTarget = getNearestPunchTarget({
       targets: combatTargetsRef?.current,
@@ -4710,11 +5056,29 @@ function Player({
       targetZ = constrainedTarget.z
     }
 
+    if (currentZone !== ZONES.outside) {
+      const constrainedTarget = constrainInteriorCameraToPlayerSpace(
+        focusX, originY, focusZ, targetX, targetY, targetZ,
+      )
+      targetX = constrainedTarget.x
+      targetY = constrainedTarget.y
+      targetZ = constrainedTarget.z
+    }
+
     const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ, currentZone)
     const cameraDamping = towerCameraContext ? 20 : 12
-    camera.position.x = MathUtils.damp(camera.position.x, clampedTarget.x, cameraDamping, delta)
-    camera.position.y = MathUtils.damp(camera.position.y, clampedTarget.y, cameraDamping, delta)
-    camera.position.z = MathUtils.damp(camera.position.z, clampedTarget.z, cameraDamping, delta)
+    let nextCameraX = MathUtils.damp(camera.position.x, clampedTarget.x, cameraDamping, delta)
+    let nextCameraY = MathUtils.damp(camera.position.y, clampedTarget.y, cameraDamping, delta)
+    let nextCameraZ = MathUtils.damp(camera.position.z, clampedTarget.z, cameraDamping, delta)
+    if (currentZone !== ZONES.outside) {
+      const constrainedCamera = constrainInteriorCameraToPlayerSpace(
+        focusX, originY, focusZ, nextCameraX, nextCameraY, nextCameraZ,
+      )
+      nextCameraX = constrainedCamera.x
+      nextCameraY = constrainedCamera.y
+      nextCameraZ = constrainedCamera.z
+    }
+    camera.position.set(nextCameraX, nextCameraY, nextCameraZ)
 
     cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, focusX, 16, delta)
     cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, focusY + lookHeight, 16, delta)
@@ -7239,11 +7603,17 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   }
 
   const setCameraDistance = (distance) => {
+    const maxDistance = isLikelyMobileDevice() ? 11 : CAMERA_MAX_DISTANCE
     touchRef.current.cameraDistance = MathUtils.clamp(
       distance,
       CAMERA_MIN_DISTANCE,
-      CAMERA_MAX_DISTANCE,
+      maxDistance,
     )
+  }
+
+  const changeCameraDistance = (delta) => {
+    const currentDistance = touchRef.current.cameraDistance ?? CAMERA_DISTANCE
+    setCameraDistance(currentDistance + delta)
   }
 
   const getPinchDistance = () => {
@@ -7528,6 +7898,26 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
         >
           <span className="action-symbol">{mountFlying ? '\u25b2' : '\u2423'}</span>
         </button>
+      )}
+      {!uiHidden && isLikelyMobileDevice() && (
+        <div className="camera-zoom-controls" aria-label="Zoom caméra">
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => changeCameraDistance(-1)}
+            aria-label="Rapprocher la caméra"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => changeCameraDistance(1)}
+            aria-label="Éloigner la caméra"
+          >
+            +
+          </button>
+        </div>
       )}
       {!uiHidden && mountFlying && (
         <button
@@ -8666,13 +9056,17 @@ function CustomizationStation({ isNear }) {
   )
 }
 
-function OutdoorDoor() {
-  const doorWidth = outsideDoorOpening.width
-  const doorHeight = outsideDoorOpening.height
-  const doorY = (outsideDoorOpening.bottomY ?? 0) + doorHeight * 0.5
+function OutdoorDoor({ entrance }) {
+  const doorWidth = entrance?.width ?? outsideDoorOpening.width
+  const doorHeight = entrance?.height ?? outsideDoorOpening.height
+  const doorY = (entrance?.bottom ?? outsideDoorOpening.bottomY ?? 0) + doorHeight * 0.5
+  const position = entrance
+    ? [entrance.doorPosition.x, 0, entrance.doorPosition.z]
+    : [OUTDOOR_DOOR_POSITION.x, 0, OUTDOOR_DOOR_POSITION.z]
+  const rotationY = entrance?.rotationY ?? Math.PI / 2
 
   return (
-    <group position={[OUTDOOR_DOOR_POSITION.x, 0, OUTDOOR_DOOR_POSITION.z]} rotation={[0, Math.PI / 2, 0]}>
+    <group position={position} rotation={[0, rotationY, 0]}>
       <mesh position={[0, doorY, 0.02]}>
         <planeGeometry args={[doorWidth, doorHeight]} />
         <meshStandardMaterial color="#8b5a3d" roughness={0.66} side={DoubleSide} />
@@ -8685,8 +9079,10 @@ function OutdoorDoor() {
   )
 }
 
-function OutdoorDoorStation({ isNear, currentZone }) {
+function OutdoorDoorStation({ isNear, currentZone, entrance }) {
   const isOutside = currentZone === ZONES.outside
+  const exitPosition = entrance?.insidePosition ?? OUTDOOR_EXIT_POSITION
+  const entryPosition = entrance?.outsidePosition ?? OUTDOOR_ENTRY_POSITION
 
   return (
     <>
@@ -8694,14 +9090,14 @@ function OutdoorDoorStation({ isNear, currentZone }) {
         isNear={!isOutside && isNear}
         color="#c9b08a"
         pulseColor="#ffe8c8"
-        position={[OUTDOOR_EXIT_POSITION.x, 0.02, OUTDOOR_EXIT_POSITION.z]}
+        position={[exitPosition.x, 0.02, exitPosition.z]}
         size={0.62}
       />
       <InteractionHalo
         isNear={isOutside && isNear}
         color="#c9b08a"
         pulseColor="#ffe8c8"
-        position={[OUTDOOR_ENTRY_POSITION.x, 0.02, OUTDOOR_ENTRY_POSITION.z]}
+        position={[entryPosition.x, 0.02, entryPosition.z]}
         size={0.62}
       />
     </>
@@ -8868,6 +9264,45 @@ function TvInteractionTrigger({ playerPositionRef, objects, enabled, onNearbyTvC
   return null
 }
 
+function YouTubeFrameInteractionTrigger({ playerPositionRef, objects, enabled, onNearbyFrameChange }) {
+  const currentFrameIdRef = useRef(null)
+
+  useFrame(() => {
+    if (!enabled) {
+      if (currentFrameIdRef.current !== null) {
+        currentFrameIdRef.current = null
+        onNearbyFrameChange(null)
+      }
+      return
+    }
+
+    const playerPosition = playerPositionRef.current
+    let nearestFrame = null
+    let nearestDistance = Infinity
+
+    objects.forEach((object) => {
+      const type = objectCatalog[object.objectId]?.type
+      if (!['youtube_subscriber_frame', 'tiktok_profile_frame'].includes(type) || !object.position) return
+      const distance = Math.hypot(
+        playerPosition.x - object.position[0],
+        playerPosition.z - object.position[2],
+      )
+      if (distance <= YOUTUBE_FRAME_INTERACTION_DISTANCE && distance < nearestDistance) {
+        nearestDistance = distance
+        nearestFrame = object
+      }
+    })
+
+    const nextFrameId = nearestFrame?.id ?? null
+    if (nextFrameId !== currentFrameIdRef.current) {
+      currentFrameIdRef.current = nextFrameId
+      onNearbyFrameChange(nearestFrame)
+    }
+  })
+
+  return null
+}
+
 function SeatTargetMarker({ seat }) {
   if (!seat) return null
   return (
@@ -8883,33 +9318,120 @@ function SeatTargetMarker({ seat }) {
 const CUSTOMIZE_ZOOM_MIN = 20
 const CUSTOMIZE_ZOOM_MAX = 150
 const CUSTOMIZE_ZOOM_DEFAULT = 58
+// Orbite de la vue 3D du mode personnalisation. Objet module muté par
+// EditableFloor (drag) et lu par CustomizationCamera dans useFrame — même
+// principe que PLAY_AREA_LIMITS : pas de re-render à chaque frame.
+const CUSTOMIZE_ORBIT_DEFAULT = { yaw: Math.PI * 0.25, pitch: 0.85, distance: 24 }
+const CUSTOMIZE_ORBIT = { ...CUSTOMIZE_ORBIT_DEFAULT }
+const CUSTOMIZE_ORBIT_PITCH_MIN = 0.22
+const CUSTOMIZE_ORBIT_PITCH_MAX = 1.35
+const CUSTOMIZE_ORBIT_DISTANCE_MIN = 9
+const CUSTOMIZE_ORBIT_DISTANCE_MAX = 46
+const CUSTOMIZE_HISTORY_LIMIT = 50
+
+function cloneCustomizationValue(value) {
+  if (typeof structuredClone === 'function') return structuredClone(value)
+  return JSON.parse(JSON.stringify(value))
+}
+
+function resetCustomizeOrbit() {
+  Object.assign(CUSTOMIZE_ORBIT, CUSTOMIZE_ORBIT_DEFAULT)
+}
+
+function applyCustomizeOrbitDrag(dxPixels, dyPixels) {
+  CUSTOMIZE_ORBIT.yaw -= dxPixels * 0.008
+  CUSTOMIZE_ORBIT.pitch = MathUtils.clamp(
+    CUSTOMIZE_ORBIT.pitch + dyPixels * 0.006,
+    CUSTOMIZE_ORBIT_PITCH_MIN,
+    CUSTOMIZE_ORBIT_PITCH_MAX,
+  )
+}
 const PLACEABLE_PLAY_INITIAL_RENDER_COUNT = 6
 const PLACEABLE_PLAY_REVEAL_BATCH_SIZE = 3
 const PLACEABLE_PLAY_REVEAL_INTERVAL_MS = 180
 const PLACEABLE_PLAY_STUTTER_PAUSE_MS = 450
 const PLACEABLE_PLAY_FREEZE_PAUSE_MS = 1000
 
-function CustomizationCamera({ active }) {
+function CustomizationCamera({ active, view = 'top' }) {
   const { gl } = useThree()
+  const getThreeState = useThree((state) => state.get)
+  const setThreeState = useThree((state) => state.set)
   const camRef = useRef()
+  const orbitCamRef = useRef()
+  const gameplayCamRef = useRef(null)
   const zoomRef = useRef(CUSTOMIZE_ZOOM_DEFAULT)
   const pinchDistRef = useRef(null)
+  const is3D = view === '3d'
+
+  // Les deux caméras de personnalisation restent montées et la caméra de jeu
+  // est mémorisée explicitement. Empiler plusieurs `makeDefault` peut restaurer
+  // l'orthographique quand la perspective 3D se démonte pendant la validation.
+  useLayoutEffect(() => {
+    const topCamera = camRef.current
+    const orbitCamera = orbitCamRef.current
+    if (!topCamera || !orbitCamera) return
+
+    const currentCamera = getThreeState().camera
+    if (active) {
+      if (currentCamera !== topCamera && currentCamera !== orbitCamera) {
+        gameplayCamRef.current = currentCamera
+      }
+      const nextCamera = is3D ? orbitCamera : topCamera
+      if (currentCamera !== nextCamera) setThreeState({ camera: nextCamera })
+      return
+    }
+
+    if (
+      gameplayCamRef.current &&
+      (currentCamera === topCamera || currentCamera === orbitCamera)
+    ) {
+      setThreeState({ camera: gameplayCamRef.current })
+    }
+  }, [active, getThreeState, is3D, setThreeState])
+
+  useEffect(() => () => {
+    const topCamera = camRef.current
+    const orbitCamera = orbitCamRef.current
+    const currentCamera = getThreeState().camera
+    if (
+      gameplayCamRef.current &&
+      (currentCamera === topCamera || currentCamera === orbitCamera)
+    ) {
+      setThreeState({ camera: gameplayCamRef.current })
+    }
+  }, [getThreeState, setThreeState])
 
   useEffect(() => {
     if (active) zoomRef.current = CUSTOMIZE_ZOOM_DEFAULT
   }, [active])
 
   useEffect(() => {
+    if (active && is3D) resetCustomizeOrbit()
+  }, [active, is3D])
+
+  useEffect(() => {
     if (!active) return
     const canvas = gl.domElement
 
-    const onWheel = (e) => {
-      e.preventDefault()
+    const applyZoomDelta = (delta) => {
+      if (is3D) {
+        CUSTOMIZE_ORBIT.distance = MathUtils.clamp(
+          CUSTOMIZE_ORBIT.distance - delta * 0.09,
+          CUSTOMIZE_ORBIT_DISTANCE_MIN,
+          CUSTOMIZE_ORBIT_DISTANCE_MAX,
+        )
+        return
+      }
       zoomRef.current = MathUtils.clamp(
-        zoomRef.current + Math.sign(e.deltaY) * -5,
+        zoomRef.current + delta,
         CUSTOMIZE_ZOOM_MIN,
         CUSTOMIZE_ZOOM_MAX,
       )
+    }
+
+    const onWheel = (e) => {
+      e.preventDefault()
+      applyZoomDelta(Math.sign(e.deltaY) * -5)
     }
 
     const onTouchStart = (e) => {
@@ -8927,11 +9449,7 @@ function CustomizationCamera({ active }) {
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY,
       )
-      zoomRef.current = MathUtils.clamp(
-        zoomRef.current + (dist - pinchDistRef.current) * 0.3,
-        CUSTOMIZE_ZOOM_MIN,
-        CUSTOMIZE_ZOOM_MAX,
-      )
+      applyZoomDelta((dist - pinchDistRef.current) * 0.3)
       pinchDistRef.current = dist
     }
 
@@ -8948,26 +9466,43 @@ function CustomizationCamera({ active }) {
       canvas.removeEventListener('touchmove', onTouchMove)
       canvas.removeEventListener('touchend', onTouchEnd)
     }
-  }, [active, gl])
+  }, [active, gl, is3D])
 
   useFrame(() => {
-    if (!camRef.current) return
-    if (Math.abs(camRef.current.zoom - zoomRef.current) > 0.1) {
+    if (camRef.current && Math.abs(camRef.current.zoom - zoomRef.current) > 0.1) {
       camRef.current.zoom = MathUtils.lerp(camRef.current.zoom, zoomRef.current, 0.15)
       camRef.current.updateProjectionMatrix()
+    }
+    const orbitCam = orbitCamRef.current
+    if (orbitCam && active && is3D) {
+      const { yaw, pitch, distance } = CUSTOMIZE_ORBIT
+      const horizontal = Math.cos(pitch) * distance
+      orbitCam.position.set(
+        Math.sin(yaw) * horizontal,
+        Math.sin(pitch) * distance,
+        Math.cos(yaw) * horizontal,
+      )
+      orbitCam.lookAt(0, 1, 0)
     }
   })
 
   return (
-    <OrthographicCamera
-      ref={camRef}
-      makeDefault={active}
-      position={[0, 18, 0]}
-      rotation={[-Math.PI / 2, 0, 0]}
-      zoom={CUSTOMIZE_ZOOM_DEFAULT}
-      near={0.1}
-      far={60}
-    />
+    <>
+      <OrthographicCamera
+        ref={camRef}
+        position={[0, 18, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        zoom={CUSTOMIZE_ZOOM_DEFAULT}
+        near={0.1}
+        far={60}
+      />
+      <DreiPerspectiveCamera
+        ref={orbitCamRef}
+        fov={50}
+        near={0.1}
+        far={220}
+      />
+    </>
   )
 }
 
@@ -9320,10 +9855,16 @@ function RugModel({ objectId }) {
   )
 }
 
-function PlaceableModel({ objectId, type, placedObjectId }) {
+function PlaceableModel({ objectId, type, placedObjectId, channelUrl, profileUrl }) {
   const catalogItem = objectCatalog[objectId]
   if (type === 'goal' || catalogItem?.type === 'goal') return <GoalVisual />
   if (type === 'rug' || catalogItem?.type === 'rug') return <RugModel objectId={objectId} />
+  if (catalogItem?.type === 'youtube_subscriber_frame') {
+    return <YouTubeSubscriberFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} channelUrl={channelUrl ?? catalogItem.channelUrl} />
+  }
+  if (catalogItem?.type === 'tiktok_profile_frame') {
+    return <TikTokCreatorFrame width={catalogItem.width} height={catalogItem.height} depth={catalogItem.depth} profileUrl={profileUrl ?? catalogItem.profileUrl} />
+  }
   if (catalogItem?.type === 'interactive_tv') return <InteractiveTvModel objectId={objectId} placedObjectId={placedObjectId} />
   if (catalogItem?.modelUrl) return <GlbPlaceableModel objectId={objectId} />
   if (type === 'sofa' || catalogItem?.type === 'sofa') return <SofaModel />
@@ -12945,7 +13486,10 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
     if (!isCustomizeMode || !object.canMove) return
     event.stopPropagation()
     onSelect(object.id)
-    onStartDragging(object.id)
+    onStartDragging(object.id, {
+      x: (object.position?.[0] ?? 0) - event.point.x,
+      z: (object.position?.[2] ?? 0) - event.point.z,
+    })
   }
 
   return (
@@ -12964,7 +13508,7 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
               onDefeated={onTrainingDummyDefeated}
             />
           ) : (
-            <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
+            <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} profileUrl={object.profileUrl} />
           )}
         </Suspense>
       </group>
@@ -13001,21 +13545,278 @@ function RoomBorder({ width, depth, posX = 0, posZ = 0, visible = true }) {
   )
 }
 
+// Grille du mode personnalisation : suit l'empreinte réelle des cellules du
+// plan (contour exact, formes en L comprises) au lieu d'un carré fixe.
+function HouseFootprintGrid({ layout, gridSize = CUSTOM_GRID_SIZE }) {
+  const { gridGeometry, borderGeometry } = useMemo(() => {
+    const cellKeys = Object.keys(layout.plan?.floorCells ?? {})
+    const cells = new Set(cellKeys)
+    const grid = []
+    const border = []
+
+    cellKeys.forEach((key) => {
+      const [x, z] = key.split(',').map(Number)
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return
+      // Contour : arête dessinée seulement si la cellule voisine n'existe pas.
+      if (!cells.has(`${x},${z - 1}`)) border.push(x, 0, z, x + 1, 0, z)
+      if (!cells.has(`${x},${z + 1}`)) border.push(x, 0, z + 1, x + 1, 0, z + 1)
+      if (!cells.has(`${x - 1},${z}`)) border.push(x, 0, z, x, 0, z + 1)
+      if (!cells.has(`${x + 1},${z}`)) border.push(x + 1, 0, z, x + 1, 0, z + 1)
+      // Sous-lignes de placement au pas de la grille objets.
+      for (let offset = gridSize; offset < 1 - 1e-6; offset += gridSize) {
+        grid.push(x + offset, 0, z, x + offset, 0, z + 1)
+        grid.push(x, 0, z + offset, x + 1, 0, z + offset)
+      }
+      // Arêtes internes entre cellules (une seule fois par paire, côté +).
+      if (cells.has(`${x + 1},${z}`)) grid.push(x + 1, 0, z, x + 1, 0, z + 1)
+      if (cells.has(`${x},${z + 1}`)) grid.push(x, 0, z + 1, x + 1, 0, z + 1)
+    })
+
+    const makeGeometry = (positions) => {
+      const geometry = new BufferGeometry()
+      geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+      return geometry
+    }
+    return { gridGeometry: makeGeometry(grid), borderGeometry: makeGeometry(border) }
+  }, [layout, gridSize])
+  useEffect(() => () => {
+    gridGeometry.dispose()
+    borderGeometry.dispose()
+  }, [gridGeometry, borderGeometry])
+
+  return (
+    <group>
+      <lineSegments geometry={gridGeometry} position={[0, 0.032, 0]}>
+        <lineBasicMaterial color="#d8e0e8" transparent opacity={0.55} />
+      </lineSegments>
+      <lineSegments geometry={borderGeometry} position={[0, 0.07, 0]}>
+        <lineBasicMaterial color="#f2c14e" />
+      </lineSegments>
+    </group>
+  )
+}
+
+// Rectangle de cellules couvert par un geste de tracé : chaque cellule
+// touchée par le doigt est incluse (floor → floor+1). Partagé entre le
+// fantôme de prévisualisation et la construction pour qu'ils coïncident.
+function getDraggedCellRect(start, end) {
+  return {
+    minX: Math.floor(Math.min(start.x, end.x)),
+    maxX: Math.floor(Math.max(start.x, end.x)) + 1,
+    minZ: Math.floor(Math.min(start.z, end.z)),
+    maxZ: Math.floor(Math.max(start.z, end.z)) + 1,
+  }
+}
+
+// Tracé de pièce façon Sims : pendant le drag de l'outil Pièce, montre le
+// rectangle (vert = constructible, rouge = invalide) avec ses dimensions.
+// La pièce n'est construite qu'au relâchement.
+function RoomRectGhost({ startPoint, hoverRef, layout, coins }) {
+  const groupRef = useRef()
+  const meshRef = useRef()
+  const northWallRef = useRef()
+  const eastWallRef = useRef()
+  const southWallRef = useRef()
+  const westWallRef = useRef()
+  const doorRef = useRef()
+  const labelRef = useRef()
+  // Prix et validité viennent de la VRAIE opération, pas d'une estimation
+  // parallèle qui finirait par diverger. Mis en cache sur le rectangle : ne
+  // recalcule que quand le tracé change, pas à chaque frame.
+  const previewRef = useRef({ key: null, cost: 0, valid: false })
+
+  useFrame(() => {
+    const group = groupRef.current
+    const mesh = meshRef.current
+    if (!group || !mesh) return
+    const hover = hoverRef?.current
+    const rect = getDraggedCellRect(startPoint, hover ?? startPoint)
+    const width = rect.maxX - rect.minX
+    const depth = rect.maxZ - rect.minZ
+    group.visible = width > 0 && depth > 0
+    if (!group.visible) return
+
+    const key = `${rect.minX},${rect.minZ},${rect.maxX},${rect.maxZ}`
+    if (previewRef.current.key !== key) {
+      const plan = layout.plan
+      const next = addHouseRoomRect(plan, rect)
+      previewRef.current = next === plan
+        ? { key, cost: 0, valid: false }
+        : { key, cost: getHousePlanValue(next) - getHousePlanValue(plan), valid: true }
+    }
+    const { cost, valid } = previewRef.current
+    const wallHeight = layout.plan?.defaultWallHeight ?? 5
+
+    group.position.set((rect.minX + rect.maxX) * 0.5, 0.11, (rect.minZ + rect.maxZ) * 0.5)
+    mesh.scale.set(Math.max(0.05, width), 1, Math.max(0.05, depth))
+    mesh.material.color.set(valid ? '#66ff9a' : '#ff5f5f')
+    northWallRef.current?.position.set(0, wallHeight * 0.5, depth * 0.5)
+    northWallRef.current?.scale.set(width, wallHeight, 1)
+    eastWallRef.current?.position.set(width * 0.5, wallHeight * 0.5, 0)
+    eastWallRef.current?.scale.set(depth, wallHeight, 1)
+    southWallRef.current?.position.set(0, wallHeight * 0.5, -depth * 0.5)
+    southWallRef.current?.scale.set(width, wallHeight, 1)
+    westWallRef.current?.position.set(-width * 0.5, wallHeight * 0.5, 0)
+    westWallRef.current?.scale.set(depth, wallHeight, 1)
+    doorRef.current?.position.set(0, 1.2, -depth * 0.5 - 0.09)
+    doorRef.current?.scale.set(Math.min(1.2, width - 0.4), 2.4, 1)
+    if (labelRef.current) {
+      const affordable = cost <= coins
+      labelRef.current.textContent = valid
+        ? `${width} × ${depth} · ${width * depth} m² · ${cost} pièces${affordable ? '' : ' — trop cher'}`
+        : `${width} × ${depth} · emplacement invalide`
+      labelRef.current.className = `build-ghost-label${valid && !affordable ? ' is-unaffordable' : ''}`
+    }
+  })
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial color="#66ff9a" transparent opacity={0.3} depthWrite={false} />
+      </mesh>
+      <mesh ref={northWallRef}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={eastWallRef} rotation={[0, Math.PI * 0.5, 0]}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={southWallRef}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={westWallRef} rotation={[0, Math.PI * 0.5, 0]}>
+        <boxGeometry args={[1, 1, 0.14]} />
+        <meshBasicMaterial color="#7ecbff" transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+      <mesh ref={doorRef}>
+        <boxGeometry args={[1, 1, 0.18]} />
+        <meshBasicMaterial color="#65f2a3" transparent opacity={0.85} depthWrite={false} />
+      </mesh>
+      <Html position={[0, 5.7, 0]} center>
+        <div ref={labelRef} className="build-ghost-label" />
+      </Html>
+    </group>
+  )
+}
+
+// Curseur de sol : petit anneau qui suit le pointeur sur la parcelle,
+// pour toujours voir où l'on pointe (surtout en 3D et sur mobile).
+function FloorCursor({ hoverRef }) {
+  const meshRef = useRef()
+
+  useFrame(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    const hover = hoverRef?.current
+    const fresh = hover && Number.isFinite(hover.x) && (performance.now() - (hover.time ?? 0)) < 450
+    mesh.visible = Boolean(fresh)
+    if (!fresh) return
+    mesh.position.set(snap(hover.x), 0.065, snap(hover.z))
+  })
+
+  return (
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} visible={false} raycast={ignorePointerRaycast}>
+      <ringGeometry args={[0.14, 0.22, 24]} />
+      <meshBasicMaterial color="#f2c14e" transparent opacity={0.85} depthWrite={false} />
+    </mesh>
+  )
+}
+
 function EditableFloor({
   mode,
+  view = 'top',
+  disabled = false,
   draggingObjectId,
   placingObjectId,
+  buildTool,
   placementLocked,
   getPlacementY,
   getFootprint,
   onDrag,
+  onBuildFloorClick,
+  onBuildFloorHover,
+  onSelectSpaceAt,
+  onRoomDragStart,
+  onRoomDragEnd,
   onLockPlacement,
   onStopDragging,
   onClearSelection,
+  dragOffsetRef,
 }) {
   const { camera } = useThree()
   const lastClientRef = useRef(null)
-  const isActive = mode === 'customize'
+  const activePointerIdRef = useRef(null)
+  const isActive = mode === 'customize' && !disabled
+
+  const finishPointerInteraction = useCallback((pointerId = null) => {
+    if (
+      pointerId !== null &&
+      activePointerIdRef.current !== null &&
+      pointerId !== activePointerIdRef.current
+    ) return
+    activePointerIdRef.current = null
+    lastClientRef.current = null
+    onStopDragging()
+  }, [onStopDragging])
+
+  useEffect(() => {
+    if (!isActive) {
+      activePointerIdRef.current = null
+      lastClientRef.current = null
+      return undefined
+    }
+
+    const onPointerEnd = (event) => {
+      if (buildTool === 'room') onRoomDragEnd?.(null)
+      finishPointerInteraction(event.pointerId)
+    }
+    const onWindowBlur = () => finishPointerInteraction()
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') finishPointerInteraction()
+    }
+    // Pan/orbite au niveau fenêtre (deltas écran) : les événements ne se
+    // coupent plus quand le pointeur sort du mesh du sol pendant un drag
+    // rapide — l'orbite 3D reste fluide.
+    const onWindowPointerMove = (event) => {
+      if (!lastClientRef.current) return
+      if (
+        activePointerIdRef.current !== null &&
+        event.pointerId !== activePointerIdRef.current
+      ) return
+      // Revérifie l'état de drag au moment du move (l'état React peut avoir
+      // changé après le pointerdown) : déplacer un meuble ne doit pas orbiter.
+      const editorState = useGameStore.getState().editor
+      if (editorState.draggingObjectId || editorState.placingObjectId) {
+        lastClientRef.current = null
+        return
+      }
+      const dx = event.clientX - lastClientRef.current.x
+      const dy = event.clientY - lastClientRef.current.y
+      lastClientRef.current = { x: event.clientX, y: event.clientY }
+      if (view === '3d') {
+        applyCustomizeOrbitDrag(dx, dy)
+        return
+      }
+      const worldPerPixel = 1 / camera.zoom
+      camera.position.x = MathUtils.clamp(camera.position.x - dx * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minX, CUSTOMIZE_PAN_BOUNDS.maxX)
+      camera.position.z = MathUtils.clamp(camera.position.z - dy * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minZ, CUSTOMIZE_PAN_BOUNDS.maxZ)
+    }
+    window.addEventListener('pointerup', onPointerEnd)
+    window.addEventListener('pointercancel', onPointerEnd)
+    window.addEventListener('pointermove', onWindowPointerMove)
+    window.addEventListener('blur', onWindowBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('pointerup', onPointerEnd)
+      window.removeEventListener('pointercancel', onPointerEnd)
+      window.removeEventListener('pointermove', onWindowPointerMove)
+      window.removeEventListener('blur', onWindowBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [buildTool, camera, finishPointerInteraction, isActive, onRoomDragEnd, view])
 
   useEffect(() => {
     if (!isActive) {
@@ -13026,12 +13827,15 @@ function EditableFloor({
 
   const getSnappedPlacement = (point, objectId) => {
     const { hx, hz } = getFootprint(objectId)
-    const x = MathUtils.clamp(snap(point.x), -PARCEL_HALF + hx, PARCEL_HALF - hx)
-    const z = MathUtils.clamp(snap(point.z), -PARCEL_HALF + hz, PARCEL_HALF - hz)
+    const dragOffset = objectId === draggingObjectId
+      ? dragOffsetRef.current
+      : { x: 0, z: 0 }
+    const x = MathUtils.clamp(snap(point.x + dragOffset.x), -PARCEL_HALF + hx, PARCEL_HALF - hx)
+    const z = MathUtils.clamp(snap(point.z + dragOffset.z), -PARCEL_HALF + hz, PARCEL_HALF - hz)
     return [x, getPlacementY(x, z, objectId), z]
   }
 
-  const isPanning = !draggingObjectId && !placingObjectId
+  const isPanning = !draggingObjectId && !placingObjectId && !buildTool
 
   return (
     <mesh
@@ -13040,28 +13844,37 @@ function EditableFloor({
       visible={isActive}
       onPointerDown={(event) => {
         if (!isActive) return
+        if (buildTool === 'room') {
+          // Tracé de pièce : le coin de départ se pose au doigt/clic.
+          event.stopPropagation()
+          onBuildFloorHover?.(event.point)
+          onRoomDragStart?.(event.point)
+          return
+        }
         if (isPanning) {
           if (event.pointerType === 'touch' && lastClientRef.current) {
             // Second finger landed — cancel pan to let pinch zoom take over
             lastClientRef.current = null
           } else {
+            activePointerIdRef.current = event.pointerId
             lastClientRef.current = { x: event.clientX, y: event.clientY }
           }
         }
       }}
       onPointerMove={(event) => {
         if (!isActive) return
-        if (isPanning) {
-          if (lastClientRef.current) {
-            const dx = event.clientX - lastClientRef.current.x
-            const dy = event.clientY - lastClientRef.current.y
-            lastClientRef.current = { x: event.clientX, y: event.clientY }
-            const worldPerPixel = 1 / camera.zoom
-            camera.position.x = MathUtils.clamp(camera.position.x - dx * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minX, CUSTOMIZE_PAN_BOUNDS.maxX)
-            camera.position.z = MathUtils.clamp(camera.position.z - dy * worldPerPixel, CUSTOMIZE_PAN_BOUNDS.minZ, CUSTOMIZE_PAN_BOUNDS.maxZ)
-          }
-          return
-        }
+        if (
+          activePointerIdRef.current !== null &&
+          event.pointerId !== activePointerIdRef.current
+        ) return
+        // Le survol alimente le curseur de sol et les fantômes (cloison,
+        // tracé de pièce) — simple écriture de ref, aucun re-render.
+        onBuildFloorHover?.(event.point)
+        // Le pan (vue dessus) et l'orbite (3D) sont gérés au niveau fenêtre
+        // (onWindowPointerMove) : ici on ne traite que ce qui a besoin du
+        // point 3D issu du raycast.
+        if (isPanning) return
+        if (buildTool) return
         if (placingObjectId && placementLocked) return
         event.stopPropagation()
         const objectId = draggingObjectId ?? placingObjectId
@@ -13069,6 +13882,22 @@ function EditableFloor({
       }}
       onClick={(event) => {
         if (!isActive) return
+        if (buildTool === 'partition' || buildTool === 'paintFloor') {
+          event.stopPropagation()
+          onBuildFloorClick(event.point)
+          return
+        }
+        if (!buildTool && !placingObjectId && !draggingObjectId) {
+          // Un tap (pas un pan) sur le sol sélectionne la pièce, façon Sims.
+          if (event.delta > 6) return
+          // Si le clic a d'abord touché une poignée/un élément au-dessus du
+          // sol, ne pas écraser la sélection qui vient d'être faite.
+          const firstHit = event.intersections?.[0]
+          if (firstHit && firstHit.eventObject !== event.eventObject) return
+          event.stopPropagation()
+          onSelectSpaceAt?.(event.point)
+          return
+        }
         if (!placingObjectId || placementLocked) return
         event.stopPropagation()
         onDrag(placingObjectId, getSnappedPlacement(event.point, placingObjectId))
@@ -13076,20 +13905,72 @@ function EditableFloor({
       }}
       onPointerUp={(event) => {
         if (!isActive) return
-        lastClientRef.current = null
+        if (buildTool === 'room') {
+          event.stopPropagation()
+          onRoomDragEnd?.(event.point)
+          return
+        }
+        finishPointerInteraction(event.pointerId)
         event.stopPropagation()
-        onStopDragging()
       }}
       onPointerMissed={() => {
         if (!isActive) return
-        lastClientRef.current = null
-        onStopDragging()
-        onClearSelection()
+        finishPointerInteraction()
+        // Ne PAS effacer la sélection ici : en 3D, un clic sur un mur haut
+        // peut rater le sol et ce callback effaçait la sélection à peine
+        // faite. La désélection passe par un tap sur le sol hors maison.
       }}
     >
       <planeGeometry args={[PLAYER_PLOT_SIZE + 4, PLAYER_PLOT_SIZE + 4]} />
       <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>
+  )
+}
+
+function WallPlacementSurfaces({ object, layout, placementLocked, isPlacing, onTransform, onLockPlacement, onStopDragging }) {
+  const catalogItem = objectCatalog[object?.objectId]
+  const width = catalogItem?.width ?? 1.5
+  const height = catalogItem?.height ?? 0.86
+  const depth = catalogItem?.depth ?? 0.07
+  const targets = useMemo(
+    () => getWallMountTargets(layout, width, height),
+    [height, layout, width],
+  )
+
+  if (!object || catalogItem?.placementSurface !== 'wall') return null
+
+  const updateTransform = (event, target) => {
+    if (isPlacing && placementLocked) return
+    event.stopPropagation()
+    onTransform(getWallMountTransform(target, event.point, width, height, depth))
+  }
+
+  return (
+    <group>
+      {targets.map((target) => {
+        const surface = getWallSideTransform(target.wall, target.rect, target.side)
+        return (
+          <mesh
+            key={target.id}
+            position={surface.position}
+            rotation={surface.rotation}
+            onPointerMove={(event) => updateTransform(event, target)}
+            onClick={(event) => {
+              if (!isPlacing || placementLocked) return
+              updateTransform(event, target)
+              onLockPlacement()
+            }}
+            onPointerUp={(event) => {
+              event.stopPropagation()
+              if (!isPlacing) onStopDragging()
+            }}
+          >
+            <planeGeometry args={[surface.width, surface.height]} />
+            <meshBasicMaterial color="#ff365f" transparent opacity={0.045} depthWrite={false} side={DoubleSide} />
+          </mesh>
+        )
+      })}
+    </group>
   )
 }
 
@@ -13100,12 +13981,12 @@ function PlacementPreview({ object, preview, groupRef }) {
     <group position={preview.position} rotation={[0, preview.rotationY, 0]}>
       <group ref={groupRef} scale={0.96}>
         <Suspense fallback={null}>
-          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} />
+          <PlaceableModel objectId={object.objectId} type={object.type} placedObjectId={object.id} channelUrl={object.channelUrl} profileUrl={object.profileUrl} />
         </Suspense>
       </group>
       <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0.045, 0]}
+        rotation={objectCatalog[object.objectId]?.placementSurface === 'wall' ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
+        position={objectCatalog[object.objectId]?.placementSurface === 'wall' ? [0, 0, 0.055] : [0, 0.045, 0]}
         userData={{ ignorePlacementSupport: true }}
       >
         <ringGeometry args={[1.08, 1.16, 40]} />
@@ -13115,9 +13996,762 @@ function PlacementPreview({ object, preview, groupRef }) {
   )
 }
 
+function houseCornersMatch(a, b) {
+  return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.z - b.z) < 0.001
+}
+
+// Fantôme de cloison : pendant l'outil Cloison, montre le tracé (aligné sur
+// l'axe dominant, comme la logique) et sa longueur avant le second clic.
+// Mise à jour par ref dans useFrame — aucun re-render pendant le survol.
+function PartitionGhost({ startPoint, hoverRef, coins, layout }) {
+  const groupRef = useRef()
+  const meshRef = useRef()
+  const labelRef = useRef()
+  // Comme pour le tracé de pièce : prix réel issu de l'opération. Une cloison
+  // qui referme un espace facture aussi le sol créé — l'ancienne étiquette
+  // n'affichait que le mur et le prix final surprenait.
+  const previewRef = useRef({ key: null, cost: 0, valid: false })
+
+  useFrame(() => {
+    const group = groupRef.current
+    const mesh = meshRef.current
+    if (!group || !mesh) return
+    // Même grille que la pose : l'aperçu montre exactement le tracé obtenu.
+    const from = { x: snapHouseCoordinate(startPoint.x), z: snapHouseCoordinate(startPoint.z) }
+    const hover = hoverRef?.current
+    const raw = hover
+      ? { x: snapHouseCoordinate(hover.x), z: snapHouseCoordinate(hover.z) }
+      : from
+    const to = Math.abs(raw.x - from.x) >= Math.abs(raw.z - from.z)
+      ? { x: raw.x, z: from.z }
+      : { x: from.x, z: raw.z }
+    const length = Math.hypot(to.x - from.x, to.z - from.z)
+    group.position.set((from.x + to.x) * 0.5, 0.12, (from.z + to.z) * 0.5)
+    group.rotation.y = Math.abs(to.x - from.x) >= Math.abs(to.z - from.z) ? 0 : Math.PI * 0.5
+    mesh.visible = length >= 0.5
+    mesh.scale.x = Math.max(0.05, length)
+
+    const key = `${from.x},${from.z},${to.x},${to.z}`
+    if (previewRef.current.key !== key) {
+      const plan = layout?.plan
+      const next = plan ? addInteriorWallToHousePlan(plan, [from.x, from.z], [to.x, to.z]) : null
+      previewRef.current = !next || next === plan
+        ? { key, cost: 0, valid: false }
+        : { key, cost: getHousePlanValue(next) - getHousePlanValue(plan), valid: true }
+    }
+    const { cost, valid } = previewRef.current
+
+    if (labelRef.current) {
+      const affordable = cost <= coins
+      labelRef.current.textContent = valid
+        ? `${length} m · ${cost} pièces${affordable ? '' : ' — trop cher'}`
+        : 'trop court'
+      labelRef.current.className = `build-ghost-label${valid && !affordable ? ' is-unaffordable' : ''}`
+    }
+  })
+
+  return (
+    <group ref={groupRef}>
+      <mesh ref={meshRef} raycast={ignorePointerRaycast}>
+        <boxGeometry args={[1, 0.4, 0.14]} />
+        <meshBasicMaterial color="#f2c14e" transparent opacity={0.55} depthWrite={false} />
+      </mesh>
+      <Html position={[0, 0.9, 0]} center style={{ pointerEvents: 'none' }}>
+        <div ref={labelRef} className="build-ghost-label" />
+      </Html>
+    </group>
+  )
+}
+
+// Fantôme de déplacement de mur : suit le pointeur (pas de saut par case)
+// pendant un drag resize/moveInterior ; le mur réel ne bouge qu'au relâchement.
+function applyChunkedHouseWallMove(plan, wallId, amount, operation) {
+  let next = plan
+  let remaining = snapHouseCoordinate(amount)
+  while (Math.abs(remaining) >= HOUSE_STRUCTURE_GRID_SIZE * 0.5) {
+    const step = Math.max(-4, Math.min(4, remaining))
+    const result = operation(next, wallId, step)
+    if (result === next) break
+    next = result
+    remaining = snapHouseCoordinate(remaining - step)
+  }
+  return next
+}
+
+function WallMoveGhost({ dragRef, view, layout, coins }) {
+  const groupRef = useRef()
+  const meshRef = useRef()
+  const labelRef = useRef()
+
+  useFrame(() => {
+    const group = groupRef.current
+    const mesh = meshRef.current
+    const drag = dragRef.current
+    if (!group || !mesh) return
+    const active = drag && (drag.type === 'resize' || drag.type === 'moveInterior') && drag.wall
+    const amount = drag?.pendingAmount ?? 0
+    // À 0 m, le fantôme serait exactement sur le mur réel : deux surfaces
+    // coplanaires provoquent un clignotement. Il ne s'affiche donc qu'après
+    // le premier déplacement effectif et son libellé est toujours effacé.
+    group.visible = Boolean(active && amount !== 0)
+    if (!active || amount === 0) {
+      if (labelRef.current) labelRef.current.textContent = ''
+      return
+    }
+    const wall = drag.wall
+    group.position.set(
+      (wall.startCorner.x + wall.endCorner.x) * 0.5 + drag.normal[0] * amount,
+      0,
+      (wall.startCorner.z + wall.endCorner.z) * 0.5 + drag.normal[2] * amount,
+    )
+    group.rotation.y = -Math.atan2(
+      wall.endCorner.z - wall.startCorner.z,
+      wall.endCorner.x - wall.startCorner.x,
+    )
+    mesh.scale.x = Math.max(0.2, wall.length)
+    if (labelRef.current) {
+      const plan = layout?.plan
+      const operation = drag.type === 'moveInterior' ? moveHouseInteriorWall : resizeHouseExteriorWall
+      const next = plan ? applyChunkedHouseWallMove(plan, wall.id, amount, operation) : null
+      const cost = next && next !== plan ? getHousePlanValue(next) - getHousePlanValue(plan) : 0
+      const priceLabel = cost > 0
+        ? `coût ${cost} pièces`
+        : cost < 0 ? `remboursement ${Math.abs(cost)} pièces` : '0 pièce'
+      labelRef.current.textContent = `${amount > 0 ? '+' : ''}${amount} m · ${priceLabel}`
+      labelRef.current.className = `build-ghost-label${cost > coins ? ' is-unaffordable' : ''}`
+    }
+  })
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh ref={meshRef} position={[0, view === '3d' ? 1.4 : 0.16, 0]} raycast={ignorePointerRaycast}>
+        <boxGeometry args={[1, view === '3d' ? 2.8 : 0.3, 0.18]} />
+        <meshBasicMaterial color="#4fb9ff" transparent opacity={0.4} depthWrite={false} />
+      </mesh>
+      <Html position={[0, view === '3d' ? 3.2 : 1, 0]} center style={{ pointerEvents: 'none' }}>
+        <div ref={labelRef} className="build-ghost-label" />
+      </Html>
+    </group>
+  )
+}
+
+function OpeningResizeHandle({ position, color, onPointerDown }) {
+  return (
+    <group position={position} onPointerDown={onPointerDown}>
+      {/* La cible reste large sans transformer la poignée en gros bouton visuel. */}
+      <mesh>
+        <sphereGeometry args={[0.38, 16, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[0.16, 14, 10]} />
+        <meshBasicMaterial color={color} transparent opacity={0.95} depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
+function HouseBuildHandles({
+  layout,
+  view = 'top',
+  canEditStructure = true,
+  coins = 0,
+  selectedElement,
+  buildTool,
+  onSelectElement,
+  onSplitWall,
+  onResizeWall,
+  onMoveOpening,
+  onMoveInteriorWall,
+  onResizeWallEnd,
+  onMoveWallJoint,
+  onResizeOpeningSpan,
+  onResizeOpeningVertical,
+  onResizeOpeningBottom,
+  onAddOpening,
+  onAddRoom,
+  onCompleteBuildTool,
+  onBeginChange,
+  onEndChange,
+  onCancelChange,
+}) {
+  const [activeDrag, setActiveDrag] = useState(null)
+  const [hoveredTarget, setHoveredTarget] = useState(null)
+  const activeDragRef = useRef(null)
+  const walls = layout.walls ?? []
+
+  // En vue 3D, les poignées se posent au sommet des murs (au sol elles sont
+  // masquées par les murs eux-mêmes) ; en vue dessus elles restent au sol.
+  const getHandleY = (wall) => (
+    view === '3d' ? (wall.bottom ?? 0) + wall.height + 0.08 : 0.09
+  )
+
+  const getWallHitTransform = (wall) => {
+    const direction = getWallDirection(wall)
+    const center = getWallPointAt(wall, direction.length * 0.5)
+    return {
+      position: [center.x, getHandleY(wall), center.z],
+      rotation: [0, -Math.atan2(direction.z, direction.x), 0],
+      length: direction.length,
+    }
+  }
+
+  const getWallOutsideNormal = (wall) => {
+    const outsideSide = wall.sideA?.type === 'outside' ? wall.sideA : wall.sideB?.type === 'outside' ? wall.sideB : null
+    return outsideSide?.normal ?? null
+  }
+
+  const getDoorTransform = (wall, opening) => {
+    const center = getWallPointAt(wall, opening.center)
+    return {
+      position: [center.x, view === '3d' ? getHandleY(wall) + 0.06 : 0.13, center.z],
+      rotation: [0, -Math.atan2(wall.endCorner.z - wall.startCorner.z, wall.endCorner.x - wall.startCorner.x), 0],
+    }
+  }
+
+  const getWallOffsetFromPoint = (wall, point) => {
+    const direction = getWallDirection(wall)
+    const dx = point.x - wall.startCorner.x
+    const dz = point.z - wall.startCorner.z
+    return Math.min(0.98, Math.max(0.02, (dx * direction.x + dz * direction.z) / direction.length))
+  }
+
+  const getRoomDirectionFromNormal = (normal) => {
+    if (Math.abs(normal[0]) >= Math.abs(normal[2])) return normal[0] >= 0 ? 'east' : 'west'
+    return normal[2] >= 0 ? 'north' : 'south'
+  }
+
+  const updateActiveDrag = (event) => {
+    const drag = activeDragRef.current
+    if (!drag) return
+    event.stopPropagation()
+    if (drag.type === 'resize' || drag.type === 'moveInterior') {
+      // Prévisualisation fantôme : rien n'est appliqué pendant le drag, le
+      // mur ne saute plus par pas d'une case. Application au relâchement.
+      const dx = event.point.x - drag.startX
+      const dz = event.point.z - drag.startZ
+      const distance = dx * drag.normal[0] + dz * drag.normal[2]
+      // Murs et cloisons partagent la grille des cellules : le sol reste
+      // toujours exactement bord à bord avec la cloison.
+      drag.pendingAmount = snapHouseCoordinate(distance)
+      return
+    }
+
+    if (drag.type === 'wallEnd' || drag.type === 'joint') {
+      const value = snapHouseCoordinate(drag.axis === 'z' ? event.point.z : event.point.x)
+      if (value === drag.lastValue) return
+      drag.lastValue = value
+      if (drag.type === 'wallEnd') onResizeWallEnd(drag.wallId, drag.end, value)
+      else onMoveWallJoint(drag.wallIdA, drag.wallIdB, value)
+      return
+    }
+
+    if (drag.type === 'openingSpan') {
+      const wallLength = Math.max(0.001, drag.wall.length)
+      const distance = getWallOffsetFromPoint(drag.wall, event.point) * wallLength
+      const snapped = Math.round(distance * 10) / 10
+      if (snapped === drag.lastDistance) return
+      drag.lastDistance = snapped
+      const width = Math.abs(snapped - drag.fixedDistance)
+      const center = (snapped + drag.fixedDistance) * 0.5
+      onResizeOpeningSpan(drag.openingId, center / wallLength, width)
+      return
+    }
+
+    if (drag.type === 'openingHeight') {
+      const nextHeight = Math.round((event.point.y - drag.bottom) * 10) / 10
+      if (nextHeight === drag.lastHeight) return
+      drag.lastHeight = nextHeight
+      onResizeOpeningVertical(drag.openingId, nextHeight)
+      return
+    }
+
+    if (drag.type === 'openingBottom') {
+      // Le haut de l'ouverture reste fixe : descendre le bas supprime
+      // le soubassement, le remonter le recrée.
+      const localBottom = Math.round((event.point.y - drag.wallBottom) * 10) / 10
+      if (localBottom === drag.lastBottom) return
+      drag.lastBottom = localBottom
+      onResizeOpeningBottom(drag.openingId, Math.max(0, localBottom), drag.topLocal)
+      return
+    }
+
+    if (drag.type === 'opening') {
+      // Une ouverture reste sur son mur pendant le drag. Le changement
+      // automatique de mur rendait la manipulation imprévisible.
+      const targetWall = drag.wall
+      const offset = getWallOffsetFromPoint(targetWall, event.point)
+      const wallLength = Math.max(0.001, targetWall.length)
+      const snappedOffset = (Math.round(offset * wallLength * 10) / 10) / wallLength
+      if (Math.abs(snappedOffset - drag.lastOffset) >= 0.001) {
+        drag.lastOffset = snappedOffset
+        onMoveOpening(drag.openingId, targetWall.id, snappedOffset)
+      }
+    }
+  }
+
+  const finishActiveDrag = (event) => {
+    const drag = activeDragRef.current
+    if (!drag) return
+    event?.stopPropagation?.()
+    // Les drags à fantôme appliquent leur total au relâchement seulement.
+    if ((drag.type === 'resize' || drag.type === 'moveInterior') && drag.pendingAmount) {
+      if (drag.type === 'resize') onResizeWall(drag.wallId, drag.pendingAmount)
+      else onMoveInteriorWall(drag.wallId, drag.pendingAmount)
+    }
+    activeDragRef.current = null
+    activeWallMovePreviewRef.current = null
+    setActiveDrag(null)
+    onEndChange?.()
+  }
+
+  const cancelActiveDrag = (event) => {
+    if (!activeDragRef.current) return
+    event?.stopPropagation?.()
+    activeDragRef.current = null
+    activeWallMovePreviewRef.current = null
+    setActiveDrag(null)
+    onCancelChange?.()
+  }
+
+  const beginDrag = (drag) => {
+    onBeginChange?.()
+    activeDragRef.current = drag
+    activeWallMovePreviewRef.current = drag
+    setActiveDrag(drag)
+  }
+
+  const beginHandleDrag = (event, drag) => {
+    event.stopPropagation()
+    event.target?.setPointerCapture?.(event.pointerId)
+    beginDrag(drag)
+  }
+
+  useEffect(() => {
+    if (!activeDrag) return undefined
+    const onPointerUp = (event) => finishActiveDrag(event)
+    const onPointerCancel = (event) => cancelActiveDrag(event)
+    const onBlur = () => cancelActiveDrag()
+    const onKeyDown = (event) => {
+      if (getKeyboardKey(event) === 'escape') cancelActiveDrag(event)
+    }
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [activeDrag])
+
+  return (
+    <group visible userData={{ debugCategory: 'house-build-handles' }}>
+      {activeDrag && (() => {
+        // Plan de capture du drag. En 3D, tous les drags d'ouvertures passent
+        // par un plan VERTICAL aligné au mur (le pointeur est sur l'ouverture,
+        // pas au sol : projeter sur le sol créait une grosse parallaxe).
+        // Les drags horizontaux utilisent un plan à la hauteur de la poignée.
+        const useWallPlane = activeDrag.wall && (
+          activeDrag.type === 'openingHeight' ||
+          activeDrag.type === 'openingBottom' ||
+          (view === '3d' && (activeDrag.type === 'opening' || activeDrag.type === 'openingSpan'))
+        )
+        return (
+        <mesh
+          rotation={useWallPlane
+            ? [0, -Math.atan2(
+                activeDrag.wall.endCorner.z - activeDrag.wall.startCorner.z,
+                activeDrag.wall.endCorner.x - activeDrag.wall.startCorner.x,
+              ), 0]
+            : [-Math.PI / 2, 0, 0]}
+          position={useWallPlane
+            ? [
+                (activeDrag.wall.startCorner.x + activeDrag.wall.endCorner.x) * 0.5,
+                4,
+                (activeDrag.wall.startCorner.z + activeDrag.wall.endCorner.z) * 0.5,
+              ]
+            : [0, activeDrag.planeY ?? 0.18, 0]}
+          onPointerMove={updateActiveDrag}
+          onPointerUp={finishActiveDrag}
+          onPointerCancel={cancelActiveDrag}
+        >
+          <planeGeometry args={[PLAYER_PLOT_SIZE + 12, PLAYER_PLOT_SIZE + 12]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
+        </mesh>
+        )
+      })()}
+      <WallMoveGhost dragRef={activeDragRef} view={view} layout={layout} coins={coins} />
+      {/* Sélection de pièce façon Sims : surbrillance de l'espace détecté +
+          poignées au centre de chaque côté pour agrandir/réduire la pièce. */}
+      {selectedElement?.type === 'space' && (() => {
+        const space = (layout.spaces ?? []).find((candidate) => candidate.id === selectedElement.id)
+        if (!space) return null
+        const rects = decomposeCellsIntoRects(space.cells)
+        const bounds = space.bounds
+        const midX = (bounds.minX + bounds.maxX) * 0.5
+        const midZ = (bounds.minZ + bounds.maxZ) * 0.5
+        const sideDefs = [
+          { key: 'east', wallAxis: 'z', constant: bounds.maxX, mid: midZ, position: [bounds.maxX, 0, midZ] },
+          { key: 'west', wallAxis: 'z', constant: bounds.minX, mid: midZ, position: [bounds.minX, 0, midZ] },
+          { key: 'north', wallAxis: 'x', constant: bounds.maxZ, mid: midX, position: [midX, 0, bounds.maxZ] },
+          { key: 'south', wallAxis: 'x', constant: bounds.minZ, mid: midX, position: [midX, 0, bounds.minZ] },
+        ]
+        return (
+          <group>
+            {rects.map((rect) => (
+              <mesh
+                key={`space-fill-${rect.minX}-${rect.minZ}-${rect.maxX}-${rect.maxZ}`}
+                rotation={[-Math.PI / 2, 0, 0]}
+                position={[(rect.minX + rect.maxX) * 0.5, 0.052, (rect.minZ + rect.maxZ) * 0.5]}
+              >
+                <planeGeometry args={[rect.maxX - rect.minX, rect.maxZ - rect.minZ]} />
+                <meshBasicMaterial color="#f2c14e" transparent opacity={0.16} depthWrite={false} />
+              </mesh>
+            ))}
+            {canEditStructure && !buildTool && sideDefs.map((side) => {
+              const wall = walls.find((candidate) => (
+                candidate.axis === side.wallAxis &&
+                Math.abs(candidate.constant - side.constant) < 0.01 &&
+                Math.min(candidate.from, candidate.to) <= side.mid + 0.001 &&
+                Math.max(candidate.from, candidate.to) >= side.mid - 0.001
+              ))
+              if (!wall) return null
+              const outsideNormal = getWallOutsideNormal(wall)
+              const direction = getWallDirection(wall)
+              const moveNormal = outsideNormal ?? [-direction.z, 0, direction.x]
+              return (
+                <mesh
+                  key={`space-side-${side.key}`}
+                  position={[
+                    side.position[0],
+                    view === '3d' ? (wall.bottom ?? 0) + wall.height + 0.2 : 0.24,
+                    side.position[2],
+                  ]}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    beginDrag({
+                      type: outsideNormal ? 'resize' : 'moveInterior',
+                      wallId: wall.id,
+                      wall,
+                      startX: event.point.x,
+                      startZ: event.point.z,
+                      normal: moveNormal,
+                      planeY: event.point.y,
+                      pendingAmount: 0,
+                    })
+                  }}
+                >
+                  <boxGeometry args={side.wallAxis === 'z' ? [0.34, 0.16, 0.72] : [0.72, 0.16, 0.34]} />
+                  <meshBasicMaterial color="#4fb9ff" transparent opacity={0.95} depthWrite={false} />
+                </mesh>
+              )
+            })}
+          </group>
+        )
+      })()}
+      {walls.map((wall) => {
+        const transform = getWallHitTransform(wall)
+        const selected = selectedElement?.type === 'wall' && selectedElement.id === wall.id
+        const outsideNormal = getWallOutsideNormal(wall)
+        return (
+          <group key={`build-wall-${wall.id}`}>
+            <mesh
+              position={view === '3d'
+                ? [transform.position[0], (wall.bottom ?? 0) + wall.height * 0.5, transform.position[2]]
+                : transform.position}
+              rotation={transform.rotation}
+              onPointerOver={(event) => {
+                // Pas de survol pendant un drag : stopPropagation volerait des
+                // événements au plan de capture et le setState re-rendrait.
+                if (activeDragRef.current) return
+                event.stopPropagation()
+                setHoveredTarget(`wall:${wall.id}`)
+              }}
+              onPointerOut={() => setHoveredTarget((current) => current === `wall:${wall.id}` ? null : current)}
+              onPointerDown={(event) => {
+                // Outil Pièce : on laisse l'événement traverser jusqu'au sol,
+                // qui gère le tracé du rectangle.
+                if (buildTool === 'room') return
+                event.stopPropagation()
+                const offset = getWallOffsetFromPoint(wall, event.point)
+                if (buildTool === 'segment') {
+                  onSplitWall(wall.id, offset)
+                  onCompleteBuildTool()
+                  return
+                }
+                if (buildTool === 'door' || buildTool === 'window') {
+                  onAddOpening(wall.id, offset, buildTool)
+                  onCompleteBuildTool()
+                  return
+                }
+                // Mémorise le côté cliqué du mur : la tapisserie s'applique
+                // au côté touché (une cloison a deux faces peignables).
+                const direction2 = getWallDirection(wall)
+                const midX = (wall.startCorner.x + wall.endCorner.x) * 0.5
+                const midZ = (wall.startCorner.z + wall.endCorner.z) * 0.5
+                const sideDot = (event.point.x - midX) * -direction2.z + (event.point.z - midZ) * direction2.x
+                onSelectElement({ type: 'wall', id: wall.id, side: sideDot >= 0 ? 'left' : 'right' })
+              }}
+            >
+              <boxGeometry args={view === '3d'
+                ? [Math.max(0.2, transform.length), Math.max(0.4, wall.height), 0.16]
+                : [Math.max(0.2, transform.length), 0.1, selected ? 0.72 : 0.5]} />
+              <meshBasicMaterial
+                color={
+                  buildTool === 'segment' ? '#f2c14e'
+                    : buildTool === 'door' ? '#65f2a3'
+                      : buildTool === 'window' ? '#8fd7ff'
+                        : selected ? '#f2c14e'
+                          : hoveredTarget === `wall:${wall.id}` ? '#d8efff'
+                            : outsideNormal ? '#75d5ff' : '#ff8e6e'
+                }
+                transparent
+                opacity={
+                  buildTool === 'room' ? 0.05
+                    : buildTool || selected ? 0.46
+                      : hoveredTarget === `wall:${wall.id}` ? 0.28 : view === '3d' ? 0.035 : 0.18
+                }
+                depthWrite={false}
+              />
+            </mesh>
+            {selected && canEditStructure && !buildTool && (() => {
+              const direction = getWallDirection(wall)
+              const moveNormal = outsideNormal ?? [-direction.z, 0, direction.x]
+              return (
+                <mesh
+                  position={[transform.position[0], getHandleY(wall) + 0.2, transform.position[2]]}
+                  rotation={transform.rotation}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    beginDrag({
+                      type: outsideNormal ? 'resize' : 'moveInterior',
+                      wallId: wall.id,
+                      wall,
+                      startX: event.point.x,
+                      startZ: event.point.z,
+                      normal: moveNormal,
+                      planeY: event.point.y,
+                      pendingAmount: 0,
+                    })
+                  }}
+                >
+                  <boxGeometry args={[Math.min(0.72, Math.max(0.38, transform.length * 0.22)), 0.16, 0.32]} />
+                  <meshBasicMaterial color="#4fb9ff" transparent opacity={0.95} depthWrite={false} />
+                </mesh>
+              )
+            })()}
+            {selected && canEditStructure && !buildTool && ['start', 'end'].map((endKey) => {
+              const corner = endKey === 'start' ? wall.startCorner : wall.endCorner
+              const connectedWalls = walls.filter((candidate) => (
+                candidate.id !== wall.id &&
+                (houseCornersMatch(candidate.startCorner, corner) || houseCornersMatch(candidate.endCorner, corner))
+              ))
+              const colinearNeighbor = connectedWalls.find((candidate) => (
+                candidate.axis === wall.axis && Math.abs(candidate.constant - wall.constant) < 0.001
+              ))
+              if (connectedWalls.length > 0 && !colinearNeighbor) return null
+              return (
+                <mesh
+                  key={`build-wall-end-${wall.id}-${endKey}`}
+                  position={[corner.x, view === '3d' ? getHandleY(wall) + 0.12 : 0.2, corner.z]}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                    if (colinearNeighbor) {
+                      beginDrag({
+                        type: 'joint',
+                        wallIdA: wall.id,
+                        wallIdB: colinearNeighbor.id,
+                        axis: wall.axis === 'x' ? 'x' : 'z',
+                        planeY: event.point.y,
+                        lastValue: null,
+                      })
+                      return
+                    }
+                    beginDrag({
+                      type: 'wallEnd',
+                      wallId: wall.id,
+                      end: endKey === 'start' ? 'from' : 'to',
+                      axis: wall.axis === 'x' ? 'x' : 'z',
+                      planeY: event.point.y,
+                      lastValue: null,
+                    })
+                  }}
+                >
+                  <sphereGeometry args={[0.18, 14, 10]} />
+                  <meshBasicMaterial color="#ffffff" transparent opacity={0.92} depthWrite={false} />
+                </mesh>
+              )
+            })}
+            {(wall.openings ?? []).map((opening) => {
+              const doorTransform = getDoorTransform(wall, opening)
+              const doorSelected = selectedElement?.type === 'opening' && selectedElement.id === opening.id
+              return (
+                <group key={`build-opening-${opening.id}`}>
+                  <mesh
+                    position={view === '3d'
+                      ? [
+                          doorTransform.position[0],
+                          (wall.bottom ?? 0) + (opening.bottom ?? 0) + opening.height * 0.5,
+                          doorTransform.position[2],
+                        ]
+                      : doorTransform.position}
+                    rotation={doorTransform.rotation}
+                    onPointerOver={(event) => {
+                      if (activeDragRef.current) return
+                      event.stopPropagation()
+                      setHoveredTarget(`opening:${opening.id}`)
+                    }}
+                    onPointerOut={() => setHoveredTarget((current) => current === `opening:${opening.id}` ? null : current)}
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      activeDragRef.current = null
+                      setActiveDrag(null)
+                      onSelectElement({ type: 'opening', id: opening.id })
+                      // Saisir l'ouverture la déplace directement (façon Sims) :
+                      // pas besoin de viser la petite poignée.
+                      if (canEditStructure && !buildTool) {
+                        beginDrag({
+                          type: 'opening',
+                          openingId: opening.id,
+                          wall,
+                          lastOffset: opening.center / Math.max(0.001, wall.length),
+                        })
+                      }
+                    }}
+                  >
+                    <boxGeometry args={view === '3d'
+                      ? [Math.max(0.45, opening.width), Math.max(0.4, opening.height), 0.2]
+                      : [Math.max(0.45, opening.width), 0.12, 0.62]} />
+                    <meshBasicMaterial
+                      color={
+                        doorSelected ? '#f2c14e'
+                          : hoveredTarget === `opening:${opening.id}` ? '#ffffff'
+                          : opening.role === 'entrance' ? '#5aa0ff'
+                            : opening.type === 'window' ? '#8fd7ff' : '#65f2a3'
+                      }
+                      transparent
+                      opacity={doorSelected ? 0.48 : hoveredTarget === `opening:${opening.id}` ? 0.35 : view === '3d' ? 0.04 : 0.3}
+                      depthWrite={false}
+                    />
+                  </mesh>
+                  {doorSelected && canEditStructure && !buildTool && (
+                    <mesh
+                      // En 3D, la poignée de déplacement est posée SUR
+                      // l'ouverture (mi-hauteur), pas au sommet du mur.
+                      position={view === '3d'
+                        ? [
+                            doorTransform.position[0],
+                            (wall.bottom ?? 0) + (opening.bottom ?? 0) + opening.height * 0.5,
+                            doorTransform.position[2],
+                          ]
+                        : [doorTransform.position[0], 0.22, doorTransform.position[2]]}
+                      rotation={doorTransform.rotation}
+                      onPointerDown={(event) => {
+                        event.stopPropagation()
+                        beginDrag({
+                          type: 'opening',
+                          openingId: opening.id,
+                          wall,
+                          lastOffset: opening.center / Math.max(0.001, wall.length),
+                        })
+                      }}
+                    >
+                      <boxGeometry args={view === '3d'
+                        ? [Math.min(0.5, Math.max(0.3, opening.width * 0.35)), 0.5, 0.34]
+                        : [Math.min(0.5, Math.max(0.3, opening.width * 0.35)), 0.16, 0.3]} />
+                      <meshBasicMaterial color="#65f2a3" transparent opacity={0.96} depthWrite={false} />
+                    </mesh>
+                  )}
+                  {doorSelected && canEditStructure && view === '3d' && (() => {
+                    const centerPoint = getWallPointAt(wall, opening.center)
+                    const wallBottom = wall.bottom ?? 0
+                    const bottomY = wallBottom + (opening.bottom ?? 0)
+                    const topY = bottomY + opening.height
+                    return (
+                      <>
+                        <OpeningResizeHandle
+                          position={[centerPoint.x, topY, centerPoint.z]}
+                          color="#8fd7ff"
+                          onPointerDown={(event) => {
+                            beginHandleDrag(event, {
+                              type: 'openingHeight',
+                              openingId: opening.id,
+                              wall,
+                              bottom: bottomY,
+                              lastHeight: null,
+                            })
+                          }}
+                        />
+                        {opening.type === 'window' && (
+                          <OpeningResizeHandle
+                            position={[centerPoint.x, Math.max(0.18, bottomY), centerPoint.z]}
+                            color="#ffd447"
+                            onPointerDown={(event) => {
+                              beginHandleDrag(event, {
+                                type: 'openingBottom',
+                                openingId: opening.id,
+                                wall,
+                                wallBottom,
+                                topLocal: (opening.bottom ?? 0) + opening.height,
+                                lastBottom: null,
+                              })
+                            }}
+                          />
+                        )}
+                      </>
+                    )
+                  })()}
+                  {doorSelected && canEditStructure && [-1, 1].map((side) => {
+                    const endPoint = getWallPointAt(wall, opening.center + side * opening.width * 0.5)
+                    return (
+                      <OpeningResizeHandle
+                        key={`build-opening-end-${opening.id}-${side}`}
+                        // En 3D : sur les bords verticaux de l'ouverture,
+                        // à mi-hauteur — la vitre a ses poignées sur ses 4 côtés.
+                        position={[
+                          endPoint.x,
+                          view === '3d'
+                            ? (wall.bottom ?? 0) + (opening.bottom ?? 0) + opening.height * 0.5
+                            : 0.24,
+                          endPoint.z,
+                        ]}
+                        onPointerDown={(event) => {
+                          beginHandleDrag(event, {
+                            type: 'openingSpan',
+                            openingId: opening.id,
+                            wall,
+                            fixedDistance: opening.center - side * opening.width * 0.5,
+                            lastDistance: null,
+                          })
+                        }}
+                        color="#ffffff"
+                      />
+                    )
+                  })}
+                </group>
+              )
+            })}
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
 function CustomizationLayer({
   mode,
+  view = 'top',
+  showBuildHandles = true,
+  canEditStructure = true,
+  coins = 0,
   objects,
+  layout = houseLayout,
+  selectedBuildElement,
+  buildTool,
+  partitionStart,
   hideInteriorObjects = false,
   selectedObjectId,
   draggingObjectId,
@@ -13128,15 +14762,39 @@ function CustomizationLayer({
   onStartDragging,
   onStopDragging,
   onUpdatePosition,
+  onUpdateTransform,
   onUpdatePlacementPreview,
   onLockPlacement,
+  onSelectBuildElement,
+  onBuildFloorClick,
+  onSelectBuildSpaceAt,
+  buildFloorHoverRef,
+  roomDragStart,
+  onRoomDragStart,
+  onRoomDragEnd,
+  onSplitBuildWall,
+  onResizeBuildWall,
+  onMoveBuildOpening,
+  onMoveBuildInteriorWall,
+  onResizeBuildWallEnd,
+  onMoveBuildWallJoint,
+  onResizeBuildOpeningSpan,
+  onResizeBuildOpeningVertical,
+  onResizeBuildOpeningBottom,
+  onAddBuildOpening,
+  onAddBuildRoom,
+  onCompleteBuildTool,
+  onBeginBuildChange,
+  onEndBuildChange,
+  onCancelBuildChange,
   registerCombatTarget,
   onTrainingDummyDefeated,
 }) {
+  const rooms = layout.rooms ?? houseLayout.rooms
   const placedObjects = useMemo(() => objects.filter((object) => (
     object.status !== 'stored' &&
-    (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35))
-  )), [hideInteriorObjects, objects])
+    (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35, layout))
+  )), [hideInteriorObjects, layout, objects])
   const renderablePlacedObjects = useMemo(
     () => placedObjects.filter((object) => object.type !== 'goal'),
     [placedObjects],
@@ -13221,8 +14879,11 @@ function CustomizationLayer({
     ? renderablePlacedObjects.slice(0, visiblePlaceableCount)
     : renderablePlacedObjects
   const placingObject = objects.find((object) => object.id === placingObjectId)
+  const movingObject = objects.find((object) => object.id === (draggingObjectId ?? placingObjectId))
+  const isMovingWallObject = objectCatalog[movingObject?.objectId]?.placementSurface === 'wall'
   const placeableRefs = useRef(new Map())
   const previewGroupRef = useRef()
+  const dragOffsetRef = useRef({ x: 0, z: 0 })
   const placingObjectIdRef = useRef(placingObjectId)
   useEffect(() => { placingObjectIdRef.current = placingObjectId }, [placingObjectId])
 
@@ -13245,7 +14906,7 @@ function CustomizationLayer({
   }, [])
 
   const getFloorPlacementY = useCallback((x, z) => {
-    const insideHouse = houseLayout.rooms.some((room) => {
+    const insideHouse = rooms.some((room) => {
       const [rx, , rz] = room.position
       return (
         Math.abs(x - rx) <= room.size[0] * 0.5 &&
@@ -13253,7 +14914,7 @@ function CustomizationLayer({
       )
     })
     return insideHouse ? 0 : getTerrainHeight(x, z)
-  }, [])
+  }, [rooms])
 
   const getPlacementY = useCallback((x, z, ignoredObjectId) => {
     const movingObject = objects.find((object) => object.id === ignoredObjectId)
@@ -13284,11 +14945,14 @@ function CustomizationLayer({
 
   return (
     <group userData={{ debugCategory: 'placeables' }}>
-      <CustomizationCamera active={mode === 'customize'} />
+      <CustomizationCamera active={mode === 'customize'} view={view} />
       <EditableFloor
         mode={mode}
+        view={view}
+        disabled={isMovingWallObject}
         draggingObjectId={draggingObjectId}
         placingObjectId={placingObjectId}
+        buildTool={buildTool}
         placementLocked={placementLocked}
         getPlacementY={getPlacementY}
         getFootprint={getFootprint}
@@ -13299,23 +14963,82 @@ function CustomizationLayer({
           }
           onUpdatePosition(id, position)
         }}
+        onBuildFloorClick={onBuildFloorClick}
+        onBuildFloorHover={(point) => {
+          if (buildFloorHoverRef) {
+            buildFloorHoverRef.current = { x: point.x, z: point.z, time: performance.now() }
+          }
+        }}
+        onSelectSpaceAt={onSelectBuildSpaceAt}
+        onRoomDragStart={onRoomDragStart}
+        onRoomDragEnd={onRoomDragEnd}
         onStopDragging={onStopDragging}
-        onClearSelection={() => onSelect(null)}
+        onClearSelection={() => {
+          onSelect(null)
+          onSelectBuildElement(null)
+        }}
         onLockPlacement={onLockPlacement}
+        dragOffsetRef={dragOffsetRef}
       />
+      {isMovingWallObject && (
+        <WallPlacementSurfaces
+          object={movingObject}
+          layout={layout}
+          isPlacing={Boolean(placingObjectId)}
+          placementLocked={placementLocked}
+          onTransform={(transform) => {
+            if (placingObjectId) {
+              onUpdatePlacementPreview(transform.position, transform.rotationY, transform.wallId)
+              return
+            }
+            onUpdateTransform(movingObject.id, transform)
+          }}
+          onLockPlacement={onLockPlacement}
+          onStopDragging={onStopDragging}
+        />
+      )}
       <group visible={mode === 'customize'}>
-        <gridHelper
-          args={[MAIN_ROOM.width, MAIN_ROOM.width / CUSTOM_GRID_SIZE, '#f2c14e', '#d8e0e8']}
-          position={[0, 0.032, 0]}
-        />
-        <RoomBorder width={MAIN_ROOM.width} depth={MAIN_ROOM.depth} />
-        <RoomBorder
-          width={secondRoom.size[0]}
-          depth={secondRoom.size[2]}
-          posX={secondRoom.position[0]}
-          posZ={secondRoom.position[2]}
-        />
+        {mode === 'customize' && <HouseFootprintGrid layout={layout} />}
+        {partitionStart && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[partitionStart.x, 0.08, partitionStart.z]} raycast={ignorePointerRaycast}>
+            <ringGeometry args={[0.28, 0.36, 24]} />
+            <meshBasicMaterial color="#f2c14e" transparent opacity={0.9} depthWrite={false} />
+          </mesh>
+        )}
+        {partitionStart && (
+          <PartitionGhost startPoint={partitionStart} hoverRef={buildFloorHoverRef} coins={coins} layout={layout} />
+        )}
+        {buildTool === 'room' && roomDragStart && (
+          <RoomRectGhost startPoint={roomDragStart} hoverRef={buildFloorHoverRef} layout={layout} coins={coins} />
+        )}
+        <FloorCursor hoverRef={buildFloorHoverRef} />
       </group>
+      {mode === 'customize' && showBuildHandles && (
+        <HouseBuildHandles
+          layout={layout}
+          view={view}
+          canEditStructure={canEditStructure}
+          coins={coins}
+          selectedElement={selectedBuildElement}
+          buildTool={buildTool}
+          onSelectElement={onSelectBuildElement}
+          onSplitWall={onSplitBuildWall}
+          onResizeWall={onResizeBuildWall}
+          onMoveOpening={onMoveBuildOpening}
+          onMoveInteriorWall={onMoveBuildInteriorWall}
+          onResizeWallEnd={onResizeBuildWallEnd}
+          onMoveWallJoint={onMoveBuildWallJoint}
+          onResizeOpeningSpan={onResizeBuildOpeningSpan}
+          onResizeOpeningVertical={onResizeBuildOpeningVertical}
+          onResizeOpeningBottom={onResizeBuildOpeningBottom}
+          onAddOpening={onAddBuildOpening}
+          onAddRoom={onAddBuildRoom}
+          onCompleteBuildTool={onCompleteBuildTool}
+          onBeginChange={onBeginBuildChange}
+          onEndChange={onEndBuildChange}
+          onCancelChange={onCancelBuildChange}
+        />
+      )}
       {visiblePlacedObjects.map((object) => (
         <EditableObject
           key={object.id}
@@ -13323,7 +15046,10 @@ function CustomizationLayer({
           selected={selectedObjectId === object.id}
           mode={mode}
           onSelect={onSelect}
-          onStartDragging={onStartDragging}
+          onStartDragging={(id, dragOffset) => {
+            dragOffsetRef.current = dragOffset ?? { x: 0, z: 0 }
+            onStartDragging(id)
+          }}
           onObjectRef={registerPlaceableRef}
           registerCombatTarget={registerCombatTarget}
           onTrainingDummyDefeated={onTrainingDummyDefeated}
@@ -13367,27 +15093,42 @@ function InventoryThumbnail({ card }) {
 }
 
 function ObjectInventorySheet({ open, cards, placingObjectId, onToggle, onSelect }) {
+  const [activeCategory, setActiveCategory] = useState('all')
+  const categoryOptions = useMemo(() => ([
+    { id: 'all', label: 'Tous' },
+    { id: 'furniture', label: 'Meubles' },
+    { id: 'decoration', label: 'Déco' },
+    { id: 'rugs', label: 'Tapis' },
+    { id: 'electronics', label: 'Électronique' },
+  ]).filter((option) => option.id === 'all' || cards.some((card) => card.category === option.id)), [cards])
+  const visibleCards = activeCategory === 'all'
+    ? cards
+    : cards.filter((card) => card.category === activeCategory)
+
   return (
-    <div className={`object-inventory-sheet ${open ? 'open' : ''}`}>
-      <button className="object-inventory-handle" type="button" onClick={onToggle}>
-        Objets
-      </button>
+    <div className={`object-inventory-sheet ${open ? 'open' : ''} ${placingObjectId ? 'is-placing' : ''}`}>
       {open && (
         <div className="object-inventory-content">
           <div className="object-inventory-header">
             <h2>Objets</h2>
             <button type="button" aria-label="Fermer" onClick={onToggle}>×</button>
           </div>
-          <div className="object-inventory-tabs">
-            <button type="button" className="active">Tous</button>
-            <button type="button">Meubles</button>
-            <button type="button">Lumières</button>
-            <button type="button">Déco</button>
-            <button type="button">Sols</button>
-            <button type="button">Murs</button>
+          <div className="object-inventory-tabs" role="tablist" aria-label="Catégories d’objets">
+            {categoryOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="tab"
+                aria-selected={activeCategory === option.id}
+                className={activeCategory === option.id ? 'active' : ''}
+                onClick={() => setActiveCategory(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
           <div className="object-inventory-grid">
-            {cards.map((card) => {
+            {visibleCards.map((card) => {
               const isAvailable = card.stored > 0
               return (
                 <button
@@ -13595,6 +15336,11 @@ function SkinMenu({
 
 function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
   const [local, setLocal] = useState(appearance)
+  const {
+    panelRef: characterMenuPanelRef,
+    panelStyle: characterMenuPanelStyle,
+    dragHandleProps: characterMenuDragHandleProps,
+  } = useDraggablePanel(open)
 
   useEffect(() => { setLocal({ ...CHARACTER_DEFAULT_APPEARANCE, ...appearance }) }, [appearance])
 
@@ -13614,11 +15360,11 @@ function CharacterCustomizationMenu({ open, appearance, onApply, onClose }) {
 
   return (
     <div className="char-menu-overlay">
-      <div className="char-menu">
+      <div ref={characterMenuPanelRef} className="char-menu" style={characterMenuPanelStyle}>
         <button type="button" className="char-menu-close" onClick={onClose} aria-label="Fermer la personnalisation">
           x
         </button>
-        <div className="char-menu-title">Personnage</div>
+        <div className="char-menu-title draggable-panel-handle" {...characterMenuDragHandleProps} title="Glisser pour déplacer">Personnage</div>
         <button
           type="button"
           className={`char-gold-coat-btn char-gold-coat-global${local.goldCoat ? ' selected' : ''}`}
@@ -13686,30 +15432,45 @@ function CustomizationChoiceMenu({ open, onChooseRoom, onClose }) {
   )
 }
 
+// Palette de peinture du mode personnalisation : swatches des skins sol/mur,
+// achat direct si non possédé (le prix s'affiche sur le swatch).
+function SkinPaintPalette({ title, skins, ownedSkinIds, activeSkinId, coins, hasUnlimitedCoins, onPick }) {
+  return (
+    <div className="skin-paint-palette">
+      <span className="skin-paint-title">{title}</span>
+      <div className="skin-paint-swatches">
+        {skins.map((skin) => {
+          const owned = ownedSkinIds.includes(skin.id)
+          const affordable = hasUnlimitedCoins || coins >= skin.price
+          return (
+            <button
+              key={skin.id}
+              type="button"
+              className={`skin-paint-swatch ${activeSkinId === skin.id ? 'active' : ''}`}
+              style={{ backgroundImage: `url(${skin.texture})` }}
+              onClick={() => onPick(skin)}
+              disabled={!owned && !affordable}
+              title={skin.name}
+              aria-label={skin.name}
+            >
+              {!owned && <span className="skin-paint-price">{skin.price}</span>}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function EnvironmentMenu({
   open,
   coins,
   hasUnlimitedCoins = false,
   activeTab,
   onTabChange,
-  floorSkins,
-  wallSkins,
   furnitureItems,
   furnitureCounts,
-  previewFloorIndex,
-  previewWallIndex,
-  selectedFloorSkinId,
-  selectedWallSkinId,
-  ownedFloorSkinIds,
-  ownedWallSkinIds,
-  applyWallToCeiling,
-  canApplyWorldSkins = true,
-  onApplyWallToCeilingChange,
   onClose,
-  onPrevious,
-  onNext,
-  onBuy,
-  onSelect,
   furnitureCart,
   onAddFurnitureToCart,
   onRemoveFurnitureFromCart,
@@ -13732,22 +15493,20 @@ function EnvironmentMenu({
   activeSlimePetId = null,
   onToggleSlimePet,
 }) {
+  const {
+    panelRef: shopMenuPanelRef,
+    panelStyle: shopMenuPanelStyle,
+    dragHandleProps: shopMenuDragHandleProps,
+  } = useDraggablePanel(open)
   if (!open) return null
 
-  const isAnimalsTab = activeTab === 'animals'
-  const isWeaponsTab = showWeaponShop && activeTab === 'weapons'
-  const isMountsTab = activeTab === 'mounts'
-  const isFurnitureTab = activeTab === 'furniture'
-  const isCartTab = activeTab === 'cart'
-  const isFloorTab = activeTab === 'floor'
-  const skins = isFloorTab ? floorSkins : wallSkins
-  const previewIndex = isFloorTab ? previewFloorIndex : previewWallIndex
-  const selectedSkinId = isFloorTab ? selectedFloorSkinId : selectedWallSkinId
-  const ownedSkinIds = isFloorTab ? ownedFloorSkinIds : ownedWallSkinIds
-  const skin = skins[previewIndex]
-  const isOwned = skin ? ownedSkinIds.includes(skin.id) : false
-  const isSelected = skin ? selectedSkinId === skin.id : false
-  const canBuy = skin ? coins >= skin.price : false
+  // La personnalisation sols/murs a déménagé dans la vue personnalisation :
+  // les anciens onglets 'floor'/'wall' retombent sur les meubles.
+  const normalizedTab = activeTab === 'floor' || activeTab === 'wall' ? 'furniture' : activeTab
+  const isAnimalsTab = normalizedTab === 'animals'
+  const isWeaponsTab = showWeaponShop && normalizedTab === 'weapons'
+  const isMountsTab = normalizedTab === 'mounts'
+  const isCartTab = normalizedTab === 'cart'
   const cartEntries = furnitureCart
     .map((entry) => {
       const item = furnitureItems.find((candidate) => candidate.id === entry.objectId)
@@ -13763,11 +15522,11 @@ function EnvironmentMenu({
 
   return (
     <div className="skin-menu-overlay environment-shop-overlay">
-      <div className="skin-menu environment-shop-menu">
+      <div ref={shopMenuPanelRef} className="skin-menu environment-shop-menu" style={shopMenuPanelStyle}>
         <button type="button" className="environment-shop-close" onClick={onClose} aria-label="Fermer la boutique">
           x
         </button>
-        <div className="environment-shop-header">
+        <div className="environment-shop-header draggable-panel-handle" {...shopMenuDragHandleProps} title="Glisser pour déplacer">
           <div>
             <span className="environment-shop-kicker">Boutique</span>
             <div className="skin-title">{isCartTab ? 'Panier' : 'Maison'}</div>
@@ -13780,21 +15539,7 @@ function EnvironmentMenu({
         <div className="env-tabs">
           <button
             type="button"
-            className={`env-tab-btn ${isFloorTab ? 'active' : ''}`}
-            onClick={() => onTabChange('floor')}
-          >
-            Sol
-          </button>
-          <button
-            type="button"
-            className={`env-tab-btn ${activeTab === 'wall' ? 'active' : ''}`}
-            onClick={() => onTabChange('wall')}
-          >
-            Mur
-          </button>
-          <button
-            type="button"
-            className={`env-tab-btn ${isFurnitureTab ? 'active' : ''}`}
+            className={`env-tab-btn ${normalizedTab === 'furniture' ? 'active' : ''}`}
             onClick={() => onTabChange('furniture')}
           >
             Meubles
@@ -14016,7 +15761,7 @@ function EnvironmentMenu({
               })}
             </div>
           </>
-        ) : isFurnitureTab ? (
+        ) : (
           <>
             <div className="shop-section-heading">
               <span>Meubles</span>
@@ -14047,49 +15792,6 @@ function EnvironmentMenu({
               })}
             </div>
           </>
-        ) : (
-          <>
-            <div className="skin-title">{skin.name}</div>
-            <div className="env-preview-wrap">
-              <div
-                className="env-preview-wall"
-                style={{
-                  backgroundImage: `url(${isFloorTab ? wallSkins[previewWallIndex].texture : skin.texture})`,
-                }}
-              />
-              <div
-                className="env-preview-floor"
-                style={{
-                  backgroundImage: `url(${isFloorTab ? skin.texture : floorSkins[previewFloorIndex].texture})`,
-                }}
-              />
-            </div>
-            {!isFloorTab && (
-              <label className="env-ceiling-toggle">
-                <input
-                  type="checkbox"
-                  checked={applyWallToCeiling}
-                  disabled={!canApplyWorldSkins}
-                  onChange={(event) => canApplyWorldSkins && onApplyWallToCeilingChange(event.target.checked)}
-                />
-                <span>Appliquer au plafond</span>
-              </label>
-            )}
-            <div className="skin-nav">
-              <button type="button" onClick={onPrevious} className="skin-nav-btn">{'<'}</button>
-              <button type="button" onClick={onNext} className="skin-nav-btn">{'>'}</button>
-            </div>
-            {!isOwned && (
-              <button type="button" className="skin-action-btn" onClick={onBuy} disabled={!canBuy}>
-                Acheter - {skin.price}
-              </button>
-            )}
-            {isOwned && !isSelected && canApplyWorldSkins && (
-              <button type="button" className="skin-action-btn" onClick={onSelect}>Selectionner</button>
-            )}
-            {isOwned && isSelected && canApplyWorldSkins && <div className="skin-equipped">Equipe</div>}
-            {isOwned && !canApplyWorldSkins && <div className="skin-equipped">Possede</div>}
-          </>
         )}
         {!isCartTab && (
           <button type="button" className="skin-action-btn shop-cart-open-btn" onClick={() => onTabChange('cart')}>
@@ -14101,10 +15803,11 @@ function EnvironmentMenu({
   )
 }
 
-function isPositionInsideHouse(position, margin = 0.5) {
+function isPositionInsideHouse(position, margin = 0.5, layout = houseLayout) {
   if (!position) return true
   const [x, , z] = position
-  return houseLayout.rooms.some((room) => {
+  const rooms = layout.rooms ?? houseLayout.rooms
+  return rooms.some((room) => {
     const [rx, , rz] = room.position
     return (
       Math.abs(x - rx) <= room.size[0] * 0.5 + margin &&
@@ -15648,6 +17351,7 @@ function App() {
   const roomLightOn = useGameStore((s) => s.house.roomLightOn)
   const lightColor = useGameStore((s) => s.house.lightColor)
   const lightIntensity = useGameStore((s) => s.house.lightIntensity)
+  const housePlan = useGameStore((s) => s.house.housePlan)
   // Slice "proximité" migré vers le store : ces flags ne vivent plus dans App(),
   // on s'y abonne via des sélecteurs fins. `setNear` (action stable) les écrit
   // depuis les callbacks onNearChange des détecteurs. Prochaine étape : descendre
@@ -15674,8 +17378,6 @@ function App() {
   const ownedWallSkins = useGameStore((s) => s.inventory.ownedWallSkins)
   const selectedFloorSkinId = useGameStore((s) => s.inventory.selectedFloorSkinId)
   const selectedWallSkinId = useGameStore((s) => s.inventory.selectedWallSkinId)
-  const previewFloorSkinId = useGameStore((s) => s.inventory.previewFloorSkinId)
-  const previewWallSkinId = useGameStore((s) => s.inventory.previewWallSkinId)
   const applyWallToCeiling = useGameStore((s) => s.inventory.applyWallToCeiling)
   const isEnvironmentMenuOpen = useGameStore((s) => s.menus.environment ?? false)
   const [furnitureCart, setFurnitureCart] = useState([])
@@ -15751,6 +17453,8 @@ function App() {
   const playerBodyYawRef = useRef(0) // yaw du corps joueur (mis à jour par Player)
   const nearbySeat = useGameStore((s) => s.near.seat ?? null)
   const nearbyTv = useGameStore((s) => s.near.tv ?? null)
+  const nearbyYouTubeFrame = useGameStore((s) => s.near.youtubeFrame ?? null)
+  const [youtubeFrameEditor, setYoutubeFrameEditor] = useState(null)
   useEffect(() => {
     const interval = window.setInterval(() => setSpellCooldownNow(Date.now()), 100)
     return () => window.clearInterval(interval)
@@ -15854,6 +17558,9 @@ function App() {
   const isHostVisit = multiplayerRole === 'host'
   const isMultiplayerSession = multiplayerRole !== 'solo'
   const canModifyWorld = !isGuestVisit
+  useEffect(() => {
+    if (!canModifyWorld) setYoutubeFrameEditor(null)
+  }, [canModifyWorld])
   const activeVisitExpiry = incomingVisitRequest?.expiresAt || outgoingVisitRequest?.expiresAt
   const visitRemainingSeconds = activeVisitExpiry
     ? Math.max(0, Math.ceil((new Date(activeVisitExpiry).getTime() - visitRequestNow) / 1000))
@@ -16142,7 +17849,7 @@ function App() {
         worldSyncTimeoutRef.current = null
       }
     }
-  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, roomLightOn, lightColor, lightIntensity, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
+  }, [isHostVisit, multiplayerSession, authUser, sessionConnectionState, roomLightOn, lightColor, lightIntensity, housePlan, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects])
 
   useEffect(() => {
     if (!isAdminMode && !isVerticalFrameMode) return undefined
@@ -16177,6 +17884,7 @@ function App() {
     roomLightOn,
     lightColor,
     lightIntensity,
+    housePlan,
     ownedFloorSkins,
     ownedWallSkins,
     selectedFloorSkinId,
@@ -16207,6 +17915,7 @@ function App() {
     roomLightOn,
     lightColor,
     lightIntensity,
+    housePlan,
     selectedFloorSkinId,
     selectedWallSkinId,
     applyWallToCeiling,
@@ -16251,6 +17960,7 @@ function App() {
       roomLightOn: savedWorld.roomLightOn ?? roomLightOn,
       lightColor: savedWorld.lightColor ?? lightColor,
       lightIntensity: savedWorld.lightIntensity ?? lightIntensity,
+      housePlan: savedWorld.housePlan ? normalizeHousePlan(savedWorld.housePlan) : housePlan,
       selectedFloorSkinId: savedWorld.selectedFloorSkinId ?? selectedFloorSkinId,
       selectedWallSkinId: savedWorld.selectedWallSkinId ?? selectedWallSkinId,
       applyWallToCeiling: savedWorld.applyWallToCeiling ?? applyWallToCeiling,
@@ -16266,12 +17976,13 @@ function App() {
     setHouse('roomLightOn',true)
     setHouse('lightColor','#ffffff')
     setHouse('lightIntensity',2)
-    setInventory('ownedFloorSkins',['floor-classic'])
-    setInventory('ownedWallSkins',['wall-classic'])
-    setInventory('selectedFloorSkinId','floor-classic')
-    setInventory('selectedWallSkinId','wall-classic')
-    setInventory('previewFloorSkinId','floor-classic')
-    setInventory('previewWallSkinId','wall-classic')
+    setHouse('housePlan',createDefaultHousePlan())
+    setInventory('ownedFloorSkins',[...DEFAULT_OWNED_FLOOR_SKIN_IDS])
+    setInventory('ownedWallSkins',[...DEFAULT_OWNED_WALL_SKIN_IDS])
+    setInventory('selectedFloorSkinId',DEFAULT_FLOOR_SKIN_ID)
+    setInventory('selectedWallSkinId',DEFAULT_WALL_SKIN_ID)
+    setInventory('previewFloorSkinId',DEFAULT_FLOOR_SKIN_ID)
+    setInventory('previewWallSkinId',DEFAULT_WALL_SKIN_ID)
     setInventory('applyWallToCeiling',false)
     setEditor('editableObjects',defaultEditableObjects)
     setEditor('selectedObjectId',null)
@@ -16340,18 +18051,22 @@ function App() {
     if (includeWorld && typeof parsed.lightIntensity === 'number') {
       setHouse('lightIntensity',MathUtils.clamp(parsed.lightIntensity, 0.1, 3))
     }
+    if (includeWorld && parsed.housePlan && typeof parsed.housePlan === 'object') {
+      setHouse('housePlan',normalizeHousePlan(parsed.housePlan))
+    }
     if (includeIdentity && parsed.characterAppearance && typeof parsed.characterAppearance === 'object') {
       setEquipment('characterAppearance',{ ...CHARACTER_DEFAULT_APPEARANCE, ...parsed.characterAppearance })
     }
 
     const validFloorSkinIds = new Set(floorSkins.map((skin) => skin.id))
     const validWallSkinIds = new Set(wallSkins.map((skin) => skin.id))
+    // Les skins gratuits sont toujours possédés, quel que soit l'historique.
     const ownedFloorSkinIds = Array.isArray(parsed.ownedFloorSkins)
-      ? ['floor-classic', ...parsed.ownedFloorSkins.filter((id) => validFloorSkinIds.has(id) && id !== 'floor-classic')]
-      : ['floor-classic']
+      ? [...new Set([...DEFAULT_OWNED_FLOOR_SKIN_IDS, ...parsed.ownedFloorSkins.filter((id) => validFloorSkinIds.has(id))])]
+      : [...DEFAULT_OWNED_FLOOR_SKIN_IDS]
     const ownedWallSkinIds = Array.isArray(parsed.ownedWallSkins)
-      ? ['wall-classic', ...parsed.ownedWallSkins.filter((id) => validWallSkinIds.has(id) && id !== 'wall-classic')]
-      : ['wall-classic']
+      ? [...new Set([...DEFAULT_OWNED_WALL_SKIN_IDS, ...parsed.ownedWallSkins.filter((id) => validWallSkinIds.has(id))])]
+      : [...DEFAULT_OWNED_WALL_SKIN_IDS]
 
     // Owned floor/wall skins are inventory (keep the visitor's own); the
     // selected ones below are the host's house appearance (apply always).
@@ -16408,6 +18123,11 @@ function App() {
               ? normalizeSavedObjectPosition(position, [0, 0, 0])
               : null,
             rotationY: Number.isFinite(object.rotationY) ? object.rotationY : 0,
+            wallId: typeof object.wallId === 'string' ? object.wallId : null,
+            channelUrl: typeof object.channelUrl === 'string' ? object.channelUrl : undefined,
+            profileUrl: object.profileUrl === 'https://www.tiktok.com/@tiktok'
+              ? objectCatalog.tiktok_profile_frame.profileUrl
+              : typeof object.profileUrl === 'string' ? object.profileUrl : undefined,
           })
         })
         .filter(Boolean)
@@ -16670,7 +18390,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -17078,6 +18798,7 @@ function App() {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !authUser || !hasLoadedCloudProgressRef.current) return undefined
+    if (mode === 'customize') return undefined
     if (skipNextCloudSaveRef.current) {
       skipNextCloudSaveRef.current = false
       return undefined
@@ -17100,16 +18821,16 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
-      if (document.visibilityState === 'hidden') {
+      if (mode !== 'customize' && document.visibilityState === 'hidden') {
         saveCurrentProgressToCloud()
       }
     }
     const saveOnPageHide = () => {
-      saveCurrentProgressToCloud()
+      if (mode !== 'customize') saveCurrentProgressToCloud()
     }
 
     document.addEventListener('visibilitychange', saveBeforeLeaving)
@@ -17118,7 +18839,7 @@ function App() {
       document.removeEventListener('visibilitychange', saveBeforeLeaving)
       window.removeEventListener('pagehide', saveOnPageHide)
     }
-  }, [progressScope])
+  }, [mode, progressScope])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -17522,19 +19243,97 @@ function App() {
       : null
   const remotePresenceTitleId = onlinePlayers.find((player) => player.userId === remoteUserId)?.equippedTitleId ?? null
   const availableWallSkins = (isAdminMode || isLocalNetwork) ? wallSkins : wallSkins.filter((skin) => !skin.adminOnly)
-  const previewFloorIndex = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
-  const previewWallIndex = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
-  const activeFloorSkinId = isEnvironmentMenuOpen ? previewFloorSkinId : selectedFloorSkinId
-  const activeWallSkinId = isEnvironmentMenuOpen ? previewWallSkinId : selectedWallSkinId
+  // Texture des surfaces NON PEINTES = texture de base (peinture blanche).
+  // Un espace fraîchement construit est donc toujours blanc, quoi qu'ait
+  // choisi le joueur ailleurs ; la couleur d'une pièce vient uniquement de sa
+  // peinture explicite (styles.floorByCell / styles.wallBySide du plan).
+  const activeFloorSkinId = DEFAULT_FLOOR_SKIN_ID
+  const activeWallSkinId = DEFAULT_WALL_SKIN_ID
   const activeFloorSkin = floorSkins.find((skin) => skin.id === activeFloorSkinId) || floorSkins[0]
   const activeWallSkin = availableWallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
   const activeCeilingTexturePath = applyWallToCeiling ? activeWallSkin.texture : DEFAULT_CEILING_TEXTURE
+  const activeHouseLayout = useMemo(() => deriveHouseLayout(housePlan), [housePlan])
+  const houseEntrance = useMemo(() => getHouseEntranceTransform(activeHouseLayout), [activeHouseLayout])
+  useEffect(() => {
+    syncInteriorPlayAreaLimits(activeHouseLayout.bounds)
+    syncHouseEntranceRuntime(houseEntrance)
+    syncPlayerHouseTerrainFootprint(activeHouseLayout.footprintRects)
+    syncInteriorWallColliders(buildInteriorWallColliderBoxes(activeHouseLayout))
+    syncPlayerHouseOutdoorColliders(activeHouseLayout)
+    syncInteriorCameraSpaces(activeHouseLayout)
+
+    // Les stations ne peuvent jamais rester sur une ancienne cellule supprimée.
+    // On conserve leur emplacement quand il est encore valide, sinon on les
+    // replace dans les cellules de sol les plus proches, sans les empiler.
+    const reservedStations = []
+    ;[SKIN_STATION_POSITION, ENV_STATION_POSITION, CUSTOM_STATION_POSITION].forEach((station) => {
+      const safePosition = getSafeHousePosition(activeHouseLayout, station, reservedStations)
+      station.x = safePosition.x
+      station.z = safePosition.z
+      reservedStations.push(safePosition)
+    })
+
+    // Une réduction peut retirer la cellule sous le joueur. Son corps Rapier et
+    // son visuel sont alors téléportés ensemble vers une cellule intérieure
+    // valide, avant la prochaine frame de déplacement.
+    if (currentZone !== ZONES.outside && !isInsideHouseFloor(activeHouseLayout, playerPositionRef.current)) {
+      const safePosition = getSafeHousePosition(activeHouseLayout, houseEntrance?.insidePosition, reservedStations)
+      setSpawnRequest({
+        zone: currentZone,
+        position: [safePosition.x, PLAYER_HEIGHT, safePosition.z],
+        token: Date.now(),
+      })
+    }
+  }, [activeHouseLayout, currentZone, houseEntrance, playerPositionRef])
+  const [selectedBuildElement, setSelectedBuildElement] = useState(null)
+  const [activeBuildTool, setActiveBuildTool] = useState(null)
+  const [partitionStart, setPartitionStart] = useState(null)
+  const [paintFloorSkinId, setPaintFloorSkinId] = useState(null)
+  // Pinceau de peinture du sol (par défaut : skin global).
+  const floorPaintBrushId = paintFloorSkinId ?? activeFloorSkinId
+  const [customizeView, setCustomizeView] = useState('top')
+  const [customizeTab, setCustomizeTab] = useState('build')
+  const [customizeMoreOpen, setCustomizeMoreOpen] = useState(false)
+  const {
+    panelRef: customizePanelRef,
+    panelStyle: customizePanelStyle,
+    dragHandleProps: customizePanelDragHandleProps,
+  } = useDraggablePanel(mode === 'customize')
+  const [buildNotice, setBuildNotice] = useState(null)
+  const [roomDragStart, setRoomDragStart] = useState(null)
+  const buildNoticeTimerRef = useRef(null)
+  const buildFloorHoverRef = useRef(null)
+  const customizationHistoryRef = useRef({ initial: null, undo: [], redo: [], transaction: null })
+  const [customizationHistoryState, setCustomizationHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    dirty: false,
+  })
+  const selectedBuildOpeningWall = selectedBuildElement?.type === 'opening'
+    ? activeHouseLayout.walls.find((wall) => (wall.openings ?? []).some((opening) => opening.id === selectedBuildElement.id))
+    : null
+  const selectedBuildOpening = selectedBuildOpeningWall
+    ? (selectedBuildOpeningWall.openings ?? []).find((opening) => opening.id === selectedBuildElement.id)
+    : null
+  const selectedBuildWall = selectedBuildElement?.type === 'wall'
+    ? activeHouseLayout.walls.find((wall) => wall.id === selectedBuildElement.id)
+    : null
+  const selectedBuildOpeningIsEntrance = selectedBuildElement?.type === 'opening' &&
+    selectedBuildElement.id === activeHouseLayout.plan.entranceDoorId
+  const canSetBuildEntrance = Boolean(
+    selectedBuildOpeningWall &&
+    selectedBuildOpening?.type === 'door' &&
+    !selectedBuildOpeningIsEntrance &&
+    (selectedBuildOpeningWall.sideA?.type === 'outside' || selectedBuildOpeningWall.sideB?.type === 'outside'),
+  )
   const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
+  const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
   const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
-  const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen
+  const showGameplayUi = showCaptureUi && mode === 'play'
+  const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen || Boolean(youtubeFrameEditor)
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
   const furnitureInventoryObjects = isGuestVisit && personalProgressVersion >= 0
     ? personalProgressRef.current?.editableObjects ?? []
@@ -17545,6 +19344,178 @@ function App() {
     }
     return counts
   }, {})
+
+  const captureCustomizationSnapshot = () => {
+    const state = useGameStore.getState()
+    return {
+      housePlan: cloneCustomizationValue(state.house.housePlan),
+      editableObjects: cloneCustomizationValue(state.editor.editableObjects),
+      // Les pièces font partie de l'état annulable : annuler une construction
+      // doit rendre exactement ce qu'elle avait coûté.
+      coins: state.economy.coins,
+    }
+  }
+
+  const customizationSnapshotsMatch = (left, right) => (
+    Boolean(left && right) && JSON.stringify(left) === JSON.stringify(right)
+  )
+  const selectedBuildSpace = selectedBuildElement?.type === 'space'
+    ? activeHouseLayout.spaces.find((candidate) => candidate.id === selectedBuildElement.id) ?? null
+    : null
+  const selectedBuildSpaceObjectCount = useMemo(() => {
+    if (!selectedBuildSpace) return 0
+    const cellSet = new Set(selectedBuildSpace.cells)
+    return editableObjects.filter((object) => {
+      if (!object.canStore || object.status === 'stored' || !object.position) return false
+      const [x, , z] = object.position
+      return cellSet.has(`${Math.floor(x)},${Math.floor(z)}`)
+    }).length
+  }, [editableObjects, selectedBuildSpace])
+  // Tout est supprimable — y compris un espace entier ou la porte d'entrée.
+  // Seule exception : un mur qui ferme la maison sur l'extérieur, dont le
+  // retrait laisserait un trou dans l'enveloppe.
+  const canDeleteSelectedBuildElement = Boolean(
+    selectedBuildElement?.type === 'opening' ||
+    selectedBuildElement?.type === 'space' ||
+    (selectedBuildElement?.type === 'wall' && selectedBuildWall &&
+      selectedBuildWall.sideA?.type !== 'outside' && selectedBuildWall.sideB?.type !== 'outside'),
+  )
+
+  const applyCustomizationSnapshot = (snapshot) => {
+    if (!snapshot) return
+    setHouse('housePlan',cloneCustomizationValue(snapshot.housePlan))
+    setEditor('editableObjects',cloneCustomizationValue(snapshot.editableObjects))
+    if (Number.isFinite(snapshot.coins)) setEconomy('coins', snapshot.coins)
+  }
+
+  const refreshCustomizationHistoryState = (currentSnapshot = null) => {
+    const history = customizationHistoryRef.current
+    const current = currentSnapshot ?? captureCustomizationSnapshot()
+    setCustomizationHistoryState({
+      canUndo: history.undo.length > 0,
+      canRedo: history.redo.length > 0,
+      dirty: Boolean(history.initial && !customizationSnapshotsMatch(history.initial, current)),
+    })
+  }
+
+  const beginCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (history.transaction) return
+    history.transaction = captureCustomizationSnapshot()
+  }
+
+  // Règle la facture d'une modification du plan : on compare la valeur du plan
+  // avant/après, donc construire débite et supprimer rembourse, quel que soit
+  // le chemin (bouton, drag, outil). Renvoie false si c'est trop cher.
+  const settleHousePlanCost = (beforePlan, afterPlan) => {
+    if (isAdminMode) return true
+    const delta = getHousePlanValue(afterPlan) - getHousePlanValue(beforePlan)
+    if (delta === 0) return true
+    if (delta > useGameStore.getState().economy.coins) return false
+    applyCoinDelta(-delta, { share: false, reason: 'build' })
+    return true
+  }
+
+  const endCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    const before = history.transaction
+    if (!before) return
+    history.transaction = null
+    let after = captureCustomizationSnapshot()
+    if (!customizationSnapshotsMatch(before, after)) {
+      // Facture refusée : on rétablit le plan précédent plutôt que de laisser
+      // le joueur construire à découvert.
+      if (!settleHousePlanCost(before.housePlan, after.housePlan)) {
+        applyCustomizationSnapshot(before)
+        showBuildNotice('Pas assez de pièces pour cette construction')
+        refreshCustomizationHistoryState(before)
+        return
+      }
+      history.undo.push(before)
+      if (history.undo.length > CUSTOMIZE_HISTORY_LIMIT) history.undo.shift()
+      history.redo = []
+      after = captureCustomizationSnapshot()
+    }
+    refreshCustomizationHistoryState(after)
+  }
+
+  const cancelCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (!history.transaction) return
+    const before = history.transaction
+    history.transaction = null
+    applyCustomizationSnapshot(before)
+    refreshCustomizationHistoryState(before)
+  }
+
+  const runCustomizationChange = (change) => {
+    beginCustomizationChange()
+    change()
+    endCustomizationChange()
+  }
+
+  const showBuildNotice = (message) => {
+    setBuildNotice(message)
+    if (buildNoticeTimerRef.current) window.clearTimeout(buildNoticeTimerRef.current)
+    buildNoticeTimerRef.current = window.setTimeout(() => setBuildNotice(null), 2600)
+  }
+
+  // Applique une opération du plan ; les refus (même référence retournée)
+  // affichent un message au lieu d'échouer en silence.
+  const applyPlanChange = (operation, failureMessage, onApplied) => {
+    const current = useGameStore.getState().house.housePlan
+    const next = operation(current)
+    if (next === current) {
+      if (failureMessage) showBuildNotice(failureMessage)
+      return false
+    }
+    runCustomizationChange(() => {
+      setHouse('housePlan', next)
+      onApplied?.()
+    })
+    return true
+  }
+
+  const selectBuildSpaceAt = (point) => {
+    if (!canModifyWorld) return
+    const cellKey = `${Math.floor(point.x)},${Math.floor(point.z)}`
+    const space = activeHouseLayout.spaces.find((candidate) => candidate.cells.includes(cellKey))
+    setEditor('selectedObjectId', null)
+    setSelectedBuildElement(space ? { type: 'space', id: space.id } : null)
+  }
+
+  const undoCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (history.transaction) endCustomizationChange()
+    const previous = history.undo.pop()
+    if (!previous) return
+    const current = captureCustomizationSnapshot()
+    history.redo.push(current)
+    applyCustomizationSnapshot(previous)
+    refreshCustomizationHistoryState(previous)
+  }
+
+  const redoCustomizationChange = () => {
+    const history = customizationHistoryRef.current
+    if (history.transaction) endCustomizationChange()
+    const next = history.redo.pop()
+    if (!next) return
+    const current = captureCustomizationSnapshot()
+    history.undo.push(current)
+    applyCustomizationSnapshot(next)
+    refreshCustomizationHistoryState(next)
+  }
+
+  const startCustomizationSession = () => {
+    const initial = captureCustomizationSnapshot()
+    customizationHistoryRef.current = { initial, undo: [], redo: [], transaction: null }
+    setCustomizationHistoryState({ canUndo: false, canRedo: false, dirty: false })
+  }
+
+  const finishCustomizationSession = () => {
+    customizationHistoryRef.current = { initial: null, undo: [], redo: [], transaction: null }
+    setCustomizationHistoryState({ canUndo: false, canRedo: false, dirty: false })
+  }
 
   const openSkinMenu = () => {
     setInventory('previewSkinId',selectedSkinId)
@@ -17558,16 +19529,12 @@ function App() {
     setMenuOpen('skin', false)
   }
   const openEnvironmentMenu = () => {
-    setUi('environmentTab','floor')
-    setInventory('previewFloorSkinId',selectedFloorSkinId)
-    setInventory('previewWallSkinId',selectedWallSkinId)
+    setUi('environmentTab','furniture')
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
     setMenuOpen('environment', true)
   }
   const closeEnvironmentMenu = () => {
-    setInventory('previewFloorSkinId',selectedFloorSkinId)
-    setInventory('previewWallSkinId',selectedWallSkinId)
     setMenuOpen('environment', false)
   }
 
@@ -17665,18 +19632,6 @@ function App() {
     const next = (current + direction + ballSkins.length) % ballSkins.length
     setInventory('previewSkinId',ballSkins[next].id)
   }
-  const goEnvironmentPreview = (direction) => {
-    if (environmentTab === 'floor') {
-      const current = Math.max(0, floorSkins.findIndex((skin) => skin.id === previewFloorSkinId))
-      const next = (current + direction + floorSkins.length) % floorSkins.length
-      setInventory('previewFloorSkinId',floorSkins[next].id)
-      return
-    }
-    const current = Math.max(0, availableWallSkins.findIndex((skin) => skin.id === previewWallSkinId))
-    const next = (current + direction + availableWallSkins.length) % availableWallSkins.length
-    setInventory('previewWallSkinId',availableWallSkins[next].id)
-  }
-
   const buyPreviewSkin = async () => {
     const skin = ballSkins[previewIndex]
     if (ownedSkins.includes(skin.id)) return
@@ -17692,30 +19647,331 @@ function App() {
     setInventory('selectedSkinId',skin.id)
     setMenuOpen('skin', false)
   }
-  const buyPreviewEnvironmentSkin = async () => {
-    const skin = environmentTab === 'floor' ? floorSkins[previewFloorIndex] : availableWallSkins[previewWallIndex]
-    const owned = environmentTab === 'floor' ? ownedFloorSkins : ownedWallSkins
-    if (owned.includes(skin.id)) return
-    if (!isAdminMode && coins < skin.price) return
-    const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
-    if (!paid) return
-    if (environmentTab === 'floor') {
+  // Palette de peinture du mode personnalisation : cliquer un swatch achète le
+  // skin si nécessaire puis en fait le pinceau actif.
+  const pickFloorPaintSkin = async (skin) => {
+    if (!canModifyWorld) return
+    if (!ownedFloorSkins.includes(skin.id)) {
+      if (!isAdminMode && coins < skin.price) return
+      const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
+      if (!paid) return
       setInventory('ownedFloorSkins',(current) => [...current, skin.id])
-    } else {
-      setInventory('ownedWallSkins',(current) => [...current, skin.id])
+    }
+    setPaintFloorSkinId(skin.id)
+    // Une pièce sélectionnée reçoit la texture immédiatement, façon Sims.
+    if (selectedBuildElement?.type === 'space') {
+      const space = activeHouseLayout.spaces.find((candidate) => candidate.id === selectedBuildElement.id)
+      if (space) {
+        runCustomizationChange(() => {
+          setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, skin.id))
+        })
+      }
     }
   }
-  const selectPreviewEnvironmentSkin = () => {
+
+  const pickWallPaintSkin = async (skin) => {
     if (!canModifyWorld) return
-    if (environmentTab === 'floor') {
-      const skin = floorSkins[previewFloorIndex]
-      if (!ownedFloorSkins.includes(skin.id)) return
-      setInventory('selectedFloorSkinId',skin.id)
+    if (!ownedWallSkins.includes(skin.id)) {
+      if (!isAdminMode && coins < skin.price) return
+      const paid = isAdminMode ? true : await applyCoinDelta(-skin.price)
+      if (!paid) return
+      setInventory('ownedWallSkins',(current) => [...current, skin.id])
+    }
+    if (selectedBuildElement?.type === 'wall') {
+      // Applique au côté cliqué du mur (une cloison a deux faces distinctes).
+      runCustomizationChange(() => {
+        setHouse('housePlan',(current) => setHouseWallSideStyle(
+          current,
+          selectedBuildElement.id,
+          selectedBuildElement.side ?? 'inside',
+          skin.id,
+        ))
+      })
+    }
+  }
+
+  const resetHousePlan = () => {
+    if (!canModifyWorld) return
+    if (!window.confirm('Réinitialiser toute la maison ? Les murs, ouvertures et revêtements seront restaurés.')) return
+    if (!window.confirm('Confirmation finale : réinitialiser maintenant toute la maison ?')) return
+    runCustomizationChange(() => {
+      setSelectedBuildElement(null)
+      setActiveBuildTool(null)
+      setPartitionStart(null)
+      setHouse('housePlan',createDefaultHousePlan())
+    })
+  }
+
+  const deleteSelectedBuildElement = () => {
+    if (!canModifyWorld || !selectedBuildElement) return
+    // Un espace emporte son sol, ses murs devenus flottants et leurs
+    // ouvertures ; on peut vider la maison entièrement.
+    if (selectedBuildElement.type === 'space') {
+      const space = activeHouseLayout.spaces.find((candidate) => candidate.id === selectedBuildElement.id)
+      if (!space) return
+      const cellSet = new Set(space.cells)
+      applyPlanChange(
+        (current) => removeHouseSpace(current, space.cells),
+        null,
+        () => {
+          // Les meubles de l'espace supprimé retournent à l'inventaire : on ne
+          // perd jamais silencieusement un objet acheté.
+          setEditor('editableObjects',(current) => current.map((object) => {
+            if (!object.canStore || object.status === 'stored' || !object.position) return object
+            const [x, , z] = object.position
+            return cellSet.has(`${Math.floor(x)},${Math.floor(z)}`)
+              ? { ...object, status: 'stored', position: null }
+              : object
+          }))
+          setEditor('selectedObjectId',null)
+          setSelectedBuildElement(null)
+        },
+      )
       return
     }
-    const skin = availableWallSkins[previewWallIndex]
-    if (!ownedWallSkins.includes(skin.id)) return
-    setInventory('selectedWallSkinId',skin.id)
+    applyPlanChange(
+      (current) => (
+        selectedBuildElement.type === 'opening'
+          ? removeHouseOpening(current, selectedBuildElement.id)
+          : removeHouseWall(current, selectedBuildElement.id)
+      ),
+      selectedBuildElement.type === 'opening'
+        ? null
+        : "Ce mur ferme la maison sur l'extérieur — supprime plutôt l'espace entier",
+      () => setSelectedBuildElement(null),
+    )
+  }
+
+  const beginSegmentTool = () => {
+    if (!canModifyWorld) return
+    setActiveBuildTool((current) => current === 'segment' ? null : 'segment')
+    setPartitionStart(null)
+  }
+
+  const beginDoorTool = () => {
+    if (!canModifyWorld) return
+    setActiveBuildTool((current) => current === 'door' ? null : 'door')
+    setPartitionStart(null)
+    setSelectedBuildElement(null)
+  }
+
+  const beginWindowTool = () => {
+    if (!canModifyWorld) return
+    setActiveBuildTool((current) => current === 'window' ? null : 'window')
+    setPartitionStart(null)
+    setSelectedBuildElement(null)
+  }
+
+  const beginRoomTool = () => {
+    if (!canModifyWorld) return
+    setActiveBuildTool((current) => current === 'room' ? null : 'room')
+    setPartitionStart(null)
+    setRoomDragStart(null)
+    setSelectedBuildElement(null)
+  }
+
+  const beginPaintFloorTool = () => {
+    if (!canModifyWorld) return
+    setActiveBuildTool((current) => current === 'paintFloor' ? null : 'paintFloor')
+    setPartitionStart(null)
+    setSelectedBuildElement(null)
+  }
+
+  const beginPartitionTool = () => {
+    if (!canModifyWorld) return
+    setActiveBuildTool((current) => current === 'partition' ? null : 'partition')
+    setPartitionStart(null)
+    setSelectedBuildElement(null)
+  }
+
+  const splitBuildWallAtOffset = (wallId, offset) => {
+    if (!canModifyWorld) return
+    applyPlanChange(
+      (current) => splitHouseWallSegment(current, wallId, offset),
+      'Impossible de couper ici : une ouverture gêne',
+      () => setSelectedBuildElement(null),
+    )
+  }
+
+  const resizeSelectedBuildWall = (wallId, amount) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => applyChunkedHouseWallMove(current, wallId, amount, resizeHouseExteriorWall))
+  }
+
+  const moveBuildOpening = (openingId, wallId, offset) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => moveHouseOpening(current, openingId, wallId, offset))
+  }
+
+  const addBuildOpening = (wallId, offset, type = 'door') => {
+    if (!canModifyWorld) return
+    applyPlanChange(
+      (current) => addHouseOpeningToWall(current, wallId, offset, { type }),
+      type === 'window'
+        ? 'Pas de place pour une vitre ici (trop près d\'une autre ouverture)'
+        : 'Pas de place pour une porte ici (trop près d\'une autre ouverture)',
+    )
+  }
+
+  const resizeBuildOpeningSpan = (openingId, offset, width) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => setHouseOpeningSpan(current, openingId, offset, width))
+  }
+
+  const resizeBuildOpeningVertical = (openingId, height) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => setHouseOpeningVertical(current, openingId, { height }))
+  }
+
+  const resizeBuildOpeningBottom = (openingId, bottom, topLocal) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => setHouseOpeningVertical(current, openingId, {
+      bottom,
+      height: topLocal - bottom,
+    }))
+  }
+
+  const adjustSelectedOpeningBottom = (delta) => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        // Le haut reste fixe : bouger l'allège compense sur la hauteur.
+        return setHouseOpeningVertical(current, opening.id, {
+          bottom: opening.bottom + delta,
+          height: opening.height - delta,
+        })
+      })
+    })
+  }
+
+  const selectCustomizeTab = (tab) => {
+    setCustomizeTab(tab)
+    setActiveBuildTool(null)
+    setPartitionStart(null)
+    setRoomDragStart(null)
+    setSelectedBuildElement(null)
+    setUi('objectInventoryOpen', tab === 'furniture')
+  }
+
+  // Boutons +/− du panneau : redimensionnement fiable au doigt (les poignées
+  // 3D restent disponibles à la souris).
+  const adjustSelectedOpeningWidth = (delta) => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        return setHouseOpeningSpan(current, opening.id, opening.offset, opening.width + delta)
+      })
+    })
+  }
+
+  const adjustSelectedOpeningHeight = (delta) => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        return setHouseOpeningVertical(current, opening.id, { height: opening.height + delta })
+      })
+    })
+  }
+
+  const moveBuildInteriorWall = (wallId, amount) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => applyChunkedHouseWallMove(current, wallId, amount, moveHouseInteriorWall))
+  }
+
+  const resizeBuildWallEnd = (wallId, end, value) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => resizeHouseWallEnd(current, wallId, end, value))
+  }
+
+  const moveBuildWallJoint = (wallIdA, wallIdB, value) => {
+    if (!canModifyWorld) return
+    setHouse('housePlan',(current) => moveHouseWallJoint(current, wallIdA, wallIdB, value))
+  }
+
+  const addBuildRoom = (direction) => {
+    if (!canModifyWorld) return
+    applyPlanChange(
+      (current) => addRoomToHousePlan(current, { direction }),
+      'Pas de place pour une pièce de ce côté',
+      () => setSelectedBuildElement(null),
+    )
+  }
+
+  // Tracé de pièce façon Sims : coin posé au pointerdown, rectangle
+  // prévisualisé pendant le drag, construction au relâchement.
+  // Le rectangle couvre les CELLULES touchées par le geste (floor → floor+1),
+  // pas les coins les plus proches : ce que le doigt balaye est ce qui se
+  // construit, sans décalage d'une demi-case.
+  const startRoomDrag = (point) => {
+    if (!canModifyWorld) return
+    setRoomDragStart({ x: point.x, z: point.z })
+  }
+
+  const endRoomDrag = (point) => {
+    if (!roomDragStart) return
+    const endSource = point ?? buildFloorHoverRef.current
+    setRoomDragStart(null)
+    if (!endSource) return
+    const rect = getDraggedCellRect(roomDragStart, endSource)
+    // Simple tap : on annule sans message.
+    if (rect.maxX - rect.minX <= 1 && rect.maxZ - rect.minZ <= 1) return
+    applyPlanChange(
+      (current) => addHouseRoomRect(current, rect),
+      'La fondation doit faire au moins 2 × 2 et ne rien chevaucher',
+    )
+  }
+
+  const setBuildEntrance = () => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening') return
+    applyPlanChange(
+      (current) => setHouseEntranceDoor(current, selectedBuildElement.id),
+      "L'entrée doit être une porte sur un mur extérieur",
+    )
+  }
+
+  const handleBuildFloorClick = (point) => {
+    if (!canModifyWorld) return
+    if (activeBuildTool === 'paintFloor') {
+      const cellKey = `${Math.floor(point.x)},${Math.floor(point.z)}`
+      const space = activeHouseLayout.spaces.find((candidate) => candidate.cells.includes(cellKey))
+      if (!space) {
+        showBuildNotice('Touche le sol d\'une pièce de la maison')
+        return
+      }
+      runCustomizationChange(() => {
+        setHouse('housePlan',(current) => setHouseFloorStyleForCells(current, space.cells, floorPaintBrushId))
+      })
+      return
+    }
+    if (activeBuildTool !== 'partition') return
+    // Grille de structure : la cloison se pose sur un bord de cellule.
+    const snappedPoint = { x: snapHouseCoordinate(point.x), z: snapHouseCoordinate(point.z) }
+    if (!partitionStart) {
+      setPartitionStart(snappedPoint)
+      return
+    }
+    applyPlanChange(
+      (current) => addInteriorWallToHousePlan(
+        current,
+        [partitionStart.x, partitionStart.z],
+        [snappedPoint.x, snappedPoint.z],
+      ),
+      'Cloison trop courte : écarte les deux points d\'au moins une case',
+    )
+    setPartitionStart(null)
+    buildFloorHoverRef.current = null
+  }
+
+  const completeBuildTool = () => {
+    setActiveBuildTool(null)
+    setPartitionStart(null)
+    setRoomDragStart(null)
   }
 
   const buyCat = async () => {
@@ -18059,6 +20315,42 @@ function App() {
     window.dispatchEvent(new CustomEvent(TV_MENU_EVENT, { detail: { objectId: nearbyTv.id } }))
   }
 
+  const requestYouTubeFrameEditor = () => {
+    if (!canModifyWorld || !nearbyYouTubeFrame || mode !== 'play') return
+    const platform = objectCatalog[nearbyYouTubeFrame.objectId]?.type === 'tiktok_profile_frame' ? 'tiktok' : 'youtube'
+    setYoutubeFrameEditor({
+      objectId: nearbyYouTubeFrame.id,
+      platform,
+      value: platform === 'tiktok'
+        ? nearbyYouTubeFrame.profileUrl ?? objectCatalog.tiktok_profile_frame.profileUrl
+        : nearbyYouTubeFrame.channelUrl ?? objectCatalog.youtube_subscriber_frame.channelUrl,
+      error: '',
+    })
+  }
+
+  const saveYouTubeFrameChannel = (event) => {
+    event.preventDefault()
+    if (!canModifyWorld || !youtubeFrameEditor) return
+    try {
+      const isTikTok = youtubeFrameEditor.platform === 'tiktok'
+      const normalizedUrl = isTikTok
+        ? normalizeTikTokProfileUrl(youtubeFrameEditor.value)
+        : normalizeYouTubeChannelUrl(youtubeFrameEditor.value)
+      setEditor('editableObjects', (current) => current.map((object) => (
+        object.id !== youtubeFrameEditor.objectId
+          ? object
+          : isTikTok && objectCatalog[object.objectId]?.type === 'tiktok_profile_frame'
+            ? { ...object, profileUrl: normalizedUrl }
+            : !isTikTok && objectCatalog[object.objectId]?.type === 'youtube_subscriber_frame'
+              ? { ...object, channelUrl: normalizedUrl }
+              : object
+      )))
+      setYoutubeFrameEditor(null)
+    } catch (error) {
+      setYoutubeFrameEditor((current) => current ? { ...current, error: error.message } : current)
+    }
+  }
+
   const registerCombatTarget = useCallback((id, target) => {
     if (!id || !target) return undefined
     combatTargetsRef.current.set(id, target)
@@ -18121,12 +20413,21 @@ function App() {
     setNear('magicSkullDiscovery', false)
     setNear('seat', null)
     setNear('tv', null)
+    setNear('youtubeFrame', null)
+    setYoutubeFrameEditor(null)
     setSeatedState(null)
     setView('mode','play')
     setMenuOpen('skin', false)
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
+    setUi('accountOpen',false)
+    setUi('weaponMenuOpen',false)
+    setUi('lightMenuOpen',false)
+    setQuest('journalOpen',false)
+    setQuest('dialogOpen',false)
+    setQuest('vendorOpen',false)
+    setIsGameChatOpen(false)
     setEditor('selectedObjectId',null)
     setEditor('draggingObjectId',null)
     setEditor('placingObjectId',null)
@@ -18238,6 +20539,11 @@ function App() {
         requestOutdoorTransition()
         return
       }
+      if (nearbyYouTubeFrame && canModifyWorld) {
+        event.preventDefault()
+        requestYouTubeFrameEditor()
+        return
+      }
       if (seatedState?.phase === 'sitting') {
         event.preventDefault()
         requestStandUp()
@@ -18251,16 +20557,19 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [mode, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
+  }, [mode, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbyYouTubeFrame, canModifyWorld, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
 
   const openCustomizationMode = () => {
     if (!canModifyWorld) return
+    startCustomizationSession()
     setMenuOpen('skin', false)
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', false)
+    setCustomizeView('top')
+    setCustomizeMoreOpen(false)
     setView('mode','customize')
-    setEditor('selectedObjectId',placedEditableObjects[0]?.id ?? null)
+    setEditor('selectedObjectId',null)
     setEditor('draggingObjectId',null)
     setEditor('placingObjectId',null)
     setEditor('placementLocked',false)
@@ -18268,10 +20577,53 @@ function App() {
     setUi('objectInventoryOpen',false)
     setNear('seat', null)
     setNear('tv', null)
+    setNear('youtubeFrame', null)
+    setYoutubeFrameEditor(null)
     setSeatedState(null)
   }
 
   const closeCustomizationMode = () => {
+    endCustomizationChange()
+    finishCustomizationSession()
+    setCustomizeView('top')
+    setCustomizeMoreOpen(false)
+    setView('mode','play')
+    setMenuOpen('customizationChoice', false)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setEditor('placingObjectId',null)
+    setEditor('placementLocked',false)
+    setEditor('placementPreview',null)
+    setUi('objectInventoryOpen',false)
+    setNear('customizationStation', false)
+  }
+
+  const adjustSelectedOpeningPosition = (delta) => {
+    if (!canModifyWorld || selectedBuildElement?.type !== 'opening' || !selectedBuildOpeningWall) return
+    const wallLength = Math.max(0.001, selectedBuildOpeningWall.length)
+    runCustomizationChange(() => {
+      setHouse('housePlan',(current) => {
+        const opening = current.openings?.[selectedBuildElement.id]
+        if (!opening) return current
+        return setHouseOpeningSpan(
+          current,
+          opening.id,
+          opening.offset + delta / wallLength,
+          opening.width,
+        )
+      })
+    })
+  }
+
+  const cancelCustomizationMode = () => {
+    const initial = customizationHistoryRef.current.initial
+    if (initial) applyCustomizationSnapshot(initial)
+    finishCustomizationSession()
+    setSelectedBuildElement(null)
+    setActiveBuildTool(null)
+    setPartitionStart(null)
+    setCustomizeView('top')
+    setCustomizeMoreOpen(false)
     setView('mode','play')
     setMenuOpen('customizationChoice', false)
     setEditor('selectedObjectId',null)
@@ -18290,18 +20642,55 @@ function App() {
     )
   }
 
+  const updateEditableObjectTransform = (id, transform) => {
+    if (!canModifyWorld) return
+    setEditor('editableObjects',(current) =>
+      current.map((object) => (
+        object.id === id
+          ? {
+            ...object,
+            position: transform.position,
+            rotationY: transform.rotationY,
+            wallId: transform.wallId,
+          }
+          : object
+      )),
+    )
+  }
+
   const storeSelectedObject = () => {
     if (!canModifyWorld) return
     if (!selectedObject?.canStore) return
-    setEditor('editableObjects',(current) =>
-      current.map((object) =>
-        object.id === selectedObject.id
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) =>
+        current.map((object) =>
+          object.id === selectedObject.id
+            ? { ...object, status: 'stored', position: null }
+            : object,
+        ),
+      )
+      setEditor('selectedObjectId',null)
+      setEditor('draggingObjectId',null)
+    })
+  }
+
+  const storeSelectedSpaceObjects = () => {
+    if (!canModifyWorld || !selectedBuildSpace || selectedBuildSpaceObjectCount === 0) return
+    const label = selectedBuildSpaceObjectCount === 1 ? 'ce meuble' : `ces ${selectedBuildSpaceObjectCount} meubles`
+    if (!window.confirm(`Ranger ${label} dans l'inventaire ?`)) return
+    if (!window.confirm('Confirmation finale : tous les meubles de cette pièce vont être rangés.')) return
+    const cellSet = new Set(selectedBuildSpace.cells)
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) => current.map((object) => {
+        if (!object.canStore || object.status === 'stored' || !object.position) return object
+        const [x, , z] = object.position
+        return cellSet.has(`${Math.floor(x)},${Math.floor(z)}`)
           ? { ...object, status: 'stored', position: null }
-          : object,
-      ),
-    )
-    setEditor('selectedObjectId',null)
-    setEditor('draggingObjectId',null)
+          : object
+      }))
+      setEditor('selectedObjectId',null)
+      setEditor('draggingObjectId',null)
+    })
   }
 
   const beginPlaceObject = (id) => {
@@ -18312,18 +20701,27 @@ function App() {
     setEditor('draggingObjectId',null)
     setEditor('placingObjectId',id)
     setEditor('placementLocked',false)
+    const isWallObject = objectCatalog[object.objectId]?.placementSurface === 'wall'
     setEditor('placementPreview',{
-      position: [0, 0, 0],
+      position: isWallObject ? [0, 2, 0] : [0, 0, 0],
       rotationY: object.rotationY ?? 0,
-      isValid: true,
+      isValid: !isWallObject,
     })
-    setUi('objectInventoryOpen',false)
   }
 
-  const updatePlacementPreview = (position) => {
+  const updatePlacementPreview = (position, rotationY = null, wallId = null) => {
     if (!canModifyWorld) return
     setEditor('placementPreview',(current) => {
       if (!current) return current
+      if (Number.isFinite(rotationY)) {
+        return {
+          ...current,
+          position,
+          rotationY,
+          wallId,
+          isValid: true,
+        }
+      }
       const [x, z] = clampToCustomRoom(position[0], position[2])
       return {
         ...current,
@@ -18336,22 +20734,25 @@ function App() {
   const confirmPlacement = () => {
     if (!canModifyWorld) return
     if (!placingObjectId || !placementPreview?.isValid) return
-    setEditor('editableObjects',(current) =>
-      current.map((object) =>
-        object.id === placingObjectId
-          ? {
-            ...object,
-            status: 'placed',
-            position: placementPreview.position,
-            rotationY: placementPreview.rotationY,
-          }
-          : object,
-      ),
-    )
-    setEditor('selectedObjectId',placingObjectId)
-    setEditor('placingObjectId',null)
-    setEditor('placementLocked',false)
-    setEditor('placementPreview',null)
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) =>
+        current.map((object) =>
+          object.id === placingObjectId
+            ? {
+              ...object,
+              status: 'placed',
+              position: placementPreview.position,
+              rotationY: placementPreview.rotationY,
+              wallId: placementPreview.wallId ?? null,
+            }
+            : object,
+        ),
+      )
+      setEditor('selectedObjectId',placingObjectId)
+      setEditor('placingObjectId',null)
+      setEditor('placementLocked',false)
+      setEditor('placementPreview',null)
+    })
   }
 
   const cancelPlacement = () => {
@@ -18360,23 +20761,79 @@ function App() {
     setEditor('placementPreview',null)
   }
 
+  const leaveCustomizationContext = () => {
+    if (placingObjectId) cancelPlacement()
+    setActiveBuildTool(null)
+    setPartitionStart(null)
+    setRoomDragStart(null)
+    setSelectedBuildElement(null)
+    setEditor('selectedObjectId',null)
+    setEditor('draggingObjectId',null)
+    setCustomizeMoreOpen(false)
+  }
+
   const rotateSelectedObject = (direction) => {
     if (!canModifyWorld) return
     const angle = Math.PI / 4
     if (placingObjectId) {
+      const placingObject = editableObjects.find((object) => object.id === placingObjectId)
+      if (objectCatalog[placingObject?.objectId]?.placementSurface === 'wall') return
       setEditor('placementPreview',(current) => (
         current ? { ...current, rotationY: current.rotationY + direction * angle } : current
       ))
       return
     }
     if (!selectedObjectId) return
-    setEditor('editableObjects',(current) =>
-      current.map((object) => {
-        if (object.id !== selectedObjectId || !object.canRotate) return object
-        return { ...object, rotationY: object.rotationY + direction * angle }
-      }),
-    )
+    runCustomizationChange(() => {
+      setEditor('editableObjects',(current) =>
+        current.map((object) => {
+          if (object.id !== selectedObjectId || !object.canRotate) return object
+          return { ...object, rotationY: object.rotationY + direction * angle }
+        }),
+      )
+    })
   }
+
+  useEffect(() => {
+    if (mode !== 'customize') return undefined
+    const onCustomizeKeyDown = (event) => {
+      if (isTextInputEvent(event)) return
+      const key = getKeyboardKey(event)
+      if ((event.ctrlKey || event.metaKey) && key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) redoCustomizationChange()
+        else undoCustomizationChange()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && key === 'y') {
+        event.preventDefault()
+        redoCustomizationChange()
+        return
+      }
+      // Suppr : supprime la sélection courante (élément de structure ou
+      // meuble), comme le bouton Supprimer du panneau.
+      if (key === 'delete' || key === 'backspace') {
+        if (!selectedBuildElement && !selectedObjectId) return
+        event.preventDefault()
+        if (selectedBuildElement) deleteSelectedBuildElement()
+        else storeSelectedObject()
+        return
+      }
+      if (key === 'escape') {
+        event.preventDefault()
+        if (customizationHistoryRef.current.transaction) {
+          cancelCustomizationChange()
+          return
+        }
+        setSelectedBuildElement(null)
+        setActiveBuildTool(null)
+        setPartitionStart(null)
+        setEditor('selectedObjectId',null)
+      }
+    }
+    window.addEventListener('keydown', onCustomizeKeyDown)
+    return () => window.removeEventListener('keydown', onCustomizeKeyDown)
+  })
 
   const requestVisitPlayer = async (player) => {
     if (!authUser || multiplayerRole !== 'solo') return
@@ -18658,6 +21115,7 @@ function App() {
     (currentZone !== ZONES.outside && isNearEnvironmentStation) ||
     (canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation) ||
     Boolean(nearbyTv) ||
+    Boolean(nearbyYouTubeFrame) ||
     Boolean(nearbySeat) ||
     seatedState?.phase === 'sitting'
   )
@@ -18748,6 +21206,8 @@ function App() {
               hideCeiling={mode === 'customize'}
               hideRoof={mode === 'customize' || currentZone !== ZONES.outside}
               exteriorOnly={currentZone === ZONES.outside}
+              cutawayWalls={mode === 'customize' && customizeView === '3d'}
+              layout={activeHouseLayout}
             />
             <group visible={showInteriorHouseDetails} userData={{ debugCategory: 'house-interior' }}>
                 <LightSwitch
@@ -18755,12 +21215,6 @@ function App() {
                   isNear={isNearLightSwitch && canModifyWorld}
                   onOpen={() => canModifyWorld && setUi('lightMenuOpen',true)}
                   mode={mode}
-                />
-                <Dragon playerPositionRef={playerPositionRef} visible={showInteriorHouseDetails} />
-                <GlassContainmentRoom
-                  roomLightOn={roomLightOn}
-                  lightColor={lightColor}
-                  lightweight={performanceSettings.lowResolution}
                 />
             </group>
             {catActive && (
@@ -18804,8 +21258,8 @@ function App() {
             )}
             {catActive && (isAdminMode || isVerticalFrameMode) && <CatTapDetector catPositionRef={catPositionRef} callbackRef={catTapCallbackRef} onToggle={toggleCameraOnCat} />}
             <group userData={{ debugCategory: 'interactions' }}>
-              <OutdoorDoor />
-              <OutdoorDoorStation isNear={isNearOutdoorDoor} currentZone={currentZone} />
+              <OutdoorDoor entrance={houseEntrance} />
+              <OutdoorDoorStation isNear={isNearOutdoorDoor} currentZone={currentZone} entrance={houseEntrance} />
               <BallStation isNear={isNearSkinStation} goalObject={goalObject} />
               <MagicSkullDiscovery
                 discovered={magicSkullDiscovered}
@@ -18821,19 +21275,62 @@ function App() {
           <Defer level={6}>
           <CustomizationLayer
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
+            view={customizeView}
+            showBuildHandles={customizeTab !== 'furniture'}
+            canEditStructure={customizeTab === 'build'}
+            coins={coins}
             objects={editableObjects}
+            layout={activeHouseLayout}
+            selectedBuildElement={selectedBuildElement}
+            buildTool={activeBuildTool}
+            partitionStart={partitionStart}
             hideInteriorObjects={currentZone === ZONES.outside}
             selectedObjectId={selectedObjectId}
             draggingObjectId={draggingObjectId}
             placingObjectId={placingObjectId}
             placementLocked={placementLocked}
             placementPreview={placementPreview}
-            onSelect={(id) => setEditor('selectedObjectId', id)}
-            onStartDragging={(id) => setEditor('draggingObjectId', id)}
-            onStopDragging={() => setEditor('draggingObjectId',null)}
+            onSelect={(id) => {
+              setSelectedBuildElement(null)
+              setEditor('selectedObjectId', id)
+            }}
+            onStartDragging={(id) => {
+              beginCustomizationChange()
+              setEditor('draggingObjectId', id)
+            }}
+            onStopDragging={() => {
+              setEditor('draggingObjectId',null)
+              endCustomizationChange()
+            }}
             onUpdatePosition={updateEditableObjectPosition}
+            onUpdateTransform={updateEditableObjectTransform}
             onUpdatePlacementPreview={updatePlacementPreview}
             onLockPlacement={() => setEditor('placementLocked',true)}
+            onSelectBuildElement={(element) => {
+              setSelectedBuildElement(element)
+              setEditor('selectedObjectId',null)
+            }}
+            onBuildFloorClick={handleBuildFloorClick}
+            onSelectBuildSpaceAt={selectBuildSpaceAt}
+            buildFloorHoverRef={buildFloorHoverRef}
+            roomDragStart={roomDragStart}
+            onRoomDragStart={startRoomDrag}
+            onRoomDragEnd={endRoomDrag}
+            onSplitBuildWall={splitBuildWallAtOffset}
+            onResizeBuildWall={resizeSelectedBuildWall}
+            onMoveBuildOpening={moveBuildOpening}
+            onMoveBuildInteriorWall={moveBuildInteriorWall}
+            onResizeBuildWallEnd={resizeBuildWallEnd}
+            onMoveBuildWallJoint={moveBuildWallJoint}
+            onResizeBuildOpeningSpan={resizeBuildOpeningSpan}
+            onResizeBuildOpeningVertical={resizeBuildOpeningVertical}
+            onResizeBuildOpeningBottom={resizeBuildOpeningBottom}
+            onAddBuildOpening={addBuildOpening}
+            onAddBuildRoom={addBuildRoom}
+            onCompleteBuildTool={completeBuildTool}
+            onBeginBuildChange={beginCustomizationChange}
+            onEndBuildChange={endCustomizationChange}
+            onCancelBuildChange={cancelCustomizationChange}
             registerCombatTarget={registerCombatTarget}
             onTrainingDummyDefeated={handleTrainingDummyDefeated}
           />
@@ -18895,8 +21392,7 @@ function App() {
         )}
         <Suspense fallback={null}>
         <Physics gravity={[0, -9.81, 0]}>
-          <PhysicsBounds />
-          <GlassContainmentColliders />
+          <PhysicsBounds layout={activeHouseLayout} />
           <OutdoorBounds includeHouseFootprint={false} />
           {!PERF_NO_MAP_COLLIDERS && (
             <Profiler id="MapObjectPhysicsColliders" onRender={recordRenderProfile}>
@@ -19108,6 +21604,12 @@ function App() {
             enabled={mode === 'play'}
             onNearbyTvChange={(v) => setNear('tv', v)}
           />
+          <YouTubeFrameInteractionTrigger
+            playerPositionRef={playerPositionRef}
+            objects={placedEditableObjects}
+            enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
+            onNearbyFrameChange={(value) => setNear('youtubeFrame', value)}
+          />
           <LightSwitchTrigger
             playerPositionRef={playerPositionRef}
             enabled={currentZone !== ZONES.outside && mode === 'play' && canModifyWorld}
@@ -19124,7 +21626,7 @@ function App() {
               />
             </>
           )}
-          {showCaptureUi && <ScorePopups popups={scorePopups} />}
+          {showGameplayUi && <ScorePopups popups={scorePopups} />}
         </Physics>
         </Suspense>
       </Canvas>
@@ -19140,15 +21642,15 @@ function App() {
           </div>
         </div>
       )}
-      {isDebugMode && (
+      {mode === 'play' && isDebugMode && (
         <RenderStatsOverlay
           stats={renderStats}
           toggles={debugToggles}
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
         />
       )}
-      {!isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
-      <GpuWarning visible={showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
+      {mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
+      <GpuWarning visible={mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
       {mode === 'play' && (
         <ControlsOverlay
@@ -19159,10 +21661,12 @@ function App() {
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
       )}
-      {showCaptureUi && <CoinsOverlay coins={coins} />}
-      {showCaptureUi && <AchievementToast toast={achievementToast} />}
+      {/* Les pièces restent visibles en construction : on ne peut pas décider
+          d'une dépense sans voir son solde. */}
+      {showCaptureUi && (mode === 'play' || mode === 'customize') && <CoinsOverlay coins={coins} />}
+      {showGameplayUi && <AchievementToast toast={achievementToast} />}
       {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
-      {showCaptureUi && isLocalNetwork && freeCameraActive && (
+      {showGameplayUi && isLocalNetwork && freeCameraActive && (
         <div className="free-camera-badge">Camera libre</div>
       )}
       {showCaptureUi && PUBLIC_BUILD_FLAGS.showWeaponInventory && mode === 'play' && (
@@ -19185,13 +21689,13 @@ function App() {
           📜
         </button>
       )}
-      {showCaptureUi && isCharging && (
+      {showGameplayUi && isCharging && (
         <div className="charge-bar-wrap">
           <div className="charge-bar-fill" style={{ width: `${chargeProgress * 100}%` }} />
           <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
         </div>
       )}
-      {showCaptureUi && isLearningMagicSkull && (
+      {showGameplayUi && isLearningMagicSkull && (
         <div className="charge-bar-wrap">
           <div className="charge-bar-fill" style={{ width: `${magicSkullLearnProgress * 100}%` }} />
           <span className="charge-bar-label">💀 {magicSkullLearnProgress >= 1 ? 'Appris !' : 'Apprentissage...'}</span>
@@ -19208,7 +21712,7 @@ function App() {
           wingsUiRef={wingsUiRef}
         />
       )}
-      {showCaptureUi && (
+      {showGameplayUi && (
         <CharacterCustomizationMenu
           open={PUBLIC_BUILD_FLAGS.showCharacterCustomization && isCharacterMenuOpen}
           appearance={characterAppearance}
@@ -19216,14 +21720,14 @@ function App() {
           onClose={() => setMenuOpen('character', false)}
         />
       )}
-      {showCaptureUi && canModifyWorld && (
+      {showGameplayUi && canModifyWorld && (
         <CustomizationChoiceMenu
           open={isCustomizationChoiceOpen}
           onChooseRoom={openCustomizationMode}
           onClose={() => setMenuOpen('customizationChoice', false)}
         />
       )}
-      {showCaptureUi && (
+      {showGameplayUi && (
         <BagPanel
           open={PUBLIC_BUILD_FLAGS.showWeaponInventory && isWeaponMenuOpen}
           ownedItems={BAG_ITEM_DEFS
@@ -19247,17 +21751,17 @@ function App() {
           materials={materials}
         />
       )}
-      {showCaptureUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (
+      {showGameplayUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>
           +500
         </button>
       )}
-      {showCaptureUi && catActive && cameraOnCat && (isAdminMode || isVerticalFrameMode) && (
+      {showGameplayUi && catActive && cameraOnCat && (isAdminMode || isVerticalFrameMode) && (
         <button className="cat-cam-btn" type="button" onClick={() => setCameraOnCat(false)}>
           🐱 Caméra chat — Retour joueur
         </button>
       )}
-      {showCaptureUi && (
+      {showGameplayUi && (
         <GameMenuPanel
           configured={isSupabaseConfigured}
           user={authUser}
@@ -19340,14 +21844,41 @@ function App() {
         onOpenEnvironmentMenu={openEnvironmentMenu}
         onOpenCustomizationChoice={openCustomizationChoice}
         onRequestTv={requestTvMenu}
+        youtubeFrameEditorOpen={Boolean(youtubeFrameEditor)}
+        onEditYouTubeFrame={requestYouTubeFrameEditor}
         onRequestSit={requestSit}
         onRequestStandUp={requestStandUp}
       />
+      {showGameplayUi && canModifyWorld && youtubeFrameEditor && (
+        <div className="youtube-frame-editor-backdrop" role="presentation" onPointerDown={() => setYoutubeFrameEditor(null)}>
+          <form className="youtube-frame-editor" onSubmit={saveYouTubeFrameChannel} onPointerDown={(event) => event.stopPropagation()}>
+            <button className="youtube-frame-editor-close" type="button" onClick={() => setYoutubeFrameEditor(null)} aria-label="Fermer">×</button>
+            <h2>{youtubeFrameEditor.platform === 'tiktok' ? 'Profil du cadre TikTok' : 'Chaîne du cadre YouTube'}</h2>
+            <p>Colle le lien public {youtubeFrameEditor.platform === 'tiktok' ? 'du profil' : 'de la chaîne'} à afficher.</p>
+            <label>
+              <span>{youtubeFrameEditor.platform === 'tiktok' ? 'Lien du profil' : 'Lien de la chaîne'}</span>
+              <input
+                type="text"
+                inputMode="url"
+                autoFocus
+                value={youtubeFrameEditor.value}
+                placeholder={youtubeFrameEditor.platform === 'tiktok' ? 'https://www.tiktok.com/@MonProfil' : 'https://www.youtube.com/@MaChaine'}
+                onChange={(event) => setYoutubeFrameEditor((current) => current ? { ...current, value: event.target.value, error: '' } : current)}
+              />
+            </label>
+            {youtubeFrameEditor.error && <div className="youtube-frame-editor-error" role="alert">{youtubeFrameEditor.error}</div>}
+            <div className="youtube-frame-editor-actions">
+              <button type="button" onClick={() => setYoutubeFrameEditor(null)}>Annuler</button>
+              <button className="primary" type="submit">Afficher {youtubeFrameEditor.platform === 'tiktok' ? 'ce profil' : 'cette chaîne'}</button>
+            </div>
+          </form>
+        </div>
+      )}
       <QuestTalkPrompt
         canShow={showCaptureUi && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen}
         onTalk={() => setQuest('dialogOpen',true)}
       />
-      {questDialogOpen && (
+      {showGameplayUi && questDialogOpen && (
         <QuestDialog
           questId={FIRST_QUEST_ID}
           questProgress={questProgress}
@@ -19357,7 +21888,7 @@ function App() {
           onOpenVendor={() => { setQuest('dialogOpen',false); setQuest('vendorOpen',true) }}
         />
       )}
-      {vendorOpen && (
+      {showGameplayUi && vendorOpen && (
         <VendorPanel
           materials={materials}
           onSell={handleSellItem}
@@ -19368,7 +21899,7 @@ function App() {
       {showCaptureUi && mode === 'play' && pinnedQuestId && !questJournalOpen && (
         <QuestTracker questId={pinnedQuestId} questProgress={questProgress} />
       )}
-      {questJournalOpen && (
+      {showGameplayUi && questJournalOpen && (
         <QuestJournal
           questProgress={questProgress}
           pinnedQuestId={pinnedQuestId}
@@ -19411,7 +21942,7 @@ function App() {
           </button>
         </div>
       )}
-      {showCaptureUi && isMultiplayerSession && !blocksBottomGameChat && (
+      {showGameplayUi && isMultiplayerSession && !blocksBottomGameChat && (
         <GameChatPanel
           open={isGameChatOpen}
           value={chatInput}
@@ -19424,42 +21955,143 @@ function App() {
         />
       )}
       {showCaptureUi && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
-        <div className="customize-ui">
-          <div className="customize-rotation">
-            <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={!selectedObjectId && !placingObjectId}>
-              {'<'}
+        <>
+          <div className="customize-topbar">
+            <button className="customize-topbar-done" type="button" onClick={closeCustomizationMode}>
+              {customizationHistoryState.dirty ? 'Terminer •' : 'Terminer'}
             </button>
-            <button type="button" onClick={() => rotateSelectedObject(1)} disabled={!selectedObjectId && !placingObjectId}>
-              {'>'}
-            </button>
-            {PUBLIC_BUILD_FLAGS.showObjectInventory && selectedObject?.canStore && !placingObjectId && (
-              <button type="button" onClick={storeSelectedObject}>
-                Ranger
-              </button>
-            )}
-          </div>
-          {placingObjectId ? (
-            <div className="customize-placement-actions">
-              <button
-                className="customize-done"
-                type="button"
-                onClick={confirmPlacement}
-                disabled={!placementPreview?.isValid || !placementLocked}
-              >
-                Poser
-              </button>
-              <button className="customize-cancel" type="button" onClick={cancelPlacement}>
-                Annuler
+            <div className="customize-topbar-history" aria-label="Historique et vue">
+              <button type="button" onClick={undoCustomizationChange} disabled={!customizationHistoryState.canUndo} aria-label="Annuler" title="Annuler (Ctrl+Z)">↶</button>
+              <button type="button" onClick={redoCustomizationChange} disabled={!customizationHistoryState.canRedo} aria-label="Rétablir" title="Rétablir (Ctrl+Y)">↷</button>
+              <button type="button" className={customizeView === '3d' ? 'active' : ''} onClick={() => setCustomizeView((current) => current === '3d' ? 'top' : '3d')}>
+                {customizeView === '3d' ? 'Dessus' : '3D'}
               </button>
             </div>
-          ) : (
-            <button className="customize-done" type="button" onClick={closeCustomizationMode}>
-              Valider
-            </button>
-          )}
-        </div>
+            <div className="customize-more-wrap">
+              <button className="customize-more-button" type="button" onClick={() => setCustomizeMoreOpen((current) => !current)} aria-expanded={customizeMoreOpen} aria-label="Plus d’options">•••</button>
+              {customizeMoreOpen && (
+                <div className="customize-more-menu">
+                  <div className="customize-more-balance">
+                    <img src="/ui/coins.png" alt="" />
+                    <span>Solde</span>
+                    <strong>{coins}</strong>
+                  </div>
+                  <label>
+                    <input type="checkbox" checked={applyWallToCeiling} onChange={(event) => setInventory('applyWallToCeiling', event.target.checked)} />
+                    <span>Tapisserie au plafond</span>
+                  </label>
+                  <button type="button" onClick={() => { setCustomizeMoreOpen(false); resetHousePlan() }}>Réinitialiser la maison</button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => {
+                      if (!customizationHistoryState.dirty || window.confirm('Abandonner toutes les modifications de cette session ?')) cancelCustomizationMode()
+                    }}
+                  >
+                    Abandonner les modifications
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div ref={customizePanelRef} className={`customize-ui ${(activeBuildTool || placingObjectId || selectedObjectId || selectedBuildElement) ? 'is-contextual' : 'is-navigation'}`} style={customizePanelStyle}>
+            <div className="customize-panel-drag-handle draggable-panel-handle" {...customizePanelDragHandleProps} title="Glisser pour déplacer" aria-label="Déplacer le menu de personnalisation">⋮⋮ Déplacer</div>
+            {!activeHouseLayout.plan.entranceDoorId && <div className="customize-build-warning">Aucune entrée définie · sélectionne une porte extérieure</div>}
+            {buildNotice && <div className="customize-build-warning customize-build-notice">{buildNotice}</div>}
+
+            {placingObjectId ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading"><strong>Placer le meuble</strong><span>Déplace-le dans la scène</span></div>
+                <div className="customize-context-actions">
+                  <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={placingEditableObject?.canRotate === false}>Tourner ↶</button>
+                  <button type="button" onClick={() => rotateSelectedObject(1)} disabled={placingEditableObject?.canRotate === false}>Tourner ↷</button>
+                  <button className="primary" type="button" onClick={confirmPlacement} disabled={!placementPreview?.isValid || !placementLocked}>Poser</button>
+                  <button type="button" onClick={cancelPlacement}>Annuler</button>
+                </div>
+              </div>
+            ) : activeBuildTool ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading">
+                  <strong>{({ room: 'Créer un espace', segment: 'Couper un mur', partition: 'Tracer une cloison', door: 'Ajouter une porte', window: 'Ajouter une fenêtre', paintFloor: 'Peindre le sol' })[activeBuildTool]}</strong>
+                  <span>{({ room: 'Glisse pour tracer les fondations', segment: 'Touche le mur à couper', partition: 'Touche le départ puis l’arrivée', door: 'Touche un mur', window: 'Touche un mur', paintFloor: 'Choisis une texture puis touche une pièce' })[activeBuildTool]}</span>
+                </div>
+                {activeBuildTool === 'paintFloor' && (
+                  <SkinPaintPalette title="Textures de sol" skins={floorSkins} ownedSkinIds={ownedFloorSkins} activeSkinId={floorPaintBrushId} coins={coins} hasUnlimitedCoins={isAdminMode} onPick={pickFloorPaintSkin} />
+                )}
+                <div className="customize-context-actions"><button type="button" onClick={leaveCustomizationContext}>Quitter l’outil</button></div>
+              </div>
+            ) : selectedObjectId ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading"><strong>{selectedObject?.name ?? 'Meuble sélectionné'}</strong><span>Glisse le meuble pour le déplacer</span></div>
+                <div className="customize-context-actions">
+                  <button type="button" onClick={() => rotateSelectedObject(-1)} disabled={selectedObject?.canRotate === false}>Tourner ↶</button>
+                  <button type="button" onClick={() => rotateSelectedObject(1)} disabled={selectedObject?.canRotate === false}>Tourner ↷</button>
+                  {selectedObject?.canStore && <button type="button" onClick={storeSelectedObject}>Ranger</button>}
+                  <button type="button" onClick={leaveCustomizationContext}>Retour</button>
+                </div>
+              </div>
+            ) : selectedBuildElement ? (
+              <div className="customize-context-panel">
+                <div className="customize-context-heading">
+                  <strong>{selectedBuildElement.type === 'wall' ? 'Mur sélectionné' : selectedBuildElement.type === 'opening' ? (selectedBuildOpening?.type === 'window' ? 'Fenêtre sélectionnée' : 'Porte sélectionnée') : 'Espace sélectionné'}</strong>
+                  <span>{selectedBuildSpace ? `${selectedBuildSpace.cells.length} m² · poignées bleues pour redimensionner` : 'Les actions affichées concernent uniquement cette sélection'}</span>
+                </div>
+
+                {selectedBuildElement.type === 'opening' && (
+                  <div className="customize-opening-size">
+                    <span>Position</span><button type="button" onClick={() => adjustSelectedOpeningPosition(-0.1)}>−</button><strong>{Math.round((selectedBuildOpening?.offset ?? 0) * (selectedBuildOpeningWall?.length ?? 0) * 10) / 10}</strong><button type="button" onClick={() => adjustSelectedOpeningPosition(0.1)}>+</button>
+                    <span>Largeur</span><button type="button" onClick={() => adjustSelectedOpeningWidth(-0.2)}>−</button><strong>{selectedBuildOpening?.width?.toFixed?.(1)}</strong><button type="button" onClick={() => adjustSelectedOpeningWidth(0.2)}>+</button>
+                    <span>Hauteur</span><button type="button" onClick={() => adjustSelectedOpeningHeight(-0.2)}>−</button><strong>{selectedBuildOpening?.height?.toFixed?.(1)}</strong><button type="button" onClick={() => adjustSelectedOpeningHeight(0.2)}>+</button>
+                    {selectedBuildOpening?.type === 'window' && <><span>Bas</span><button type="button" onClick={() => adjustSelectedOpeningBottom(-0.2)}>−</button><strong>{selectedBuildOpening?.bottom?.toFixed?.(1)}</strong><button type="button" onClick={() => adjustSelectedOpeningBottom(0.2)}>+</button></>}
+                  </div>
+                )}
+
+                {customizeTab === 'decorate' && selectedBuildSpace && (
+                  <SkinPaintPalette title="Sol de cette pièce" skins={floorSkins} ownedSkinIds={ownedFloorSkins} activeSkinId={housePlan?.styles?.floorByCell?.[selectedBuildSpace.cells[0]] ?? null} coins={coins} hasUnlimitedCoins={isAdminMode} onPick={pickFloorPaintSkin} />
+                )}
+                {customizeTab === 'decorate' && selectedBuildElement.type === 'wall' && (
+                  <SkinPaintPalette title="Tapisserie du côté sélectionné" skins={availableWallSkins} ownedSkinIds={ownedWallSkins} activeSkinId={housePlan?.styles?.wallBySide?.[`${selectedBuildElement.id}:${selectedBuildElement.side ?? 'inside'}`] ?? housePlan?.styles?.wallBySide?.[`${selectedBuildElement.id}:inside`] ?? null} coins={coins} hasUnlimitedCoins={isAdminMode} onPick={pickWallPaintSkin} />
+                )}
+
+                <div className="customize-context-actions">
+                  {customizeTab === 'build' && selectedBuildElement.type === 'wall' && <><button type="button" onClick={beginSegmentTool}>Couper</button><button type="button" onClick={beginDoorTool}>Porte</button><button type="button" onClick={beginWindowTool}>Fenêtre</button></>}
+                  {customizeTab === 'decorate' && selectedBuildSpace && <button type="button" onClick={beginPaintFloorTool}>Peindre un autre sol</button>}
+                  {canSetBuildEntrance && <button type="button" onClick={setBuildEntrance}>Définir comme entrée</button>}
+                  {selectedBuildSpace && <button type="button" onClick={storeSelectedSpaceObjects} disabled={selectedBuildSpaceObjectCount === 0}>Tout ranger{selectedBuildSpaceObjectCount > 0 ? ` (${selectedBuildSpaceObjectCount})` : ''}</button>}
+                  {canDeleteSelectedBuildElement && <button type="button" className="danger" onClick={deleteSelectedBuildElement}>{selectedBuildElement.type === 'space' ? 'Supprimer l’espace' : 'Supprimer'}</button>}
+                  <button type="button" onClick={leaveCustomizationContext}>Retour</button>
+                </div>
+              </div>
+            ) : (
+              <div className="customize-navigation-panel">
+                <div className="customize-primary-nav" role="tablist" aria-label="Mode de personnalisation">
+                  <button type="button" className={customizeTab === 'build' ? 'active' : ''} onClick={() => selectCustomizeTab('build')}>Construire</button>
+                  <button type="button" className={customizeTab === 'decorate' ? 'active' : ''} onClick={() => selectCustomizeTab('decorate')}>Décorer</button>
+                  {PUBLIC_BUILD_FLAGS.showObjectInventory && <button type="button" className={customizeTab === 'furniture' ? 'active' : ''} onClick={() => selectCustomizeTab('furniture')}>Meubler</button>}
+                </div>
+                {customizeTab === 'build' && (
+                  <div className="customize-tool-grid">
+                    <button type="button" onClick={beginRoomTool}><span>▣</span>Espace<em>{HOUSE_FLOOR_COST_PER_CELL}/m²</em></button>
+                    <button type="button" onClick={beginPartitionTool}><span>╱</span>Cloison<em>{HOUSE_WALL_COST_PER_UNIT}/m</em></button>
+                    <button type="button" onClick={beginDoorTool}><span>▯</span>Porte<em>{HOUSE_DOOR_COST}</em></button>
+                    <button type="button" onClick={beginWindowTool}><span>▤</span>Fenêtre<em>{HOUSE_WINDOW_COST}</em></button>
+                    <button type="button" onClick={beginSegmentTool}><span>✂</span>Couper<em>gratuit</em></button>
+                  </div>
+                )}
+                {customizeTab === 'decorate' && (
+                  <div className="customize-tool-grid decorate">
+                    <button type="button" onClick={beginPaintFloorTool}><span>▦</span>Sol</button>
+                    <button type="button" onClick={() => showBuildNotice('Touche un mur dans la scène pour choisir sa tapisserie')}><span>▥</span>Mur</button>
+                  </div>
+                )}
+                {customizeTab === 'furniture' && <p className="customize-navigation-hint">Choisis un meuble dans le catalogue, puis place-le dans la scène.</p>}
+              </div>
+            )}
+          </div>
+        </>
       )}
-      {showCaptureUi && PUBLIC_BUILD_FLAGS.showObjectInventory && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && (
+      {showCaptureUi && PUBLIC_BUILD_FLAGS.showObjectInventory && canModifyWorld && currentZone !== ZONES.outside && mode === 'customize' && customizeTab === 'furniture' && (
         <ObjectInventorySheet
           open={isObjectInventoryOpen}
           cards={inventoryCards}
@@ -19469,7 +22101,7 @@ function App() {
         />
       )}
       <SkinMenu
-        open={showCaptureUi && isSkinMenuOpen}
+        open={showGameplayUi && isSkinMenuOpen}
         coins={coins}
         skins={ballSkins}
         previewIndex={previewIndex}
@@ -19483,29 +22115,14 @@ function App() {
         onRespawn={handleBallRespawn}
       />
       <EnvironmentMenu
-        open={showCaptureUi && isEnvironmentMenuOpen}
+        open={showGameplayUi && isEnvironmentMenuOpen}
         coins={coins}
         hasUnlimitedCoins={isAdminMode}
         activeTab={environmentTab}
         onTabChange={(v) => setUi('environmentTab', v)}
-        floorSkins={floorSkins}
-        wallSkins={availableWallSkins}
         furnitureItems={furnitureShopItems}
         furnitureCounts={furnitureCounts}
-        previewFloorIndex={previewFloorIndex}
-        previewWallIndex={previewWallIndex}
-        selectedFloorSkinId={selectedFloorSkinId}
-        selectedWallSkinId={selectedWallSkinId}
-        ownedFloorSkinIds={ownedFloorSkins}
-        ownedWallSkinIds={ownedWallSkins}
-        applyWallToCeiling={applyWallToCeiling}
-        canApplyWorldSkins={canModifyWorld}
-        onApplyWallToCeilingChange={(v) => setInventory('applyWallToCeiling', v)}
         onClose={closeEnvironmentMenu}
-        onPrevious={() => goEnvironmentPreview(-1)}
-        onNext={() => goEnvironmentPreview(1)}
-        onBuy={buyPreviewEnvironmentSkin}
-        onSelect={selectPreviewEnvironmentSkin}
         furnitureCart={furnitureCart}
         onAddFurnitureToCart={addFurnitureToCart}
         onRemoveFurnitureFromCart={removeFurnitureFromCart}

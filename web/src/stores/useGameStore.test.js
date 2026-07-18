@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useGameStore } from './useGameStore'
+import { createDefaultHousePlan } from '../world/house/housePlan'
 
 // Réinitialise les slices avant chaque test (le store est un singleton).
 beforeEach(() => {
@@ -36,6 +37,7 @@ beforeEach(() => {
   setProgress('mobKillCount', 0)
   setProgress('unlockedAchievements', [])
   setHouse('roomLightOn', true)
+  setHouse('housePlan', createDefaultHousePlan())
 })
 
 describe('gameStore — slice proximité', () => {
@@ -297,5 +299,21 @@ describe('gameStore — slices progress + house', () => {
     setHouse('lightColor', '#ff0000')
     expect(useGameStore.getState().house.roomLightOn).toBe(false)
     expect(useGameStore.getState().house.lightColor).toBe('#ff0000')
+  })
+
+  it('house : stocke et normalise le plan de maison', () => {
+    const { setHouse } = useGameStore.getState()
+    setHouse('housePlan', {
+      floorCells: { '0,0': true },
+      walls: {
+        wall_a: { from: [0, 0], to: [1, 0] },
+      },
+      openings: {},
+    })
+
+    const { housePlan } = useGameStore.getState().house
+    expect(housePlan.version).toBe(1)
+    expect(housePlan.floorCells).toHaveProperty('0,0')
+    expect(housePlan.walls.wall_a.id).toBe('wall_a')
   })
 })

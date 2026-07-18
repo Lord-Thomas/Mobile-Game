@@ -149,15 +149,27 @@ export function getWallPointAt(wall, distance) {
   }
 }
 
-export function getWallColliderTransform(wall, rect) {
+export function getWallColliderTransform(wall, rect, {
+  extendJoints = true,
+  startExtension = null,
+  endExtension = null,
+} = {}) {
   const direction = getWallDirection(wall)
   const jointExtension = wall.thickness * 0.5
   const rectStart = Number.isFinite(rect.start) ? rect.start : rect.center - rect.width * 0.5
   const rectEnd = Number.isFinite(rect.end) ? rect.end : rect.center + rect.width * 0.5
-  const startExtension = rectStart <= 0.0001 ? jointExtension : 0
-  const endExtension = rectEnd >= direction.length - 0.0001 ? jointExtension : 0
-  const extendedStart = Math.max(-jointExtension, rectStart - startExtension)
-  const extendedEnd = Math.min(direction.length + jointExtension, rectEnd + endExtension)
+  // Les prolongements assurent que les colliders de deux murs qui se joignent
+  // ne laissent aucun interstice. Ils ne doivent pas être utilisés pour le
+  // rendu : les deux volumes se croisent dans les angles et leurs textures se
+  // superposent alors visuellement.
+  const resolvedStartExtension = Number.isFinite(startExtension)
+    ? startExtension
+    : (extendJoints && rectStart <= 0.0001 ? jointExtension : 0)
+  const resolvedEndExtension = Number.isFinite(endExtension)
+    ? endExtension
+    : (extendJoints && rectEnd >= direction.length - 0.0001 ? jointExtension : 0)
+  const extendedStart = Math.max(-jointExtension, rectStart - resolvedStartExtension)
+  const extendedEnd = Math.min(direction.length + jointExtension, rectEnd + resolvedEndExtension)
   const extendedWidth = extendedEnd - extendedStart
   const center = getWallPointAt(wall, (extendedStart + extendedEnd) * 0.5)
   const rotationY = Math.atan2(direction.z, direction.x)
@@ -168,6 +180,49 @@ export function getWallColliderTransform(wall, rect) {
     args: [extendedWidth * 0.5, rect.height * 0.5, wall.thickness * 0.5],
     renderWidth: extendedWidth,
   }
+}
+
+function cornersMatch(left, right) {
+  return Math.abs(left.x - right.x) < 0.001 && Math.abs(left.z - right.z) < 0.001
+}
+
+// Au rendu, une jonction perpendiculaire reste fermée, tandis que deux
+// segments alignés ne se chevauchent jamais. Cela évite le z-fighting des
+// textures sans laisser de trou dans un angle.
+export function getWallRenderTransform(wall, rect, walls = []) {
+  const direction = getWallDirection(wall)
+  const rectStart = Number.isFinite(rect.start) ? rect.start : rect.center - rect.width * 0.5
+  const rectEnd = Number.isFinite(rect.end) ? rect.end : rect.center + rect.width * 0.5
+  const jointExtension = wall.thickness * 0.5
+  const getJointExtension = (corner) => {
+    const connections = walls.filter((candidate) => (
+      candidate.id !== wall.id &&
+      (cornersMatch(candidate.startCorner, corner) || cornersMatch(candidate.endCorner, corner))
+    ))
+    const directions = connections.map(getWallDirection)
+    const hasCollinearContinuation = directions.some((otherDirection) => (
+      Math.abs(direction.x * otherDirection.z - direction.z * otherDirection.x) <= 0.001
+    ))
+    const perpendicularCount = directions.filter((otherDirection) => (
+      Math.abs(direction.x * otherDirection.z - direction.z * otherDirection.x) > 0.001
+    )).length
+
+    // Jonction en T : les deux segments du mur principal restent bord à bord.
+    // La cloison qui arrive perpendiculairement s'arrête contre leur face au
+    // lieu de traverser le volume, ce qui supprimme la texture visible par
+    // transparence au point de raccord.
+    if (hasCollinearContinuation) return 0
+    if (perpendicularCount >= 2) return -jointExtension
+    return perpendicularCount === 1 ? jointExtension : 0
+  }
+  const startExtension = rectStart <= 0.0001 ? getJointExtension(wall.startCorner) : 0
+  const endExtension = rectEnd >= direction.length - 0.0001 ? getJointExtension(wall.endCorner) : 0
+
+  return getWallColliderTransform(wall, rect, {
+    extendJoints: false,
+    startExtension,
+    endExtension,
+  })
 }
 
 export function getWallFootprint(wall) {
