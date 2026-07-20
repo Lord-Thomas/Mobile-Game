@@ -25,7 +25,7 @@ import { NECRO_WEAPON_PARTICLE_NAME, SUMMON_END_PARTICLE_NAME, SUMMON_START_PART
 import { createEditableObjectInstance, defaultEditableObjects, objectCatalog, shopObjectIds } from './gameObjects/placeableObjects'
 import YouTubeSubscriberFrame from './gameObjects/YouTubeSubscriberFrame'
 import TikTokCreatorFrame from './gameObjects/TikTokCreatorFrame'
-import { getWallMountTargets, getWallMountTransform, isWallCutAwayFromCamera } from './gameObjects/wallPlacement'
+import { getClosestWallMountTransform, getWallMountTargets, getWallMountTransformFromRay, isWallCutAwayFromCamera } from './gameObjects/wallPlacement'
 import { normalizeYouTubeChannelUrl } from './services/youtubeChannelService'
 import { normalizeTikTokProfileUrl } from './services/tiktokProfileService'
 import { isSupabaseConfigured } from './lib/supabase'
@@ -14019,7 +14019,7 @@ function EditableFloor({
   )
 }
 
-function WallPlacementTarget({ target, view, isPlacing, placementLocked, width, height, depth, onTransform, onLockPlacement, onStopDragging }) {
+function WallPlacementGuide({ target, view }) {
   const surfaceRef = useRef(null)
   const surface = useMemo(
     () => getWallSideTransform(target.wall, target.rect, target.side),
@@ -14032,32 +14032,131 @@ function WallPlacementTarget({ target, view, isPlacing, placementLocked, width, 
     if (surfaceRef.current.visible !== visible) surfaceRef.current.visible = visible
   })
 
-  const updateTransform = (event) => {
-    if (isPlacing && placementLocked) return
-    event.stopPropagation()
-    onTransform(getWallMountTransform(target, event.point, width, height, depth))
-  }
-
   return (
     <mesh
       ref={surfaceRef}
       position={surface.position}
       rotation={surface.rotation}
-      onPointerMove={updateTransform}
-      onClick={(event) => {
-        if (!isPlacing || placementLocked) return
-        updateTransform(event)
-        onLockPlacement()
-      }}
-      onPointerUp={(event) => {
-        event.stopPropagation()
-        if (!isPlacing) onStopDragging()
-      }}
+      raycast={ignorePointerRaycast}
     >
       <planeGeometry args={[surface.width, surface.height]} />
       <meshBasicMaterial color="#ff365f" transparent opacity={0.045} depthWrite={false} side={DoubleSide} />
     </mesh>
   )
+}
+
+function WallPlacementPointerController({
+  object,
+  targets,
+  view,
+  width,
+  height,
+  depth,
+  placementLocked,
+  isPlacing,
+  onTransform,
+  onLockPlacement,
+  onStopDragging,
+}) {
+  const { camera, gl } = useThree()
+  const raycasterRef = useRef(new Raycaster())
+  const pointerRef = useRef(new Vector2())
+  const pointerDownRef = useRef(null)
+  const lastTransformRef = useRef(null)
+  const objectRef = useRef(object)
+  const handlersRef = useRef({ onTransform, onLockPlacement, onStopDragging })
+  objectRef.current = object
+  handlersRef.current = { onTransform, onLockPlacement, onStopDragging }
+
+  useEffect(() => {
+    lastTransformRef.current = null
+  }, [object?.id])
+
+  useEffect(() => {
+    const canvas = gl.domElement
+    const updateFromPointer = (event) => {
+      if (placementLocked || targets.length === 0) return
+      const bounds = canvas.getBoundingClientRect()
+      pointerRef.current.set(
+        ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 2 - 1,
+        -(((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 2 - 1),
+      )
+      raycasterRef.current.setFromCamera(pointerRef.current, camera)
+      const ray = raycasterRef.current.ray
+      const currentObject = objectRef.current
+      const preferredWallId = lastTransformRef.current?.wallId ?? currentObject?.wallId ?? null
+      let transform = null
+
+      if (view === '3d') {
+        const visibleTargets = targets.filter((target) => !isWallCutAwayFromCamera(target.wall, camera.position))
+        transform = getWallMountTransformFromRay(
+          visibleTargets,
+          ray,
+          width,
+          height,
+          depth,
+          preferredWallId,
+        )
+      } else if (Math.abs(ray.direction.y) > 0.0001) {
+        const preferredY = lastTransformRef.current?.position?.[1] ?? currentObject?.position?.[1] ?? 1.5
+        const distance = (preferredY - ray.origin.y) / ray.direction.y
+        if (distance > 0) {
+          const point = {
+            x: ray.origin.x + ray.direction.x * distance,
+            y: preferredY,
+            z: ray.origin.z + ray.direction.z * distance,
+          }
+          transform = getClosestWallMountTransform(
+            targets,
+            point,
+            width,
+            height,
+            depth,
+            preferredWallId,
+          )
+        }
+      }
+
+      if (!transform) return
+      lastTransformRef.current = transform
+      handlersRef.current.onTransform(transform)
+    }
+
+    const onPointerDown = (event) => {
+      if (placementLocked || event.button !== 0) return
+      pointerDownRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+      updateFromPointer(event)
+    }
+    const onPointerMove = (event) => updateFromPointer(event)
+    const onPointerEnd = (event) => {
+      const pointerDown = pointerDownRef.current
+      pointerDownRef.current = null
+      if (event.type === 'pointercancel') {
+        if (!isPlacing) handlersRef.current.onStopDragging()
+        return
+      }
+      if (isPlacing && !placementLocked && pointerDown && lastTransformRef.current) {
+        const moved = Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y)
+        if (moved <= 8) handlersRef.current.onLockPlacement()
+        return
+      }
+      if (!isPlacing) handlersRef.current.onStopDragging()
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerEnd)
+    window.addEventListener('pointercancel', onPointerEnd)
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerEnd)
+      window.removeEventListener('pointercancel', onPointerEnd)
+      pointerDownRef.current = null
+    }
+  }, [camera, depth, gl, height, isPlacing, placementLocked, targets, view, width])
+
+  return null
 }
 
 function WallPlacementSurfaces({ object, layout, view, placementLocked, isPlacing, onTransform, onLockPlacement, onStopDragging }) {
@@ -14074,19 +14173,24 @@ function WallPlacementSurfaces({ object, layout, view, placementLocked, isPlacin
 
   return (
     <group>
+      <WallPlacementPointerController
+        object={object}
+        targets={targets}
+        view={view}
+        width={width}
+        height={height}
+        depth={depth}
+        placementLocked={placementLocked}
+        isPlacing={isPlacing}
+        onTransform={onTransform}
+        onLockPlacement={onLockPlacement}
+        onStopDragging={onStopDragging}
+      />
       {targets.map((target) => (
-        <WallPlacementTarget
+        <WallPlacementGuide
           key={target.id}
           target={target}
           view={view}
-          isPlacing={isPlacing}
-          placementLocked={placementLocked}
-          width={width}
-          height={height}
-          depth={depth}
-          onTransform={onTransform}
-          onLockPlacement={onLockPlacement}
-          onStopDragging={onStopDragging}
         />
       ))}
     </group>

@@ -70,3 +70,52 @@ export function getWallMountTransform(target, point, frameWidth, frameHeight, fr
     wallId: wall.id,
   }
 }
+
+export function getClosestWallMountTransform(targets, point, frameWidth, frameHeight, frameDepth, preferredWallId = null) {
+  let best = null
+
+  targets.forEach((target) => {
+    const transform = getWallMountTransform(target, point, frameWidth, frameHeight, frameDepth)
+    const dx = transform.position[0] - point.x
+    const dz = transform.position[2] - point.z
+    const score = dx * dx + dz * dz - (target.wall.id === preferredWallId ? 0.0001 : 0)
+    if (!best || score < best.score) best = { score, transform }
+  })
+
+  return best?.transform ?? null
+}
+
+export function getWallMountTransformFromRay(targets, ray, frameWidth, frameHeight, frameDepth, preferredWallId = null) {
+  let best = null
+
+  targets.forEach((target) => {
+    const { wall, rect, normal } = target
+    const planePoint = getWallPointAt(wall, rect.center)
+    const planeOffset = wall.thickness * 0.5
+    planePoint.x += normal[0] * planeOffset
+    planePoint.z += normal[2] * planeOffset
+    const denominator = ray.direction.x * normal[0] + ray.direction.z * normal[2]
+    if (Math.abs(denominator) < 0.0001) return
+
+    const distance = (
+      (planePoint.x - ray.origin.x) * normal[0] +
+      (planePoint.z - ray.origin.z) * normal[2]
+    ) / denominator
+    if (distance <= 0) return
+
+    const point = {
+      x: ray.origin.x + ray.direction.x * distance,
+      y: ray.origin.y + ray.direction.y * distance,
+      z: ray.origin.z + ray.direction.z * distance,
+    }
+    const transform = getWallMountTransform(target, point, frameWidth, frameHeight, frameDepth)
+    const missX = transform.position[0] - point.x
+    const missY = transform.position[1] - point.y
+    const missZ = transform.position[2] - point.z
+    const aimMiss = Math.hypot(missX, missY, missZ)
+    const score = distance + aimMiss * 12 - (wall.id === preferredWallId ? 0.0001 : 0)
+    if (!best || score < best.score) best = { score, transform }
+  })
+
+  return best?.transform ?? null
+}
