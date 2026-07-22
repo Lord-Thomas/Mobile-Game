@@ -31,6 +31,10 @@ const ANIMATIONS = {
   'stand-to-sit': 'Stand To Sit.fbx',
   'sitting-idle': 'Sitting Idle.fbx',
   'stand-up': 'Stand Up.fbx',
+  // Épée « ultra cheat » (pack Great Sword, Mixamo) — arme de mêlée du Boss Slime.
+  'sword-slash': 'great-sword-slash.fbx',
+  'sword-idle': 'great-sword-idle.fbx',
+  'sword-impact': 'great-sword-impact.fbx',
 }
 
 mkdirSync(OUT_DIR, { recursive: true })

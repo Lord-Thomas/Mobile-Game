@@ -731,10 +731,12 @@ const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
 const CHEAT_SWORD_MODEL_URL = '/models/weapons/cheat_sword.glb'
 // Réglages de la prise en main de l'épée (à ajuster selon l'orientation du modèle).
+// La rotation se COMPOSE par-dessus l'orientation de la main : [0,0,0] = épée alignée
+// sur l'axe de la main. Ajuster ces 3 knobs après un test visuel.
 const CHEAT_SWORD_GRIP = {
-  targetLength: 1.15, // longueur cible (unités monde)
-  offset: [0.02, 0.05, 0.1], // décalage local par rapport à la main
-  rotation: [Math.PI * 0.15, 0, Math.PI * 0.05], // orientation dans la main
+  targetLength: 1.4, // longueur cible (unités monde)
+  offset: [0, 0, 0], // décalage local par rapport à la main
+  rotation: [0, 0, 0], // rotation de prise (composée avec l'orientation de la main)
 }
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
 const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) ?? null
@@ -5678,6 +5680,7 @@ function PlayerAvatar({
   const run = useMixamoGlbAnimation('/models/player/anim/run.glb')
   const kick = useMixamoGlbAnimation('/models/player/anim/kick.glb')
   const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
+  const swordSlash = useMixamoGlbAnimation('/models/player/anim/sword-slash.glb')
   const wave = useMixamoGlbAnimation('/models/player/anim/waving.glb')
   const dance = useMixamoGlbAnimation('/models/player/anim/dance.glb')
   const pointingUp = useMixamoGlbAnimation('/models/player/anim/pointing-up.glb')
@@ -5854,6 +5857,7 @@ function PlayerAvatar({
       { source: run.animations[0], name: 'run' },
       { source: kick.animations[0], name: 'kick' },
       { source: punch.animations[0], name: 'punch' },
+      { source: swordSlash.animations[0], name: 'swordSlash' },
       { source: wave.animations[0], name: 'wave' },
       { source: dance.animations[0], name: 'dance' },
       { source: pointingUp.animations[0], name: 'pointingUp' },
@@ -5879,7 +5883,7 @@ function PlayerAvatar({
         }
         return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordSlash.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const { actions, mixer } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
@@ -5969,7 +5973,7 @@ function PlayerAvatar({
 
     if (previousAction === nextAction) return
 
-    const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
+    const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || nextMotion === 'swordSlash' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
     const fadeDuration =
       previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
         ? PLAYER_JUMP_TO_FALL_ANIMATION_FADE
@@ -5985,7 +5989,7 @@ function PlayerAvatar({
       .reset()
       .setLoop(isOneShot ? LoopOnce : LoopRepeat, isOneShot ? 1 : Infinity)
       .setEffectiveWeight(1)
-      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : nextMotion === 'punch' ? 1.35 : 1)
+      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : nextMotion === 'punch' ? 1.35 : nextMotion === 'swordSlash' ? 1.25 : 1)
       .play()
     nextAction.clampWhenFinished = isOneShot
 
@@ -6006,14 +6010,19 @@ function PlayerAvatar({
     return true
   }
 
+  // Avec l'épée équipée, la frappe joue le coup d'épée au lieu du poing.
+  const resolveMotion = (m) => (equippedWeapon === 'cheat_sword' && m === 'punch' ? 'swordSlash' : m)
+
   useEffect(() => {
-    if (currentActionRef.current || !actions[motion]) return
-    playMotion(motion)
-  }, [actions, motion])
+    const effective = resolveMotion(motion)
+    if (currentActionRef.current || !actions[effective]) return
+    playMotion(effective)
+  }, [actions, motion, equippedWeapon])
 
   useFrame((state, delta) => {
-    if (currentMotionRef.current !== motion) {
-      playMotion(motion)
+    const effectiveMotion = resolveMotion(motion)
+    if (currentMotionRef.current !== effectiveMotion) {
+      playMotion(effectiveMotion)
     }
 
     if (revealFramesRef.current <= 0) return
@@ -6309,12 +6318,14 @@ function CheatSwordMesh() {
   return <primitive object={swordScene} scale={fitScale} />
 }
 
-// Épée tenue en main : suit le bone de la main (repère local du corps) avec une
-// orientation de prise fixe. Contrairement aux armes magiques flottantes, elle
-// colle à la main (pas de lerp) pour rester "tenue".
+// Épée tenue en main : suit la POSITION et la ROTATION du bone de la main (dans le
+// repère du corps), pour qu'elle swingue avec l'animation d'attaque. Une prise fixe
+// (offset + rotation) se compose par-dessus l'orientation de la main.
 function HeldSword({ active, handBoneRef, playerGroupRef }) {
   const groupRef = useRef(null)
   const worldPos = useRef(new Vector3())
+  const worldQuat = useRef(new Quaternion())
+  const parentQuat = useRef(new Quaternion())
 
   useFrame(() => {
     const g = groupRef.current
@@ -6326,16 +6337,24 @@ function HeldSword({ active, handBoneRef, playerGroupRef }) {
 
     const hand = handBoneRef?.current
     const playerGroup = playerGroupRef?.current
-    if (hand && playerGroup) {
-      hand.getWorldPosition(worldPos.current)
-      playerGroup.worldToLocal(worldPos.current)
-      g.position.set(
-        worldPos.current.x + CHEAT_SWORD_GRIP.offset[0],
-        worldPos.current.y + CHEAT_SWORD_GRIP.offset[1],
-        worldPos.current.z + CHEAT_SWORD_GRIP.offset[2],
-      )
-    }
-    g.rotation.set(CHEAT_SWORD_GRIP.rotation[0], CHEAT_SWORD_GRIP.rotation[1], CHEAT_SWORD_GRIP.rotation[2])
+    if (!hand || !playerGroup) return
+
+    // Position : main → repère local du corps, + petit offset de prise.
+    hand.getWorldPosition(worldPos.current)
+    playerGroup.worldToLocal(worldPos.current)
+    g.position.set(
+      worldPos.current.x + CHEAT_SWORD_GRIP.offset[0],
+      worldPos.current.y + CHEAT_SWORD_GRIP.offset[1],
+      worldPos.current.z + CHEAT_SWORD_GRIP.offset[2],
+    )
+
+    // Rotation : orientation de la main dans le repère du corps, + rotation de prise.
+    hand.getWorldQuaternion(worldQuat.current)
+    playerGroup.getWorldQuaternion(parentQuat.current)
+    g.quaternion.copy(parentQuat.current.invert().multiply(worldQuat.current))
+    g.rotateX(CHEAT_SWORD_GRIP.rotation[0])
+    g.rotateY(CHEAT_SWORD_GRIP.rotation[1])
+    g.rotateZ(CHEAT_SWORD_GRIP.rotation[2])
   })
 
   return (
