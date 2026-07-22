@@ -21832,6 +21832,7 @@ function App() {
           <SlimeBossSystem
             placements={SUMMONING_ALTAR_PLACEMENTS}
             playerPositionRef={playerPositionRef}
+            onDamagePlayer={({ damage }) => handlePlayerHit({ damage, sourceId: 'slime_boss' })}
             enabled={currentZone === ZONES.outside && mode === 'play'}
           />
           <LootDrops

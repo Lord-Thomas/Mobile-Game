@@ -7,12 +7,30 @@ export const SLIME_BOSS = {
   name: 'Roi Slime',
   modelUrl: '/models/enemies/slime_boss.glb',
   maxHp: 2000,
-  targetHeight: 3.4, // hauteur visuelle cible (unités monde), normalisée depuis la bbox
-  spawnForwardOffset: 3.6, // distance d'apparition devant l'autel
+  targetHeight: 4.5, // hauteur visuelle cible (unités monde), normalisée depuis la bbox
+  spawnForwardOffset: 9, // distance d'apparition devant l'autel
   summonRange: 3.0, // portée d'interaction avec l'autel
-  // Seuils de phase (fraction de vie). V1 : n'affiche que la phase, les attaques
-  // viendront ensuite et brancheront leurs paramètres dessus.
+  // Seuils de phase (fraction de vie). Les attaques accélèrent selon la phase.
   phaseThresholds: [0.6, 0.3],
+
+  // Attaque « bond écrasant + onde de choc ». Séparation volontaire (cf. brief) :
+  // ces durées pilotent la MACHINE À ÉTATS ; le rendu (bond, anneau) et la DÉTECTION
+  // (bande de l'anneau + hauteur du joueur pour l'esquive) en découlent.
+  shockwave: {
+    telegraphMs: 850, // le boss se ramasse (télégraphe) avant de sauter
+    jumpMs: 700, // bond en l'air
+    shockMs: 800, // propagation de l'onde au sol
+    recoverMs: 1100, // récupération
+    idleGapMs: 1600, // pause avant l'attaque suivante
+    jumpHeight: 3.4, // hauteur du bond (unités monde)
+    maxRadius: 10, // rayon max de l'onde
+    band: 1.7, // épaisseur du front qui inflige les dégâts
+    damage: 18,
+    dodgeHeight: 0.9, // le joueur doit être à cette hauteur (sauter) pour esquiver
+  },
+
+  // Multiplicateur de vitesse d'attaque par phase (1 → 3). Le boss devient plus agressif.
+  phaseSpeed: [1, 1.18, 1.42],
 }
 
 export { SUMMONING_ALTAR_OBJECT_ID }

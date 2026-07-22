@@ -9,6 +9,8 @@ const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFER
 const MAX_STEP_UP = 0.58
 const STEP_UP_BY_OBJECT_ID = {
   skeleton_tower: 1.08,
+  // Autel à escaliers : step-up généreux pour monter les marches sans sauter.
+  summoning_altar: 0.85,
 }
 const WALK_SEARCH_DOWN = 3.2
 const WALKABLE_TRIANGLE_TOLERANCE = 0.045
