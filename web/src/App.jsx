@@ -17692,6 +17692,7 @@ function App() {
   const nearbyTv = useGameStore((s) => s.near.tv ?? null)
   const nearbyYouTubeFrame = useGameStore((s) => s.near.youtubeFrame ?? null)
   const [youtubeFrameEditor, setYoutubeFrameEditor] = useState(null)
+  const youtubeFrameEditorOpen = Boolean(youtubeFrameEditor)
   useEffect(() => {
     const interval = window.setInterval(() => setSpellCooldownNow(Date.now()), 100)
     return () => window.clearInterval(interval)
@@ -20760,6 +20761,7 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
+      if (event.repeat || isTextInputEvent(event) || youtubeFrameEditorOpen) return
       if (getKeyboardKey(event) !== 'e') return
       if (mode !== 'play') return
       if (isLearningMagicSkull) {
@@ -20794,7 +20796,7 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [mode, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbyYouTubeFrame, canModifyWorld, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull])
+  }, [mode, isLearningMagicSkull, isNearMagicSkullDiscovery, magicSkullDiscovered, isNearOutdoorDoor, nearbyYouTubeFrame, canModifyWorld, nearbySeat, seatedState, currentZone, zoneFadeActive, learnMagicSkull, youtubeFrameEditorOpen])
 
   const openCustomizationMode = () => {
     if (!canModifyWorld) return
@@ -22088,7 +22090,12 @@ function App() {
       />
       {showGameplayUi && canModifyWorld && youtubeFrameEditor && (
         <div className="youtube-frame-editor-backdrop" role="presentation" onPointerDown={() => setYoutubeFrameEditor(null)}>
-          <form className="youtube-frame-editor" onSubmit={saveYouTubeFrameChannel} onPointerDown={(event) => event.stopPropagation()}>
+          <form
+            className="youtube-frame-editor"
+            onSubmit={saveYouTubeFrameChannel}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
             <button className="youtube-frame-editor-close" type="button" onClick={() => setYoutubeFrameEditor(null)} aria-label="Fermer">×</button>
             <h2>{youtubeFrameEditor.platform === 'tiktok' ? 'Profil du cadre TikTok' : 'Chaîne du cadre YouTube'}</h2>
             <p>Colle le lien public {youtubeFrameEditor.platform === 'tiktok' ? 'du profil' : 'de la chaîne'} à afficher.</p>
