@@ -737,6 +737,8 @@ const CHEAT_SWORD_GRIP = {
   targetLength: 1.4, // longueur cible (unités monde)
   offset: [0, 0, 0], // décalage local par rapport à la main
   rotation: [0, 0, 0], // rotation de prise (composée avec l'orientation de la main)
+  // Repli utilisé uniquement par les anciens GLB dépourvus de weapon_grip_r.
+  modelOffset: [0, -0.13, 0],
 }
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
 const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) ?? null
@@ -5680,6 +5682,9 @@ function PlayerAvatar({
   const run = useMixamoGlbAnimation('/models/player/anim/run.glb')
   const kick = useMixamoGlbAnimation('/models/player/anim/kick.glb')
   const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb')
+  const swordIdle = useMixamoGlbAnimation('/models/player/anim/sword-idle.glb')
+  const swordWalk = useMixamoGlbAnimation('/models/player/anim/sword-walk.glb')
+  const swordRun = useMixamoGlbAnimation('/models/player/anim/sword-run.glb')
   const swordSlash = useMixamoGlbAnimation('/models/player/anim/sword-slash.glb')
   const wave = useMixamoGlbAnimation('/models/player/anim/waving.glb')
   const dance = useMixamoGlbAnimation('/models/player/anim/dance.glb')
@@ -5857,6 +5862,9 @@ function PlayerAvatar({
       { source: run.animations[0], name: 'run' },
       { source: kick.animations[0], name: 'kick' },
       { source: punch.animations[0], name: 'punch' },
+      { source: swordIdle.animations[0], name: 'swordIdle' },
+      { source: swordWalk.animations[0], name: 'swordWalk' },
+      { source: swordRun.animations[0], name: 'swordRun' },
       { source: swordSlash.animations[0], name: 'swordSlash' },
       { source: wave.animations[0], name: 'wave' },
       { source: dance.animations[0], name: 'dance' },
@@ -5878,12 +5886,12 @@ function PlayerAvatar({
         if (name === 'wave' || name === 'dance' || name === 'pointingUp') {
           lockEmoteHipsHeight(clip, hipsRestHeight)
         }
-        if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run') {
+        if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun') {
           lockHipsPlanarPosition(clip)
         }
         return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordSlash.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const { actions, mixer } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
@@ -6010,8 +6018,16 @@ function PlayerAvatar({
     return true
   }
 
-  // Avec l'épée équipée, la frappe joue le coup d'épée au lieu du poing.
-  const resolveMotion = (m) => (equippedWeapon === 'cheat_sword' && m === 'punch' ? 'swordSlash' : m)
+  // Avec l'épée équipée, le joueur adopte sa garde au repos et frappe avec
+  // l'animation dédiée. Les déplacements et les états aériens restent inchangés.
+  const resolveMotion = (nextMotion) => {
+    if (equippedWeapon !== 'cheat_sword') return nextMotion
+    if (nextMotion === 'idle') return 'swordIdle'
+    if (nextMotion === 'walk') return 'swordWalk'
+    if (nextMotion === 'run') return 'swordRun'
+    if (nextMotion === 'punch') return 'swordSlash'
+    return nextMotion
+  }
 
   useEffect(() => {
     const effective = resolveMotion(motion)
@@ -6315,7 +6331,20 @@ function CheatSwordMesh() {
     const size = box.getSize(new Vector3())
     return CHEAT_SWORD_GRIP.targetLength / Math.max(size.x, size.y, size.z, 0.001)
   }, [swordScene])
-  return <primitive object={swordScene} scale={fitScale} />
+  const modelPosition = useMemo(() => {
+    const gripSocket = swordScene.getObjectByName('weapon_grip_r')
+    if (!gripSocket) return new Vector3(...CHEAT_SWORD_GRIP.modelOffset)
+
+    // Exprime le socket dans le repère local de la scène, puis déplace le modèle
+    // dans le sens opposé : après scale, le socket tombe exactement sur l'origine
+    // du groupe HeldSword, elle-même synchronisée avec mixamorigRightHand.
+    swordScene.updateMatrixWorld(true)
+    const gripPosition = gripSocket.getWorldPosition(new Vector3())
+    swordScene.worldToLocal(gripPosition)
+    return gripPosition.multiplyScalar(-fitScale)
+  }, [swordScene, fitScale])
+
+  return <primitive object={swordScene} position={modelPosition} scale={fitScale} />
 }
 
 // Épée tenue en main : suit la POSITION et la ROTATION du bone de la main (dans le

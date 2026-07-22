@@ -35,6 +35,10 @@ const ANIMATIONS = {
   'sword-slash': 'great-sword-slash.fbx',
   'sword-idle': 'great-sword-idle.fbx',
   'sword-impact': 'great-sword-impact.fbx',
+  // Ces deux sources sont déjà conservées avec le pack importé par le projet.
+  'sword-walk': '../public/models/player/anim/Great Sword Pack/great sword walk.fbx',
+  // La variante sans suffixe se déplace vers -Z et paraît reculer dans notre repère.
+  'sword-run': '../public/models/player/anim/Great Sword Pack/great sword run (2).fbx',
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
