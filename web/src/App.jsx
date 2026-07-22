@@ -46,6 +46,7 @@ import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATAL
 import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
 import SlimeBossSystem from './game/boss/SlimeBossSystem'
 import BossHud from './game/boss/BossHud'
+import BossRewardWatcher from './game/boss/BossRewardWatcher'
 import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
 import QuestTalkPrompt from './ui/QuestTalkPrompt'
@@ -728,6 +729,13 @@ const PLAYER_MODEL_URL = '/models/player/player.glb'
 const PLAYER_FACE_DETAILS_MASK_URL = '/models/player/masks/face-details-mask.png'
 const MAGIC_BOOK_MODEL_URL = '/models/weapons/magic_book.glb'
 const MAGIC_SKULL_MODEL_URL = '/models/weapons/magic_skull_necromancer.glb'
+const CHEAT_SWORD_MODEL_URL = '/models/weapons/cheat_sword.glb'
+// Réglages de la prise en main de l'épée (à ajuster selon l'orientation du modèle).
+const CHEAT_SWORD_GRIP = {
+  targetLength: 1.15, // longueur cible (unités monde)
+  offset: [0.02, 0.05, 0.1], // décalage local par rapport à la main
+  rotation: [Math.PI * 0.15, 0, Math.PI * 0.05], // orientation dans la main
+}
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
 const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) ?? null
 // PNJ de quête placés depuis l'éditeur (statique au chargement, comme les autres
@@ -5220,6 +5228,7 @@ function Player({
           />
           <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
           <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
+          <HeldSword active={equippedWeapon === 'cheat_sword'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
           <MagicWings wingsSpellRef={wingsSpellRef} currentZone={currentZone} />
         </group>
         <WingsSpeedTrail wingsSpellRef={wingsSpellRef} />
@@ -6279,6 +6288,66 @@ function FloatingMagicSkull({ active, handBoneRef, playerGroupRef }) {
   )
 }
 
+function CheatSwordMesh() {
+  const { scene } = useGLTF(CHEAT_SWORD_MODEL_URL)
+  const swordScene = useMemo(() => {
+    const next = scene.clone(true)
+    next.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.castShadow = true
+        child.frustumCulled = false
+      }
+    })
+    return next
+  }, [scene])
+  // Normalise l'échelle (taille du modèle inconnue) vers une longueur d'épée tenable.
+  const fitScale = useMemo(() => {
+    const box = new Box3().setFromObject(swordScene)
+    const size = box.getSize(new Vector3())
+    return CHEAT_SWORD_GRIP.targetLength / Math.max(size.x, size.y, size.z, 0.001)
+  }, [swordScene])
+  return <primitive object={swordScene} scale={fitScale} />
+}
+
+// Épée tenue en main : suit le bone de la main (repère local du corps) avec une
+// orientation de prise fixe. Contrairement aux armes magiques flottantes, elle
+// colle à la main (pas de lerp) pour rester "tenue".
+function HeldSword({ active, handBoneRef, playerGroupRef }) {
+  const groupRef = useRef(null)
+  const worldPos = useRef(new Vector3())
+
+  useFrame(() => {
+    const g = groupRef.current
+    if (!g) return
+    if (!active) {
+      g.position.set(0, -500, 0)
+      return
+    }
+
+    const hand = handBoneRef?.current
+    const playerGroup = playerGroupRef?.current
+    if (hand && playerGroup) {
+      hand.getWorldPosition(worldPos.current)
+      playerGroup.worldToLocal(worldPos.current)
+      g.position.set(
+        worldPos.current.x + CHEAT_SWORD_GRIP.offset[0],
+        worldPos.current.y + CHEAT_SWORD_GRIP.offset[1],
+        worldPos.current.z + CHEAT_SWORD_GRIP.offset[2],
+      )
+    }
+    g.rotation.set(CHEAT_SWORD_GRIP.rotation[0], CHEAT_SWORD_GRIP.rotation[1], CHEAT_SWORD_GRIP.rotation[2])
+  })
+
+  return (
+    <group ref={groupRef} position={[0.4, 0.9, 0]}>
+      <Suspense fallback={null}>
+        <CheatSwordMesh />
+      </Suspense>
+      <pointLight color="#66e0ff" intensity={active ? 0.9 : 0} distance={2.2} />
+    </group>
+  )
+}
+
 // Pre-allocated geometries — created once, shared by all fireball instances.
 // Avoids per-cast GPU upload stutter.
 function MagicSkullDiscovery({ discovered, isNear }) {
@@ -7218,7 +7287,7 @@ function RemotePlayer({
         setDisplayedTitleId(nextTitleId)
       }
 
-      const nextEquippedWeapon = state.equippedWeapon === 'magic_book' ? 'magic_book' : null
+      const nextEquippedWeapon = (state.equippedWeapon === 'magic_book' || state.equippedWeapon === 'cheat_sword') ? state.equippedWeapon : null
       if (nextEquippedWeapon !== displayedEquippedWeaponRef.current) {
         displayedEquippedWeaponRef.current = nextEquippedWeapon
         setDisplayedEquippedWeapon(nextEquippedWeapon)
@@ -7427,6 +7496,7 @@ function RemotePlayer({
           />
           <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
           <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
+          <HeldSword active={displayedEquippedWeapon === 'cheat_sword'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
           <Suspense fallback={null}>
             <AngelWingsModel flightRef={remoteWingsFlightRef} currentZone={currentZone} />
           </Suspense>
@@ -7942,6 +8012,7 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
 const BAG_ITEM_DEFS = [
   { id: 'magic_book', icon: '📖', name: 'Livre Magique', desc: 'Lance des boules de feu' },
   { id: 'magic_skull', icon: '💀', name: 'Crâne Nécromancien', desc: 'Invoque 3 squelettes alliés' },
+  { id: 'cheat_sword', icon: '🗡️', name: 'Épée Ultra Cheat', desc: 'Arme rare du Boss Slime' },
 ]
 
 const BAG_GRID_SIZE = 12
@@ -17664,6 +17735,7 @@ function App() {
   const activeSlimePetId = useGameStore((s) => s.inventory.activeSlimePetId)
   const ownedMagicBook = useGameStore((s) => s.equipment.ownedMagicBook)
   const ownedMagicSkull = useGameStore((s) => s.equipment.ownedMagicSkull)
+  const ownedCheatSword = useGameStore((s) => s.equipment.ownedCheatSword)
   const magicSkullDiscovered = useGameStore((s) => s.progress.magicSkullDiscovered)
   const isNearMagicSkullDiscovery = useGameStore((s) => s.near.magicSkullDiscovery ?? false)
   const [isLearningMagicSkull, setIsLearningMagicSkull] = useState(false)
@@ -18140,7 +18212,7 @@ function App() {
     ownedMagicBook,
     ownedMagicSkull,
     magicSkullDiscovered,
-    ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
+    ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull', ownedCheatSword && 'cheat_sword'].filter(Boolean),
     unlockedAchievements,
     mobKillCount,
     ownedMounts,
@@ -18188,7 +18260,7 @@ function App() {
       ownedMagicBook,
       ownedMagicSkull,
       magicSkullDiscovered,
-      ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull'].filter(Boolean),
+      ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull', ownedCheatSword && 'cheat_sword'].filter(Boolean),
       unlockedAchievements,
       mobKillCount,
       ownedMounts,
@@ -18241,6 +18313,7 @@ function App() {
     setInventory('activeSlimePetId',null)
     setEquipment('ownedMagicBook',false)
     setEquipment('ownedMagicSkull',false)
+    setEquipment('ownedCheatSword',false)
     setProgress('magicSkullDiscovered',isAdminMode)
     setNear('magicSkullDiscovery', false)
     summonSlotRefs.current.forEach((slotRef) => { slotRef.current = null })
@@ -18403,6 +18476,7 @@ function App() {
       const hasMagicSkull = Boolean(parsed.ownedMagicSkull || parsedOwnedWeapons.includes('magic_skull'))
       setEquipment('ownedMagicBook',hasMagicBook)
       setEquipment('ownedMagicSkull',hasMagicSkull)
+      setEquipment('ownedCheatSword',Boolean(parsedOwnedWeapons.includes('cheat_sword')))
       setProgress('magicSkullDiscovered',Boolean(isAdminMode || parsed.magicSkullDiscovered || hasMagicSkull))
       const parsedOwnedMounts = Array.isArray(parsed.ownedMounts)
         ? parsed.ownedMounts.filter((id) => VALID_MOUNT_IDS.has(id))
@@ -21980,7 +22054,7 @@ function App() {
         <BagPanel
           open={PUBLIC_BUILD_FLAGS.showWeaponInventory && isWeaponMenuOpen}
           ownedItems={BAG_ITEM_DEFS
-            .filter((def) => def.id === 'magic_book' ? ownedMagicBook : def.id === 'magic_skull' ? ownedMagicSkull : false)
+            .filter((def) => def.id === 'magic_book' ? ownedMagicBook : def.id === 'magic_skull' ? ownedMagicSkull : def.id === 'cheat_sword' ? ownedCheatSword : false)
             .map((def) => ({
               ...def,
               name: objectCatalog[def.id]?.name ?? def.name,
@@ -22099,6 +22173,7 @@ function App() {
         onRequestStandUp={requestStandUp}
       />
       <BossHud placements={SUMMONING_ALTAR_PLACEMENTS} />
+      <BossRewardWatcher onDefeated={() => setEquipment('ownedCheatSword', true)} />
       {showGameplayUi && canModifyWorld && youtubeFrameEditor && (
         <div className="youtube-frame-editor-backdrop" role="presentation" onPointerDown={() => setYoutubeFrameEditor(null)}>
           <form

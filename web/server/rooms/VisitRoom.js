@@ -66,7 +66,7 @@ function sanitizeCharacterAppearance(value) {
 }
 
 function sanitizeEquippedWeapon(value) {
-  return value === 'magic_book' ? 'magic_book' : null
+  return value === 'magic_book' || value === 'cheat_sword' ? value : null
 }
 
 function sanitizeCatState(value) {

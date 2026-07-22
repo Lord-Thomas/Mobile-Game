@@ -144,6 +144,7 @@ export const useGameStore = create((set) => ({
     equippedWeapon: null,
     ownedMagicBook: false,
     ownedMagicSkull: false,
+    ownedCheatSword: false, // récompense du Boss Slime (arme rare, garantie 1×/joueur)
     ownedTitleIds: [],
     equippedTitleId: null,
     characterAppearance: CHARACTER_DEFAULT_APPEARANCE,
