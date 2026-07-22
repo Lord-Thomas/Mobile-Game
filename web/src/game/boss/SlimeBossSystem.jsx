@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
@@ -51,13 +51,42 @@ function AltarProximity({ placements, playerPositionRef, enabled }) {
   return null
 }
 
-function BossModel({ playerPositionRef, onDamagePlayer }) {
+function BossModel({ playerPositionRef, onDamagePlayer, registerCombatTarget, swordEquipped }) {
   const gltf = useGLTF(SLIME_BOSS.modelUrl)
   const groupRef = useRef(null)
   const ringRef = useRef(null)
   const deathTimeRef = useRef(0)
   const attackRef = useRef({ t: 0, waveHit: false })
   const spawn = useBossStore((s) => s.spawn)
+
+  // Cible de combat : permet à la frappe existante (poing/épée) de toucher le boss.
+  // L'épée « ultra cheat » remplace les dégâts de base par un montant massif.
+  const swordRef = useRef(swordEquipped)
+  swordRef.current = swordEquipped
+  const targetRef = useRef(null)
+  if (!targetRef.current) {
+    targetRef.current = {
+      id: 'slime_boss',
+      position: { x: 0, y: 0, z: 0 },
+      radius: SLIME_BOSS.melee.hitRadius,
+      height: SLIME_BOSS.targetHeight,
+      disabled: false,
+      takeDamage: ({ damage }) => {
+        const dealt = swordRef.current ? SLIME_BOSS.melee.swordDamage : damage
+        useBossStore.getState().damage(dealt)
+        return true
+      },
+    }
+  }
+
+  useEffect(() => {
+    if (!registerCombatTarget || !spawn) return undefined
+    const target = targetRef.current
+    target.position.x = spawn[0]
+    target.position.y = spawn[1]
+    target.position.z = spawn[2]
+    return registerCombatTarget('slime_boss', target)
+  }, [registerCombatTarget, spawn])
 
   // Normalise le modèle à la hauteur cible + pose les "pieds" à y=0 (une seule fois).
   const { scene, baseScale, footOffset } = useMemo(() => {
@@ -73,6 +102,8 @@ function BossModel({ playerPositionRef, onDamagePlayer }) {
     const group = groupRef.current
     if (!group || !spawn) return
     const { state, phase } = useBossStore.getState()
+    // Le boss n'est frappable que pendant le combat (pas en mort/reset).
+    if (targetRef.current) targetRef.current.disabled = state !== 'active'
     const cfg = SLIME_BOSS.shockwave
     const cycle = cfg.telegraphMs + cfg.jumpMs + cfg.shockMs + cfg.recoverMs + cfg.idleGapMs
 
@@ -173,13 +204,27 @@ function BossModel({ playerPositionRef, onDamagePlayer }) {
   )
 }
 
-export default function SlimeBossSystem({ placements = [], playerPositionRef, onDamagePlayer, enabled = true }) {
+export default function SlimeBossSystem({
+  placements = [],
+  playerPositionRef,
+  onDamagePlayer,
+  registerCombatTarget,
+  swordEquipped = false,
+  enabled = true,
+}) {
   const active = useBossStore((s) => s.active)
 
   return (
     <>
       <AltarProximity placements={placements} playerPositionRef={playerPositionRef} enabled={enabled} />
-      {active && <BossModel playerPositionRef={playerPositionRef} onDamagePlayer={onDamagePlayer} />}
+      {active && (
+        <BossModel
+          playerPositionRef={playerPositionRef}
+          onDamagePlayer={onDamagePlayer}
+          registerCombatTarget={registerCombatTarget}
+          swordEquipped={swordEquipped}
+        />
+      )}
     </>
   )
 }

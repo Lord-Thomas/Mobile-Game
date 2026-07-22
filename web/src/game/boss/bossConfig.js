@@ -31,6 +31,14 @@ export const SLIME_BOSS = {
 
   // Multiplicateur de vitesse d'attaque par phase (1 → 3). Le boss devient plus agressif.
   phaseSpeed: [1, 1.18, 1.42],
+
+  // Mêlée : le boss s'enregistre comme cible de combat → la frappe du joueur
+  // (poing / épée) le touche via le système existant (arc + combo). L'épée « ultra
+  // cheat » inflige des dégâts massifs (bonus anti-slime intégré au montant élevé).
+  melee: {
+    hitRadius: 2.2, // rayon de la cible de combat (le boss est gros)
+    swordDamage: 300, // dégâts par coup d'épée (poing = dégâts de base du jeu)
+  },
 }
 
 export { SUMMONING_ALTAR_OBJECT_ID }

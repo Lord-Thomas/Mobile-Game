@@ -21907,6 +21907,8 @@ function App() {
             placements={SUMMONING_ALTAR_PLACEMENTS}
             playerPositionRef={playerPositionRef}
             onDamagePlayer={({ damage }) => handlePlayerHit({ damage, sourceId: 'slime_boss' })}
+            registerCombatTarget={registerCombatTarget}
+            swordEquipped={equippedWeapon === 'cheat_sword'}
             enabled={currentZone === ZONES.outside && mode === 'play'}
           />
           <LootDrops
