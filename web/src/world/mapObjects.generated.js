@@ -981,6 +981,17 @@ export const MAP_OBJECT_PLACEMENTS = [
     ],
     "rotationY": 2.2,
     "scale": 0.98
+  },
+  {
+    "id": "summoning_altar_mrw3cz84",
+    "objectId": "summoning_altar",
+    "position": [
+      28.5,
+      0.14695032563494964,
+      11.5
+    ],
+    "rotationY": 0,
+    "scale": 1
   }
 ]
 

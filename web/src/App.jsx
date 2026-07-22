@@ -42,8 +42,10 @@ import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts, syncPlayerHouseOutdoorColliders } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { collisionReady } from './world/mapObjectCollisionData'
-import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './world/mapObjects'
+import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, SUMMONING_ALTAR_OBJECT_ID } from './world/mapObjects'
 import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
+import SlimeBossSystem from './game/boss/SlimeBossSystem'
+import BossHud from './game/boss/BossHud'
 import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
 import QuestTalkPrompt from './ui/QuestTalkPrompt'
@@ -731,6 +733,8 @@ const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) =
 // PNJ de quête placés depuis l'éditeur (statique au chargement, comme les autres
 // placements). Vide tant qu'aucun PNJ n'a été placé + sauvegardé.
 const QUEST_NPC_PLACEMENTS = MAP_OBJECT_PLACEMENTS.filter((placement) => placement.objectId === QUEST_NPC_OBJECT_ID)
+// Autels d'invocation placés depuis l'éditeur de map (statique au chargement).
+const SUMMONING_ALTAR_PLACEMENTS = MAP_OBJECT_PLACEMENTS.filter((placement) => placement.objectId === SUMMONING_ALTAR_OBJECT_ID)
 // Plafond d'objets lootés au sol affichés simultanément (anti-lag : ils
 // s'absorbent en ~0,8 s, ce plafond ne mord qu'en cas de massacre simultané).
 const LOOT_DROP_MAX = 60
@@ -21825,6 +21829,11 @@ function App() {
             enabled={currentZone === ZONES.outside && mode === 'play'}
             onNearChange={(id) => { setNear('questNpcId', id); if (!id) setQuest('dialogOpen',false) }}
           />
+          <SlimeBossSystem
+            placements={SUMMONING_ALTAR_PLACEMENTS}
+            playerPositionRef={playerPositionRef}
+            enabled={currentZone === ZONES.outside && mode === 'play'}
+          />
           <LootDrops
             drops={lootDrops}
             playerPositionRef={playerPositionRef}
@@ -22088,6 +22097,7 @@ function App() {
         onRequestSit={requestSit}
         onRequestStandUp={requestStandUp}
       />
+      <BossHud placements={SUMMONING_ALTAR_PLACEMENTS} />
       {showGameplayUi && canModifyWorld && youtubeFrameEditor && (
         <div className="youtube-frame-editor-backdrop" role="presentation" onPointerDown={() => setYoutubeFrameEditor(null)}>
           <form

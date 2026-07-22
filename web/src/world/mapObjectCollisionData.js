@@ -9,6 +9,7 @@
 // objectId → URL du .bin (servi depuis public/).
 const COLLISION_BIN_URLS = {
   skeleton_tower: '/collision/skeleton_tower.bin',
+  summoning_altar: '/collision/summoning_altar.bin',
 }
 
 // objectId → source { vertices, indices, walkTriangles, solidTriangles } (vues typées).

@@ -24,6 +24,7 @@ const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
 const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFERENCE_HEIGHT_METERS
 const MAGIC_SKULL_DISCOVERY_TOWER_Y_OFFSET = 0.14
 export const MAGIC_SKULL_DISCOVERY_OBJECT_ID = 'magic_skull_discovery'
+export const SUMMONING_ALTAR_OBJECT_ID = 'summoning_altar'
 const LOOT_ITEM_IDS = new Set(ALL_ITEM_IDS)
 
 const BASE_MAP_OBJECT_CATALOG = {
@@ -50,6 +51,23 @@ const BASE_MAP_OBJECT_CATALOG = {
     hitHeightMeters: 0.8,
     defaultScale: 1,
     thumbnailLabel: 'Crane',
+  },
+  // Autel d'invocation du Boss Slime : plaçable depuis l'éditeur de map comme
+  // n'importe quel objet. Le modèle est rendu par MapObjectPlaceables ;
+  // l'interaction (proximité, prompt, invocation) est gérée séparément via
+  // SUMMONING_ALTAR_OBJECT_ID (cf. boss). Un seul type d'autel / un seul boss en V1,
+  // mais l'archi permet d'en ajouter d'autres (cf. ADR 0002).
+  [SUMMONING_ALTAR_OBJECT_ID]: {
+    id: SUMMONING_ALTAR_OBJECT_ID,
+    name: "Autel d'invocation",
+    modelUrl: '/models/map/summoning_altar/model.glb',
+    targetHeightMeters: 1.2,
+    colliderRadius: 0.9,
+    selectionRadius: 1.3,
+    hitRadius: 1.6,
+    hitHeightMeters: 1.4,
+    defaultScale: 1,
+    thumbnailLabel: 'Autel',
   },
   // PNJ de quête : plaçable depuis l'éditeur de map comme n'importe quel objet.
   // Le modèle (FBX) est rendu par MapObjectPlaceables ; l'interaction (marqueur,
