@@ -1,6 +1,6 @@
 // Config statique du Boss Slime (V1). Data-driven pour permettre d'autres boss
 // plus tard sans cas particulier (cf. docs/decisions/0002-autorite-boss.md).
-import { SUMMONING_ALTAR_OBJECT_ID } from '../../world/mapObjects'
+const SUMMONING_ALTAR_OBJECT_ID = 'summoning_altar'
 
 export const SLIME_BOSS = {
   id: 'slime_boss',
@@ -12,6 +12,11 @@ export const SLIME_BOSS = {
   summonRange: 3.0, // portée d'interaction avec l'autel
   // Seuils de phase (fraction de vie). Les attaques accélèrent selon la phase.
   phaseThresholds: [0.6, 0.3],
+  arenaRadius: 18,
+  resetDistance: 28,
+  resetAfterMs: 12_000,
+  chaseSpeed: [1.15, 1.4, 1.7],
+  attackRange: 8.5,
 
   // Attaque « bond écrasant + onde de choc ». Séparation volontaire (cf. brief) :
   // ces durées pilotent la MACHINE À ÉTATS ; le rendu (bond, anneau) et la DÉTECTION
@@ -32,12 +37,35 @@ export const SLIME_BOSS = {
   // Multiplicateur de vitesse d'attaque par phase (1 → 3). Le boss devient plus agressif.
   phaseSpeed: [1, 1.18, 1.42],
 
+  projectile: {
+    telegraphMs: 1050,
+    poolDurationMs: 7200,
+    poolTickMs: 850,
+    impactDamage: 14,
+    poolDamage: 5,
+    poolRadius: 1.75,
+    slowMultiplier: 0.58,
+    countByPhase: [0, 3, 5],
+  },
+
+  summons: {
+    phases: [2, 3],
+    countByPhase: [0, 3, 5],
+    radius: 0.75,
+    speed: 1.55,
+    damage: 7,
+    attackCooldownMs: 1250,
+    greenModelUrl: '/models/enemies/cute+slime+3d+model.glb',
+    blueModelUrl: '/models/enemies/blue_slime.glb',
+  },
+
   // Mêlée : le boss s'enregistre comme cible de combat → la frappe du joueur
   // (poing / épée) le touche via le système existant (arc + combo). L'épée « ultra
   // cheat » inflige des dégâts massifs (bonus anti-slime intégré au montant élevé).
   melee: {
     hitRadius: 2.2, // rayon de la cible de combat (le boss est gros)
     swordDamage: 300, // dégâts par coup d'épée (poing = dégâts de base du jeu)
+    chargedMultiplier: 2.25,
   },
 }
 

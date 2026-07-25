@@ -1,21 +1,11 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { getTerrainHeight } from '../../world/terrain/terrainGeometry'
 import { useBossStore } from './bossStore'
 import { SLIME_BOSS } from './bossConfig'
-
-// Système 3D du Boss Slime (monté dans le Canvas extérieur).
-// Contient : la détection de proximité des autels (écrit nearAltarId au store) et
-// le rendu + l'animation du boss quand il est actif. La logique de jeu (vie, mort)
-// vit dans le store ; ici on ne fait que RENDRE l'état + gérer l'anim par frame.
-//
-// V1 : le boss est statique (bob léger) et prend des dégâts au clic (placeholder en
-// attendant la mêlée / l'onde de choc). La mort joue une réduction d'échelle puis
-// reset (le boss disparaît, l'autel se déverrouille).
-
-const DEATH_DURATION = 1.0
+import { getBossJumpOffset, getShockwaveRadius } from './bossSimulation'
 
 function AltarProximity({ placements, playerPositionRef, enabled }) {
   const currentRef = useRef(null)
@@ -30,176 +20,276 @@ function AltarProximity({ placements, playerPositionRef, enabled }) {
       return
     }
 
-    const p = playerPositionRef.current
+    const player = playerPositionRef.current
     let nearestId = null
     let nearestDistance = SLIME_BOSS.summonRange
     for (const placement of placements) {
       const [x = 0, , z = 0] = placement.position ?? []
-      const distance = Math.hypot(p.x - x, p.z - z)
+      const distance = Math.hypot(player.x - x, player.z - z)
       if (distance < nearestDistance) {
         nearestDistance = distance
         nearestId = placement.id
       }
     }
-
     if (nearestId !== currentRef.current) {
       currentRef.current = nearestId
       setNearAltar(nearestId)
     }
   })
-
   return null
 }
 
-function BossModel({ playerPositionRef, onDamagePlayer, registerCombatTarget, swordEquipped }) {
+function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplierRef, timeOffsetRef }) {
+  const hazards = useBossStore((state) => state.hazards)
+  const attack = useBossStore((state) => state.attack)
+  const spawn = useBossStore((state) => state.spawn)
+  const shockRingRef = useRef(null)
+  const fallingRefs = useRef(new Map())
+  const damageTimesRef = useRef(new Map())
+  const shockHitRef = useRef(null)
+
+  useFrame(() => {
+    const now = Date.now() + (timeOffsetRef?.current ?? 0)
+    const player = playerPositionRef?.current
+    let slowed = false
+
+    if (shockRingRef.current) {
+      const radius = getShockwaveRadius(attack, now)
+      shockRingRef.current.visible = radius > 0
+      shockRingRef.current.scale.set(Math.max(0.001, radius), Math.max(0.001, radius), 1)
+      shockRingRef.current.material.opacity = radius > 0 ? 0.18 + 0.5 * (1 - radius / SLIME_BOSS.shockwave.maxRadius) : 0
+
+      if (radius > 0 && player && shockHitRef.current !== attack?.id) {
+        const distance = Math.hypot(player.x - spawn[0], player.z - spawn[2])
+        const airborne = player.y - getTerrainHeight(player.x, player.z) > SLIME_BOSS.shockwave.dodgeHeight
+        if (!airborne && Math.abs(distance - radius) < SLIME_BOSS.shockwave.band) {
+          shockHitRef.current = attack.id
+          onDamagePlayer?.({ damage: SLIME_BOSS.shockwave.damage, sourceId: attack.id })
+        }
+      }
+    }
+
+    for (const hazard of hazards) {
+      const falling = fallingRefs.current.get(hazard.id)
+      if (falling) {
+        const progress = Math.max(0, Math.min(1, (now - hazard.telegraphAt) / Math.max(1, hazard.impactAt - hazard.telegraphAt)))
+        falling.visible = now < hazard.impactAt
+        falling.position.y = hazard.position[1] + 7 * (1 - progress)
+      }
+      if (!player) continue
+      const distance = Math.hypot(player.x - hazard.position[0], player.z - hazard.position[2])
+      if (distance > hazard.radius) continue
+      if (now >= hazard.impactAt && now < hazard.impactAt + 220) {
+        const impactKey = `${hazard.id}:impact`
+        if (!damageTimesRef.current.has(impactKey)) {
+          damageTimesRef.current.set(impactKey, now)
+          onDamagePlayer?.({ damage: SLIME_BOSS.projectile.impactDamage, sourceId: impactKey })
+        }
+      }
+      if (now >= hazard.impactAt && now < hazard.expiresAt) {
+        slowed = true
+        const tickKey = `${hazard.id}:pool`
+        const lastDamageAt = damageTimesRef.current.get(tickKey) ?? 0
+        if (now - lastDamageAt >= SLIME_BOSS.projectile.poolTickMs) {
+          damageTimesRef.current.set(tickKey, now)
+          onDamagePlayer?.({ damage: SLIME_BOSS.projectile.poolDamage, sourceId: tickKey })
+        }
+      }
+    }
+    if (movementSpeedMultiplierRef) {
+      movementSpeedMultiplierRef.current = slowed ? SLIME_BOSS.projectile.slowMultiplier : 1
+    }
+  })
+
+  if (!spawn) return null
+  return (
+    <>
+      <mesh
+        ref={shockRingRef}
+        visible={false}
+        position={[spawn[0], spawn[1] + 0.08, spawn[2]]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <ringGeometry args={[0.82, 1, 64]} />
+        <meshBasicMaterial color="#ff3b30" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      {hazards.map((hazard) => (
+        <group key={hazard.id}>
+          <mesh position={[hazard.position[0], hazard.position[1] + 0.045, hazard.position[2]]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[hazard.radius, 40]} />
+            <meshBasicMaterial color="#ff372f" transparent opacity={Date.now() < hazard.impactAt ? 0.28 : 0.48} depthWrite={false} />
+          </mesh>
+          <mesh
+            ref={(node) => {
+              if (node) fallingRefs.current.set(hazard.id, node)
+              else fallingRefs.current.delete(hazard.id)
+            }}
+            position={[hazard.position[0], hazard.position[1] + 7, hazard.position[2]]}
+          >
+            <sphereGeometry args={[0.48, 16, 12]} />
+            <meshStandardMaterial color="#e31520" emissive="#7b0000" emissiveIntensity={0.8} roughness={0.55} />
+          </mesh>
+        </group>
+      ))}
+    </>
+  )
+}
+
+const BossMinion = memo(function BossMinion({ minion, playerPositionRef, onDamagePlayer, timeOffsetRef }) {
+  const url = minion.kind === 'blue' ? SLIME_BOSS.summons.blueModelUrl : SLIME_BOSS.summons.greenModelUrl
+  const { scene } = useGLTF(url)
+  const cloned = useMemo(() => scene.clone(true), [scene])
+  const groupRef = useRef(null)
+  const lastDamageAtRef = useRef(0)
+
+  useFrame(() => {
+    const group = groupRef.current
+    const live = useBossStore.getState().minions.find((entry) => entry.id === minion.id)
+    if (!group || !live) return
+    group.position.x = THREE.MathUtils.damp(group.position.x, live.position[0], 9, 1 / 60)
+    group.position.y = live.position[1] + 0.45 + Math.sin(Date.now() / 180 + minion.spawnedPhase) * 0.08
+    group.position.z = THREE.MathUtils.damp(group.position.z, live.position[2], 9, 1 / 60)
+
+    const player = playerPositionRef?.current
+    const now = Date.now() + (timeOffsetRef?.current ?? 0)
+    if (!player || now - lastDamageAtRef.current < SLIME_BOSS.summons.attackCooldownMs) return
+    if (Math.hypot(player.x - live.position[0], player.z - live.position[2]) <= SLIME_BOSS.summons.radius + 0.65) {
+      lastDamageAtRef.current = now
+      onDamagePlayer?.({ damage: SLIME_BOSS.summons.damage, sourceId: minion.id })
+    }
+  })
+
+  return (
+    <group ref={groupRef} position={minion.position} scale={0.55}>
+      <primitive object={cloned} />
+    </group>
+  )
+})
+
+function BossModel({
+  authority,
+  playerPositionRef,
+  remotePlayerStateRef,
+  localPlayerAlive,
+  onDamagePlayer,
+  onBossHit,
+  registerCombatTarget,
+  swordEquipped,
+  movementSpeedMultiplierRef,
+  timeOffsetRef,
+}) {
   const gltf = useGLTF(SLIME_BOSS.modelUrl)
   const groupRef = useRef(null)
-  const ringRef = useRef(null)
   const deathTimeRef = useRef(0)
-  const attackRef = useRef({ t: 0, waveHit: false })
-  const spawn = useBossStore((s) => s.spawn)
+  const lastSimulationAtRef = useRef(0)
+  const spawn = useBossStore((state) => state.spawn)
+  const minions = useBossStore((state) => state.minions)
+  const phase = useBossStore((state) => state.phase)
 
-  // Cible de combat : permet à la frappe existante (poing/épée) de toucher le boss.
-  // L'épée « ultra cheat » remplace les dégâts de base par un montant massif.
   const swordRef = useRef(swordEquipped)
   swordRef.current = swordEquipped
+  const hitRef = useRef(onBossHit)
+  hitRef.current = onBossHit
   const targetRef = useRef(null)
   if (!targetRef.current) {
     targetRef.current = {
-      id: 'slime_boss',
+      id: SLIME_BOSS.id,
       position: { x: 0, y: 0, z: 0 },
       radius: SLIME_BOSS.melee.hitRadius,
       height: SLIME_BOSS.targetHeight,
       disabled: false,
-      takeDamage: ({ damage }) => {
-        const dealt = swordRef.current ? SLIME_BOSS.melee.swordDamage : damage
-        useBossStore.getState().damage(dealt)
+      takeDamage: (hit) => {
+        const baseDamage = swordRef.current ? SLIME_BOSS.melee.swordDamage : hit.damage
+        const damage = hit.charged ? baseDamage * SLIME_BOSS.melee.chargedMultiplier : baseDamage
+        hitRef.current?.({ ...hit, damage, weaponId: swordRef.current ? 'cheat_sword' : null })
         return true
       },
     }
   }
 
-  useEffect(() => {
-    if (!registerCombatTarget || !spawn) return undefined
-    const target = targetRef.current
-    target.position.x = spawn[0]
-    target.position.y = spawn[1]
-    target.position.z = spawn[2]
-    return registerCombatTarget('slime_boss', target)
-  }, [registerCombatTarget, spawn])
-
-  // Normalise le modèle à la hauteur cible + pose les "pieds" à y=0 (une seule fois).
   const { scene, baseScale, footOffset } = useMemo(() => {
     const cloned = gltf.scene.clone(true)
+    cloned.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true
+        child.frustumCulled = false
+      }
+    })
     const box = new THREE.Box3().setFromObject(cloned)
-    const size = new THREE.Vector3()
-    box.getSize(size)
-    const baseScale = SLIME_BOSS.targetHeight / (size.y || 1)
-    return { scene: cloned, baseScale, footOffset: -box.min.y * baseScale }
+    const size = box.getSize(new THREE.Vector3())
+    const scale = SLIME_BOSS.targetHeight / (size.y || 1)
+    return { scene: cloned, baseScale: scale, footOffset: -box.min.y * scale }
   }, [gltf])
 
+  useEffect(() => {
+    if (!registerCombatTarget || !spawn) return undefined
+    return registerCombatTarget(SLIME_BOSS.id, targetRef.current)
+  }, [registerCombatTarget, spawn])
+
   useFrame((_, dt) => {
-    const group = groupRef.current
-    if (!group || !spawn) return
-    const { state, phase } = useBossStore.getState()
-    // Le boss n'est frappable que pendant le combat (pas en mort/reset).
-    if (targetRef.current) targetRef.current.disabled = state !== 'active'
-    const cfg = SLIME_BOSS.shockwave
-    const cycle = cfg.telegraphMs + cfg.jumpMs + cfg.shockMs + cfg.recoverMs + cfg.idleGapMs
-
-    let jumpOffset = 0
-    let ringRadius = 0
-    let ringActive = false
-
-    // --- Machine à états de l'attaque (uniquement quand le boss combat) ---------
-    if (state === 'active') {
-      const a = attackRef.current
-      a.t += dt * 1000 * (SLIME_BOSS.phaseSpeed[phase - 1] ?? 1)
-      if (a.t >= cycle) { a.t -= cycle; a.waveHit = false }
-      const t = a.t
-
-      if (t < cfg.telegraphMs) {
-        // Télégraphe : le boss se ramasse légèrement.
-        jumpOffset = -0.25 * Math.sin((t / cfg.telegraphMs) * Math.PI)
-      } else if (t < cfg.telegraphMs + cfg.jumpMs) {
-        // Bond : parabole up→down.
-        const p = (t - cfg.telegraphMs) / cfg.jumpMs
-        jumpOffset = cfg.jumpHeight * Math.sin(p * Math.PI)
-      } else if (t < cfg.telegraphMs + cfg.jumpMs + cfg.shockMs) {
-        // Onde : le front s'étend au sol.
-        const p = (t - cfg.telegraphMs - cfg.jumpMs) / cfg.shockMs
-        ringRadius = cfg.maxRadius * p
-        ringActive = true
-
-        // Détection + dégâts (séparés du visuel) : un seul hit par onde, esquive
-        // possible en sautant (hauteur du joueur au moment du passage du front).
-        if (!a.waveHit && playerPositionRef?.current && onDamagePlayer) {
-          const pp = playerPositionRef.current
-          const dist = Math.hypot(pp.x - spawn[0], pp.z - spawn[2])
-          const airborne = pp.y - getTerrainHeight(pp.x, pp.z) > cfg.dodgeHeight
-          if (!airborne && dist <= cfg.maxRadius && Math.abs(dist - ringRadius) < cfg.band) {
-            a.waveHit = true
-            onDamagePlayer({ damage: cfg.damage })
-          }
-        }
+    const now = Date.now() + (timeOffsetRef?.current ?? 0)
+    if (authority && now - lastSimulationAtRef.current >= 100) {
+      const players = []
+      if (playerPositionRef?.current) {
+        const player = playerPositionRef.current
+        players.push({ id: 'local', alive: localPlayerAlive, position: [player.x, player.y, player.z] })
       }
-    } else {
-      attackRef.current.t = 0
-      attackRef.current.waveHit = false
+      const remote = remotePlayerStateRef?.current
+      if (remote?.position) players.push({ id: remote.userId ?? 'remote', alive: true, position: remote.position })
+      useBossStore.getState().step({
+        now,
+        dt: Math.min(0.25, (now - (lastSimulationAtRef.current || now - 100)) / 1000),
+        players,
+      })
+      lastSimulationAtRef.current = now
     }
 
-    // --- Position / bob / bond / mort ------------------------------------------
-    const bob = Math.sin(performance.now() / 1000 * 2) * 0.12
-    group.position.set(spawn[0], spawn[1] + footOffset + bob + jumpOffset, spawn[2])
+    const group = groupRef.current
+    const boss = useBossStore.getState()
+    if (!group || !boss.position) return
+    const jumpOffset = getBossJumpOffset(boss.attack, now)
+    const bob = Math.sin(now / 500) * 0.12
+    group.position.x = THREE.MathUtils.damp(group.position.x, boss.position[0], 8, dt)
+    group.position.y = boss.position[1] + footOffset + bob + jumpOffset
+    group.position.z = THREE.MathUtils.damp(group.position.z, boss.position[2], 8, dt)
+    targetRef.current.position.x = boss.position[0]
+    targetRef.current.position.y = boss.position[1]
+    targetRef.current.position.z = boss.position[2]
+    targetRef.current.disabled = boss.state !== 'active'
 
-    if (state === 'dying') {
+    if (boss.state === 'dying') {
       deathTimeRef.current += dt
-      const k = Math.max(0, 1 - deathTimeRef.current / DEATH_DURATION)
-      group.scale.setScalar(baseScale * k)
-      if (deathTimeRef.current >= DEATH_DURATION) {
-        deathTimeRef.current = 0
-        useBossStore.getState().reset()
-      }
+      const scale = Math.max(0, 1 - deathTimeRef.current / 1.2)
+      group.scale.setScalar(baseScale * scale)
     } else {
       deathTimeRef.current = 0
-      group.scale.setScalar(baseScale)
-    }
-
-    // --- Anneau de choc (visuel, sibling non impacté par l'échelle du boss) -----
-    const ring = ringRef.current
-    if (ring) {
-      ring.visible = ringActive && state === 'active'
-      const r = Math.max(0.001, ringRadius)
-      ring.scale.set(r, r, 1)
-      ring.material.opacity = ringActive ? 0.15 + 0.55 * (1 - ringRadius / cfg.maxRadius) : 0
+      const pulse = boss.phase === 3 ? 1 + Math.sin(now / 90) * 0.025 : 1
+      group.scale.setScalar(baseScale * pulse)
     }
   })
 
   if (!spawn) return null
-
   return (
     <>
-      <group
-        ref={groupRef}
-        position={[spawn[0], spawn[1] + footOffset, spawn[2]]}
-        scale={baseScale}
-        onClick={(event) => {
-          event.stopPropagation()
-          useBossStore.getState().damage(200)
-        }}
-      >
+      <group ref={groupRef} position={[spawn[0], spawn[1] + footOffset, spawn[2]]} scale={baseScale}>
         <primitive object={scene} />
+        {phase === 3 && <pointLight color="#ff1f18" intensity={2.2} distance={8} />}
       </group>
-      {/* Onde de choc : anneau plat au sol, échelle animée par useFrame. */}
-      <mesh
-        ref={ringRef}
-        visible={false}
-        position={[spawn[0], spawn[1] + 0.08, spawn[2]]}
-        rotation={[-Math.PI / 2, 0, 0]}
-      >
-        <ringGeometry args={[0.82, 1, 56]} />
-        <meshBasicMaterial color="#ff3b30" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
+      <BossHazards
+        playerPositionRef={playerPositionRef}
+        onDamagePlayer={onDamagePlayer}
+        movementSpeedMultiplierRef={movementSpeedMultiplierRef}
+        timeOffsetRef={timeOffsetRef}
+      />
+      {minions.map((minion) => (
+        <BossMinion
+          key={minion.id}
+          minion={minion}
+          playerPositionRef={playerPositionRef}
+          onDamagePlayer={onDamagePlayer}
+          timeOffsetRef={timeOffsetRef}
+        />
+      ))}
     </>
   )
 }
@@ -207,22 +297,37 @@ function BossModel({ playerPositionRef, onDamagePlayer, registerCombatTarget, sw
 export default function SlimeBossSystem({
   placements = [],
   playerPositionRef,
+  remotePlayerStateRef,
+  localPlayerAlive = true,
   onDamagePlayer,
+  onBossHit,
   registerCombatTarget,
   swordEquipped = false,
+  movementSpeedMultiplierRef,
+  timeOffsetRef,
+  authority = true,
   enabled = true,
 }) {
-  const active = useBossStore((s) => s.active)
+  const active = useBossStore((state) => state.active)
+  useEffect(() => () => {
+    if (movementSpeedMultiplierRef) movementSpeedMultiplierRef.current = 1
+  }, [movementSpeedMultiplierRef])
 
   return (
     <>
       <AltarProximity placements={placements} playerPositionRef={playerPositionRef} enabled={enabled} />
       {active && (
         <BossModel
+          authority={authority}
           playerPositionRef={playerPositionRef}
+          remotePlayerStateRef={remotePlayerStateRef}
+          localPlayerAlive={localPlayerAlive}
           onDamagePlayer={onDamagePlayer}
+          onBossHit={onBossHit}
           registerCombatTarget={registerCombatTarget}
           swordEquipped={swordEquipped}
+          movementSpeedMultiplierRef={movementSpeedMultiplierRef}
+          timeOffsetRef={timeOffsetRef}
         />
       )}
     </>
@@ -230,3 +335,5 @@ export default function SlimeBossSystem({
 }
 
 useGLTF.preload(SLIME_BOSS.modelUrl)
+useGLTF.preload(SLIME_BOSS.summons.greenModelUrl)
+useGLTF.preload(SLIME_BOSS.summons.blueModelUrl)

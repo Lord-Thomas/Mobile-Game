@@ -33,6 +33,8 @@ const ANIMATIONS = {
   'stand-up': 'Stand Up.fbx',
   // Épée « ultra cheat » (pack Great Sword, Mixamo) — arme de mêlée du Boss Slime.
   'sword-slash': 'great-sword-slash.fbx',
+  'sword-slash-2': '../public/models/player/anim/Great Sword Pack/great sword slash (2).fbx',
+  'sword-slash-3': '../public/models/player/anim/Great Sword Pack/great sword high spin attack.fbx',
   'sword-idle': 'great-sword-idle.fbx',
   'sword-impact': 'great-sword-impact.fbx',
   // Ces deux sources sont déjà conservées avec le pack importé par le projet.

@@ -4,6 +4,7 @@ import {
   sanitizeImpulse,
   sanitizeChatText,
   sanitizeSpellCast,
+  sanitizeBossAction,
 } from './VisitRoom.js'
 
 // Ces tests encodent les règles de validation réseau du serveur Colyseus.
@@ -84,5 +85,22 @@ describe('sanitizeSpellCast', () => {
     const spell = sanitizeSpellCast({ kind: 'fireball', position: [0, 0, 0], direction: [0, 0] })
     expect(spell).not.toBeNull()
     expect(spell.direction).toEqual([0, -1])
+  })
+})
+
+describe('sanitizeBossAction', () => {
+  it('accepte seulement les invocations et coups formés', () => {
+    expect(sanitizeBossAction({ type: 'summon', actionId: 'a-1', altarId: 'altar' })).toEqual({
+      type: 'summon', actionId: 'a-1', altarId: 'altar',
+    })
+    expect(sanitizeBossAction({ type: 'hit', actionId: 'h-1', weaponId: 'cheat_sword', charged: true })).toEqual({
+      type: 'hit', actionId: 'h-1', weaponId: 'cheat_sword', charged: true,
+    })
+  })
+
+  it('rejette un type inconnu, un identifiant vide et une arme inconnue', () => {
+    expect(sanitizeBossAction({ type: 'delete', actionId: 'x' })).toBeNull()
+    expect(sanitizeBossAction({ type: 'hit', actionId: '' })).toBeNull()
+    expect(sanitizeBossAction({ type: 'hit', actionId: 'h-2', weaponId: 'admin_blade' })?.weaponId).toBeNull()
   })
 })

@@ -179,6 +179,26 @@ export function sanitizeSpellCast(message) {
   }
 }
 
+export function sanitizeBossAction(message) {
+  if (!message || typeof message !== 'object') return null
+  const type = message.type === 'summon' ? 'summon' : message.type === 'hit' ? 'hit' : null
+  if (!type) return null
+  const actionId = typeof message.actionId === 'string'
+    ? message.actionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
+    : ''
+  if (!actionId) return null
+  if (type === 'summon') {
+    const altarId = typeof message.altarId === 'string' ? message.altarId.slice(0, 100) : ''
+    return altarId ? { type, actionId, altarId } : null
+  }
+  return {
+    type,
+    actionId,
+    weaponId: sanitizeEquippedWeapon(message.weaponId),
+    charged: Boolean(message.charged),
+  }
+}
+
 export class VisitRoom extends Room {
   maxClients = MAX_CLIENTS
 
@@ -210,6 +230,7 @@ export class VisitRoom extends Room {
     this.onMessage('world-state', (client, message) => this.handleWorldState(client, message))
     this.onMessage('coin-gain', (client, message) => this.handleCoinGain(client, message))
     this.onMessage('spell-cast', (client, message) => this.handleSpellCast(client, message))
+    this.onMessage('boss-action', (client, message) => this.handleBossAction(client, message))
     this.onMessage('time-ping', (client, message) => {
       client.send('time-pong', {
         pingId: message?.pingId,
@@ -403,6 +424,19 @@ export class VisitRoom extends Room {
       displayName: player.displayName,
       role: player.role,
     }, { except: client })
+  }
+
+  handleBossAction(client, message) {
+    const player = this.players.get(client.sessionId)
+    if (player?.role !== 'guest' || !this.hostClient) return
+    const action = sanitizeBossAction(message)
+    if (!action) return
+    this.hostClient.send('boss-action', {
+      ...action,
+      serverTime: now(),
+      userId: player.userId,
+      sessionId: client.sessionId,
+    })
   }
 
   flushNetworkState() {

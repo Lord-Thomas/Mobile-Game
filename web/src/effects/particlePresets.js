@@ -416,4 +416,30 @@ export const BUILTIN_PARTICLE_PRESETS = [
     ],
     light: { enabled: true, color: '#ff8a2a', intensity: 3.2 },
   },
+  {
+    id: 'cheat_sword_aura',
+    name: 'Aura épée ultra cheat',
+    category: 'trail',
+    duration: 1.6,
+    loop: true,
+    emitters: [
+      {
+        shape: 'circle', mode: 'loop', count: 34, texture: 'spark', blending: 'additive',
+        colorStart: '#fff4a8', colorEnd: '#43d9ff', alphaStart: 0.9, alphaEnd: 0,
+        sizeStart: 0.09, sizeEnd: 0.015, sizeVariance: 0.45,
+        speed: 0.55, speedVariance: 0.35, spread: 0.22, direction: [0, 1, 0],
+        gravity: 0.08, turbulence: 0.3, rotationSpeed: 3,
+        lifetime: 0.9, lifetimeVariance: 0.3, radius: 0.58, offset: [0, 0, 0], delay: 0,
+      },
+      {
+        shape: 'point', mode: 'loop', count: 18, texture: 'soft_glow', blending: 'additive',
+        colorStart: '#76e7ff', colorEnd: '#126bff', alphaStart: 0.55, alphaEnd: 0,
+        sizeStart: 0.14, sizeEnd: 0.025, sizeVariance: 0.35,
+        speed: 0.32, speedVariance: 0.4, spread: 0.5, direction: [0, 1, 0],
+        gravity: 0.05, turbulence: 0.4, rotationSpeed: 0,
+        lifetime: 1.15, lifetimeVariance: 0.35, radius: 0.34, offset: [0, 0, 0], delay: 0,
+      },
+    ],
+    light: { enabled: false, color: '#66e0ff', intensity: 1.5 },
+  },
 ].map(normalizeParticlePreset)

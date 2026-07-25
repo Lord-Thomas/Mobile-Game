@@ -2,6 +2,7 @@ import { useGameStore } from '../../stores/useGameStore'
 import { getTerrainHeight } from '../../world/terrain/terrainGeometry'
 import { useBossStore } from './bossStore'
 import { SLIME_BOSS } from './bossConfig'
+import { getBossSpawnForAltar } from './bossSimulation'
 
 // HUD du boss (hors Canvas) : grande barre de vie en haut quand le boss est actif,
 // et bouton "Invoquer" en bas quand le joueur est à portée d'un autel libre.
@@ -32,15 +33,7 @@ const barTrackStyle = {
   overflow: 'hidden',
 }
 
-function computeSpawn(altar) {
-  const [x = 0, , z = 0] = altar.position ?? []
-  const angle = altar.rotationY ?? 0
-  const sx = x + Math.sin(angle) * SLIME_BOSS.spawnForwardOffset
-  const sz = z + Math.cos(angle) * SLIME_BOSS.spawnForwardOffset
-  return [sx, getTerrainHeight(sx, sz), sz]
-}
-
-export default function BossHud({ placements = [] }) {
+export default function BossHud({ placements = [], authority = true, onRequestSummon }) {
   const mode = useGameStore((s) => s.view.mode)
   const active = useBossStore((s) => s.active)
   const state = useBossStore((s) => s.state)
@@ -55,7 +48,14 @@ export default function BossHud({ placements = [] }) {
   const onSummon = () => {
     const altar = placements.find((placement) => placement.id === nearAltarId)
     if (!altar) return
-    useBossStore.getState().summon({ altarId: altar.id, spawn: computeSpawn(altar) })
+    if (!authority) {
+      onRequestSummon?.({ type: 'summon', altarId: altar.id })
+      return
+    }
+    useBossStore.getState().summon({
+      altarId: altar.id,
+      spawn: getBossSpawnForAltar(altar, getTerrainHeight),
+    })
   }
 
   return (
@@ -88,18 +88,6 @@ export default function BossHud({ placements = [] }) {
         </button>
       )}
 
-      {/* Placeholder de dégâts (V1) : bouton fiable en attendant la mêlée / l'onde de
-          choc. Se retire dès que le vrai combat est branché. */}
-      {active && state === 'active' && mode === 'play' && (
-        <button
-          className="skin-open-btn"
-          type="button"
-          style={{ bottom: 96 }}
-          onClick={() => useBossStore.getState().damage(200)}
-        >
-          Frapper (-200)
-        </button>
-      )}
     </>
   )
 }

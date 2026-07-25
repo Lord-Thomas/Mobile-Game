@@ -520,6 +520,23 @@ export async function claimFirstMobDefeatRewards({ scope = DEFAULT_PROGRESS_SCOP
   return data
 }
 
+export async function claimBossSlimeReward({ scope = DEFAULT_PROGRESS_SCOPE } = {}) {
+  const user = await getCurrentUser()
+  if (!user) return { ok: false, reason: 'not_authenticated', granted: false }
+
+  const { data, error } = await supabase.rpc('claim_boss_slime_reward', {
+    requested_scope: normalizeProgressScope(scope),
+  })
+  if (error) {
+    const message = String(error.message ?? '')
+    if (message.includes('claim_boss_slime_reward') || message.includes('Could not find the function')) {
+      return { ok: true, reason: 'rpc_unavailable_fallback', granted: true }
+    }
+    throw error
+  }
+  return data
+}
+
 export async function savePlayerProgress(progress, { includeCoins = false, scope = DEFAULT_PROGRESS_SCOPE } = {}) {
   const user = await getCurrentUser()
   if (!user) return false

@@ -31,6 +31,7 @@ export async function connectColyseusVisitSession({
   onWorldState,
   onCoinGain,
   onSpellCast,
+  onBossAction,
   onPlayerLeft,
   onStatusChange,
   onServerTimeOffsetChange,
@@ -79,6 +80,7 @@ export async function connectColyseusVisitSession({
   room.onMessage('spell-cast', (message) => {
     if (message?.userId !== user.id) onSpellCast?.(message)
   })
+  room.onMessage('boss-action', (message) => onBossAction?.(message))
   room.onMessage('player-left', (message) => onPlayerLeft?.(message))
   room.onLeave(() => onStatusChange?.('closed'))
   room.onError(() => onStatusChange?.('error'))
@@ -96,6 +98,7 @@ export async function connectColyseusVisitSession({
     sendGuestKick: (payload) => room.send('guest-kick', payload),
     sendCoinGain: (payload) => room.send('coin-gain', payload),
     sendSpellCast: (payload) => room.send('spell-cast', payload),
+    sendBossAction: (payload) => room.send('boss-action', payload),
     sendChatMessage: (text) => room.send('chat-message', { text }),
     sendWorldState: (snapshot) => room.send('world-state', { snapshot }),
     sendSessionEnded: () => room.leave(true),

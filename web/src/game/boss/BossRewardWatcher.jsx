@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useBossStore } from './bossStore'
+import { claimBossSlimeReward } from '../../services/progressService'
 
 // Détecte la défaite du boss et attribue la récompense (une seule fois par combat).
 // L'attribution réelle (ajout à l'inventaire + sauvegarde) est faite par onDefeated,
@@ -26,7 +27,7 @@ const toastStyle = {
   zIndex: 41,
 }
 
-export default function BossRewardWatcher({ onDefeated }) {
+export default function BossRewardWatcher({ onDefeated, alreadyOwned = false, progressScope = 'player' }) {
   const state = useBossStore((s) => s.state)
   const grantedRef = useRef(false)
   const [showToast, setShowToast] = useState(false)
@@ -34,14 +35,21 @@ export default function BossRewardWatcher({ onDefeated }) {
   useEffect(() => {
     if (state === 'dying' && !grantedRef.current) {
       grantedRef.current = true
-      onDefeated?.()
-      setShowToast(true)
+      Promise.resolve(claimBossSlimeReward({ scope: progressScope }))
+        .catch(() => ({ ok: false, reason: 'save_failed' }))
+        .then((result) => {
+          // Hors connexion, la sauvegarde locale normale reste la source de vérité.
+          if (result.ok || result.reason === 'not_authenticated') onDefeated?.()
+        })
+      if (!alreadyOwned) setShowToast(true)
       const id = window.setTimeout(() => setShowToast(false), 4500)
-      return () => window.clearTimeout(id)
+      return () => {
+        window.clearTimeout(id)
+      }
     }
     if (state === 'idle') grantedRef.current = false
     return undefined
-  }, [state, onDefeated])
+  }, [state, onDefeated, alreadyOwned, progressScope])
 
   if (!showToast) return null
   return <div style={toastStyle}>🗡️ Épée Ultra Cheat obtenue !</div>

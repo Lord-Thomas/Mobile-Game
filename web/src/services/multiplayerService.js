@@ -171,6 +171,7 @@ export function connectMultiplayerSession({
   onWorldState,
   onCoinGain,
   onSpellCast,
+  onBossAction,
   onSessionEnded,
   onStatusChange,
   onHostTimeOffsetChange,
@@ -185,6 +186,7 @@ export function connectMultiplayerSession({
       sendWorldState: async () => false,
       sendCoinGain: async () => false,
       sendSpellCast: async () => false,
+      sendBossAction: async () => false,
       sendSessionEnded: async () => false,
     }
   }
@@ -233,6 +235,9 @@ export function connectMultiplayerSession({
     })
     .on('broadcast', { event: 'spell-cast' }, ({ payload }) => {
       if (payload?.userId !== userId) onSpellCast?.(payload)
+    })
+    .on('broadcast', { event: 'boss-action' }, ({ payload }) => {
+      if (role === 'host' && payload?.userId !== userId) onBossAction?.(payload)
     })
     .on('broadcast', { event: 'time-ping' }, ({ payload }) => {
       if (role !== 'host' || !payload?.pingId) return
@@ -308,6 +313,8 @@ export function connectMultiplayerSession({
       sendWhenReady({ type: 'broadcast', event: 'coin-gain', payload: { ...payload, userId } }),
     sendSpellCast: (payload) =>
       sendWhenReady({ type: 'broadcast', event: 'spell-cast', payload: { ...payload, userId } }),
+    sendBossAction: (payload) =>
+      sendWhenReady({ type: 'broadcast', event: 'boss-action', payload: { ...payload, userId } }),
     sendChatMessage: (text) =>
       sendWhenReady({
         type: 'broadcast',

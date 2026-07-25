@@ -47,6 +47,8 @@ import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
 import SlimeBossSystem from './game/boss/SlimeBossSystem'
 import BossHud from './game/boss/BossHud'
 import BossRewardWatcher from './game/boss/BossRewardWatcher'
+import { createBossNetworkSnapshot, useBossStore } from './game/boss/bossStore'
+import { createBossActionGuard, handleHostBossAction, sendBossHitRequest, sendBossSummonRequest } from './game/boss/bossNetwork'
 import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
 import QuestTalkPrompt from './ui/QuestTalkPrompt'
@@ -489,6 +491,7 @@ const PLAYER_SIT_DOWN_DURATION = 1.05
 const PLAYER_STAND_UP_DURATION = 1.05
 const MOB_DEATH_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'mob_death')
 const HEAL_AURA_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'heal_aura')
+const CHEAT_SWORD_AURA_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'cheat_sword_aura')
 const INTERACTION_PARTICLE_PRESET = BUILTIN_PARTICLE_PRESETS.find(({ id }) => id === 'interaction')
 const EFFECT_WARMUP_FRAMES = 4
 const PLAYER_SITTING_HEIGHT = 0.34
@@ -1508,15 +1511,32 @@ function CombatActionDock({
   spellUi,
   onSpellPress,
   wingsUiRef,
+  showDodge = false,
+  swordEquipped = false,
 }) {
   const wingsUi = useWingsSpellUi(wingsUiRef)
   const showWings = wingsUi.visible && !wingsUi.flying
   const showWingsBoost = wingsUi.visible && wingsUi.flying
-  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
+  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0) + (showDodge ? 2 : 0)
   if (count === 0) return null
 
   const queuePunch = () => {
     touchRef.current.punchQueued = true
+  }
+
+  const startPunchCharge = () => {
+    if (!swordEquipped) {
+      queuePunch()
+      return
+    }
+    touchRef.current.punchHeldAt = performance.now()
+  }
+
+  const releasePunchCharge = () => {
+    if (!swordEquipped || !touchRef.current.punchHeldAt) return
+    touchRef.current.punchChargeMs = performance.now() - touchRef.current.punchHeldAt
+    touchRef.current.punchHeldAt = 0
+    queuePunch()
   }
 
   const queueKick = () => {
@@ -1540,11 +1560,41 @@ function CombatActionDock({
           aria-label="Taper"
           onPointerDown={(event) => {
             event.preventDefault()
-            queuePunch()
+            startPunchCharge()
           }}
+          onPointerUp={releasePunchCharge}
+          onPointerCancel={releasePunchCharge}
         >
           <span className="combat-action-icon" aria-hidden="true">👊</span>
           <span className="combat-action-label">Taper</span>
+        </button>
+      )}
+      {showDodge && (
+        <button
+          className="combat-action-btn"
+          type="button"
+          aria-label="Esquive gauche"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            touchRef.current.dodgeLeftQueued = true
+          }}
+        >
+          <span className="combat-action-icon" aria-hidden="true">↶</span>
+          <span className="combat-action-label">Esquive</span>
+        </button>
+      )}
+      {showDodge && (
+        <button
+          className="combat-action-btn"
+          type="button"
+          aria-label="Esquive droite"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            touchRef.current.dodgeRightQueued = true
+          }}
+        >
+          <span className="combat-action-icon" aria-hidden="true">↷</span>
+          <span className="combat-action-label">Esquive</span>
         </button>
       )}
       {canKick && (
@@ -1647,6 +1697,8 @@ function useKeyboardInput() {
     actionQueued: false,
     punchQueued: false,
     kickQueued: false,
+    dodgeLeftQueued: false,
+    dodgeRightQueued: false,
   })
 
   useEffect(() => {
@@ -1658,6 +1710,8 @@ function useKeyboardInput() {
       keysRef.current.actionQueued = false
       keysRef.current.punchQueued = false
       keysRef.current.kickQueued = false
+      keysRef.current.dodgeLeftQueued = false
+      keysRef.current.dodgeRightQueued = false
     }
 
     const resetKeysWhenInactive = () => {
@@ -1680,6 +1734,8 @@ function useKeyboardInput() {
       if (key === 's' || key === 'arrowdown') keysRef.current.back = true
       if (key === 'q' || key === 'arrowleft' || key === 'a') keysRef.current.left = true
       if (key === 'd' || key === 'arrowright') keysRef.current.right = true
+      if (key === 'x' && !event.repeat) keysRef.current.dodgeLeftQueued = true
+      if (key === 'c' && !event.repeat) keysRef.current.dodgeRightQueued = true
 
       if (key === ' ' || key === 'space') {
         event.preventDefault()
@@ -2700,6 +2756,9 @@ const DRAGON_SLEEP_DELAY = 4
 
 const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI / 2
 const PLAYER_MAX_RUN_SPEED = 3.4
+const PLAYER_DODGE_DURATION = 0.52
+const PLAYER_DODGE_COOLDOWN = 0.9
+const PLAYER_DODGE_SPEED = 7.4
 const DRAGON_RIDE_GROUND_SPEED = PLAYER_MAX_RUN_SPEED * 1.6
 const DRAGON_RIDE_FLY_SPEED = PLAYER_MAX_RUN_SPEED * 3
 const DRAGON_RIDE_TURN_SPEED = 2.2
@@ -3947,6 +4006,8 @@ function Player({
   onSpawnConsumed = null,
   freeCameraActive = false,
   movementLocked = false,
+  movementSpeedMultiplierRef = null,
+  playerInvulnerableRef = null,
   dragonRide = null,
   wingsUiRef = null,
   onWingsParticleBurst = null,
@@ -3969,8 +4030,10 @@ function Player({
   const mountedPlayerLocalPosition = useMemo(() => new Vector3(), [])
   const punchUntilRef = useRef(0)
   const pendingPunchRef = useRef(null)
+  const swordAttackRef = useRef({ step: 0, lastAt: -Infinity, motion: 'punch' })
   // Combo de coups de poing : enchaîner dans le délai augmente les dégâts.
   const punchComboRef = useRef({ count: 0, lastHitAt: -Infinity })
+  const dodgeRef = useRef({ activeUntil: 0, cooldownUntil: 0, direction: 0 })
   const jumpStartUntilRef = useRef(0)
   const jumpLandUntilRef = useRef(0)
   const waveUntilRef = useRef(0)
@@ -4535,7 +4598,7 @@ function Player({
     let worldX = rightX * moveX + forwardX * moveY
     let worldZ = rightZ * moveX + forwardZ * moveY
 
-    const isMoving = worldX !== 0 || worldZ !== 0
+    let isMoving = worldX !== 0 || worldZ !== 0
 
     if (isMoving) {
       const length = Math.hypot(worldX, worldZ)
@@ -4543,11 +4606,49 @@ function Player({
       worldZ /= length
     }
 
+    const dodge = dodgeRef.current
+    const wantsDodgeLeft = touch.dodgeLeftQueued || key.dodgeLeftQueued
+    const wantsDodgeRight = touch.dodgeRightQueued || key.dodgeRightQueued
+    if (
+      !isEmoting &&
+      onGroundRef.current &&
+      state.clock.elapsedTime >= dodge.cooldownUntil &&
+      (wantsDodgeLeft || wantsDodgeRight)
+    ) {
+      dodge.direction = wantsDodgeLeft ? -1 : 1
+      dodge.activeUntil = state.clock.elapsedTime + PLAYER_DODGE_DURATION
+      dodge.cooldownUntil = state.clock.elapsedTime + PLAYER_DODGE_COOLDOWN
+      punchUntilRef.current = 0
+      pendingPunchRef.current = null
+      kickUntilRef.current = 0
+      pendingKickRef.current = null
+    }
+    touch.dodgeLeftQueued = false
+    touch.dodgeRightQueued = false
+    key.dodgeLeftQueued = false
+    key.dodgeRightQueued = false
+
+    const isDodging = state.clock.elapsedTime < dodge.activeUntil
+    if (playerInvulnerableRef) playerInvulnerableRef.current = isDodging
+    if (isDodging) {
+      worldX = rightX * dodge.direction
+      worldZ = rightZ * dodge.direction
+      isMoving = true
+      const elapsed = PLAYER_DODGE_DURATION - (dodge.activeUntil - state.clock.elapsedTime)
+      if (wingsTiltRef.current) {
+        wingsTiltRef.current.rotation.z = dodge.direction * (elapsed / PLAYER_DODGE_DURATION) * Math.PI * 2
+      }
+    } else if (wingsTiltRef.current && Math.abs(wingsTiltRef.current.rotation.z) > 0.001) {
+      wingsTiltRef.current.rotation.z = 0
+    }
+
     const wingsAirborne = isWingsFlying(wings)
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
-    const speed = isMoving
-      ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95))
-      : 0
+    const speed = isDodging
+      ? PLAYER_DODGE_SPEED
+      : isMoving
+        ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) * (movementSpeedMultiplierRef?.current ?? 1)
+        : 0
     if (wingsAirborne) {
       // Plané : l'avance est dirigée par la caméra (wings.forwardSpeed le long
       // du forward caméra), le joystick de déplacement est ignoré.
@@ -4557,7 +4658,7 @@ function Player({
     } else {
       const targetVelX = worldX * speed
       const targetVelZ = worldZ * speed
-      const planarDamping = 14
+      const planarDamping = isDodging ? 40 : 14
       planarVelocityRef.current.x +=
         (targetVelX - planarVelocityRef.current.x) * Math.min(1, planarDamping * delta)
       planarVelocityRef.current.z +=
@@ -4634,7 +4735,8 @@ function Player({
     const wantsEmote = touch.emoteQueued
     const isAttackLocked =
       state.clock.elapsedTime < punchUntilRef.current ||
-      state.clock.elapsedTime < kickUntilRef.current
+      state.clock.elapsedTime < kickUntilRef.current ||
+      isDodging
     const wantsPunch = !isEmoting && !isAttackLocked && (touch.punchQueued || key.punchQueued)
     const wantsKick = !isEmoting && !isAttackLocked && (touch.kickQueued || key.kickQueued)
     const wantsGenericAction = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
@@ -4682,11 +4784,20 @@ function Player({
       filteredInputRef.current.y = 0
     } else if (wantsPunch && punchTarget && onGroundRef.current) {
       const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
+      const charged = equippedWeapon === 'cheat_sword' && (touch.punchChargeMs ?? 0) >= 700
+      if (equippedWeapon === 'cheat_sword') {
+        const swordAttack = swordAttackRef.current
+        if (state.clock.elapsedTime - swordAttack.lastAt > PUNCH_COMBO_WINDOW) swordAttack.step = 0
+        swordAttack.step = charged ? 3 : (swordAttack.step % 3) + 1
+        swordAttack.lastAt = state.clock.elapsedTime
+        swordAttack.motion = swordAttack.step === 1 ? 'punch' : `punch${swordAttack.step}`
+      }
       punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
       pendingPunchRef.current = {
         targetId: punchTarget.target.id,
         contactAt,
         expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
+        charged,
         fired: false,
       }
     } else if (wantsKick && kickInArc && onGroundRef.current) {
@@ -4701,6 +4812,13 @@ function Player({
     } else if (wantsGenericAction) {
       if (punchTarget && onGroundRef.current) {
         const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
+        if (equippedWeapon === 'cheat_sword') {
+          const swordAttack = swordAttackRef.current
+          if (state.clock.elapsedTime - swordAttack.lastAt > PUNCH_COMBO_WINDOW) swordAttack.step = 0
+          swordAttack.step = (swordAttack.step % 3) + 1
+          swordAttack.lastAt = state.clock.elapsedTime
+          swordAttack.motion = swordAttack.step === 1 ? 'punch' : `punch${swordAttack.step}`
+        }
         punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
         pendingPunchRef.current = {
           targetId: punchTarget.target.id,
@@ -4746,6 +4864,7 @@ function Player({
     key.actionQueued = false
     touch.actionQueued = false
     touch.punchQueued = false
+    touch.punchChargeMs = 0
     touch.kickQueued = false
     key.punchQueued = false
     key.kickQueued = false
@@ -4907,6 +5026,7 @@ function Player({
           onCombatHit?.({
             targetId: target.id,
             damage: punchDamage,
+            charged: Boolean(pendingPunch.charged),
             direction: { x: contact.forwardX, z: contact.forwardZ },
             hitPoint: [
               target.position.x,
@@ -4952,7 +5072,9 @@ function Player({
     }
 
     const nextMotion =
-      state.clock.elapsedTime < jumpLandUntilRef.current
+      isDodging
+        ? 'run'
+        : state.clock.elapsedTime < jumpLandUntilRef.current
         ? 'jumpLand'
         : !onGroundRef.current && state.clock.elapsedTime < jumpStartUntilRef.current
           ? 'jumpStart'
@@ -4967,7 +5089,7 @@ function Player({
                 : state.clock.elapsedTime < pointingUpUntilRef.current
                   ? 'pointingUp'
                   : state.clock.elapsedTime < punchUntilRef.current
-                    ? 'punch'
+                    ? equippedWeapon === 'cheat_sword' ? swordAttackRef.current.motion : 'punch'
                   : state.clock.elapsedTime < kickUntilRef.current
                     ? 'kick'
                     : isMoving
@@ -5686,6 +5808,8 @@ function PlayerAvatar({
   const swordWalk = useMixamoGlbAnimation('/models/player/anim/sword-walk.glb')
   const swordRun = useMixamoGlbAnimation('/models/player/anim/sword-run.glb')
   const swordSlash = useMixamoGlbAnimation('/models/player/anim/sword-slash.glb')
+  const swordSlash2 = useMixamoGlbAnimation('/models/player/anim/sword-slash-2.glb')
+  const swordSlash3 = useMixamoGlbAnimation('/models/player/anim/sword-slash-3.glb')
   const wave = useMixamoGlbAnimation('/models/player/anim/waving.glb')
   const dance = useMixamoGlbAnimation('/models/player/anim/dance.glb')
   const pointingUp = useMixamoGlbAnimation('/models/player/anim/pointing-up.glb')
@@ -5866,6 +5990,8 @@ function PlayerAvatar({
       { source: swordWalk.animations[0], name: 'swordWalk' },
       { source: swordRun.animations[0], name: 'swordRun' },
       { source: swordSlash.animations[0], name: 'swordSlash' },
+      { source: swordSlash2.animations[0], name: 'swordSlash2' },
+      { source: swordSlash3.animations[0], name: 'swordSlash3' },
       { source: wave.animations[0], name: 'wave' },
       { source: dance.animations[0], name: 'dance' },
       { source: pointingUp.animations[0], name: 'pointingUp' },
@@ -5891,7 +6017,7 @@ function PlayerAvatar({
         }
         return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const { actions, mixer } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
@@ -5981,7 +6107,8 @@ function PlayerAvatar({
 
     if (previousAction === nextAction) return
 
-    const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || nextMotion === 'swordSlash' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
+    const isSwordSlash = nextMotion === 'swordSlash' || nextMotion === 'swordSlash2' || nextMotion === 'swordSlash3'
+    const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || isSwordSlash || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
     const fadeDuration =
       previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
         ? PLAYER_JUMP_TO_FALL_ANIMATION_FADE
@@ -5997,7 +6124,7 @@ function PlayerAvatar({
       .reset()
       .setLoop(isOneShot ? LoopOnce : LoopRepeat, isOneShot ? 1 : Infinity)
       .setEffectiveWeight(1)
-      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : nextMotion === 'punch' ? 1.35 : nextMotion === 'swordSlash' ? 1.25 : 1)
+      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : nextMotion === 'punch' ? 1.35 : isSwordSlash ? 1.25 : 1)
       .play()
     nextAction.clampWhenFinished = isOneShot
 
@@ -6026,6 +6153,8 @@ function PlayerAvatar({
     if (nextMotion === 'walk') return 'swordWalk'
     if (nextMotion === 'run') return 'swordRun'
     if (nextMotion === 'punch') return 'swordSlash'
+    if (nextMotion === 'punch2') return 'swordSlash2'
+    if (nextMotion === 'punch3') return 'swordSlash3'
     return nextMotion
   }
 
@@ -6391,6 +6520,12 @@ function HeldSword({ active, handBoneRef, playerGroupRef }) {
       <Suspense fallback={null}>
         <CheatSwordMesh />
       </Suspense>
+      <RuntimeParticleEffect
+        preset={CHEAT_SWORD_AURA_PARTICLE_PRESET}
+        playing={active}
+        loop
+        layer={OUTDOOR_LIGHT_LAYER}
+      />
       <pointLight color="#66e0ff" intensity={active ? 0.9 : 0} distance={2.2} />
     </group>
   )
@@ -17549,6 +17684,10 @@ function App() {
     actionQueued: false,
     punchQueued: false,
     kickQueued: false,
+    punchHeldAt: 0,
+    punchChargeMs: 0,
+    dodgeLeftQueued: false,
+    dodgeRightQueued: false,
     wingsQueued: false,
     wingsBoostQueued: false,
     emoteQueued: null,
@@ -17556,6 +17695,7 @@ function App() {
     mountDescend: false,
   })
   const playerCombatActionsRef = useRef({ canKick: false, canPunch: false })
+  const playerDodgeInvulnerableRef = useRef(false)
   const { canKick, canPunch } = useCombatActionsAvailability(playerCombatActionsRef)
   // Sort d'ailes : instantané écrit par Player() dans useFrame, pollé par le dock.
   const wingsUiRef = useRef({ visible: false, canCast: false, flying: false, boostAvailable: false, cooldownRemaining: 0, energyRatio: 0 })
@@ -17599,6 +17739,10 @@ function App() {
       touchRef.current.actionQueued = false
       touchRef.current.punchQueued = false
       touchRef.current.kickQueued = false
+      touchRef.current.punchHeldAt = 0
+      touchRef.current.punchChargeMs = 0
+      touchRef.current.dodgeLeftQueued = false
+      touchRef.current.dodgeRightQueued = false
       touchRef.current.emoteQueued = null
       touchRef.current.mountAscend = false
       touchRef.current.mountDescend = false
@@ -17880,6 +18024,8 @@ function App() {
   const cloudSaveTimeoutRef = useRef(null)
   const onlinePresenceRef = useRef(null)
   const multiplayerChannelRef = useRef(null)
+  const bossActionGuardRef = useRef(createBossActionGuard())
+  const bossMovementSpeedMultiplierRef = useRef(1)
   const localPlayerStateRef = useRef({ position: [0, PLAYER_HEIGHT, 2.2], rotationY: 0, motion: 'idle', zone: ZONES.interior })
   const guestKickQueueRef = useRef([])
   const hostTimeOffsetRef = useRef(0)
@@ -18282,7 +18428,28 @@ function App() {
     selectedWallSkinId,
     applyWallToCeiling,
     editableObjects,
+    boss: createBossNetworkSnapshot(),
   })
+
+  useEffect(() => {
+    if (!isHostVisit || !multiplayerSession || !authUser) return undefined
+    let timeoutId = null
+    const unsubscribe = useBossStore.subscribe((state, previous) => {
+      if (state.revision === previous.revision) return
+      if (timeoutId) window.clearTimeout(timeoutId)
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null
+        multiplayerChannelRef.current?.sendWorldState?.({
+          bossOnly: true,
+          boss: createBossNetworkSnapshot(),
+        })
+      }, 80)
+    })
+    return () => {
+      unsubscribe()
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
+  }, [isHostVisit, multiplayerSession, authUser])
 
   const rememberPersonalProgress = (snapshot) => {
     if (!snapshot) return
@@ -18533,7 +18700,8 @@ function App() {
       const savedEquipped = typeof parsed.equippedWeapon === 'string' ? parsed.equippedWeapon : null
       const equippedIsValid =
         (savedEquipped === 'magic_book' && hasMagicBook) ||
-        (savedEquipped === 'magic_skull' && hasMagicSkull)
+        (savedEquipped === 'magic_skull' && hasMagicSkull) ||
+        (savedEquipped === 'cheat_sword' && parsedOwnedWeapons.includes('cheat_sword'))
       setEquipment('equippedWeapon',equippedIsValid ? savedEquipped : null)
     }
     if (includeIdentity && Array.isArray(parsed.ownedTitleIds)) {
@@ -18754,7 +18922,7 @@ function App() {
       progressStorageKey,
       JSON.stringify(snapshot),
     )
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -18872,6 +19040,7 @@ function App() {
         setMultiplayerMessage(`${response.fromDisplayName} est maintenant dans ta liste d'amis.`)
       },
       onSessionEnded: () => {
+        useBossStore.getState().reset('session-ended')
         setMultiplayerMessage('La visite est terminee.')
         setMultiplayerRole('solo')
         setMultiplayerSession(null)
@@ -18938,7 +19107,19 @@ function App() {
       if (seq <= lastRemoteWorldSeqRef.current) return
       if (!message?.snapshot) return
       lastRemoteWorldSeqRef.current = seq
-      applyProgressSnapshot(message.snapshot, { includeCoins: false })
+      const snapshot = message.snapshot
+      if (snapshot.boss) useBossStore.getState().applySnapshot(snapshot.boss)
+      if (!snapshot.bossOnly) applyProgressSnapshot(snapshot, { includeCoins: false })
+    }
+    const applyRemoteBossAction = (action) => {
+      if (multiplayerRole !== 'host') return
+      handleHostBossAction({
+        action,
+        remotePlayerState: remotePlayerStateRef.current,
+        placements: SUMMONING_ALTAR_PLACEMENTS,
+        getHeight: getTerrainHeight,
+        guard: bossActionGuardRef.current,
+      })
     }
     const applyRemoteCoinGain = async (message) => {
       const delta = Number(message?.delta)
@@ -19011,11 +19192,13 @@ function App() {
         onWorldState: applyRemoteWorldState,
         onCoinGain: applyRemoteCoinGain,
         onSpellCast: applyRemoteSpellCast,
+        onBossAction: applyRemoteBossAction,
         onStatusChange: setSessionConnectionState,
         onHostTimeOffsetChange: (offset) => {
           hostTimeOffsetRef.current = MathUtils.lerp(hostTimeOffsetRef.current, offset, 0.25)
         },
         onSessionEnded: () => {
+          useBossStore.getState().reset('session-ended')
           clearRemoteState()
           setMultiplayerRole('solo')
           setMultiplayerSession(null)
@@ -19043,7 +19226,9 @@ function App() {
       onWorldState: applyRemoteWorldState,
       onCoinGain: applyRemoteCoinGain,
       onSpellCast: applyRemoteSpellCast,
+      onBossAction: applyRemoteBossAction,
       onPlayerLeft: () => {
+        if (multiplayerRole === 'guest') useBossStore.getState().reset('host-left')
         clearRemoteState()
         setMultiplayerMessage('Le joueur distant a quitte la visite.')
       },
@@ -19185,7 +19370,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
 
   useEffect(() => {
     const saveBeforeLeaving = () => {
@@ -19550,7 +19735,7 @@ function App() {
   const handlePlayerHit = useCallback(({ damage = MUSHROOM_ENEMY_ATTACK_DAMAGE, sourceId = null } = {}) => {
     // Agression subie : les squelettes invoqués focalisent l'agresseur.
     if (sourceId) playerTargetIdRef.current = sourceId
-    if (playerDamageLockRef.current || playerHpRef.current <= 0) return false
+    if (playerDodgeInvulnerableRef.current || playerDamageLockRef.current || playerHpRef.current <= 0) return false
     playerDamageLockRef.current = true
     window.setTimeout(() => {
       playerDamageLockRef.current = false
@@ -21909,6 +22094,8 @@ function App() {
               appearance={characterAppearance}
               freeCameraActive={isLocalNetwork && freeCameraActive}
               movementLocked={isCharging || isLearningMagicSkull}
+              movementSpeedMultiplierRef={bossMovementSpeedMultiplierRef}
+              playerInvulnerableRef={playerDodgeInvulnerableRef}
               playerCombatActionsRef={playerCombatActionsRef}
               wingsUiRef={wingsUiRef}
               onWingsParticleBurst={addWingsParticleBurst}
@@ -21954,9 +22141,21 @@ function App() {
           <SlimeBossSystem
             placements={SUMMONING_ALTAR_PLACEMENTS}
             playerPositionRef={playerPositionRef}
+            remotePlayerStateRef={remotePlayerStateRef}
+            localPlayerAlive={playerHp > 0}
             onDamagePlayer={({ damage }) => handlePlayerHit({ damage, sourceId: 'slime_boss' })}
+            onBossHit={(hit) => {
+              if (isGuestVisit) {
+                sendBossHitRequest(multiplayerChannelRef.current, hit)
+                return
+              }
+              useBossStore.getState().damage(hit.damage)
+            }}
             registerCombatTarget={registerCombatTarget}
             swordEquipped={equippedWeapon === 'cheat_sword'}
+            movementSpeedMultiplierRef={bossMovementSpeedMultiplierRef}
+            timeOffsetRef={hostTimeOffsetRef}
+            authority={!isGuestVisit}
             enabled={currentZone === ZONES.outside && mode === 'play'}
           />
           <LootDrops
@@ -22083,6 +22282,8 @@ function App() {
           spellUi={spellUi}
           onSpellPress={handleSpellPress}
           wingsUiRef={wingsUiRef}
+          showDodge={currentZone === ZONES.outside}
+          swordEquipped={equippedWeapon === 'cheat_sword'}
         />
       )}
       {showGameplayUi && (
@@ -22222,8 +22423,16 @@ function App() {
         onRequestSit={requestSit}
         onRequestStandUp={requestStandUp}
       />
-      <BossHud placements={SUMMONING_ALTAR_PLACEMENTS} />
-      <BossRewardWatcher onDefeated={() => setEquipment('ownedCheatSword', true)} />
+      <BossHud
+        placements={SUMMONING_ALTAR_PLACEMENTS}
+        authority={!isGuestVisit}
+        onRequestSummon={({ altarId }) => sendBossSummonRequest(multiplayerChannelRef.current, altarId)}
+      />
+      <BossRewardWatcher
+        onDefeated={() => setEquipment('ownedCheatSword', true)}
+        alreadyOwned={ownedCheatSword}
+        progressScope={progressScope}
+      />
       {showGameplayUi && canModifyWorld && youtubeFrameEditor && (
         <div className="youtube-frame-editor-backdrop" role="presentation" onPointerDown={() => setYoutubeFrameEditor(null)}>
           <form

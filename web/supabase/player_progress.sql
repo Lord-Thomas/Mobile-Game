@@ -395,3 +395,49 @@ end;
 $$;
 
 grant execute on function public.claim_first_mob_defeat_rewards(text) to authenticated;
+
+create or replace function public.claim_boss_slime_reward(requested_scope text default 'player')
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid := auth.uid();
+  safe_scope text := case when requested_scope = 'admin' then 'admin' else 'player' end;
+  weapons jsonb;
+begin
+  if current_user_id is null then
+    return jsonb_build_object('ok', false, 'reason', 'not_authenticated', 'granted', false);
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('boss_slime_reward:' || current_user_id::text || ':' || safe_scope));
+
+  insert into public.player_progress (user_id, progress_scope, world_settings)
+  values (current_user_id, safe_scope, '{}'::jsonb)
+  on conflict (user_id, progress_scope) do nothing;
+
+  select case
+    when jsonb_typeof(world_settings -> 'ownedWeapons') = 'array' then world_settings -> 'ownedWeapons'
+    else '[]'::jsonb
+  end
+  into weapons
+  from public.player_progress
+  where user_id = current_user_id and progress_scope = safe_scope
+  for update;
+
+  if weapons @> '["cheat_sword"]'::jsonb then
+    return jsonb_build_object('ok', true, 'reason', 'already_claimed', 'granted', false);
+  end if;
+
+  update public.player_progress
+  set
+    world_settings = jsonb_set(world_settings, '{ownedWeapons}', weapons || '["cheat_sword"]'::jsonb, true),
+    updated_at = now()
+  where user_id = current_user_id and progress_scope = safe_scope;
+
+  return jsonb_build_object('ok', true, 'reason', 'claimed', 'granted', true);
+end;
+$$;
+
+grant execute on function public.claim_boss_slime_reward(text) to authenticated;

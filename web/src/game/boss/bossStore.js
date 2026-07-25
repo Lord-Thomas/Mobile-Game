@@ -1,55 +1,95 @@
 import { create } from 'zustand'
-import { SLIME_BOSS, hpToPhase } from './bossConfig'
+import {
+  createInactiveBossState,
+  damageBoss,
+  resetBoss,
+  sanitizeBossSnapshot,
+  stepBoss,
+  summonBoss,
+} from './bossSimulation'
 
-// Store dédié au boss (convention "plusieurs stores par domaine", cf. useGameStore).
-// N'y met QUE de l'état événementiel (vie, phase, état de combat, proximité autel).
-// La POSITION/animation temps réel du boss reste en useRef+useFrame côté composant.
-//
-// Autorité (ADR 0002) : en solo, ce store EST la source de vérité locale. En multi,
-// seul l'hôte le mute et diffuse l'état ; l'invité le reçoit et rend. La forme du
-// state est donc volontairement sérialisable et pilotée par des actions pures.
-export const useBossStore = create((set) => ({
-  active: false,
-  state: 'idle', // 'idle' | 'active' | 'dying' | 'dead'
-  hp: 0,
-  maxHp: SLIME_BOSS.maxHp,
-  phase: 1,
-  altarId: null,
-  spawn: null, // [x, y, z] point d'apparition (sol)
-  nearAltarId: null, // proximité d'un autel invocable (écrit depuis useFrame)
+const initialState = createInactiveBossState()
 
-  setNearAltar: (id) => set((s) => (s.nearAltarId === id ? s : { nearAltarId: id })),
+export const useBossStore = create((set, get) => ({
+  ...initialState,
+  nearAltarId: null,
 
-  // Invocation. Idempotente : ignore si un boss est déjà actif (anti double-invocation).
-  summon: ({ altarId, spawn }) => set((s) => (
-    s.active
-      ? s
-      : {
-          active: true,
-          state: 'active',
-          hp: SLIME_BOSS.maxHp,
-          maxHp: SLIME_BOSS.maxHp,
-          phase: 1,
-          altarId,
-          spawn,
-        }
-  )),
+  setNearAltar: (id) => set((state) => (state.nearAltarId === id ? state : { nearAltarId: id })),
 
-  // Application de dégâts (V1 : local ; en multi ce sera l'autorité qui l'appelle).
-  damage: (amount) => set((s) => {
-    if (s.state !== 'active') return s
-    const hp = Math.max(0, s.hp - Math.max(0, amount))
-    if (hp <= 0) return { hp: 0, phase: 3, state: 'dying' }
-    return { hp, phase: hpToPhase(hp, s.maxHp) }
-  }),
+  summon: (payload) => {
+    const previous = get()
+    const next = summonBoss(previous, payload)
+    if (next !== previous) set(next)
+    return next.active
+  },
 
-  // Fin de l'animation de mort → boss retiré, autel réutilisable.
-  reset: () => set({
-    active: false,
-    state: 'idle',
-    hp: 0,
-    phase: 1,
-    altarId: null,
-    spawn: null,
-  }),
+  damage: (amount, options) => {
+    const previous = get()
+    const next = damageBoss(previous, amount, options)
+    if (next !== previous) set(next)
+    return next.hp < previous.hp
+  },
+
+  step: (inputs) => {
+    const previous = get()
+    const next = stepBoss(previous, inputs)
+    if (next !== previous) set(next)
+    return next
+  },
+
+  applySnapshot: (snapshot) => {
+    const safe = sanitizeBossSnapshot(snapshot)
+    if (!safe) return false
+    set(safe)
+    return true
+  },
+
+  reset: (reason = 'manual') => set((state) => resetBoss(state, reason)),
 }))
+
+export function createBossNetworkSnapshot(state = useBossStore.getState()) {
+  const {
+    version,
+    revision,
+    active,
+    state: combatState,
+    hp,
+    maxHp,
+    phase,
+    altarId,
+    spawn,
+    position,
+    attack,
+    nextAttackAt,
+    attackSequence,
+    hazards,
+    minions,
+    summonedPhases,
+    lastPlayerInArenaAt,
+    dyingEndsAt,
+    victoryId,
+    resetReason,
+  } = state
+  return {
+    version,
+    revision,
+    active,
+    state: combatState,
+    hp,
+    maxHp,
+    phase,
+    altarId,
+    spawn,
+    position,
+    attack,
+    nextAttackAt,
+    attackSequence,
+    hazards,
+    minions,
+    summonedPhases,
+    lastPlayerInArenaAt,
+    dyingEndsAt,
+    victoryId,
+    resetReason,
+  }
+}
