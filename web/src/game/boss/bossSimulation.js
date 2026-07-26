@@ -65,6 +65,7 @@ export function createInactiveBossState(overrides = {}) {
     dyingEndsAt: 0,
     victoryId: null,
     resetReason: overrides.resetReason ?? null,
+    stuckSince: 0,
   }
 }
 
@@ -111,6 +112,19 @@ export function damageBoss(state, amount, { now = Date.now() } = {}) {
   }
 }
 
+export function damageBossMinion(state, minionId, amount) {
+  if (!state?.active || state.state !== 'active' || typeof minionId !== 'string') return state
+  const damage = Math.max(0, finite(amount))
+  const index = state.minions.findIndex((minion) => minion.id === minionId)
+  if (damage <= 0 || index < 0) return state
+  const minion = state.minions[index]
+  const hp = Math.max(0, finite(minion.hp, minion.maxHp) - damage)
+  const minions = hp <= 0
+    ? state.minions.filter((entry) => entry.id !== minionId)
+    : state.minions.map((entry, entryIndex) => entryIndex === index ? { ...entry, hp } : entry)
+  return { ...state, revision: state.revision + 1, minions }
+}
+
 export function resetBoss(state, reason = 'manual') {
   return createInactiveBossState({
     revision: finite(state?.revision, 0) + 1,
@@ -129,6 +143,8 @@ function spawnPhaseMinions(state, phase) {
       kind: index % 2 === 0 ? 'green' : 'blue',
       position: [state.position[0] + ox, state.position[1], state.position[2] + oz],
       spawnedPhase: phase,
+      hp: SLIME_BOSS.summons.maxHpByKind[index % 2 === 0 ? 'green' : 'blue'],
+      maxHp: SLIME_BOSS.summons.maxHpByKind[index % 2 === 0 ? 'green' : 'blue'],
     })
   }
   return {
@@ -220,7 +236,11 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
     return now >= state.dyingEndsAt ? resetBoss(state, 'defeated') : state
   }
 
-  const availablePlayers = activePlayers(players)
+  const knownPlayers = (Array.isArray(players) ? players : []).filter((player) => player && Array.isArray(player.position))
+  const availablePlayers = activePlayers(knownPlayers)
+  if (knownPlayers.length > 0 && availablePlayers.length === 0) {
+    return resetBoss(state, 'all-dead')
+  }
   const playersInResetRange = availablePlayers.filter((player) => distance2d(player.position, state.spawn) <= SLIME_BOSS.resetDistance)
   let next = state
   if (playersInResetRange.length > 0) {
@@ -251,7 +271,13 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
       SLIME_BOSS.arenaRadius,
       next.spawn,
     )
-    if (position !== next.position) next = { ...next, revision: next.revision + 1, position }
+    if (position !== next.position) {
+      next = { ...next, revision: next.revision + 1, position, stuckSince: 0 }
+    } else if (closest.distance > SLIME_BOSS.attackRange) {
+      const stuckSince = next.stuckSince || now
+      if (now - stuckSince >= 8000) return resetBoss(next, 'stuck')
+      if (stuckSince !== next.stuckSince) next = { ...next, revision: next.revision + 1, stuckSince }
+    }
   }
 
   if (next.minions.length && availablePlayers.length) {
@@ -321,7 +347,20 @@ export function sanitizeBossSnapshot(value) {
     spawn: safePosition(value.spawn),
     position: safePosition(value.position, value.spawn),
     hazards: Array.isArray(value.hazards) ? value.hazards.slice(0, 12) : [],
-    minions: Array.isArray(value.minions) ? value.minions.slice(0, 12) : [],
+    minions: Array.isArray(value.minions)
+      ? value.minions.slice(0, 12).map((minion) => {
+        const kind = minion?.kind === 'blue' ? 'blue' : 'green'
+        const maxHp = SLIME_BOSS.summons.maxHpByKind[kind]
+        return {
+          id: typeof minion?.id === 'string' ? minion.id.slice(0, 100) : `boss-minion-${kind}`,
+          kind,
+          position: safePosition(minion?.position, value.spawn),
+          spawnedPhase: minion?.spawnedPhase === 3 ? 3 : 2,
+          hp: Math.max(0, Math.min(maxHp, finite(minion?.hp, maxHp))),
+          maxHp,
+        }
+      })
+      : [],
     summonedPhases: Array.isArray(value.summonedPhases) ? value.summonedPhases.filter((phase) => phase === 2 || phase === 3) : [],
   }
 }

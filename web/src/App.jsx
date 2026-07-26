@@ -11,6 +11,8 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
+import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed } from './game/dodge'
+import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
@@ -49,6 +51,7 @@ import BossHud from './game/boss/BossHud'
 import BossRewardWatcher from './game/boss/BossRewardWatcher'
 import { createBossNetworkSnapshot, useBossStore } from './game/boss/bossStore'
 import { createBossActionGuard, handleHostBossAction, sendBossHitRequest, sendBossSummonRequest } from './game/boss/bossNetwork'
+import { SLIME_BOSS } from './game/boss/bossConfig'
 import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
 import QuestTalkPrompt from './ui/QuestTalkPrompt'
@@ -1517,7 +1520,7 @@ function CombatActionDock({
   const wingsUi = useWingsSpellUi(wingsUiRef)
   const showWings = wingsUi.visible && !wingsUi.flying
   const showWingsBoost = wingsUi.visible && wingsUi.flying
-  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0) + (showDodge ? 2 : 0)
+  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0) + (showDodge ? 1 : 0)
   if (count === 0) return null
 
   const queuePunch = () => {
@@ -1534,7 +1537,10 @@ function CombatActionDock({
 
   const releasePunchCharge = () => {
     if (!swordEquipped || !touchRef.current.punchHeldAt) return
-    touchRef.current.punchChargeMs = performance.now() - touchRef.current.punchHeldAt
+    touchRef.current.punchChargeMs = Math.min(
+      MELEE_WEAPONS.cheat_sword.maxChargeMs,
+      performance.now() - touchRef.current.punchHeldAt,
+    )
     touchRef.current.punchHeldAt = 0
     queuePunch()
   }
@@ -1560,41 +1566,34 @@ function CombatActionDock({
           aria-label="Taper"
           onPointerDown={(event) => {
             event.preventDefault()
+            if (swordEquipped) event.currentTarget.classList.add('combat-action-btn--charging')
             startPunchCharge()
           }}
-          onPointerUp={releasePunchCharge}
-          onPointerCancel={releasePunchCharge}
+          onPointerUp={(event) => {
+            event.currentTarget.classList.remove('combat-action-btn--charging')
+            releasePunchCharge()
+          }}
+          onPointerCancel={(event) => {
+            event.currentTarget.classList.remove('combat-action-btn--charging')
+            releasePunchCharge()
+          }}
         >
           <span className="combat-action-icon" aria-hidden="true">👊</span>
-          <span className="combat-action-label">Taper</span>
+          <span className="combat-action-label">{swordEquipped ? 'Maintenir' : 'Taper'}</span>
         </button>
       )}
       {showDodge && (
         <button
           className="combat-action-btn"
           type="button"
-          aria-label="Esquive gauche"
+          aria-label="Roulade"
           onPointerDown={(event) => {
             event.preventDefault()
-            touchRef.current.dodgeLeftQueued = true
+            touchRef.current.dodgeQueued = true
           }}
         >
-          <span className="combat-action-icon" aria-hidden="true">↶</span>
-          <span className="combat-action-label">Esquive</span>
-        </button>
-      )}
-      {showDodge && (
-        <button
-          className="combat-action-btn"
-          type="button"
-          aria-label="Esquive droite"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            touchRef.current.dodgeRightQueued = true
-          }}
-        >
-          <span className="combat-action-icon" aria-hidden="true">↷</span>
-          <span className="combat-action-label">Esquive</span>
+          <span className="combat-action-icon" aria-hidden="true">↻</span>
+          <span className="combat-action-label">Roulade</span>
         </button>
       )}
       {canKick && (
@@ -1697,8 +1696,7 @@ function useKeyboardInput() {
     actionQueued: false,
     punchQueued: false,
     kickQueued: false,
-    dodgeLeftQueued: false,
-    dodgeRightQueued: false,
+    dodgeQueued: false,
   })
 
   useEffect(() => {
@@ -1710,8 +1708,7 @@ function useKeyboardInput() {
       keysRef.current.actionQueued = false
       keysRef.current.punchQueued = false
       keysRef.current.kickQueued = false
-      keysRef.current.dodgeLeftQueued = false
-      keysRef.current.dodgeRightQueued = false
+      keysRef.current.dodgeQueued = false
     }
 
     const resetKeysWhenInactive = () => {
@@ -1734,8 +1731,10 @@ function useKeyboardInput() {
       if (key === 's' || key === 'arrowdown') keysRef.current.back = true
       if (key === 'q' || key === 'arrowleft' || key === 'a') keysRef.current.left = true
       if (key === 'd' || key === 'arrowright') keysRef.current.right = true
-      if (key === 'x' && !event.repeat) keysRef.current.dodgeLeftQueued = true
-      if (key === 'c' && !event.repeat) keysRef.current.dodgeRightQueued = true
+      if (key === 'control' && !event.repeat) {
+        event.preventDefault()
+        keysRef.current.dodgeQueued = true
+      }
 
       if (key === ' ' || key === 'space') {
         event.preventDefault()
@@ -2756,9 +2755,6 @@ const DRAGON_SLEEP_DELAY = 4
 
 const DRAGON_RIDE_MODEL_YAW_OFFSET = Math.PI / 2
 const PLAYER_MAX_RUN_SPEED = 3.4
-const PLAYER_DODGE_DURATION = 0.52
-const PLAYER_DODGE_COOLDOWN = 0.9
-const PLAYER_DODGE_SPEED = 7.4
 const DRAGON_RIDE_GROUND_SPEED = PLAYER_MAX_RUN_SPEED * 1.6
 const DRAGON_RIDE_FLY_SPEED = PLAYER_MAX_RUN_SPEED * 3
 const DRAGON_RIDE_TURN_SPEED = 2.2
@@ -4008,6 +4004,7 @@ function Player({
   movementLocked = false,
   movementSpeedMultiplierRef = null,
   playerInvulnerableRef = null,
+  localPlayerAlive = true,
   dragonRide = null,
   wingsUiRef = null,
   onWingsParticleBurst = null,
@@ -4030,10 +4027,16 @@ function Player({
   const mountedPlayerLocalPosition = useMemo(() => new Vector3(), [])
   const punchUntilRef = useRef(0)
   const pendingPunchRef = useRef(null)
-  const swordAttackRef = useRef({ step: 0, lastAt: -Infinity, motion: 'punch' })
+  const swordAttackRef = useRef({ step: 0, lastAt: -Infinity, motion: 'punch', chargedCooldownUntil: 0 })
   // Combo de coups de poing : enchaîner dans le délai augmente les dégâts.
   const punchComboRef = useRef({ count: 0, lastHitAt: -Infinity })
-  const dodgeRef = useRef({ activeUntil: 0, cooldownUntil: 0, direction: 0 })
+  const dodgeRef = useRef({
+    startedAt: 0,
+    activeUntil: 0,
+    cooldownUntil: 0,
+    directionX: 0,
+    directionZ: 1,
+  })
   const jumpStartUntilRef = useRef(0)
   const jumpLandUntilRef = useRef(0)
   const waveUntilRef = useRef(0)
@@ -4361,6 +4364,7 @@ function Player({
           rotationY: yaw,
           motion: 'mountedIdle',
           zone: currentZone,
+          alive: localPlayerAlive,
           // Mount transform so remote players can render this mount under us.
           mount: {
             id: mountConfig.id,
@@ -4449,6 +4453,7 @@ function Player({
           rotationY: targetYaw,
           motion: nextMotion,
           zone: currentZone,
+          alive: localPlayerAlive,
         }
       }
 
@@ -4607,45 +4612,39 @@ function Player({
     }
 
     const dodge = dodgeRef.current
-    const wantsDodgeLeft = touch.dodgeLeftQueued || key.dodgeLeftQueued
-    const wantsDodgeRight = touch.dodgeRightQueued || key.dodgeRightQueued
+    const wantsDodge = touch.dodgeQueued || key.dodgeQueued
     if (
       !isEmoting &&
       onGroundRef.current &&
       state.clock.elapsedTime >= dodge.cooldownUntil &&
-      (wantsDodgeLeft || wantsDodgeRight)
+      wantsDodge
     ) {
-      dodge.direction = wantsDodgeLeft ? -1 : 1
-      dodge.activeUntil = state.clock.elapsedTime + PLAYER_DODGE_DURATION
-      dodge.cooldownUntil = state.clock.elapsedTime + PLAYER_DODGE_COOLDOWN
+      const direction = getDodgeDirection(worldX, worldZ, visualRef.current.rotation.y)
+      dodge.startedAt = state.clock.elapsedTime
+      dodge.activeUntil = dodge.startedAt + PLAYER_DODGE.duration
+      dodge.cooldownUntil = dodge.activeUntil + PLAYER_DODGE.cooldownAfter
+      dodge.directionX = direction.x
+      dodge.directionZ = direction.z
       punchUntilRef.current = 0
       pendingPunchRef.current = null
       kickUntilRef.current = 0
       pendingKickRef.current = null
     }
-    touch.dodgeLeftQueued = false
-    touch.dodgeRightQueued = false
-    key.dodgeLeftQueued = false
-    key.dodgeRightQueued = false
+    touch.dodgeQueued = false
+    key.dodgeQueued = false
 
     const isDodging = state.clock.elapsedTime < dodge.activeUntil
     if (playerInvulnerableRef) playerInvulnerableRef.current = isDodging
     if (isDodging) {
-      worldX = rightX * dodge.direction
-      worldZ = rightZ * dodge.direction
+      worldX = dodge.directionX
+      worldZ = dodge.directionZ
       isMoving = true
-      const elapsed = PLAYER_DODGE_DURATION - (dodge.activeUntil - state.clock.elapsedTime)
-      if (wingsTiltRef.current) {
-        wingsTiltRef.current.rotation.z = dodge.direction * (elapsed / PLAYER_DODGE_DURATION) * Math.PI * 2
-      }
-    } else if (wingsTiltRef.current && Math.abs(wingsTiltRef.current.rotation.z) > 0.001) {
-      wingsTiltRef.current.rotation.z = 0
     }
 
     const wingsAirborne = isWingsFlying(wings)
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
     const speed = isDodging
-      ? PLAYER_DODGE_SPEED
+      ? getDodgeSpeed(state.clock.elapsedTime - dodge.startedAt)
       : isMoving
         ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) * (movementSpeedMultiplierRef?.current ?? 1)
         : 0
@@ -4737,7 +4736,13 @@ function Player({
       state.clock.elapsedTime < punchUntilRef.current ||
       state.clock.elapsedTime < kickUntilRef.current ||
       isDodging
-    const wantsPunch = !isEmoting && !isAttackLocked && (touch.punchQueued || key.punchQueued)
+    const wantsChargedSwordAttack =
+      equippedWeapon === 'cheat_sword' &&
+      (touch.punchChargeMs ?? 0) >= MELEE_WEAPONS.cheat_sword.chargeThresholdMs
+    const chargedSwordLocked =
+      wantsChargedSwordAttack &&
+      state.clock.elapsedTime < swordAttackRef.current.chargedCooldownUntil
+    const wantsPunch = !isEmoting && !isAttackLocked && !chargedSwordLocked && (touch.punchQueued || key.punchQueued)
     const wantsKick = !isEmoting && !isAttackLocked && (touch.kickQueued || key.kickQueued)
     const wantsGenericAction = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
     if (wantsEmote === 'wave' && onGroundRef.current) {
@@ -4784,13 +4789,17 @@ function Player({
       filteredInputRef.current.y = 0
     } else if (wantsPunch && punchTarget && onGroundRef.current) {
       const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
-      const charged = equippedWeapon === 'cheat_sword' && (touch.punchChargeMs ?? 0) >= 700
+      const charged = wantsChargedSwordAttack
       if (equippedWeapon === 'cheat_sword') {
         const swordAttack = swordAttackRef.current
         if (state.clock.elapsedTime - swordAttack.lastAt > PUNCH_COMBO_WINDOW) swordAttack.step = 0
         swordAttack.step = charged ? 3 : (swordAttack.step % 3) + 1
         swordAttack.lastAt = state.clock.elapsedTime
         swordAttack.motion = swordAttack.step === 1 ? 'punch' : `punch${swordAttack.step}`
+        if (charged) {
+          swordAttack.chargedCooldownUntil =
+            state.clock.elapsedTime + MELEE_WEAPONS.cheat_sword.chargedCooldownMs / 1000
+        }
       }
       punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
       pendingPunchRef.current = {
@@ -5073,7 +5082,7 @@ function Player({
 
     const nextMotion =
       isDodging
-        ? 'run'
+        ? 'dodgeRoll'
         : state.clock.elapsedTime < jumpLandUntilRef.current
         ? 'jumpLand'
         : !onGroundRef.current && state.clock.elapsedTime < jumpStartUntilRef.current
@@ -5105,6 +5114,7 @@ function Player({
         motion: nextMotion,
         zone: currentZone,
         wings: isWingsFlying(wings),
+        alive: localPlayerAlive,
       }
     }
 
@@ -5810,6 +5820,7 @@ function PlayerAvatar({
   const swordSlash = useMixamoGlbAnimation('/models/player/anim/sword-slash.glb')
   const swordSlash2 = useMixamoGlbAnimation('/models/player/anim/sword-slash-2.glb')
   const swordSlash3 = useMixamoGlbAnimation('/models/player/anim/sword-slash-3.glb')
+  const dodgeRoll = useMixamoGlbAnimation('/models/player/anim/dodge-roll.glb')
   const wave = useMixamoGlbAnimation('/models/player/anim/waving.glb')
   const dance = useMixamoGlbAnimation('/models/player/anim/dance.glb')
   const pointingUp = useMixamoGlbAnimation('/models/player/anim/pointing-up.glb')
@@ -5992,6 +6003,7 @@ function PlayerAvatar({
       { source: swordSlash.animations[0], name: 'swordSlash' },
       { source: swordSlash2.animations[0], name: 'swordSlash2' },
       { source: swordSlash3.animations[0], name: 'swordSlash3' },
+      { source: dodgeRoll.animations[0], name: 'dodgeRoll' },
       { source: wave.animations[0], name: 'wave' },
       { source: dance.animations[0], name: 'dance' },
       { source: pointingUp.animations[0], name: 'pointingUp' },
@@ -6012,12 +6024,12 @@ function PlayerAvatar({
         if (name === 'wave' || name === 'dance' || name === 'pointingUp') {
           lockEmoteHipsHeight(clip, hipsRestHeight)
         }
-        if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun') {
+        if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun' || name === 'dodgeRoll') {
           lockHipsPlanarPosition(clip)
         }
         return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, dodgeRoll.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const { actions, mixer } = useAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
@@ -6108,7 +6120,7 @@ function PlayerAvatar({
     if (previousAction === nextAction) return
 
     const isSwordSlash = nextMotion === 'swordSlash' || nextMotion === 'swordSlash2' || nextMotion === 'swordSlash3'
-    const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || isSwordSlash || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
+    const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || isSwordSlash || nextMotion === 'dodgeRoll' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
     const fadeDuration =
       previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
         ? PLAYER_JUMP_TO_FALL_ANIMATION_FADE
@@ -6120,11 +6132,21 @@ function PlayerAvatar({
           ? PLAYER_AIR_ANIMATION_FADE
           : PLAYER_DEFAULT_ANIMATION_FADE
 
+    const motionTimeScale = nextMotion === 'dodgeRoll'
+      ? Math.max(0.01, nextAction.getClip().duration) / PLAYER_DODGE.duration
+      : nextMotion === 'kick'
+        ? 1.2
+        : nextMotion === 'punch'
+          ? 1.35
+          : isSwordSlash
+            ? 1.25
+            : 1
+
     nextAction
       .reset()
       .setLoop(isOneShot ? LoopOnce : LoopRepeat, isOneShot ? 1 : Infinity)
       .setEffectiveWeight(1)
-      .setEffectiveTimeScale(nextMotion === 'kick' ? 1.2 : nextMotion === 'punch' ? 1.35 : isSwordSlash ? 1.25 : 1)
+      .setEffectiveTimeScale(motionTimeScale)
       .play()
     nextAction.clampWhenFinished = isOneShot
 
@@ -9122,6 +9144,7 @@ function MultiplayerBridge({
             }
           : null,
         equippedWeapon,
+        alive: localPlayerStateRef.current.alive !== false,
         equippedTitleId,
         characterAppearance,
         sentAt: estimatedHostTime,
@@ -11257,6 +11280,7 @@ function SmallMushroomEnemy({
     position: { x: spawnPosition[0], y: spawnPosition[1], z: spawnPosition[2] },
     radius: cfg.targetRadius ?? 0.48,
     height: cfg.targetHeight ?? 1.2,
+    tags: typeof monsterType === 'string' && monsterType.includes('slime') ? ['slime'] : [],
     disabled: true,
     takeDamage: null,
   })
@@ -17686,8 +17710,7 @@ function App() {
     kickQueued: false,
     punchHeldAt: 0,
     punchChargeMs: 0,
-    dodgeLeftQueued: false,
-    dodgeRightQueued: false,
+    dodgeQueued: false,
     wingsQueued: false,
     wingsBoostQueued: false,
     emoteQueued: null,
@@ -17741,8 +17764,7 @@ function App() {
       touchRef.current.kickQueued = false
       touchRef.current.punchHeldAt = 0
       touchRef.current.punchChargeMs = 0
-      touchRef.current.dodgeLeftQueued = false
-      touchRef.current.dodgeRightQueued = false
+      touchRef.current.dodgeQueued = false
       touchRef.current.emoteQueued = null
       touchRef.current.mountAscend = false
       touchRef.current.mountDescend = false
@@ -18026,7 +18048,7 @@ function App() {
   const multiplayerChannelRef = useRef(null)
   const bossActionGuardRef = useRef(createBossActionGuard())
   const bossMovementSpeedMultiplierRef = useRef(1)
-  const localPlayerStateRef = useRef({ position: [0, PLAYER_HEIGHT, 2.2], rotationY: 0, motion: 'idle', zone: ZONES.interior })
+  const localPlayerStateRef = useRef({ position: [0, PLAYER_HEIGHT, 2.2], rotationY: 0, motion: 'idle', zone: ZONES.interior, alive: true })
   const guestKickQueueRef = useRef([])
   const hostTimeOffsetRef = useRef(0)
   const worldSyncTimeoutRef = useRef(null)
@@ -20915,8 +20937,14 @@ function App() {
     // génère de la menace ('player') sur l'ennemi touché.
     playerTargetIdRef.current = hit.targetId
     const target = combatTargetsRef.current.get(hit.targetId)
-    target?.takeDamage?.({ ...hit, attackerId: 'player' })
-  }, [])
+    const damage = getMeleeHitDamage({
+      weaponId: equippedWeapon,
+      fallbackDamage: hit.damage,
+      targetTags: target?.tags ?? [],
+      charged: Boolean(hit.charged),
+    })
+    target?.takeDamage?.({ ...hit, damage, attackerId: 'player' })
+  }, [equippedWeapon])
 
   // Le joueur est une cible d'aggro permanente (id 'player').
   useEffect(() => {
@@ -22096,6 +22124,7 @@ function App() {
               movementLocked={isCharging || isLearningMagicSkull}
               movementSpeedMultiplierRef={bossMovementSpeedMultiplierRef}
               playerInvulnerableRef={playerDodgeInvulnerableRef}
+              localPlayerAlive={playerHp > 0}
               playerCombatActionsRef={playerCombatActionsRef}
               wingsUiRef={wingsUiRef}
               onWingsParticleBurst={addWingsParticleBurst}
@@ -22143,13 +22172,20 @@ function App() {
             playerPositionRef={playerPositionRef}
             remotePlayerStateRef={remotePlayerStateRef}
             localPlayerAlive={playerHp > 0}
-            onDamagePlayer={({ damage }) => handlePlayerHit({ damage, sourceId: 'slime_boss' })}
+            onDamagePlayer={({ damage, sourceId }) => handlePlayerHit({
+              damage,
+              sourceId: sourceId ?? 'slime_boss',
+            })}
             onBossHit={(hit) => {
               if (isGuestVisit) {
                 sendBossHitRequest(multiplayerChannelRef.current, hit)
                 return
               }
-              useBossStore.getState().damage(hit.damage)
+              if (hit.targetId && hit.targetId !== SLIME_BOSS.id) {
+                useBossStore.getState().damageMinion(hit.targetId, hit.damage)
+              } else {
+                useBossStore.getState().damage(hit.damage)
+              }
             }}
             registerCombatTarget={registerCombatTarget}
             swordEquipped={equippedWeapon === 'cheat_sword'}

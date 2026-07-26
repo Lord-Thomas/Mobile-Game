@@ -105,6 +105,7 @@ function sanitizePlayerState(message, client, player) {
     motion: typeof message?.motion === 'string' ? message.motion.slice(0, 32) : 'idle',
     zone: typeof message?.zone === 'string' ? message.zone.slice(0, 32) : 'interior',
     wings: message?.wings === true,
+    alive: message?.alive !== false,
     mount: sanitizeMount(message?.mount),
     catActive: activeSlimePetId ? false : Boolean(message?.catActive),
     cat: sanitizeCatState(message?.cat),
@@ -194,6 +195,9 @@ export function sanitizeBossAction(message) {
   return {
     type,
     actionId,
+    targetId: typeof message.targetId === 'string'
+      ? message.targetId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100)
+      : 'slime_boss',
     weaponId: sanitizeEquippedWeapon(message.weaponId),
     charged: Boolean(message.charged),
   }

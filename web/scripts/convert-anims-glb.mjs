@@ -31,6 +31,9 @@ const ANIMATIONS = {
   'stand-to-sit': 'Stand To Sit.fbx',
   'sitting-idle': 'Sitting Idle.fbx',
   'stand-up': 'Stand Up.fbx',
+  // Roulade d'esquive. Le déplacement reste piloté par Rapier/le contrôleur :
+  // la translation des hanches est verrouillée côté runtime.
+  'dodge-roll': '../public/models/player/anim/Sprinting Forward Roll.fbx',
   // Épée « ultra cheat » (pack Great Sword, Mixamo) — arme de mêlée du Boss Slime.
   'sword-slash': 'great-sword-slash.fbx',
   'sword-slash-2': '../public/models/player/anim/Great Sword Pack/great sword slash (2).fbx',

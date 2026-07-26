@@ -55,6 +55,10 @@ export const SLIME_BOSS = {
     speed: 1.55,
     damage: 7,
     attackCooldownMs: 1250,
+    maxHpByKind: {
+      green: 45,
+      blue: 70,
+    },
     greenModelUrl: '/models/enemies/cute+slime+3d+model.glb',
     blueModelUrl: '/models/enemies/blue_slime.glb',
   },
@@ -64,8 +68,6 @@ export const SLIME_BOSS = {
   // cheat » inflige des dégâts massifs (bonus anti-slime intégré au montant élevé).
   melee: {
     hitRadius: 2.2, // rayon de la cible de combat (le boss est gros)
-    swordDamage: 300, // dégâts par coup d'épée (poing = dégâts de base du jeu)
-    chargedMultiplier: 2.25,
   },
 }
 

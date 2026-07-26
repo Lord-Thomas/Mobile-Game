@@ -3,6 +3,7 @@ import { SLIME_BOSS } from './bossConfig'
 import {
   createInactiveBossState,
   damageBoss,
+  damageBossMinion,
   getShockwaveRadius,
   stepBoss,
   summonBoss,
@@ -33,6 +34,17 @@ describe('bossSimulation', () => {
     expect(state.summonedPhases).toEqual([2, 3])
   })
 
+  it('permet de blesser puis éliminer un slime invoqué', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    state = damageBoss(state, SLIME_BOSS.maxHp * 0.45, { now: 10 })
+    state = stepBoss(state, { now: 1700, dt: 0.1, players: [player] })
+    const minion = state.minions[0]
+    state = damageBossMinion(state, minion.id, 10)
+    expect(state.minions[0].hp).toBe(minion.maxHp - 10)
+    state = damageBossMinion(state, minion.id, minion.maxHp)
+    expect(state.minions.some((entry) => entry.id === minion.id)).toBe(false)
+  })
+
   it('produit une onde dont le rayon progresse dans sa fenêtre active', () => {
     let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
     state = stepBoss(state, { now: 1700, dt: 0.1, players: [player] })
@@ -48,6 +60,17 @@ describe('bossSimulation', () => {
     expect(state.resetReason).toBe('abandoned')
     expect(state.hazards).toEqual([])
     expect(state.minions).toEqual([])
+  })
+
+  it('réinitialise immédiatement lorsque tous les joueurs connus sont morts', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    state = stepBoss(state, {
+      now: 100,
+      dt: 0.1,
+      players: [{ ...player, alive: false }],
+    })
+    expect(state.active).toBe(false)
+    expect(state.resetReason).toBe('all-dead')
   })
 
   it('passe par dying puis reset après la mort', () => {

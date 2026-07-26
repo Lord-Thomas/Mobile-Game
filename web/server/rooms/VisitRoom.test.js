@@ -94,8 +94,10 @@ describe('sanitizeBossAction', () => {
       type: 'summon', actionId: 'a-1', altarId: 'altar',
     })
     expect(sanitizeBossAction({ type: 'hit', actionId: 'h-1', weaponId: 'cheat_sword', charged: true })).toEqual({
-      type: 'hit', actionId: 'h-1', weaponId: 'cheat_sword', charged: true,
+      type: 'hit', actionId: 'h-1', targetId: 'slime_boss', weaponId: 'cheat_sword', charged: true,
     })
+    expect(sanitizeBossAction({ type: 'hit', actionId: 'h-2', targetId: 'boss-minion-2-0' })?.targetId)
+      .toBe('boss-minion-2-0')
   })
 
   it('rejette un type inconnu, un identifiant vide et une arme inconnue', () => {

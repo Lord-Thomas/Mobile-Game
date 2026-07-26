@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   createInactiveBossState,
   damageBoss,
+  damageBossMinion,
   resetBoss,
   sanitizeBossSnapshot,
   stepBoss,
@@ -28,6 +29,13 @@ export const useBossStore = create((set, get) => ({
     const next = damageBoss(previous, amount, options)
     if (next !== previous) set(next)
     return next.hp < previous.hp
+  },
+
+  damageMinion: (minionId, amount) => {
+    const previous = get()
+    const next = damageBossMinion(previous, minionId, amount)
+    if (next !== previous) set(next)
+    return next !== previous
   },
 
   step: (inputs) => {
@@ -69,6 +77,7 @@ export function createBossNetworkSnapshot(state = useBossStore.getState()) {
     dyingEndsAt,
     victoryId,
     resetReason,
+    stuckSince,
   } = state
   return {
     version,
@@ -91,5 +100,6 @@ export function createBossNetworkSnapshot(state = useBossStore.getState()) {
     dyingEndsAt,
     victoryId,
     resetReason,
+    stuckSince,
   }
 }

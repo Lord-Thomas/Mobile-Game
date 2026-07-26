@@ -1,6 +1,7 @@
 import { SLIME_BOSS } from './bossConfig'
 import { useBossStore } from './bossStore'
 import { getBossSpawnForAltar } from './bossSimulation'
+import { getMeleeHitDamage } from '../meleeWeapons'
 
 function distance2d(a, b) {
   return Math.hypot((a?.[0] ?? 0) - (b?.[0] ?? 0), (a?.[2] ?? 0) - (b?.[2] ?? 0))
@@ -18,10 +19,11 @@ export function sendBossSummonRequest(channel, altarId) {
   })
 }
 
-export function sendBossHitRequest(channel, { weaponId = null, charged = false } = {}) {
+export function sendBossHitRequest(channel, { targetId = SLIME_BOSS.id, weaponId = null, charged = false } = {}) {
   return channel?.sendBossAction?.({
     type: 'hit',
     actionId: createBossActionId('hit'),
+    targetId,
     weaponId,
     charged,
   })
@@ -57,7 +59,11 @@ export function handleHostBossAction({
   if (action.type !== 'hit' || !Array.isArray(remotePlayerState?.position)) return false
   const boss = useBossStore.getState()
   if (!boss.active || boss.state !== 'active' || !boss.position) return false
-  if (distance2d(remotePlayerState.position, boss.position) > SLIME_BOSS.melee.hitRadius + 3.2) return false
+  const targetId = typeof action.targetId === 'string' ? action.targetId : SLIME_BOSS.id
+  const minion = targetId === SLIME_BOSS.id ? null : boss.minions.find((entry) => entry.id === targetId)
+  const targetPosition = minion?.position ?? (targetId === SLIME_BOSS.id ? boss.position : null)
+  const targetRadius = minion ? SLIME_BOSS.summons.radius : SLIME_BOSS.melee.hitRadius
+  if (!targetPosition || distance2d(remotePlayerState.position, targetPosition) > targetRadius + 3.2) return false
 
   const playerId = String(action.userId ?? remotePlayerState.userId ?? 'remote')
   const lastHitAt = guard.lastHitAtByPlayer.get(playerId) ?? 0
@@ -65,9 +71,13 @@ export function handleHostBossAction({
   guard.lastHitAtByPlayer.set(playerId, now)
 
   const swordEquipped = remotePlayerState.equippedWeapon === 'cheat_sword'
-  const baseDamage = swordEquipped ? SLIME_BOSS.melee.swordDamage : 10
-  const damage = action.charged && swordEquipped
-    ? baseDamage * SLIME_BOSS.melee.chargedMultiplier
-    : baseDamage
-  return useBossStore.getState().damage(damage, { now })
+  const damage = getMeleeHitDamage({
+    weaponId: swordEquipped ? 'cheat_sword' : null,
+    fallbackDamage: 10,
+    targetTags: ['slime'],
+    charged: Boolean(action.charged && swordEquipped),
+  })
+  return minion
+    ? useBossStore.getState().damageMinion(minion.id, damage)
+    : useBossStore.getState().damage(damage, { now })
 }

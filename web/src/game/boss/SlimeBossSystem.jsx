@@ -6,6 +6,7 @@ import { getTerrainHeight } from '../../world/terrain/terrainGeometry'
 import { useBossStore } from './bossStore'
 import { SLIME_BOSS } from './bossConfig'
 import { getBossJumpOffset, getShockwaveRadius } from './bossSimulation'
+import { getMeleeHitDamage } from '../meleeWeapons'
 
 function AltarProximity({ placements, playerPositionRef, enabled }) {
   const currentRef = useRef(null)
@@ -47,6 +48,10 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
   const fallingRefs = useRef(new Map())
   const damageTimesRef = useRef(new Map())
   const shockHitRef = useRef(null)
+
+  useEffect(() => () => {
+    if (movementSpeedMultiplierRef) movementSpeedMultiplierRef.current = 1
+  }, [movementSpeedMultiplierRef])
 
   useFrame(() => {
     const now = Date.now() + (timeOffsetRef?.current ?? 0)
@@ -135,12 +140,54 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
   )
 }
 
-const BossMinion = memo(function BossMinion({ minion, playerPositionRef, onDamagePlayer, timeOffsetRef }) {
+const BossMinion = memo(function BossMinion({
+  minion,
+  playerPositionRef,
+  onDamagePlayer,
+  onBossHit,
+  registerCombatTarget,
+  swordEquipped,
+  timeOffsetRef,
+}) {
   const url = minion.kind === 'blue' ? SLIME_BOSS.summons.blueModelUrl : SLIME_BOSS.summons.greenModelUrl
   const { scene } = useGLTF(url)
   const cloned = useMemo(() => scene.clone(true), [scene])
   const groupRef = useRef(null)
   const lastDamageAtRef = useRef(0)
+  const hitRef = useRef(onBossHit)
+  hitRef.current = onBossHit
+  const swordRef = useRef(swordEquipped)
+  swordRef.current = swordEquipped
+  const targetRef = useRef(null)
+  if (!targetRef.current) {
+    targetRef.current = {
+      id: minion.id,
+      position: { x: minion.position[0], y: minion.position[1], z: minion.position[2] },
+      radius: SLIME_BOSS.summons.radius,
+      height: 1.1,
+      disabled: false,
+      takeDamage: (hit) => {
+        const damage = getMeleeHitDamage({
+          weaponId: swordRef.current ? 'cheat_sword' : null,
+          fallbackDamage: hit.damage,
+          targetTags: ['slime'],
+          charged: Boolean(hit.charged),
+        })
+        hitRef.current?.({
+          ...hit,
+          targetId: minion.id,
+          damage,
+          weaponId: swordRef.current ? 'cheat_sword' : null,
+        })
+        return true
+      },
+    }
+  }
+
+  useEffect(() => {
+    if (!registerCombatTarget) return undefined
+    return registerCombatTarget(minion.id, targetRef.current)
+  }, [minion.id, registerCombatTarget])
 
   useFrame(() => {
     const group = groupRef.current
@@ -149,6 +196,9 @@ const BossMinion = memo(function BossMinion({ minion, playerPositionRef, onDamag
     group.position.x = THREE.MathUtils.damp(group.position.x, live.position[0], 9, 1 / 60)
     group.position.y = live.position[1] + 0.45 + Math.sin(Date.now() / 180 + minion.spawnedPhase) * 0.08
     group.position.z = THREE.MathUtils.damp(group.position.z, live.position[2], 9, 1 / 60)
+    targetRef.current.position.x = live.position[0]
+    targetRef.current.position.y = live.position[1]
+    targetRef.current.position.z = live.position[2]
 
     const player = playerPositionRef?.current
     const now = Date.now() + (timeOffsetRef?.current ?? 0)
@@ -199,8 +249,12 @@ function BossModel({
       height: SLIME_BOSS.targetHeight,
       disabled: false,
       takeDamage: (hit) => {
-        const baseDamage = swordRef.current ? SLIME_BOSS.melee.swordDamage : hit.damage
-        const damage = hit.charged ? baseDamage * SLIME_BOSS.melee.chargedMultiplier : baseDamage
+        const damage = getMeleeHitDamage({
+          weaponId: swordRef.current ? 'cheat_sword' : null,
+          fallbackDamage: hit.damage,
+          targetTags: ['slime'],
+          charged: Boolean(hit.charged),
+        })
         hitRef.current?.({ ...hit, damage, weaponId: swordRef.current ? 'cheat_sword' : null })
         return true
       },
@@ -235,7 +289,11 @@ function BossModel({
         players.push({ id: 'local', alive: localPlayerAlive, position: [player.x, player.y, player.z] })
       }
       const remote = remotePlayerStateRef?.current
-      if (remote?.position) players.push({ id: remote.userId ?? 'remote', alive: true, position: remote.position })
+      if (remote?.position) players.push({
+        id: remote.userId ?? 'remote',
+        alive: remote.alive !== false,
+        position: remote.position,
+      })
       useBossStore.getState().step({
         now,
         dt: Math.min(0.25, (now - (lastSimulationAtRef.current || now - 100)) / 1000),
@@ -287,6 +345,9 @@ function BossModel({
           minion={minion}
           playerPositionRef={playerPositionRef}
           onDamagePlayer={onDamagePlayer}
+          onBossHit={onBossHit}
+          registerCombatTarget={registerCombatTarget}
+          swordEquipped={swordEquipped}
           timeOffsetRef={timeOffsetRef}
         />
       ))}
