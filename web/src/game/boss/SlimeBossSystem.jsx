@@ -7,6 +7,7 @@ import { useBossStore } from './bossStore'
 import { SLIME_BOSS } from './bossConfig'
 import { getBossJumpOffset, getShockwaveRadius } from './bossSimulation'
 import { getMeleeHitDamage } from '../meleeWeapons'
+import { ATTACK_TYPE } from '../damageTypes'
 
 function AltarProximity({ placements, playerPositionRef, enabled }) {
   const currentRef = useRef(null)
@@ -44,9 +45,11 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
   const hazards = useBossStore((state) => state.hazards)
   const attack = useBossStore((state) => state.attack)
   const spawn = useBossStore((state) => state.spawn)
+  const bossPosition = useBossStore((state) => state.position)
   const shockRingRef = useRef(null)
   const fallingRefs = useRef(new Map())
   const damageTimesRef = useRef(new Map())
+  const shockImpactRef = useRef(null)
   const shockHitRef = useRef(null)
 
   useEffect(() => () => {
@@ -56,6 +59,7 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
   useFrame(() => {
     const now = Date.now() + (timeOffsetRef?.current ?? 0)
     const player = playerPositionRef?.current
+    const attackOrigin = bossPosition ?? spawn
     let slowed = false
 
     if (shockRingRef.current) {
@@ -64,12 +68,34 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
       shockRingRef.current.scale.set(Math.max(0.001, radius), Math.max(0.001, radius), 1)
       shockRingRef.current.material.opacity = radius > 0 ? 0.18 + 0.5 * (1 - radius / SLIME_BOSS.shockwave.maxRadius) : 0
 
+      if (
+        attack?.kind === 'shockwave' &&
+        now >= attack.jumpEndsAt &&
+        now < attack.jumpEndsAt + 220 &&
+        player &&
+        shockImpactRef.current !== attack.id
+      ) {
+        const impactDistance = Math.hypot(player.x - attackOrigin[0], player.z - attackOrigin[2])
+        if (impactDistance <= SLIME_BOSS.shockwave.impactRadius) {
+          shockImpactRef.current = attack.id
+          onDamagePlayer?.({
+            damage: SLIME_BOSS.shockwave.impactDamage,
+            sourceId: `${attack.id}:impact`,
+            attackType: ATTACK_TYPE.DODGEABLE,
+          })
+        }
+      }
+
       if (radius > 0 && player && shockHitRef.current !== attack?.id) {
-        const distance = Math.hypot(player.x - spawn[0], player.z - spawn[2])
+        const distance = Math.hypot(player.x - attackOrigin[0], player.z - attackOrigin[2])
         const airborne = player.y - getTerrainHeight(player.x, player.z) > SLIME_BOSS.shockwave.dodgeHeight
         if (!airborne && Math.abs(distance - radius) < SLIME_BOSS.shockwave.band) {
           shockHitRef.current = attack.id
-          onDamagePlayer?.({ damage: SLIME_BOSS.shockwave.damage, sourceId: attack.id })
+          onDamagePlayer?.({
+            damage: SLIME_BOSS.shockwave.damage,
+            sourceId: attack.id,
+            attackType: ATTACK_TYPE.GROUND_WAVE,
+          })
         }
       }
     }
@@ -88,7 +114,11 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
         const impactKey = `${hazard.id}:impact`
         if (!damageTimesRef.current.has(impactKey)) {
           damageTimesRef.current.set(impactKey, now)
-          onDamagePlayer?.({ damage: SLIME_BOSS.projectile.impactDamage, sourceId: impactKey })
+          onDamagePlayer?.({
+            damage: SLIME_BOSS.projectile.impactDamage,
+            sourceId: impactKey,
+            attackType: ATTACK_TYPE.DODGEABLE,
+          })
         }
       }
       if (now >= hazard.impactAt && now < hazard.expiresAt) {
@@ -97,7 +127,11 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
         const lastDamageAt = damageTimesRef.current.get(tickKey) ?? 0
         if (now - lastDamageAt >= SLIME_BOSS.projectile.poolTickMs) {
           damageTimesRef.current.set(tickKey, now)
-          onDamagePlayer?.({ damage: SLIME_BOSS.projectile.poolDamage, sourceId: tickKey })
+          onDamagePlayer?.({
+            damage: SLIME_BOSS.projectile.poolDamage,
+            sourceId: tickKey,
+            attackType: ATTACK_TYPE.PERSISTENT_AREA,
+          })
         }
       }
     }
@@ -112,7 +146,11 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
       <mesh
         ref={shockRingRef}
         visible={false}
-        position={[spawn[0], spawn[1] + 0.08, spawn[2]]}
+        position={[
+          (bossPosition ?? spawn)[0],
+          (bossPosition ?? spawn)[1] + 0.08,
+          (bossPosition ?? spawn)[2],
+        ]}
         rotation={[-Math.PI / 2, 0, 0]}
       >
         <ringGeometry args={[0.82, 1, 64]} />
@@ -205,7 +243,11 @@ const BossMinion = memo(function BossMinion({
     if (!player || now - lastDamageAtRef.current < SLIME_BOSS.summons.attackCooldownMs) return
     if (Math.hypot(player.x - live.position[0], player.z - live.position[2]) <= SLIME_BOSS.summons.radius + 0.65) {
       lastDamageAtRef.current = now
-      onDamagePlayer?.({ damage: SLIME_BOSS.summons.damage, sourceId: minion.id })
+      onDamagePlayer?.({
+        damage: SLIME_BOSS.summons.damage,
+        sourceId: minion.id,
+        attackType: ATTACK_TYPE.DODGEABLE,
+      })
     }
   })
 

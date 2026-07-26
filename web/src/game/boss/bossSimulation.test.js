@@ -53,6 +53,12 @@ describe('bossSimulation', () => {
     expect(getShockwaveRadius(state.attack, middle)).toBeCloseTo(SLIME_BOSS.shockwave.maxRadius / 2, 3)
   })
 
+  it('sépare l’impact esquivable du bond et l’onde à sauter', () => {
+    expect(SLIME_BOSS.shockwave.impactDamage).toBeGreaterThan(0)
+    expect(SLIME_BOSS.shockwave.impactRadius).toBeGreaterThan(0)
+    expect(SLIME_BOSS.shockwave.dodgeHeight).toBeGreaterThan(0)
+  })
+
   it('réinitialise un combat abandonné et nettoie ses entités', () => {
     let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
     state = stepBoss(state, { now: SLIME_BOSS.resetAfterMs + 1, dt: 0.1, players: [] })

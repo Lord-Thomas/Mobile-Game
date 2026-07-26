@@ -28,7 +28,9 @@ export const SLIME_BOSS = {
     recoverMs: 1100, // récupération
     idleGapMs: 1600, // pause avant l'attaque suivante
     jumpHeight: 3.4, // hauteur du bond (unités monde)
-    maxRadius: 10, // rayon max de l'onde
+    impactRadius: 3.1,
+    impactDamage: 22,
+    maxRadius: 10, // rayon max de l’onde
     band: 1.7, // épaisseur du front qui inflige les dégâts
     damage: 18,
     dodgeHeight: 0.9, // le joueur doit être à cette hauteur (sauter) pour esquiver

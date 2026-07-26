@@ -11,7 +11,8 @@ import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, m
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
-import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed } from './game/dodge'
+import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
+import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
@@ -1584,16 +1585,17 @@ function CombatActionDock({
       )}
       {showDodge && (
         <button
-          className="combat-action-btn"
+          className="combat-action-btn combat-action-btn--dodge"
           type="button"
-          aria-label="Roulade"
+          aria-label="Esquive"
+          title="Esquive (Ctrl)"
           onPointerDown={(event) => {
             event.preventDefault()
             touchRef.current.dodgeQueued = true
           }}
         >
           <span className="combat-action-icon" aria-hidden="true">↻</span>
-          <span className="combat-action-label">Roulade</span>
+          <span className="combat-action-label">Esquive</span>
         </button>
       )}
       {canKick && (
@@ -4034,6 +4036,9 @@ function Player({
     startedAt: 0,
     activeUntil: 0,
     cooldownUntil: 0,
+    bufferedUntil: 0,
+    bufferedDirectionX: 0,
+    bufferedDirectionZ: 1,
     directionX: 0,
     directionZ: 1,
   })
@@ -4613,18 +4618,25 @@ function Player({
 
     const dodge = dodgeRef.current
     const wantsDodge = touch.dodgeQueued || key.dodgeQueued
+    const dodgeNow = state.clock.elapsedTime
+    if (wantsDodge) {
+      const bufferedDirection = getDodgeDirection(worldX, worldZ, visualRef.current.rotation.y)
+      dodge.bufferedUntil = dodgeNow + PLAYER_DODGE.inputBuffer
+      dodge.bufferedDirectionX = bufferedDirection.x
+      dodge.bufferedDirectionZ = bufferedDirection.z
+    }
     if (
       !isEmoting &&
       onGroundRef.current &&
-      state.clock.elapsedTime >= dodge.cooldownUntil &&
-      wantsDodge
+      dodgeNow >= dodge.cooldownUntil &&
+      dodgeNow <= dodge.bufferedUntil
     ) {
-      const direction = getDodgeDirection(worldX, worldZ, visualRef.current.rotation.y)
-      dodge.startedAt = state.clock.elapsedTime
+      dodge.startedAt = dodgeNow
       dodge.activeUntil = dodge.startedAt + PLAYER_DODGE.duration
-      dodge.cooldownUntil = dodge.activeUntil + PLAYER_DODGE.cooldownAfter
-      dodge.directionX = direction.x
-      dodge.directionZ = direction.z
+      dodge.cooldownUntil = dodge.startedAt + PLAYER_DODGE.cooldown
+      dodge.bufferedUntil = 0
+      dodge.directionX = dodge.bufferedDirectionX
+      dodge.directionZ = dodge.bufferedDirectionZ
       punchUntilRef.current = 0
       pendingPunchRef.current = null
       kickUntilRef.current = 0
@@ -4633,8 +4645,10 @@ function Player({
     touch.dodgeQueued = false
     key.dodgeQueued = false
 
-    const isDodging = state.clock.elapsedTime < dodge.activeUntil
-    if (playerInvulnerableRef) playerInvulnerableRef.current = isDodging
+    const dodgeElapsed = dodgeNow - dodge.startedAt
+    const isDodging = dodgeNow < dodge.activeUntil
+    const hasDodgeIFrames = isDodging && isDodgeInvulnerable(dodgeElapsed)
+    if (playerInvulnerableRef) playerInvulnerableRef.current = hasDodgeIFrames
     if (isDodging) {
       worldX = dodge.directionX
       worldZ = dodge.directionZ
@@ -4644,7 +4658,7 @@ function Player({
     const wingsAirborne = isWingsFlying(wings)
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
     const speed = isDodging
-      ? getDodgeSpeed(state.clock.elapsedTime - dodge.startedAt)
+      ? getDodgeSpeed(dodgeElapsed)
       : isMoving
         ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) * (movementSpeedMultiplierRef?.current ?? 1)
         : 0
@@ -4727,8 +4741,8 @@ function Player({
 
     if (playerCombatActionsRef) {
       const inPlay = mode === 'play'
-      playerCombatActionsRef.current.canPunch = inPlay && Boolean(punchTarget && onGroundRef.current)
-      playerCombatActionsRef.current.canKick = inPlay && Boolean(kickInArc && onGroundRef.current)
+      playerCombatActionsRef.current.canPunch = inPlay && !isDodging && Boolean(punchTarget && onGroundRef.current)
+      playerCombatActionsRef.current.canKick = inPlay && !isDodging && Boolean(kickInArc && onGroundRef.current)
     }
 
     const wantsEmote = touch.emoteQueued
@@ -5214,7 +5228,7 @@ function Player({
     }
 
     const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ, currentZone)
-    const cameraDamping = towerCameraContext ? 20 : 12
+    const cameraDamping = isDodging ? 30 : towerCameraContext ? 20 : 12
     let nextCameraX = MathUtils.damp(camera.position.x, clampedTarget.x, cameraDamping, delta)
     let nextCameraY = MathUtils.damp(camera.position.y, clampedTarget.y, cameraDamping, delta)
     let nextCameraZ = MathUtils.damp(camera.position.z, clampedTarget.z, cameraDamping, delta)
@@ -5228,9 +5242,10 @@ function Player({
     }
     camera.position.set(nextCameraX, nextCameraY, nextCameraZ)
 
-    cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, focusX, 16, delta)
-    cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, focusY + lookHeight, 16, delta)
-    cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, focusZ, 16, delta)
+    const cameraLookDamping = isDodging ? 30 : 16
+    cameraLookRef.current.x = MathUtils.damp(cameraLookRef.current.x, focusX, cameraLookDamping, delta)
+    cameraLookRef.current.y = MathUtils.damp(cameraLookRef.current.y, focusY + lookHeight, cameraLookDamping, delta)
+    cameraLookRef.current.z = MathUtils.damp(cameraLookRef.current.z, focusZ, cameraLookDamping, delta)
     camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
   })
 
@@ -6122,7 +6137,9 @@ function PlayerAvatar({
     const isSwordSlash = nextMotion === 'swordSlash' || nextMotion === 'swordSlash2' || nextMotion === 'swordSlash3'
     const isOneShot = nextMotion === 'kick' || nextMotion === 'punch' || isSwordSlash || nextMotion === 'dodgeRoll' || nextMotion === 'pointingUp' || nextMotion === 'jumpStart' || nextMotion === 'jumpLand' || nextMotion === 'sitDown' || nextMotion === 'standUp'
     const fadeDuration =
-      previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
+      nextMotion === 'dodgeRoll' || previousMotion === 'dodgeRoll'
+        ? 0.06
+        : previousMotion === 'jumpStart' && nextMotion === 'fallingIdle'
         ? PLAYER_JUMP_TO_FALL_ANIMATION_FADE
         : nextMotion === 'sitDown' || nextMotion === 'standUp' || previousMotion === 'sittingIdle'
           ? 0.12
@@ -12014,6 +12031,7 @@ function SmallMushroomEnemy({
             damage: cfg.attackDamage,
             sourcePosition: [enemyPosition.x, enemyPosition.y, enemyPosition.z],
             sourceId: enemyId,
+            attackType: ATTACK_TYPE.DODGEABLE,
           })
         }
         leashTimerRef.current = Math.max(0, leashTimerRef.current - cfg.leashCombatBonus)
@@ -19754,10 +19772,18 @@ function App() {
     if (playerRegenIntervalRef.current) window.clearInterval(playerRegenIntervalRef.current)
   }, [])
 
-  const handlePlayerHit = useCallback(({ damage = MUSHROOM_ENEMY_ATTACK_DAMAGE, sourceId = null } = {}) => {
+  const handlePlayerHit = useCallback(({
+    damage = MUSHROOM_ENEMY_ATTACK_DAMAGE,
+    sourceId = null,
+    attackType = null,
+  } = {}) => {
     // Agression subie : les squelettes invoqués focalisent l'agresseur.
     if (sourceId) playerTargetIdRef.current = sourceId
-    if (playerDodgeInvulnerableRef.current || playerDamageLockRef.current || playerHpRef.current <= 0) return false
+    if (
+      isDamageIgnoredByDodge(attackType, playerDodgeInvulnerableRef.current) ||
+      playerDamageLockRef.current ||
+      playerHpRef.current <= 0
+    ) return false
     playerDamageLockRef.current = true
     window.setTimeout(() => {
       playerDamageLockRef.current = false
@@ -22172,9 +22198,10 @@ function App() {
             playerPositionRef={playerPositionRef}
             remotePlayerStateRef={remotePlayerStateRef}
             localPlayerAlive={playerHp > 0}
-            onDamagePlayer={({ damage, sourceId }) => handlePlayerHit({
+            onDamagePlayer={({ damage, sourceId, attackType }) => handlePlayerHit({
               damage,
               sourceId: sourceId ?? 'slime_boss',
+              attackType,
             })}
             onBossHit={(hit) => {
               if (isGuestVisit) {

@@ -4117,6 +4117,21 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   transform: scale(0.92);
 }
 
+.combat-action-btn--dodge {
+  position: relative;
+  border: 2px solid rgba(96, 165, 250, 0.78);
+  background: rgba(8, 22, 42, 0.9);
+  color: #dbeafe;
+  box-shadow: 0 0 16px rgba(59, 130, 246, 0.38);
+}
+
+.combat-action-btn--dodge::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: inherit;
+}
+
 .combat-action-icon {
   font-size: 1.55rem;
   line-height: 1;
