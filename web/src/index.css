@@ -128,10 +128,16 @@ canvas {
   pointer-events: auto;
 }
 
+.game-loading-overlay--transition {
+  background:
+    radial-gradient(circle at 50% 35%, rgba(42, 76, 91, 0.96), rgba(7, 16, 22, 0.98));
+  color: #f4fbff;
+}
+
 .game-loading-panel {
-  width: min(360px, 100%);
+  width: min(420px, 100%);
   display: grid;
-  gap: 10px;
+  gap: 12px;
   text-align: center;
 }
 
@@ -146,30 +152,64 @@ canvas {
   font-weight: 700;
 }
 
+.game-loading-overlay--transition .game-loading-text {
+  color: rgba(244, 251, 255, 0.76);
+}
+
+.game-loading-progress-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+
+.game-loading-progress-row strong {
+  min-width: 42px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .game-loading-bar {
-  height: 6px;
+  height: 8px;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(24, 33, 42, 0.14);
 }
 
+.game-loading-overlay--transition .game-loading-bar {
+  background: rgba(244, 251, 255, 0.16);
+}
+
 .game-loading-bar span {
   display: block;
-  width: 42%;
   height: 100%;
   border-radius: inherit;
   background: #4f8fb8;
-  animation: game-loading-slide 1.1s ease-in-out infinite;
+  box-shadow: 0 0 18px rgba(95, 190, 239, 0.45);
+  transition: width 220ms ease-out;
 }
 
-@keyframes game-loading-slide {
-  0% {
-    transform: translateX(-120%);
-  }
+.game-loading-tip {
+  min-height: 44px;
+  margin-top: 8px;
+  color: rgba(24, 33, 42, 0.7);
+  font-size: 12px;
+  line-height: 1.45;
+}
 
-  100% {
-    transform: translateX(250%);
-  }
+.game-loading-overlay--transition .game-loading-tip {
+  color: rgba(244, 251, 255, 0.72);
+}
+
+.game-loading-tip span {
+  display: block;
+  margin-bottom: 3px;
+  color: #4f8fb8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .hud {
@@ -1533,20 +1573,6 @@ html[data-chat-open='true'] .game-chat-panel {
 .customize-ui > * {
   min-width: 0;
   max-width: 100%;
-}
-
-.zone-fade {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  pointer-events: none;
-  background: #071016;
-  opacity: 0;
-  transition: opacity 180ms ease;
-}
-
-.zone-fade.active {
-  opacity: 1;
 }
 
 .customize-rotation {

@@ -14,6 +14,7 @@ import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchC
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
+import { WORLD_LOADING_TIPS, advanceLoadingExperience, createLoadingExperience } from './game/loadingExperience'
 import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
@@ -2350,30 +2351,33 @@ function LayeredSceneRenderer({ currentZone }) {
     const previousAutoClear = gl.autoClear
     const previousLayerMask = camera.layers.mask
     const previousBackground = scene.background
+    const previousRenderTarget = gl.getRenderTarget?.() ?? null
 
-    if (currentZone === ZONES.outside) {
-      camera.layers.enable(OUTDOOR_LIGHT_LAYER)
-      gl.autoClear = previousAutoClear
+    try {
+      if (currentZone === ZONES.outside) {
+        camera.layers.enable(OUTDOOR_LIGHT_LAYER)
+        gl.autoClear = previousAutoClear
+        gl.render(scene, camera)
+        return
+      }
+
+      // Inside the house, render the outdoor world and the indoor house in
+      // separate passes. A single camera seeing both layers would let the
+      // outdoor sun be collected as a global light and brighten the interior.
+      gl.autoClear = true
+      camera.layers.set(OUTDOOR_LIGHT_LAYER)
       gl.render(scene, camera)
+
+      gl.autoClear = false
+      scene.background = null
+      camera.layers.set(0)
+      gl.render(scene, camera)
+    } finally {
+      scene.background = previousBackground
       camera.layers.mask = previousLayerMask
-      return
+      gl.autoClear = previousAutoClear
+      gl.setRenderTarget?.(previousRenderTarget)
     }
-
-    // Inside the house, render the outdoor world and the indoor house in
-    // separate passes. A single camera seeing both layers would let the
-    // outdoor sun be collected as a global light and brighten the interior.
-    gl.autoClear = true
-    camera.layers.set(OUTDOOR_LIGHT_LAYER)
-    gl.render(scene, camera)
-
-    gl.autoClear = false
-    scene.background = null
-    camera.layers.set(0)
-    gl.render(scene, camera)
-
-    scene.background = previousBackground
-    camera.layers.mask = previousLayerMask
-    gl.autoClear = previousAutoClear
   }, 1)
 
   return null
@@ -7212,18 +7216,23 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
   const pass1Ref = useRef(false)
   const pass2Ref = useRef(false)
 
-  const compileWith = useCallback((cam) => {
+  const compileWith = useCallback(async (cam) => {
+    const originalMask = cam.layers.mask
     try {
       // Deux couches (extérieure + défaut), comme compileAndRender du gate : on
       // couvre les matériaux quelle que soit leur couche de rendu.
-      const originalMask = cam.layers.mask
       for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
         cam.layers.set(layer)
-        gl.compile(scene, cam)
+        if (typeof gl.compileAsync === 'function') {
+          await gl.compileAsync(scene, cam)
+        } else {
+          gl.compile(scene, cam)
+        }
       }
-      cam.layers.mask = originalMask
     } catch (error) {
       console.warn('[loadTiming] Outdoor shader prewarm failed', error)
+    } finally {
+      cam.layers.mask = originalMask
     }
   }, [gl, scene])
 
@@ -7249,7 +7258,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
         cam.lookAt(spawn[0], spawn[1] + 1.1, spawn[2])
         cam.updateProjectionMatrix()
         cam.updateMatrixWorld(true)
-        compileWith(cam)
+        void compileWith(cam)
       })
     })
     return () => {
@@ -7268,8 +7277,9 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
     let raf2 = 0
     raf1 = window.requestAnimationFrame(() => {
       raf2 = window.requestAnimationFrame(() => {
-        compileWith(camera)
-        if (readyRef) readyRef.current = true
+        void compileWith(camera).finally(() => {
+          if (readyRef) readyRef.current = true
+        })
       })
     })
     return () => {
@@ -15360,6 +15370,7 @@ function HouseBuildHandles({
 function CustomizationLayer({
   mode,
   view = 'top',
+  streamPlaceables = true,
   showBuildHandles = true,
   canEditStructure = true,
   coins = 0,
@@ -15415,7 +15426,10 @@ function CustomizationLayer({
     () => placedObjects.filter((object) => object.type !== 'goal'),
     [placedObjects],
   )
-  const shouldStreamPlaceables = mode !== 'customize' && !draggingObjectId && !placingObjectId
+  const shouldStreamPlaceables = streamPlaceables
+    && mode !== 'customize'
+    && !draggingObjectId
+    && !placingObjectId
   const [visiblePlaceableCount, setVisiblePlaceableCount] = useState(() => (
     shouldStreamPlaceables
       ? Math.min(PLACEABLE_PLAY_INITIAL_RENDER_COUNT, renderablePlacedObjects.length)
@@ -16708,32 +16722,26 @@ const WORLD_STREAM_INITIAL_READY_LEVEL = 6
 const WORLD_STREAM_INITIAL_MAX_WAIT_MS = 4000
 // Let the fade overlay paint before mounting outdoor subtrees; otherwise the
 // heavy outdoor commit can block the first fade frame and make the transition jerk.
-const OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS = 180
-const OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS = 420
+const OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS = 100
+const OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS = 180
 // Durée pendant laquelle le voile reste après le switch de zone. Allongée pour
 // couvrir tout le staging extérieur (jusqu'à l'étape ennemis à ~920 ms) ET la
 // première frame extérieure (flash blanc possible) — le pop-in se fait sous le
 // voile. Là encore : aucune modif du chargement, juste le voile tenu plus longtemps.
-const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 650
+const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 220
 // Plafond dur : le voile attend le signal de pré-warm shader (outdoorPrewarmReadyRef)
 // après le délai minimal ci-dessus, mais ne le retient JAMAIS au-delà de cette borne,
 // même si la compilation traîne ou échoue (sécurité anti-blocage, comme le garde-fou
 // du gate de boot). Au-delà : on rend la main quoi qu'il arrive.
-const OUTDOOR_EXIT_FADE_MAX_HOLD_MS = 2500
+const OUTDOOR_EXIT_FADE_MAX_HOLD_MS = 1800
 const OUTDOOR_CONTENT_STAGES = [
   { level: 1, delay: 0 },
-  { level: 2, delay: 140 },
-  { level: 3, delay: 320 },
-  { level: 4, delay: 640 },
-  { level: 5, delay: 920 },
+  { level: 2, delay: 80 },
+  { level: 3, delay: 180 },
+  { level: 4, delay: 320 },
+  { level: 5, delay: 480 },
 ]
-const OUTDOOR_DECOR_REVEAL_DELAY_MS = 450
-const OUTDOOR_GRASS_REVEAL_DELAY_MS = 1100
-const OUTDOOR_ENEMIES_REVEAL_DELAY_MS = 2200
 const OUTDOOR_ENEMY_PRELOAD_DELAY_MS = 120
-const OUTDOOR_ENEMY_REVEAL_BATCH_SIZE = 1
-const OUTDOOR_ENEMY_REVEAL_FIRST_DELAY_MS = 250
-const OUTDOOR_ENEMY_REVEAL_INTERVAL_MS = 600
 
 const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload(PLAYER_MODEL_URL),
@@ -16855,11 +16863,62 @@ function waitForPromiseWithTimeout(promise, timeoutMs) {
   })
 }
 
-function ShaderWarmupGate({ onComplete }) {
+function WorldLoadingOverlay({ active, experience }) {
+  const [tipIndex, setTipIndex] = useState(0)
+
+  useEffect(() => {
+    if (!active) return undefined
+    const timerId = window.setInterval(() => {
+      setTipIndex((index) => (index + 1) % WORLD_LOADING_TIPS.length)
+    }, 6000)
+    return () => window.clearInterval(timerId)
+  }, [active, experience.kind])
+
+  if (!active) return null
+
+  const title = experience.kind === 'transition'
+    ? 'Voyage en cours'
+    : 'Chargement du monde'
+
+  return (
+    <div className={`game-loading-overlay game-loading-overlay--${experience.kind}`} role="status" aria-live="polite">
+      <div className="game-loading-panel">
+        <div className="game-loading-title">{title}</div>
+        <div className="game-loading-progress-row">
+          <div className="game-loading-text">{experience.phase}</div>
+          <strong>{experience.percent}%</strong>
+        </div>
+        <div
+          className="game-loading-bar"
+          role="progressbar"
+          aria-label={experience.phase}
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={experience.percent}
+        >
+          <span style={{ width: `${experience.percent}%` }} />
+        </div>
+        <div className="game-loading-tip">
+          <span>Astuce</span>
+          {WORLD_LOADING_TIPS[tipIndex]}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ShaderWarmupGate({ onComplete, onProgress, criticalPlaceableModelUrls = [] }) {
   const { gl, scene, camera } = useThree()
   const [initialAssetsReady, setInitialAssetsReady] = useState(() => isInitialAssetBatchReady())
   const completedRef = useRef(false)
   const gateStartedRef = useRef(false)
+  const criticalPlaceableModelUrlsRef = useRef(criticalPlaceableModelUrls)
+  const onProgressRef = useRef(onProgress)
+
+  useEffect(() => {
+    criticalPlaceableModelUrlsRef.current = criticalPlaceableModelUrls
+    onProgressRef.current = onProgress
+  }, [criticalPlaceableModelUrls, onProgress])
 
   useEffect(() => {
     if (gateStartedRef.current) return undefined
@@ -16878,6 +16937,8 @@ function ShaderWarmupGate({ onComplete }) {
 
     const unsubscribe = subscribeInitialAssetBatch(refresh)
     startInitialAssetBatchCollection()
+    criticalPlaceableModelUrlsRef.current.forEach((url) => useGLTF.preload(url))
+    onProgressRef.current?.({ percent: 18, phase: 'Chargement de la maison...' })
     markLoad('gate:lock')
     lockInitialAssetBatch()
     timeoutId = window.setTimeout(() => {
@@ -16907,6 +16968,10 @@ function ShaderWarmupGate({ onComplete }) {
     })
 
     const runWarmup = async () => {
+      onProgress?.({
+        percent: 30,
+        phase: 'Préparation du terrain et de la maison...',
+      })
       // Jalon : le lot initial est prêt ou libéré par le garde-fou. Les assets
       // démarrés ensuite ne peuvent plus garder l'overlay ouvert.
       const preloadResult = await waitForPromiseWithTimeout(
@@ -16917,16 +16982,25 @@ function ShaderWarmupGate({ onComplete }) {
         console.warn(`[loadTiming] Stable initial asset preloads timed out after ${STABLE_INITIAL_ASSET_MAX_WAIT_MS}ms`)
       }
       markLoad('assetsLoaded')
+      onProgress?.({
+        percent: 65,
+        phase: 'Installation des meubles et objets proches...',
+      })
       // Garantit que la collision binaire est chargée avant de masquer l'écran de
       // chargement (le fetch a démarré à l'import, donc déjà résolu en pratique).
       await collisionReady
       markLoad('collisionReady')
+      onProgress?.({ percent: 74, phase: 'Activation des collisions...' })
       startWorldStream()
       const streamResult = await waitForRevealLevel(WORLD_STREAM_INITIAL_READY_LEVEL, WORLD_STREAM_INITIAL_MAX_WAIT_MS)
       if (!streamResult.ready) {
         console.warn(`[loadTiming] World stream level ${WORLD_STREAM_INITIAL_READY_LEVEL} timed out after ${WORLD_STREAM_INITIAL_MAX_WAIT_MS}ms`)
       }
       markLoad('streamReady')
+      onProgress?.({
+        percent: 84,
+        phase: 'Préparation des joueurs et des ennemis...',
+      })
       // Let the loading overlay and the initial scene commit before WebGL shader work starts.
       await waitFrame()
       await waitFrame()
@@ -16957,15 +17031,26 @@ function ShaderWarmupGate({ onComplete }) {
 
       const compileAndRender = async (warmupCamera) => {
         const originalLayerMask = warmupCamera.layers.mask
-        for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
-          warmupCamera.layers.set(layer)
-          gl.compile(scene, warmupCamera)
-          gl.render(scene, warmupCamera)
+        try {
+          for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
+            warmupCamera.layers.set(layer)
+            if (typeof gl.compileAsync === 'function') {
+              await gl.compileAsync(scene, warmupCamera)
+            } else {
+              gl.compile(scene, warmupCamera)
+            }
+            gl.render(scene, warmupCamera)
+          }
+        } finally {
+          warmupCamera.layers.mask = originalLayerMask
         }
-        warmupCamera.layers.mask = originalLayerMask
       }
 
       try {
+        onProgress?.({
+          percent: 94,
+          phase: 'Préparation des textures, de l’herbe et des effets...',
+        })
         await compileAndRender(camera)
         markLoad('warmup:runtime')
 
@@ -16985,8 +17070,18 @@ function ShaderWarmupGate({ onComplete }) {
       }
 
       if (!cancelled) {
+        onProgress?.({
+          percent: 99,
+          phase: 'Stabilisation de la première image...',
+        })
+        await waitFrame()
+        await waitFrame()
+      }
+
+      if (!cancelled) {
         completedRef.current = true
         markLoad('warmupEnd')
+        onProgress?.({ percent: 100, phase: 'Monde prêt !' })
         reportLoadTiming()
         onComplete()
       }
@@ -16998,7 +17093,7 @@ function ShaderWarmupGate({ onComplete }) {
       cancelled = true
       if (frameId) window.cancelAnimationFrame(frameId)
     }
-  }, [camera, gl, initialAssetsReady, onComplete, scene])
+  }, [camera, gl, initialAssetsReady, onComplete, onProgress, scene])
 
   return null
 }
@@ -18043,11 +18138,19 @@ function App() {
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
   const [outdoorRuntimeRevealStage, setOutdoorRuntimeRevealStage] = useState(0)
   const [visibleOutdoorEnemyCount, setVisibleOutdoorEnemyCount] = useState(0)
+  const [loadingExperience, setLoadingExperience] = useState(() => (
+    createLoadingExperience({
+      kind: 'initial',
+      percent: 5,
+      phase: 'Connexion et récupération du monde...',
+    })
+  ))
   // Passe à true quand OutdoorShaderPrewarm a fini de compiler les shaders
   // extérieurs : le fondu de transition attend ce signal avant de se lever
   // (plafonné par OUTDOOR_EXIT_FADE_MAX_HOLD_MS). Jamais remis à false : une fois
   // les programmes en cache GPU, les sorties suivantes n'attendent plus.
   const outdoorPrewarmReadyRef = useRef(false)
+  const outdoorZoneReadyRef = useRef(false)
   const [spawnRequest, setSpawnRequest] = useState(null)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
   const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
@@ -18282,6 +18385,33 @@ function App() {
   }, [mobKillCount, coins, editableObjects, ownedMounts, ownedMagicBook, ownedMagicSkull, unlockAchievement])
 
   useEffect(() => {
+    if (!shaderWarmupComplete || currentZone === ZONES.outside || outdoorTransitionPrimed) {
+      return undefined
+    }
+
+    let idleId = 0
+    const timerId = window.setTimeout(() => {
+      const primeOutdoor = () => {
+        setOutdoorTransitionPrimed(true)
+        setOutdoorContentStage((stage) => Math.max(stage, 1))
+        perfDiagnostics.event('outdoor:background-prime')
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(primeOutdoor, { timeout: 1200 })
+      } else {
+        primeOutdoor()
+      }
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timerId)
+      if (idleId && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [currentZone, outdoorTransitionPrimed, shaderWarmupComplete])
+
+  useEffect(() => {
     const shouldPrepareOutdoor = (
       currentZone === ZONES.outside ||
       outdoorTransitionPrimed ||
@@ -18306,21 +18436,11 @@ function App() {
       return () => window.clearTimeout(timerId)
     }
 
-    const revealSteps = [
-      { level: 1, delay: OUTDOOR_DECOR_REVEAL_DELAY_MS, name: 'decor' },
-      { level: 2, delay: OUTDOOR_GRASS_REVEAL_DELAY_MS, name: 'grass' },
-      { level: 3, delay: OUTDOOR_ENEMIES_REVEAL_DELAY_MS, name: 'enemies' },
-    ]
-    const timerIds = revealSteps.map(({ level, delay, name }) => (
-      window.setTimeout(() => {
-        perfDiagnostics.event('outdoor:runtime-reveal', { level, name })
-        setOutdoorRuntimeRevealStage((stage) => Math.max(stage, level))
-      }, delay)
-    ))
-
-    return () => {
-      timerIds.forEach((timerId) => window.clearTimeout(timerId))
-    }
+    const timerId = window.setTimeout(() => {
+      perfDiagnostics.event('outdoor:runtime-reveal', { level: 3, name: 'all' })
+      setOutdoorRuntimeRevealStage(3)
+    }, 0)
+    return () => window.clearTimeout(timerId)
   }, [currentZone])
 
   useEffect(() => {
@@ -18368,28 +18488,34 @@ function App() {
     }
 
     let cancelled = false
-    const chunkCount = Math.ceil(monsterSpawnSlots.length / OUTDOOR_ENEMY_REVEAL_BATCH_SIZE)
-    const timerIds = Array.from({ length: chunkCount }, (_, chunkIndex) => {
-      const count = Math.min(monsterSpawnSlots.length, (chunkIndex + 1) * OUTDOOR_ENEMY_REVEAL_BATCH_SIZE)
-      return window.setTimeout(() => {
-        const slotsToReveal = monsterSpawnSlots.slice(0, count)
-        preloadMonsterSpawnSlotAssets(slotsToReveal).finally(() => {
-          if (cancelled) return
-          perfDiagnostics.event('outdoor:enemy-batch-reveal', {
-            count,
-            total: monsterSpawnSlots.length,
-            chunkIndex,
-          })
-          setVisibleOutdoorEnemyCount((current) => Math.max(current, count))
-        })
-      }, OUTDOOR_ENEMY_REVEAL_FIRST_DELAY_MS + chunkIndex * OUTDOOR_ENEMY_REVEAL_INTERVAL_MS)
+    preloadMonsterSpawnSlotAssets(monsterSpawnSlots).finally(() => {
+      if (cancelled) return
+      perfDiagnostics.event('outdoor:enemies-reveal', {
+        total: monsterSpawnSlots.length,
+      })
+      setVisibleOutdoorEnemyCount(monsterSpawnSlots.length)
     })
 
     return () => {
       cancelled = true
-      timerIds.forEach((timerId) => window.clearTimeout(timerId))
     }
   }, [currentZone, monsterSpawnSlots, outdoorContentStage, outdoorRuntimeRevealStage])
+
+  useEffect(() => {
+    outdoorZoneReadyRef.current = currentZone === ZONES.outside
+      && outdoorContentStage >= 5
+      && outdoorRuntimeRevealStage >= 3
+      && (
+        monsterSpawnSlots.length === 0
+        || visibleOutdoorEnemyCount >= monsterSpawnSlots.length
+      )
+  }, [
+    currentZone,
+    monsterSpawnSlots.length,
+    outdoorContentStage,
+    outdoorRuntimeRevealStage,
+    visibleOutdoorEnemyCount,
+  ])
 
   // Fin de la période de silence : les déblocages suivants affichent un toast.
   useEffect(() => {
@@ -20031,6 +20157,14 @@ function App() {
   )
   const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
+  const criticalPlaceableModelUrls = useMemo(() => (
+    [...new Set(
+      editableObjects
+        .filter((object) => object.status !== 'stored')
+        .map((object) => objectCatalog[object.objectId]?.modelUrl)
+        .filter(Boolean),
+    )]
+  ), [editableObjects])
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
@@ -21099,6 +21233,13 @@ function App() {
       to: nextZone,
       goingOutside,
     })
+    updateLoadingExperience({
+      kind: 'transition',
+      percent: 10,
+      phase: goingOutside
+        ? 'Préparation de l’extérieur...'
+        : 'Retour dans la maison...',
+    })
     setZoneFadeActive(true)
     const outdoorFadeSettleDelay = goingOutside ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS : 0
     const zoneSwitchDelay = goingOutside
@@ -21113,6 +21254,10 @@ function App() {
         })
         setOutdoorTransitionPrimed(true)
         setOutdoorContentStage((stage) => Math.max(stage, 1))
+        updateLoadingExperience({
+          percent: 35,
+          phase: 'Chargement du décor extérieur...',
+        })
       }, outdoorFadeSettleDelay)
     }
     setNear('outdoorDoor', false)
@@ -21149,11 +21294,13 @@ function App() {
         to: nextZone,
         spawn,
       })
+      updateLoadingExperience({
+        percent: goingOutside ? 72 : 82,
+        phase: goingOutside
+          ? 'Installation de l’herbe et des ennemis...'
+          : 'Installation des meubles...',
+      })
       setView('zone',nextZone)
-      if (!goingOutside) {
-        setOutdoorTransitionPrimed(false)
-        setOutdoorContentStage(0)
-      }
       setSpawnRequest({ zone: nextZone, position: spawn, token: Date.now() })
       touchRef.current.moveX = 0
       touchRef.current.moveY = 0
@@ -21167,7 +21314,8 @@ function App() {
             to: nextZone,
             prewarmReady: true,
           })
-          setZoneFadeActive(false)
+          updateLoadingExperience({ percent: 100, phase: 'Maison prête !' })
+          window.requestAnimationFrame(() => setZoneFadeActive(false))
           return
         }
         // Sortie : on ne lève le voile (= on ne rend la main) qu'une fois les
@@ -21180,22 +21328,34 @@ function App() {
             to: nextZone,
             prewarmReady: outdoorPrewarmReadyRef.current,
           })
-          setZoneFadeActive(false)
-          setOutdoorTransitionPrimed(false)
+          updateLoadingExperience({ percent: 100, phase: 'Extérieur prêt !' })
+          window.requestAnimationFrame(() => setZoneFadeActive(false))
         }
-        if (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current) {
+        if (
+          (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current)
+          && outdoorZoneReadyRef.current
+        ) {
           releaseFade()
           return
         }
         const holdStartedAt = Date.now()
         const pollPrewarm = () => {
           if (
-            outdoorPrewarmReadyRef.current ||
+            (
+              (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current)
+              && outdoorZoneReadyRef.current
+            ) ||
             Date.now() - holdStartedAt >= OUTDOOR_EXIT_FADE_MAX_HOLD_MS
           ) {
             releaseFade()
             return
           }
+          updateLoadingExperience({
+            percent: outdoorZoneReadyRef.current ? 96 : 88,
+            phase: outdoorZoneReadyRef.current
+              ? 'Stabilisation de la première image...'
+              : 'Finalisation du monde extérieur...',
+          })
           window.setTimeout(pollPrewarm, 60)
         }
         pollPrewarm()
@@ -21735,13 +21895,18 @@ function App() {
     touchRef.current.emoteQueued = null
   }
 
+  const updateLoadingExperience = useCallback((next) => {
+    setLoadingExperience((current) => advanceLoadingExperience(current, next))
+  }, [])
+
   const completeShaderWarmup = useCallback(() => {
     perfDiagnostics.event('load:warmup-complete')
-    setShaderWarmupComplete(true)
+    updateLoadingExperience({ percent: 100, phase: 'Monde prêt !' })
+    window.requestAnimationFrame(() => setShaderWarmupComplete(true))
     // L'overlay est tombé : on profite du temps mort pour précharger les assets
     // extérieurs lourds avant que le joueur n'atteigne la porte (cf. note perf).
     startOutdoorIdlePreloads()
-  }, [])
+  }, [updateLoadingExperience])
 
   const consumeSpawnRequest = useCallback((token) => {
     setSpawnRequest((current) => (
@@ -21799,6 +21964,10 @@ function App() {
   const outdoorObjectsReady = isOutsideZone && outdoorRuntimeRevealStage >= 1 && outdoorContentStage >= 3
   const outdoorGrassReady = isOutsideZone && outdoorRuntimeRevealStage >= 2 && outdoorContentStage >= 4
   const outdoorEnemiesReady = isOutsideZone && outdoorRuntimeRevealStage >= 3 && outdoorContentStage >= 5
+  const outdoorVisualsReady = outdoorEnemiesReady && (
+    monsterSpawnSlots.length === 0
+    || visibleOutdoorEnemyCount >= monsterSpawnSlots.length
+  )
   const visibleMonsterSpawnSlots = useMemo(() => {
     if (!outdoorEnemiesReady || visibleOutdoorEnemyCount <= 0) return []
     const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
@@ -21850,12 +22019,16 @@ function App() {
         }}
         resize={{ debounce: 80 }}
       >
-        <ShaderWarmupGate onComplete={completeShaderWarmup} />
+        <ShaderWarmupGate
+          onComplete={completeShaderWarmup}
+          onProgress={updateLoadingExperience}
+          criticalPlaceableModelUrls={criticalPlaceableModelUrls}
+        />
         {PERF_RUNTIME_WARMUP_RIG && <RuntimeWarmupRig />}
         {!PERF_NO_OUTDOOR_PREWARM && (
           <OutdoorShaderPrewarm
             stage={outdoorContentMounted ? outdoorContentStage : 0}
-            isOutside={isOutsideZone}
+            isOutside={isOutsideZone && outdoorVisualsReady}
             readyRef={outdoorPrewarmReadyRef}
           />
         )}
@@ -21986,6 +22159,7 @@ function App() {
           <CustomizationLayer
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             view={customizeView}
+            streamPlaceables={shaderWarmupComplete && !zoneFadeActive}
             showBuildHandles={customizeTab !== 'furniture'}
             canEditStructure={customizeTab === 'build'}
             coins={coins}
@@ -22372,17 +22546,10 @@ function App() {
         </Suspense>
       </Canvas>
       </div>
-      {!shaderWarmupComplete && (
-        <div className="game-loading-overlay" role="status" aria-live="polite">
-          <div className="game-loading-panel">
-            <div className="game-loading-title">Chargement du monde</div>
-            <div className="game-loading-text">Preparation du rendu...</div>
-            <div className="game-loading-bar" aria-hidden="true">
-              <span />
-            </div>
-          </div>
-        </div>
-      )}
+      <WorldLoadingOverlay
+        active={!shaderWarmupComplete || zoneFadeActive}
+        experience={loadingExperience}
+      />
       {mode === 'play' && isDebugMode && (
         <RenderStatsOverlay
           stats={renderStats}
@@ -22908,8 +23075,6 @@ function App() {
         ownedMountIds={ownedMounts}
         onBuyMount={buyMount}
       />
-      <div className={`zone-fade${zoneFadeActive ? ' active' : ''}`} />
-
       {showPwaGuide && (
         <div className="pwa-guide-overlay" onClick={() => setShowPwaGuide(false)}>
           <div className="pwa-guide-modal" onClick={(e) => e.stopPropagation()}>
