@@ -19,6 +19,11 @@ import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
+import GameFrameSchedulerDriver from './game/runtime/GameFrameSchedulerDriver'
+import { FRAME_PHASES } from './game/runtime/frameScheduler'
+import MobSpatialIndexSystem from './game/runtime/MobSpatialIndexSystem'
+import { SpatialHash2D } from './game/runtime/spatialHash2D'
+import { useGameFrameTask } from './game/runtime/useGameFrameTask'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
@@ -11338,6 +11343,7 @@ function SmallMushroomEnemy({
   config = MOB_CONFIGS.mushroom,
   monsterType = null,
   mobGroupRef = null,
+  mobSpatialIndexRef = null,
   allyTargetsRef = null,
 }) {
   const cfg = config
@@ -11774,7 +11780,7 @@ function SmallMushroomEnemy({
     }
   }, [])
 
-  useFrame((state, delta) => {
+  useGameFrameTask((state, delta) => {
     if (currentMotionRef.current !== motion) {
       playEnemyMotion(motion)
     }
@@ -12081,9 +12087,29 @@ function SmallMushroomEnemy({
     if (mobGroupRef?.current) {
       let pushX = 0
       let pushZ = 0
-      for (const [otherId, mob] of mobGroupRef.current) {
+      const currentMob = mobGroupRef.current.get(enemyId)
+      if (currentMob && mobSpatialIndexRef?.current) {
+        mobSpatialIndexRef.current.updateKeyedPoint(
+          enemyId,
+          { id: enemyId, mob: currentMob, position: enemyPosition },
+          enemyPosition.x,
+          enemyPosition.z,
+        )
+      }
+      const nearbyMobs = mobSpatialIndexRef?.current
+        ? mobSpatialIndexRef.current.queryRadius(
+            enemyPosition.x,
+            enemyPosition.z,
+            MOB_SEPARATION_DISTANCE,
+          )
+        : [...mobGroupRef.current].map(([id, mob]) => ({
+            id,
+            mob,
+            position: mob.getPosition(),
+          }))
+      for (const { id: otherId, mob, position: otherPosition } of nearbyMobs) {
         if (otherId === enemyId) continue
-        const op = mob.getPosition()
+        const op = otherPosition ?? mob.getPosition()
         const dx = enemyPosition.x - op.x
         const dz = enemyPosition.z - op.z
         const d = Math.hypot(dx, dz)
@@ -12149,6 +12175,9 @@ function SmallMushroomEnemy({
       setEnemyMotion(stateRef.current === 'chase' ? 'walk' : 'idle')
     }
 
+  }, {
+    label: 'enemy-simulation',
+    phase: FRAME_PHASES.SIMULATION,
   })
 
   targetRef.current.position.x = currentPositionRef.current.x
@@ -18036,6 +18065,7 @@ function App() {
   const playerVelocityRef = useRef({ x: 0, z: 0 })
   const combatTargetsRef = useRef(new Map())
   const mobGroupRef = useRef(new Map())
+  const mobSpatialIndexRef = useRef(new SpatialHash2D(MOB_SEPARATION_DISTANCE * 2))
   // Cibles que les ennemis peuvent prendre pour cible via l'aggro : le joueur
   // ('player') et les squelettes invoqués. Sert aussi à router les dégâts.
   const allyTargetsRef = useRef(new Map())
@@ -22041,6 +22071,11 @@ function App() {
         }}
         resize={{ debounce: 80 }}
       >
+        <GameFrameSchedulerDriver />
+        <MobSpatialIndexSystem
+          mobGroupRef={mobGroupRef}
+          spatialIndexRef={mobSpatialIndexRef}
+        />
         <ShaderWarmupGate
           onComplete={completeShaderWarmup}
           onProgress={updateLoadingExperience}
@@ -22359,6 +22394,7 @@ function App() {
                   aggressive={slot.aggressive}
                   patrol={slot.patrol}
                   mobGroupRef={mobGroupRef}
+                  mobSpatialIndexRef={mobSpatialIndexRef}
                   allyTargetsRef={allyTargetsRef}
                 />
               ))}

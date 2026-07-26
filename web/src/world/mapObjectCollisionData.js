@@ -15,6 +15,7 @@ const COLLISION_BIN_URLS = {
 // objectId → source { vertices, indices, walkTriangles, solidTriangles } (vues typées).
 // Référence STABLE par objet (le collisionCache amont est un WeakMap keyé dessus).
 const sources = {}
+let sourcesVersion = 0
 
 function parseCollisionBin(buffer) {
   const header = new Uint32Array(buffer, 0, 4)
@@ -35,6 +36,7 @@ async function loadOne(objectId, url) {
     const response = await fetch(url)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     sources[objectId] = parseCollisionBin(await response.arrayBuffer())
+    sourcesVersion += 1
   } catch (error) {
     console.warn(`Collision binaire non chargée (${objectId})`, error)
   }
@@ -48,4 +50,8 @@ export const collisionReady = Promise.all(
 // Source synchrone (null tant que le .bin n'est pas chargé).
 export function getMapObjectCollisionSource(objectId) {
   return sources[objectId] ?? null
+}
+
+export function getMapObjectCollisionVersion() {
+  return sourcesVersion
 }

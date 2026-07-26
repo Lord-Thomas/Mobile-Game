@@ -1,5 +1,6 @@
 import { MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS } from './mapObjects'
-import { getMapObjectCollisionSource } from './mapObjectCollisionData'
+import { SpatialHash2D } from '../game/runtime/spatialHash2D'
+import { getMapObjectCollisionSource, getMapObjectCollisionVersion } from './mapObjectCollisionData'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
@@ -25,6 +26,8 @@ const PLAYER_STANDING_HEIGHT = 1.72
 const PLAYER_KNEE_HEIGHT = 0.18
 
 const collisionCache = new WeakMap()
+const collisionSpatialCache = new WeakMap()
+const COLLISION_SPATIAL_CELL_SIZE = 16
 
 function getCollisionSource(objectId) {
   // Source binaire chargée par mapObjectCollisionData (référence stable → WeakMap OK).
@@ -160,6 +163,83 @@ export function getMapObjectBaseY(placement) {
   return Number.isFinite(savedY) ? savedY : terrainY
 }
 
+function getPlacementWorldBounds(placement, data) {
+  const [positionX = 0, , positionZ = 0] = placement.position ?? []
+  const scale = placement.scale ?? 1
+  const rotationY = placement.rotationY ?? 0
+  const cos = Math.cos(rotationY)
+  const sin = Math.sin(rotationY)
+  const corners = [
+    [data.bounds.minX, data.bounds.minZ],
+    [data.bounds.minX, data.bounds.maxZ],
+    [data.bounds.maxX, data.bounds.minZ],
+    [data.bounds.maxX, data.bounds.maxZ],
+  ]
+  let minX = Infinity
+  let minZ = Infinity
+  let maxX = -Infinity
+  let maxZ = -Infinity
+
+  corners.forEach(([localX, localZ]) => {
+    const worldX = positionX + scale * (localX * cos + localZ * sin)
+    const worldZ = positionZ + scale * (-localX * sin + localZ * cos)
+    minX = Math.min(minX, worldX)
+    minZ = Math.min(minZ, worldZ)
+    maxX = Math.max(maxX, worldX)
+    maxZ = Math.max(maxZ, worldZ)
+  })
+
+  const tolerance = WALKABLE_TRIANGLE_TOLERANCE * Math.abs(scale)
+  return {
+    minX: minX - tolerance,
+    minZ: minZ - tolerance,
+    maxX: maxX + tolerance,
+    maxZ: maxZ + tolerance,
+  }
+}
+
+function getCollisionSpatialIndex(placements) {
+  if (!placements || typeof placements !== 'object') return null
+
+  const version = getMapObjectCollisionVersion()
+  const cached = collisionSpatialCache.get(placements)
+  if (cached?.version === version && cached.placementCount === placements.length) {
+    return cached.index
+  }
+
+  const index = new SpatialHash2D(COLLISION_SPATIAL_CELL_SIZE)
+  placements.forEach((placement, order) => {
+    const data = getMapObjectCollisionData(placement.objectId)
+    if (!data) return
+    const bounds = getPlacementWorldBounds(placement, data)
+    index.insertAabb(
+      placement,
+      bounds.minX,
+      bounds.minZ,
+      bounds.maxX,
+      bounds.maxZ,
+      order,
+    )
+  })
+  collisionSpatialCache.set(placements, {
+    index,
+    placementCount: placements.length,
+    version,
+  })
+  return index
+}
+
+function getNearbyCollisionPlacements(placements, x, z, radius = 0) {
+  const index = getCollisionSpatialIndex(placements)
+  if (!index) return placements
+  return index.queryAabb(
+    x - radius,
+    z - radius,
+    x + radius,
+    z + radius,
+  )
+}
+
 function worldToLocalXZ(x, z, placement) {
   const [px = 0, , pz = 0] = placement.position ?? []
   const scale = placement.scale ?? 1
@@ -292,8 +372,9 @@ export function getOutdoorWalkableHeight(x, z, currentFootY, placements = MAP_OB
   const terrainY = getTerrainHeight(x, z)
   let bestY = terrainY
   const referenceFootY = Number.isFinite(currentFootY) ? currentFootY : terrainY
+  const nearbyPlacements = getNearbyCollisionPlacements(placements, x, z)
 
-  placements.forEach((placement) => {
+  nearbyPlacements.forEach((placement) => {
     const height = getPlacementWalkableHeight(placement, x, z, referenceFootY)
     if (height !== null && height > bestY) {
       bestY = height
@@ -304,7 +385,8 @@ export function getOutdoorWalkableHeight(x, z, currentFootY, placements = MAP_OB
 }
 
 export function collidesWithMapObjectSolid(x, z, footY, radius, placements = MAP_OBJECT_PLACEMENTS) {
-  return placements.some((placement) => {
+  const nearbyPlacements = getNearbyCollisionPlacements(placements, x, z, radius)
+  return nearbyPlacements.some((placement) => {
     const data = getMapObjectCollisionData(placement.objectId)
     if (!data) return false
 
