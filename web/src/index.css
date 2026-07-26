@@ -368,6 +368,15 @@ canvas {
   bottom: 16px;
   z-index: 3;
   pointer-events: auto;
+  opacity: var(--control-opacity, 1);
+  transform: translate(var(--joystick-offset-x, 0), var(--joystick-offset-y, 0)) scale(var(--control-scale, 1));
+  transform-origin: bottom left;
+}
+
+.hud--left-handed .joystick-wrap {
+  left: auto;
+  right: 16px;
+  transform-origin: bottom right;
 }
 
 .joystick-zone {
@@ -582,8 +591,8 @@ canvas {
 
 .action-btn {
   position: absolute;
-  right: 18px;
-  bottom: 18px;
+  right: calc(18px - var(--actions-offset-x, 0px));
+  bottom: calc(18px - var(--actions-offset-y, 0px));
   z-index: 3;
   pointer-events: auto;
   border: 0;
@@ -595,6 +604,15 @@ canvas {
   padding: 0;
   touch-action: none;
   backdrop-filter: blur(6px);
+  opacity: var(--control-opacity, 1);
+  scale: var(--control-scale, 1);
+  transform-origin: bottom right;
+}
+
+.hud--left-handed .action-btn {
+  right: auto;
+  left: calc(18px + var(--actions-offset-x, 0px));
+  transform-origin: bottom left;
 }
 
 .action-symbol {
@@ -614,11 +632,11 @@ canvas {
 
 /* When flying a mount, stack ascend (▲) above descend (▼) above the jump slot. */
 .action-btn-ascend {
-  bottom: 86px;
+  bottom: calc(86px - var(--actions-offset-y, 0px));
 }
 
 .action-btn-descend {
-  bottom: 18px;
+  bottom: calc(18px - var(--actions-offset-y, 0px));
 }
 
 .camera-zoom-controls {
@@ -2104,6 +2122,11 @@ html[data-orientation='landscape'] .joystick-wrap {
   bottom: max(10px, env(safe-area-inset-bottom));
 }
 
+html[data-orientation='landscape'] .hud--left-handed .joystick-wrap {
+  left: auto;
+  right: max(10px, env(safe-area-inset-right));
+}
+
 html[data-orientation='landscape'] .joystick-zone {
   width: 104px;
   height: 104px;
@@ -3180,6 +3203,40 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   font-weight: 800;
 }
 
+.settings-range-row {
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #dbe8f6;
+  display: grid;
+  gap: 7px;
+}
+
+.settings-range-row > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-range-row strong,
+.settings-range-row output {
+  color: #f8fbff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.settings-range-row output {
+  color: #ffe56a;
+  min-width: 52px;
+  text-align: right;
+}
+
+.settings-range-row input[type='range'] {
+  width: 100%;
+  accent-color: #f2c14e;
+}
+
 @keyframes achievement-toast-in {
   from {
     opacity: 0;
@@ -4089,6 +4146,14 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   gap: clamp(8px, 2.4vw, 14px);
   max-width: calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right));
   pointer-events: auto;
+  opacity: var(--control-opacity, 1);
+  translate: var(--actions-offset-x, 0) var(--actions-offset-y, 0);
+  scale: var(--control-scale, 1);
+  transform-origin: bottom center;
+}
+
+.combat-action-dock--left-handed {
+  flex-direction: row-reverse;
 }
 
 .app--bottom-interaction-prompt .combat-action-dock {

@@ -36,6 +36,12 @@ describe('dodge', () => {
     expect(getDodgeSpeed(PLAYER_DODGE.duration)).toBe(0)
   })
 
+  it('conserve la vitesse d’entrée au lieu de freiner une course', () => {
+    expect(getDodgeSpeed(0, 3.4)).toBeCloseTo(3.4)
+    expect(getDodgeSpeed(PLAYER_DODGE.moveDelay, 3.4)).toBeCloseTo(3.4)
+    expect(getDodgeSpeed(PLAYER_DODGE.moveDelay + 0.02, 3.4)).toBeGreaterThan(0)
+  })
+
   it('parcourt environ 2,7 mètres avec la courbe de vitesse', () => {
     const movementDuration = PLAYER_DODGE.duration - PLAYER_DODGE.moveDelay
     const integratedDistance = PLAYER_DODGE.peakSpeed * movementDuration * 2 / Math.PI

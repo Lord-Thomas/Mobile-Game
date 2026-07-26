@@ -30,12 +30,17 @@ export function getDodgeDirection(moveX, moveZ, facingYaw = 0) {
   }
 }
 
-export function getDodgeSpeed(elapsed) {
-  if (elapsed <= PLAYER_DODGE.moveDelay || elapsed >= PLAYER_DODGE.duration) return 0
+export function getDodgeSpeed(elapsed, entrySpeed = 0) {
+  if (elapsed < 0 || elapsed >= PLAYER_DODGE.duration) return 0
+
+  const carriedSpeed = Math.max(0, Number(entrySpeed) || 0)
+  if (elapsed <= PLAYER_DODGE.moveDelay) return carriedSpeed
 
   const movementDuration = PLAYER_DODGE.duration - PLAYER_DODGE.moveDelay
   const progress = Math.min(1, Math.max(0, (elapsed - PLAYER_DODGE.moveDelay) / movementDuration))
-  return Math.sin(progress * Math.PI) * PLAYER_DODGE.peakSpeed
+  const rollSpeed = Math.sin(progress * Math.PI) * PLAYER_DODGE.peakSpeed
+  const fadingEntrySpeed = carriedSpeed * (1 - progress)
+  return Math.max(rollSpeed, fadingEntrySpeed)
 }
 
 export function isDodgeInvulnerable(elapsed) {

@@ -13,6 +13,7 @@ import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS,
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
+import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
 import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
@@ -1517,6 +1518,7 @@ function CombatActionDock({
   wingsUiRef,
   showDodge = false,
   swordEquipped = false,
+  controlSettings = DEFAULT_CONTROL_SETTINGS,
 }) {
   const wingsUi = useWingsSpellUi(wingsUiRef)
   const showWings = wingsUi.visible && !wingsUi.flying
@@ -1529,6 +1531,7 @@ function CombatActionDock({
   }
 
   const startPunchCharge = () => {
+    triggerControlHaptic(controlSettings.vibration)
     if (!swordEquipped) {
       queuePunch()
       return
@@ -1547,19 +1550,25 @@ function CombatActionDock({
   }
 
   const queueKick = () => {
+    triggerControlHaptic(controlSettings.vibration)
     touchRef.current.kickQueued = true
   }
 
   const queueWings = () => {
+    triggerControlHaptic(controlSettings.vibration)
     touchRef.current.wingsQueued = true
   }
 
   const queueWingsBoost = () => {
+    triggerControlHaptic(controlSettings.vibration)
     touchRef.current.wingsBoostQueued = true
   }
 
   return (
-    <div className={`combat-action-dock combat-action-dock--count-${count}`}>
+    <div
+      className={`combat-action-dock combat-action-dock--count-${count}${controlSettings.leftHanded ? ' combat-action-dock--left-handed' : ''}`}
+      style={getControlCssVariables(controlSettings)}
+    >
       {canPunch && (
         <button
           className="combat-action-btn combat-action-btn--punch"
@@ -1591,6 +1600,7 @@ function CombatActionDock({
           title="Esquive (Ctrl)"
           onPointerDown={(event) => {
             event.preventDefault()
+            triggerControlHaptic(controlSettings.vibration)
             touchRef.current.dodgeQueued = true
           }}
         >
@@ -1621,7 +1631,10 @@ function CombatActionDock({
           style={{ '--cooldown-angle': `${spellUi?.cooldownAngle ?? 0}deg` }}
           onPointerDown={(event) => {
             event.preventDefault()
-            if (spellUi?.disabled !== true) onSpellPress?.()
+            if (spellUi?.disabled !== true) {
+              triggerControlHaptic(controlSettings.vibration)
+              onSpellPress?.()
+            }
           }}
         >
           <img className="combat-action-img" src={spellUi?.icon ?? SPELL_ICON_FIREBALL} alt="" aria-hidden="true" draggable="false" />
@@ -4041,6 +4054,7 @@ function Player({
     bufferedDirectionZ: 1,
     directionX: 0,
     directionZ: 1,
+    entrySpeed: 0,
   })
   const jumpStartUntilRef = useRef(0)
   const jumpLandUntilRef = useRef(0)
@@ -4637,6 +4651,10 @@ function Player({
       dodge.bufferedUntil = 0
       dodge.directionX = dodge.bufferedDirectionX
       dodge.directionZ = dodge.bufferedDirectionZ
+      dodge.entrySpeed = Math.hypot(
+        planarVelocityRef.current.x,
+        planarVelocityRef.current.z,
+      )
       punchUntilRef.current = 0
       pendingPunchRef.current = null
       kickUntilRef.current = 0
@@ -4658,7 +4676,7 @@ function Player({
     const wingsAirborne = isWingsFlying(wings)
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
     const speed = isDodging
-      ? getDodgeSpeed(dodgeElapsed)
+      ? getDodgeSpeed(dodgeElapsed, dodge.entrySpeed)
       : isMoving
         ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) * (movementSpeedMultiplierRef?.current ?? 1)
         : 0
@@ -7862,7 +7880,15 @@ function NetworkSlimePet({ slimePetId, stateRef, currentZone }) {
   )
 }
 
-function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = false, showJumpAction = true, mountFlying = false, onTap }) {
+function ControlsOverlay({
+  touchRef,
+  adminCameraControls = false,
+  uiHidden = false,
+  showJumpAction = true,
+  mountFlying = false,
+  controlSettings = DEFAULT_CONTROL_SETTINGS,
+  onTap,
+}) {
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookPointersRef = useRef(new Map())
@@ -8113,6 +8139,7 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   // Jump button also acts as held "ascend" while mounted (jump on ground, climb
   // in flight); the descend button lowers a flying mount.
   const onJumpDown = () => {
+    triggerControlHaptic(controlSettings.vibration)
     touchRef.current.actionQueued = true
     touchRef.current.mountAscend = true
   }
@@ -8120,6 +8147,7 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
     touchRef.current.mountAscend = false
   }
   const onDescendDown = () => {
+    triggerControlHaptic(controlSettings.vibration)
     touchRef.current.mountDescend = true
   }
   const onDescendUp = () => {
@@ -8127,7 +8155,10 @@ function ControlsOverlay({ touchRef, adminCameraControls = false, uiHidden = fal
   }
 
   return (
-    <div className="hud">
+    <div
+      className={`hud${controlSettings.leftHanded ? ' hud--left-handed' : ''}`}
+      style={getControlCssVariables(controlSettings)}
+    >
       <div
         className="camera-pad"
         onPointerDown={onLookDown}
@@ -8403,6 +8434,9 @@ function AchievementToast({ toast }) {
 function SettingsPanel({
   settings,
   onToggle,
+  controlSettings,
+  onControlSettingChange,
+  onResetControlSettings,
   isLocalNetwork = false,
   showLocalCoinButton = true,
   onToggleLocalCoinButton,
@@ -8439,6 +8473,59 @@ function SettingsPanel({
           </span>
         </label>
       ))}
+      <div className="settings-group-title">Commandes tactiles</div>
+      <label className="settings-toggle-row">
+        <input
+          type="checkbox"
+          checked={controlSettings.leftHanded}
+          onChange={(event) => onControlSettingChange('leftHanded', event.target.checked)}
+        />
+        <span>
+          <strong>Mode gaucher</strong>
+          <small>Place le joystick à droite et les actions dans l’ordre inverse.</small>
+        </span>
+      </label>
+      <label className="settings-toggle-row">
+        <input
+          type="checkbox"
+          checked={controlSettings.vibration}
+          onChange={(event) => onControlSettingChange('vibration', event.target.checked)}
+        />
+        <span>
+          <strong>Vibration</strong>
+          <small>Retour tactile lors des actions, si l’appareil le permet.</small>
+        </span>
+      </label>
+      {[
+        ['size', 'Taille des commandes', 75, 140, '%'],
+        ['opacity', 'Opacité', 35, 100, '%'],
+        ['joystickOffsetX', 'Joystick · horizontal', -100, 100, ' px'],
+        ['joystickOffsetY', 'Joystick · vertical', -100, 100, ' px'],
+        ['actionsOffsetX', 'Actions · horizontal', -140, 140, ' px'],
+        ['actionsOffsetY', 'Actions · vertical', -100, 100, ' px'],
+      ].map(([key, label, min, max, unit]) => (
+        <label className="settings-range-row" key={key}>
+          <span>
+            <strong>{label}</strong>
+            <output>{controlSettings[key]}{unit}</output>
+          </span>
+          <input
+            type="range"
+            aria-label={label}
+            min={min}
+            max={max}
+            step="1"
+            value={controlSettings[key]}
+            onChange={(event) => onControlSettingChange(key, Number(event.target.value))}
+          />
+        </label>
+      ))}
+      <button type="button" className="settings-action-row" onClick={onResetControlSettings}>
+        <span>
+          <strong>Réinitialiser les commandes</strong>
+          <small>Restaure la taille et les positions par défaut.</small>
+        </span>
+      </button>
       <div className="settings-group-title">Affichage</div>
 
       {pwaStandalone && (
@@ -8540,6 +8627,7 @@ function GameMenuPanel({
   achievementProgress,
   soloNameplateVisible,
   performanceSettings,
+  controlSettings,
   isLocalNetwork,
   showLocalCoinButton,
   fullscreenSupported,
@@ -8564,6 +8652,8 @@ function GameMenuPanel({
   onToggleTitle,
   onToggleSoloNameplate,
   onTogglePerformanceSetting,
+  onControlSettingChange,
+  onResetControlSettings,
   onToggleLocalCoinButton,
   onToggleFullscreen,
   pwaStandalone = false,
@@ -8703,6 +8793,9 @@ function GameMenuPanel({
             <SettingsPanel
               settings={performanceSettings}
               onToggle={onTogglePerformanceSetting}
+              controlSettings={controlSettings}
+              onControlSettingChange={onControlSettingChange}
+              onResetControlSettings={onResetControlSettings}
               isLocalNetwork={isLocalNetwork}
               showLocalCoinButton={showLocalCoinButton}
               onToggleLocalCoinButton={onToggleLocalCoinButton}
@@ -17514,6 +17607,7 @@ function App() {
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
   const [performanceSettings, setPerformanceSettings] = useState(loadPerformanceSettings)
+  const [controlSettings, setControlSettings] = useState(loadControlSettings)
   const [showLocalCoinButton, setShowLocalCoinButton] = useState(() => {
     if (typeof window === 'undefined') return true
     try {
@@ -17582,6 +17676,10 @@ function App() {
       // localStorage can be unavailable in private browsing or embedded contexts.
     }
   }, [performanceSettings])
+
+  useEffect(() => {
+    saveControlSettings(controlSettings)
+  }, [controlSettings])
 
   useEffect(() => {
     if (!perfDiagnosticsActive) return
@@ -17671,6 +17769,14 @@ function App() {
 
   const togglePerformanceSetting = useCallback((key) => {
     setPerformanceSettings((current) => ({ ...current, [key]: !current[key] }))
+  }, [])
+
+  const changeControlSetting = useCallback((key, value) => {
+    setControlSettings((current) => normalizeControlSettings({ ...current, [key]: value }))
+  }, [])
+
+  const resetControlSettings = useCallback(() => {
+    setControlSettings({ ...DEFAULT_CONTROL_SETTINGS })
   }, [])
 
   const toggleLocalCoinButton = useCallback(() => {
@@ -22290,6 +22396,7 @@ function App() {
       {mode === 'play' && (
         <ControlsOverlay
           touchRef={touchRef}
+          controlSettings={controlSettings}
           adminCameraControls={isAdminMode || isVerticalFrameMode || (isLocalNetwork && freeCameraActive)}
           uiHidden={!showCaptureUi}
           mountFlying={dragonMounted && activeMountConfig?.canFly === true}
@@ -22347,6 +22454,7 @@ function App() {
           wingsUiRef={wingsUiRef}
           showDodge={currentZone === ZONES.outside}
           swordEquipped={equippedWeapon === 'cheat_sword'}
+          controlSettings={controlSettings}
         />
       )}
       {showGameplayUi && (
@@ -22431,6 +22539,7 @@ function App() {
           achievementProgress={achievementProgress}
           soloNameplateVisible={soloNameplateVisible}
           performanceSettings={performanceSettings}
+          controlSettings={controlSettings}
           isLocalNetwork={isLocalNetwork}
           showLocalCoinButton={showLocalCoinButton}
           fullscreenSupported={fullscreenSupported}
@@ -22458,6 +22567,8 @@ function App() {
           onToggleTitle={toggleEquippedTitle}
           onToggleSoloNameplate={() => setSoloNameplateVisible((current) => !current)}
           onTogglePerformanceSetting={togglePerformanceSetting}
+          onControlSettingChange={changeControlSetting}
+          onResetControlSettings={resetControlSettings}
           onToggleLocalCoinButton={toggleLocalCoinButton}
           onToggleFullscreen={toggleFullscreenMode}
           pwaStandalone={pwaStandalone}
