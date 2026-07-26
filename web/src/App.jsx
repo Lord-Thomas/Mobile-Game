@@ -24,6 +24,7 @@ import { FRAME_PHASES } from './game/runtime/frameScheduler'
 import MobSpatialIndexSystem from './game/runtime/MobSpatialIndexSystem'
 import { SpatialHash2D } from './game/runtime/spatialHash2D'
 import { useGameFrameTask } from './game/runtime/useGameFrameTask'
+import { useScheduledAnimations } from './game/runtime/useScheduledAnimations'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
@@ -5829,14 +5830,25 @@ function filterAnimationClipTracksForObject(clip, object) {
   return clip
 }
 
+const mixamoAnimationCache = new WeakMap()
+
 // Charge un GLB d'animation Mixamo (converti via FBX2glTF) et renvoie un objet de
 // même forme que l'ancien useFBX ({ animations: [clip] }), pistes renormalisées.
 function useMixamoGlbAnimation(url, positionScale = MIXAMO_GLB_POSITION_SCALE) {
   const glb = useGLTF(url)
-  return useMemo(
-    () => ({ animations: glb.animations.map((clip) => cloneMixamoAnimationClip(clip, positionScale)) }),
-    [glb, positionScale],
-  )
+  return useMemo(() => {
+    let scaledAnimations = mixamoAnimationCache.get(glb)
+    if (!scaledAnimations) {
+      scaledAnimations = new Map()
+      mixamoAnimationCache.set(glb, scaledAnimations)
+    }
+    if (!scaledAnimations.has(positionScale)) {
+      scaledAnimations.set(positionScale, {
+        animations: glb.animations.map((clip) => cloneMixamoAnimationClip(clip, positionScale)),
+      })
+    }
+    return scaledAnimations.get(positionScale)
+  }, [glb, positionScale])
 }
 
 function PlayerAvatar({
@@ -11137,6 +11149,34 @@ function prepareEnemyGlbTransforms(source) {
 // transforms des os autour de la mesure (exécution synchrone dans un useMemo → pas
 // d'entrelacement avec d'autres instances).
 const enemyGlbBoundsCache = new WeakMap()
+const enemyAnimationClipsCache = new WeakMap()
+
+function getPreparedEnemyAnimationClips(cacheOwner, object, clipSources, hipsRestHeight) {
+  let ownerCache = enemyAnimationClipsCache.get(cacheOwner)
+  if (!ownerCache) {
+    ownerCache = new Map()
+    enemyAnimationClipsCache.set(cacheOwner, ownerCache)
+  }
+
+  const cacheKey = clipSources
+    .map(({ source, name }) => `${name}:${source?.uuid ?? 'none'}`)
+    .concat(Number(hipsRestHeight).toFixed(5))
+    .join('|')
+  const cached = ownerCache.get(cacheKey)
+  if (cached) return cached
+
+  const clips = clipSources
+    .filter(({ source }) => source)
+    .map(({ source, name }) => {
+      const clip = source.clone()
+      clip.name = name
+      lockEmoteHipsHeight(clip, hipsRestHeight)
+      lockHipsPlanarPosition(clip)
+      return filterAnimationClipTracksForObject(clip, object)
+    })
+  ownerCache.set(cacheKey, clips)
+  return clips
+}
 
 function getAnimationTrackTargetName(trackName) {
   if (typeof trackName !== 'string') return ''
@@ -11258,7 +11298,7 @@ function SquashStretchModel({ object, offset, scale, renderOrder = 0, positionRe
   const attackAnimRef = useRef(null)
   const seenAttackRef = useRef(0)
 
-  useFrame((state, delta) => {
+  useGameFrameTask((state, delta) => {
     const inner = innerRef.current
     const offsetGroup = offsetGroupRef.current
     if (!inner || !offsetGroup) return
@@ -11315,6 +11355,9 @@ function SquashStretchModel({ object, offset, scale, renderOrder = 0, positionRe
     if (hitSquashRef && hitSquashRef.current > 0) {
       hitSquashRef.current = Math.max(0, hitSquashRef.current - dt * 3.5)
     }
+  }, {
+    label: 'enemy-procedural-animation',
+    phase: FRAME_PHASES.POST_SIMULATION,
   })
 
   return (
@@ -11388,6 +11431,7 @@ function SmallMushroomEnemy({
   const nextWanderAtRef = useRef(getSeededUnitValue(wanderSeedRef.current + 6.41) * (cfg.wanderMaxWait ?? MUSHROOM_ENEMY_WANDER_MAX_WAIT))
   const threatRef = useRef(new Map())
   const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const nearbyMobsScratchRef = useRef([])
   const respawnTimerRef = useRef(null)
   const hudTimerRef = useRef(null)
   const flashTimerRef = useRef(null)
@@ -11525,19 +11569,16 @@ function SmallMushroomEnemy({
     const idleSource = cfg.useModelIdleAnimation ? modelIdleAnimation : idle.animations[0]
     const walkSource = cfg.useModelAnimationForAllMotions ? modelIdleAnimation : walk.animations[0]
     const punchSource = cfg.useModelAnimationForAllMotions ? modelIdleAnimation : punch.animations[0]
-    return [
-      { source: idleSource, name: 'idle' },
-      { source: walkSource, name: 'walk' },
-      { source: punchSource, name: 'punch' },
-    ]
-      .filter(({ source }) => source)
-      .map(({ source, name }) => {
-        const clip = source.clone()
-        clip.name = name
-        lockEmoteHipsHeight(clip, enemyHipsRestHeight)
-        lockHipsPlanarPosition(clip)
-        return filterAnimationClipTracksForObject(clip, model.object)
-      })
+    return getPreparedEnemyAnimationClips(
+      sourceModel,
+      model.object,
+      [
+        { source: idleSource, name: 'idle' },
+        { source: walkSource, name: 'walk' },
+        { source: punchSource, name: 'punch' },
+      ],
+      enemyHipsRestHeight,
+    )
   }, [
     cfg.useModelAnimationForAllMotions,
     cfg.useModelIdleAnimation,
@@ -11546,10 +11587,11 @@ function SmallMushroomEnemy({
     model.object,
     modelIdleAnimation,
     punch.animations,
+    sourceModel,
     walk.animations,
   ])
 
-  const { actions, mixer } = useAnimations(animationClips, model.object)
+  const { actions, mixer } = useScheduledAnimations(animationClips, model.object)
   const currentActionRef = useRef(null)
   const currentMotionRef = useRef(null)
   const revealFramesRef = useRef(0)
@@ -11753,10 +11795,16 @@ function SmallMushroomEnemy({
 
   useEffect(() => {
     if (!mobGroupRef || passive) return undefined
-    mobGroupRef.current.set(enemyId, {
+    const mob = {
       getPosition: () => currentPositionRef.current,
       triggerAggro,
-    })
+    }
+    mob.spatialValue = {
+      id: enemyId,
+      mob,
+      position: currentPositionRef.current,
+    }
+    mobGroupRef.current.set(enemyId, mob)
     return () => { mobGroupRef.current.delete(enemyId) }
   }, [enemyId, mobGroupRef, passive, triggerAggro])
 
@@ -12091,13 +12139,14 @@ function SmallMushroomEnemy({
       if (currentMob && mobSpatialIndexRef?.current) {
         mobSpatialIndexRef.current.updateKeyedPoint(
           enemyId,
-          { id: enemyId, mob: currentMob, position: enemyPosition },
+          currentMob.spatialValue,
           enemyPosition.x,
           enemyPosition.z,
         )
       }
       const nearbyMobs = mobSpatialIndexRef?.current
-        ? mobSpatialIndexRef.current.queryRadius(
+        ? mobSpatialIndexRef.current.queryRadiusInto(
+            nearbyMobsScratchRef.current,
             enemyPosition.x,
             enemyPosition.z,
             MOB_SEPARATION_DISTANCE,
@@ -12423,23 +12472,25 @@ function SummonedSkeleton({
   }, [cfg.modelTargetHeight, cfg.textureUrl, forcedTexture, idle, isGlbModel, sourceModel])
 
   const skeletonHipsRestHeight = useMemo(() => getObjectHipsRestHeight(model.object), [model.object])
-  const animationClips = useMemo(() => {
-    return [
+  const animationClips = useMemo(() => getPreparedEnemyAnimationClips(
+    sourceModel,
+    model.object,
+    [
       { source: idle.animations[0], name: 'idle' },
       { source: walk.animations[0], name: 'walk' },
       { source: punch.animations[0], name: 'punch' },
-    ]
-      .filter(({ source }) => source)
-      .map(({ source, name }) => {
-        const clip = source.clone()
-        clip.name = name
-        lockEmoteHipsHeight(clip, skeletonHipsRestHeight)
-        lockHipsPlanarPosition(clip)
-        return filterAnimationClipTracksForObject(clip, model.object)
-      })
-  }, [idle.animations, model.object, walk.animations, punch.animations, skeletonHipsRestHeight])
+    ],
+    skeletonHipsRestHeight,
+  ), [
+    idle.animations,
+    model.object,
+    punch.animations,
+    skeletonHipsRestHeight,
+    sourceModel,
+    walk.animations,
+  ])
 
-  const { actions, mixer } = useAnimations(animationClips, model.object)
+  const { actions, mixer } = useScheduledAnimations(animationClips, model.object)
   const currentActionRef = useRef(null)
   const currentMotionRef = useRef(null)
   const setMotionIfChanged = useCallback((nextMotion) => {
@@ -12488,7 +12539,7 @@ function SummonedSkeleton({
     onExpire?.(index)
   }, [index, onExpire, onParticleBurst, groupPositionsRef, setActiveVisual])
 
-  useFrame((state, delta) => {
+  useGameFrameTask((state, delta) => {
     const slot = slotRef?.current ?? null
     if (currentMotionRef.current !== motion) playSummonMotion(motion)
 
@@ -12636,6 +12687,9 @@ function SummonedSkeleton({
         }
       }
     }
+  }, {
+    label: 'summoned-skeleton-simulation',
+    phase: FRAME_PHASES.SIMULATION,
   })
 
   useEffect(() => {
