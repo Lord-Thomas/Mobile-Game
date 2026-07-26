@@ -151,6 +151,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   viewerOutside = true,
   showPlayerPlot = false,
   debugStats = false,
+  reducedGrassDensity = false,
   biomeAreas,
 }) {
   const groupRef = useRef()
@@ -190,6 +191,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
           ballRef={ballRef}
           active={lightingActive}
           debugStats={debugStats}
+          reducedDensity={reducedGrassDensity}
           biomeAreas={biomeAreas}
         />
       )}

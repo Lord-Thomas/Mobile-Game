@@ -314,23 +314,24 @@ function createRockCover() {
   return rocks
 }
 
-function buildGlobalGrassChunk(key) {
+function buildGlobalGrassChunk(key, step = GLOBAL_GRASS_GRID_STEP) {
   const [chunkX, chunkZ] = key.split(':').map(Number)
   const bounds = getGrassChunkBounds(chunkX, chunkZ)
   const grass = []
-  for (let x = bounds.minX; x <= bounds.maxX; x += GLOBAL_GRASS_GRID_STEP) {
-    pushGrassRow(grass, x, bounds.minZ, bounds.maxZ, GLOBAL_GRASS_GRID_STEP)
+  for (let x = bounds.minX; x <= bounds.maxX; x += step) {
+    pushGrassRow(grass, x, bounds.minZ, bounds.maxZ, step)
   }
   return grass
 }
 
-function createGrassChunkBuildJob(key) {
+function createGrassChunkBuildJob(key, step = GRASS_GRID_STEP) {
   const [chunkX, chunkZ] = key.split(':').map(Number)
   const bounds = getGrassChunkBounds(chunkX, chunkZ)
   return {
     key,
     bounds,
     nextX: bounds.minX,
+    step,
     grass: [],
     buildTimeMs: 0,
   }
@@ -339,8 +340,8 @@ function createGrassChunkBuildJob(key) {
 function continueGrassChunkBuild(job, deadline) {
   const sliceStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
   while (job.nextX <= job.bounds.maxX) {
-    pushGrassRow(job.grass, job.nextX, job.bounds.minZ, job.bounds.maxZ, GRASS_GRID_STEP)
-    job.nextX += GRASS_GRID_STEP
+    pushGrassRow(job.grass, job.nextX, job.bounds.minZ, job.bounds.maxZ, job.step)
+    job.nextX += job.step
     if (typeof performance !== 'undefined' && performance.now() >= deadline) {
       job.buildTimeMs += performance.now() - sliceStartedAt
       return false
@@ -554,7 +555,18 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
   }
 }
 
-function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false, biomeAreas = MAP_BIOME_AREAS }) {
+function TerrainGroundCover({
+  playerPositionRef,
+  ballRef,
+  active = true,
+  debugStats = false,
+  biomeAreas = MAP_BIOME_AREAS,
+  reducedDensity = false,
+}) {
+  const maxQuadrantInstances = reducedDensity ? 50_000 : MAX_QUADRANT_INSTANCES
+  const maxGlobalGrassInstances = reducedDensity ? 30_000 : MAX_GLOBAL_GRASS_INSTANCES_PER_QUADRANT
+  const localGrassGridStep = reducedDensity ? 0.3 : GRASS_GRID_STEP
+  const globalGrassGridStep = reducedDensity ? 1.2 : GLOBAL_GRASS_GRID_STEP
   const rocks = useMemo(() => createRockCover(), [])
   const allGrassChunkKeys = useMemo(() => getAllGrassChunkKeys(), [])
   const grassBiomeData = useMemo(() => getGrassBiomeShaderData(biomeAreas), [biomeAreas])
@@ -621,7 +633,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     const geometries = QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
       const geo = grassBaseGeometry.clone()
       geo.setAttribute('instanceSpawnTime', new InstancedBufferAttribute(
-        new Float32Array(MAX_QUADRANT_INSTANCES),
+        new Float32Array(maxQuadrantInstances),
         1,
       ))
       const cx = (minX + maxX) / 2
@@ -633,7 +645,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     })
     const spheres = geometries.map((geo) => geo.boundingSphere.clone())
     return { geometries, spheres }
-  }, [grassBaseGeometry])
+  }, [grassBaseGeometry, maxQuadrantInstances])
   const grassGeometries = grassGeometryData.geometries
   const grassQuadrantSpheres = grassGeometryData.spheres
 
@@ -713,7 +725,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     const spawnTimes = mesh.geometry.getAttribute('instanceSpawnTime')
     const spawnTime = reveal ? grassElapsedTimeRef.current : -1000
     items.forEach((grass) => {
-      if (nextGrassOffsetRefs.current[qi] >= MAX_QUADRANT_INSTANCES) return
+      if (nextGrassOffsetRefs.current[qi] >= maxQuadrantInstances) return
       const i = nextGrassOffsetRefs.current[qi] * 16
       const s = grass.scale
       const p = grass.position
@@ -749,7 +761,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     const startIndex = globalGrassOffsetsRef.current[quadrantIndex]
     items.forEach((grass) => {
       const index = globalGrassOffsetsRef.current[quadrantIndex]
-      if (index >= MAX_GLOBAL_GRASS_INSTANCES_PER_QUADRANT) return
+      if (index >= maxGlobalGrassInstances) return
       dummy.position.set(...grass.position)
       dummy.rotation.set(0, 0, 0)
       dummy.scale.setScalar(grass.scale)
@@ -775,7 +787,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     const startedAt = typeof performance !== 'undefined' ? performance.now() : 0
     while (globalGrassChunkQueueRef.current.length > 0) {
       const key = globalGrassChunkQueueRef.current.shift()
-      writeGlobalGrassChunkToGPU(key, buildGlobalGrassChunk(key))
+      writeGlobalGrassChunkToGPU(key, buildGlobalGrassChunk(key, globalGrassGridStep))
       if (
         typeof performance !== 'undefined'
         && performance.now() - startedAt >= GLOBAL_GRASS_BUILD_TIME_BUDGET_MS
@@ -906,7 +918,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
       if (!activeGrassBuildJobRef.current) {
         const nextKey = grassChunkQueueRef.current.shift()
         if (!nextKey) break
-        activeGrassBuildJobRef.current = createGrassChunkBuildJob(nextKey)
+        activeGrassBuildJobRef.current = createGrassChunkBuildJob(nextKey, localGrassGridStep)
       }
 
       const job = activeGrassBuildJobRef.current
@@ -1138,7 +1150,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
             grassMeshRefs.current[qi] = el
             if (el) el.count = 0
           }}
-          args={[grassGeometries[qi], grassMaterial, MAX_QUADRANT_INSTANCES]}
+          args={[grassGeometries[qi], grassMaterial, maxQuadrantInstances]}
           frustumCulled
           userData={{ debugCategory: 'grass-mesh' }}
         />
@@ -1150,7 +1162,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
             globalGrassMeshRefs.current[qi] = el
             if (el) el.count = 0
           }}
-          args={[grassGeometries[qi], globalGrassMaterial, MAX_GLOBAL_GRASS_INSTANCES_PER_QUADRANT]}
+          args={[grassGeometries[qi], globalGrassMaterial, maxGlobalGrassInstances]}
           frustumCulled
           userData={{ debugCategory: 'global-grass-mesh' }}
         />

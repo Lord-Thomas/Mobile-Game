@@ -8241,16 +8241,16 @@ function ControlsOverlay({
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => changeCameraDistance(-1)}
-            aria-label="Rapprocher la caméra"
+            onClick={() => changeCameraDistance(1)}
+            aria-label="Éloigner la caméra"
           >
             −
           </button>
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => changeCameraDistance(1)}
-            aria-label="Éloigner la caméra"
+            onClick={() => changeCameraDistance(-1)}
+            aria-label="Rapprocher la caméra"
           >
             +
           </button>
@@ -18134,6 +18134,7 @@ function App() {
   const mode = useGameStore((s) => s.view.mode)
   const currentZone = useGameStore((s) => s.view.zone)
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
+  const [outdoorEntryPreparing, setOutdoorEntryPreparing] = useState(false)
   const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
   const [outdoorRuntimeRevealStage, setOutdoorRuntimeRevealStage] = useState(0)
@@ -18478,8 +18479,11 @@ function App() {
   }, [currentZone, monsterSpawnSlots, outdoorContentStage, outdoorTransitionPrimed])
 
   useEffect(() => {
-    const enemiesRevealReady = currentZone === ZONES.outside
-      && outdoorRuntimeRevealStage >= 3
+    const enemiesRevealReady = (
+      currentZone === ZONES.outside
+      || outdoorEntryPreparing
+    )
+      && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 3)
       && outdoorContentStage >= 5
 
     if (!enemiesRevealReady || monsterSpawnSlots.length === 0) {
@@ -18499,7 +18503,13 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [currentZone, monsterSpawnSlots, outdoorContentStage, outdoorRuntimeRevealStage])
+  }, [
+    currentZone,
+    monsterSpawnSlots,
+    outdoorContentStage,
+    outdoorEntryPreparing,
+    outdoorRuntimeRevealStage,
+  ])
 
   useEffect(() => {
     outdoorZoneReadyRef.current = currentZone === ZONES.outside
@@ -21240,6 +21250,7 @@ function App() {
         ? 'Préparation de l’extérieur...'
         : 'Retour dans la maison...',
     })
+    if (!goingOutside) setOutdoorEntryPreparing(false)
     setZoneFadeActive(true)
     const outdoorFadeSettleDelay = goingOutside ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS : 0
     const zoneSwitchDelay = goingOutside
@@ -21254,6 +21265,7 @@ function App() {
         })
         setOutdoorTransitionPrimed(true)
         setOutdoorContentStage((stage) => Math.max(stage, 1))
+        setOutdoorEntryPreparing(true)
         updateLoadingExperience({
           percent: 35,
           phase: 'Chargement du décor extérieur...',
@@ -21329,7 +21341,10 @@ function App() {
             prewarmReady: outdoorPrewarmReadyRef.current,
           })
           updateLoadingExperience({ percent: 100, phase: 'Extérieur prêt !' })
-          window.requestAnimationFrame(() => setZoneFadeActive(false))
+          window.requestAnimationFrame(() => {
+            setZoneFadeActive(false)
+            setOutdoorEntryPreparing(false)
+          })
         }
         if (
           (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current)
@@ -21961,9 +21976,16 @@ function App() {
   const outdoorContentMounted = isOutsideZone || outdoorTransitionPrimed
   const outdoorStaticReady = outdoorContentMounted && outdoorContentStage >= 1
   const outdoorVegetationReady = outdoorContentMounted && outdoorContentStage >= 2
-  const outdoorObjectsReady = isOutsideZone && outdoorRuntimeRevealStage >= 1 && outdoorContentStage >= 3
-  const outdoorGrassReady = isOutsideZone && outdoorRuntimeRevealStage >= 2 && outdoorContentStage >= 4
-  const outdoorEnemiesReady = isOutsideZone && outdoorRuntimeRevealStage >= 3 && outdoorContentStage >= 5
+  const outdoorRuntimeContentActive = isOutsideZone || outdoorEntryPreparing
+  const outdoorObjectsReady = outdoorRuntimeContentActive
+    && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 1)
+    && outdoorContentStage >= 3
+  const outdoorGrassReady = outdoorRuntimeContentActive
+    && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 2)
+    && outdoorContentStage >= 4
+  const outdoorEnemiesReady = outdoorRuntimeContentActive
+    && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 3)
+    && outdoorContentStage >= 5
   const outdoorVisualsReady = outdoorEnemiesReady && (
     monsterSpawnSlots.length === 0
     || visibleOutdoorEnemyCount >= monsterSpawnSlots.length
@@ -22028,7 +22050,7 @@ function App() {
         {!PERF_NO_OUTDOOR_PREWARM && (
           <OutdoorShaderPrewarm
             stage={outdoorContentMounted ? outdoorContentStage : 0}
-            isOutside={isOutsideZone && outdoorVisualsReady}
+            isOutside={outdoorRuntimeContentActive && outdoorVisualsReady}
             readyRef={outdoorPrewarmReadyRef}
           />
         )}
@@ -22241,6 +22263,10 @@ function App() {
             showBiomeEffects={outdoorVegetationReady}
             showSky={outdoorStaticReady && performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
             castShadows={shadowsEnabled}
+            reducedGrassDensity={
+              mobileQualityContext.isMobile
+              || Boolean(rendererInfo && isWeakRenderer(rendererInfo))
+            }
             showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
             debugStats={isDebugMode}
           />

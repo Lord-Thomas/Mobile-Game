@@ -686,22 +686,30 @@ canvas {
   z-index: 3;
   display: grid;
   gap: 8px;
+  padding: 4px;
   pointer-events: auto;
 }
 
 .camera-zoom-controls button {
-  width: 48px;
-  height: 48px;
+  position: relative;
+  width: 40px;
+  height: 40px;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 14px;
+  border-radius: 11px;
   background: rgba(14, 23, 34, 0.82);
   color: #f8fbff;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 900;
   line-height: 1;
   backdrop-filter: blur(8px);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
   touch-action: manipulation;
+}
+
+.camera-zoom-controls button::before {
+  position: absolute;
+  inset: -4px;
+  content: '';
 }
 
 .camera-zoom-controls button:active {
