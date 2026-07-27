@@ -12401,10 +12401,51 @@ function SmallMushroomEnemy({
 // squelettes ennemis qui existent dès le chargement du monde).
 const MemoizedSmallMushroomEnemy = memo(SmallMushroomEnemy)
 
+// La transition prépare la zone proche ainsi qu'un représentant de chaque type.
+// Les doublons lointains sont ensuite montés uniquement hors champ : ils entrent
+// naturellement dans la vue au lieu d'apparaître sous les yeux du joueur.
+const OUTDOOR_ENEMY_ENTRY_SAFE_RADIUS = 90
+const OUTDOOR_ENEMY_STREAM_MIN_PLAYER_DISTANCE = 65
+const OUTDOOR_ENEMY_STREAM_VIEW_MARGIN = 1.3
+const OUTDOOR_ENEMY_STREAM_INTERVAL_MS = 100
+const OUTDOOR_ENEMY_STREAM_RETRY_MS = 260
+const outdoorEnemyStreamPoint = new Vector3()
+const outdoorEnemyStreamDirection = new Vector3()
+const outdoorEnemyStreamToSpawn = new Vector3()
+
+function isOutdoorEnemySpawnSafelyOffscreen(camera, spawnPosition) {
+  if (!camera || !spawnPosition) return false
+
+  outdoorEnemyStreamPoint.set(
+    spawnPosition[0] ?? 0,
+    (spawnPosition[1] ?? 0) + 1,
+    spawnPosition[2] ?? 0,
+  )
+  outdoorEnemyStreamToSpawn.copy(outdoorEnemyStreamPoint).sub(camera.position)
+  camera.getWorldDirection(outdoorEnemyStreamDirection)
+
+  const distance = outdoorEnemyStreamToSpawn.length()
+  if (
+    distance > 0.001
+    && outdoorEnemyStreamDirection.dot(outdoorEnemyStreamToSpawn) <= distance * 0.12
+  ) {
+    return true
+  }
+
+  outdoorEnemyStreamPoint.project(camera)
+  return (
+    outdoorEnemyStreamPoint.z < -1
+    || outdoorEnemyStreamPoint.z > 1
+    || Math.abs(outdoorEnemyStreamPoint.x) > OUTDOOR_ENEMY_STREAM_VIEW_MARGIN
+    || Math.abs(outdoorEnemyStreamPoint.y) > OUTDOOR_ENEMY_STREAM_VIEW_MARGIN
+  )
+}
+
 function ProgressiveOutdoorEnemyLayer({
   enabled,
   assetsReady,
   slots,
+  transitionPreparing,
   playerPositionRef,
   registerCombatTarget,
   onDefeated,
@@ -12438,18 +12479,8 @@ function ProgressiveOutdoorEnemyLayer({
     [],
   )
 
-  const targetCount = enabled && assetsReady ? slots.length : 0
-  const { count, complete } = useProgressiveMountCount({
-    enabled: true,
-    total: targetCount,
-    initialCount: 1,
-    batchSize: 1,
-    onComplete: ({ total }) => {
-      if (total > 0) onReady?.(total)
-    },
-  })
-  const orderedSlots = useMemo(() => {
-    if (count <= 0) return []
+  const camera = useThree((state) => state.camera)
+  const prioritizedSlots = useMemo(() => {
     const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
     const originX = spawn[0] ?? 0
     const originZ = spawn[2] ?? 0
@@ -12459,12 +12490,152 @@ function ProgressiveOutdoorEnemyLayer({
         return {
           slot,
           index,
-          distance: Math.hypot((slotSpawn[0] ?? 0) - originX, (slotSpawn[2] ?? 0) - originZ),
+          spawnPosition: slotSpawn,
+          entryDistance: Math.hypot(
+            (slotSpawn[0] ?? 0) - originX,
+            (slotSpawn[2] ?? 0) - originZ,
+          ),
         }
       })
-      .sort((left, right) => left.distance - right.distance)
-      .slice(0, count)
-  }, [count, slots])
+      .sort((left, right) => left.entryDistance - right.entryDistance)
+  }, [slots])
+  const entrySlots = useMemo(() => {
+    const selectedIds = new Set()
+    const selected = []
+    const representedTypes = new Set()
+
+    prioritizedSlots.forEach((entry) => {
+      if (entry.entryDistance > OUTDOOR_ENEMY_ENTRY_SAFE_RADIUS) return
+      selectedIds.add(entry.slot.id)
+      selected.push(entry)
+      representedTypes.add(entry.slot.monsterType)
+    })
+
+    prioritizedSlots.forEach((entry) => {
+      if (representedTypes.has(entry.slot.monsterType)) return
+      representedTypes.add(entry.slot.monsterType)
+      if (selectedIds.has(entry.slot.id)) return
+      selectedIds.add(entry.slot.id)
+      selected.push(entry)
+    })
+
+    return selected.sort((left, right) => left.entryDistance - right.entryDistance)
+  }, [prioritizedSlots])
+  const targetCount = enabled && assetsReady ? entrySlots.length : 0
+  const { count, complete } = useProgressiveMountCount({
+    enabled: true,
+    total: targetCount,
+    initialCount: 1,
+    batchSize: 1,
+    onComplete: ({ total }) => {
+      if (total > 0) onReady?.(total)
+    },
+  })
+  const streamedSlotIdsRef = useRef(new Set())
+  const [streamedSlotIds, setStreamedSlotIds] = useState([])
+
+  useEffect(() => {
+    if (enabled && assetsReady) return
+    streamedSlotIdsRef.current = new Set()
+    setStreamedSlotIds([])
+  }, [assetsReady, enabled])
+
+  useEffect(() => {
+    if (
+      !enabled
+      || !assetsReady
+      || transitionPreparing
+      || !complete
+      || prioritizedSlots.length <= entrySlots.length
+    ) {
+      return undefined
+    }
+
+    const entryIds = new Set(entrySlots.map((entry) => entry.slot.id))
+    let cancelled = false
+    let timeoutId = 0
+    let idleId = 0
+
+    const streamNext = () => {
+      if (cancelled) return
+      const player = playerPositionRef.current
+      const playerX = player?.x ?? PLAYER_SPAWNS.outside?.[0] ?? 0
+      const playerZ = player?.z ?? PLAYER_SPAWNS.outside?.[2] ?? 0
+      const candidates = prioritizedSlots
+        .filter((entry) => (
+          !entryIds.has(entry.slot.id)
+          && !streamedSlotIdsRef.current.has(entry.slot.id)
+        ))
+        .map((entry) => ({
+          ...entry,
+          playerDistance: Math.hypot(
+            (entry.spawnPosition[0] ?? 0) - playerX,
+            (entry.spawnPosition[2] ?? 0) - playerZ,
+          ),
+        }))
+        .sort((left, right) => left.playerDistance - right.playerDistance)
+
+      const next = candidates.find((entry) => (
+        entry.playerDistance >= OUTDOOR_ENEMY_STREAM_MIN_PLAYER_DISTANCE
+        && isOutdoorEnemySpawnSafelyOffscreen(camera, entry.spawnPosition)
+      ))
+
+      if (!next) {
+        if (candidates.length > 0) schedule(OUTDOOR_ENEMY_STREAM_RETRY_MS)
+        return
+      }
+
+      streamedSlotIdsRef.current.add(next.slot.id)
+      setStreamedSlotIds((current) => [...current, next.slot.id])
+      const mountedTotal = entrySlots.length + streamedSlotIdsRef.current.size
+      if (mountedTotal % 8 === 0 || mountedTotal === prioritizedSlots.length) {
+        perfDiagnostics.event('outdoor:enemy-background-stream', {
+          mounted: mountedTotal,
+          total: prioritizedSlots.length,
+        })
+      }
+      schedule(OUTDOOR_ENEMY_STREAM_INTERVAL_MS)
+    }
+
+    const schedule = (delayMs) => {
+      if (cancelled) return
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return
+        if (typeof window.requestIdleCallback === 'function') {
+          idleId = window.requestIdleCallback(streamNext, { timeout: 500 })
+        } else {
+          idleId = window.requestAnimationFrame(streamNext)
+        }
+      }, delayMs)
+    }
+
+    schedule(OUTDOOR_ENEMY_STREAM_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+      if (typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      } else {
+        window.cancelAnimationFrame(idleId)
+      }
+    }
+  }, [
+    assetsReady,
+    camera,
+    complete,
+    enabled,
+    entrySlots,
+    playerPositionRef,
+    prioritizedSlots,
+    transitionPreparing,
+  ])
+
+  const orderedSlots = useMemo(() => {
+    if (count <= 0 && streamedSlotIds.length === 0) return []
+    const mountedIds = new Set(streamedSlotIds)
+    entrySlots.slice(0, count).forEach((entry) => mountedIds.add(entry.slot.id))
+    return prioritizedSlots.filter((entry) => mountedIds.has(entry.slot.id))
+  }, [count, entrySlots, prioritizedSlots, streamedSlotIds])
 
   useEffect(() => {
     onProgress?.(count, targetCount, complete)
@@ -18397,6 +18568,7 @@ function App() {
   const [outdoorRuntimeRevealStage, setOutdoorRuntimeRevealStage] = useState(0)
   const [outdoorEnemyAssetsReady, setOutdoorEnemyAssetsReady] = useState(false)
   const [visibleOutdoorEnemyCount, setVisibleOutdoorEnemyCount] = useState(0)
+  const [outdoorEnemyEntryTargetCount, setOutdoorEnemyEntryTargetCount] = useState(0)
   const [outdoorEnemiesMounted, setOutdoorEnemiesMounted] = useState(false)
   const [outdoorMapAssetsReady, setOutdoorMapAssetsReady] = useState(false)
   const [loadingExperience, setLoadingExperience] = useState(() => (
@@ -18725,6 +18897,7 @@ function App() {
       setOutdoorEnemyAssetsReady(false)
       setOutdoorEnemiesMounted(false)
       setVisibleOutdoorEnemyCount(0)
+      setOutdoorEnemyEntryTargetCount(0)
       return undefined
     }
 
@@ -18765,6 +18938,7 @@ function App() {
       enemyAssetsReady: outdoorEnemyAssetsReady,
       enemiesMounted: outdoorEnemiesMounted,
       visibleEnemies: visibleOutdoorEnemyCount,
+      entryEnemyTarget: outdoorEnemyEntryTargetCount,
       totalEnemies: monsterSpawnSlots.length,
     }
     const key = JSON.stringify(snapshot)
@@ -18780,6 +18954,7 @@ function App() {
     outdoorEnemyAssetsReady,
     outdoorMapAssetsReady,
     outdoorEnemiesMounted,
+    outdoorEnemyEntryTargetCount,
     visibleOutdoorEnemyCount,
   ])
 
@@ -22220,6 +22395,7 @@ function App() {
   }, [])
 
   const handleOutdoorEnemyMountProgress = useCallback((count, total, complete) => {
+    setOutdoorEnemyEntryTargetCount(total)
     if (count === 0 || complete || count % 4 === 0) {
       setVisibleOutdoorEnemyCount(count)
     }
@@ -22233,18 +22409,20 @@ function App() {
 
   useEffect(() => {
     if (!zoneFadeActive || !outdoorEntryPreparing || monsterSpawnSlots.length === 0) return
+    if (outdoorEnemyEntryTargetCount <= 0) return
     if (
-      visibleOutdoorEnemyCount !== monsterSpawnSlots.length
+      visibleOutdoorEnemyCount !== outdoorEnemyEntryTargetCount
       && visibleOutdoorEnemyCount % 4 !== 0
     ) return
-    const ratio = visibleOutdoorEnemyCount / monsterSpawnSlots.length
+    const ratio = visibleOutdoorEnemyCount / outdoorEnemyEntryTargetCount
     updateLoadingExperience({
       percent: Math.round(78 + ratio * 16),
-      phase: `PrÃ©paration des crÃ©atures (${visibleOutdoorEnemyCount}/${monsterSpawnSlots.length})...`,
+      phase: `PrÃ©paration des crÃ©atures (${visibleOutdoorEnemyCount}/${outdoorEnemyEntryTargetCount})...`,
     })
   }, [
     monsterSpawnSlots.length,
     outdoorEntryPreparing,
+    outdoorEnemyEntryTargetCount,
     updateLoadingExperience,
     visibleOutdoorEnemyCount,
     zoneFadeActive,
@@ -22681,6 +22859,7 @@ function App() {
               enabled={outdoorEnemiesReady}
               assetsReady={outdoorEnemyAssetsReady}
               slots={monsterSpawnSlots}
+              transitionPreparing={outdoorEntryPreparing}
               playerPositionRef={playerPositionRef}
               registerCombatTarget={registerCombatTarget}
               onDefeated={handleSmallEnemyDefeated}
