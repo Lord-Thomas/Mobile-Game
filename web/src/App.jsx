@@ -5549,6 +5549,20 @@ function WingsSpeedTrail({ wingsSpellRef }) {
 const ANGEL_WINGS_MODEL_URL = '/models/props/angel-wings.glb'
 const ANGEL_WINGS_SPAN = 1.9 // envergure cible (unités monde)
 
+function revealHiddenShaderWarmupObjects(root) {
+  const hiddenObjects = []
+  root.traverse((object) => {
+    if (!object.userData?.shaderWarmupWhenHidden || object.visible) return
+    hiddenObjects.push(object)
+    object.visible = true
+  })
+  return () => {
+    hiddenObjects.forEach((object) => {
+      object.visible = false
+    })
+  }
+}
+
 // Mesure de l'envergure RENDUE des ailes : extraite dans
 // src/game/angelWingsBounds.js (logique pure three, testée).
 
@@ -5595,6 +5609,8 @@ function AngelWingsModel({ flightRef, currentZone = ZONES.outside }) {
       -bounds.center.y * wingsScale,
       -bounds.center.z * wingsScale,
     )
+    wings.userData.shaderWarmupWhenHidden = true
+    wings.visible = false
     const mixer = new AnimationMixer(wings)
     // L'export Blender produit plusieurs clips (armature + racine) : on joue
     // celui qui porte le squelette, c.-à-d. celui qui a le plus de pistes.
@@ -5622,7 +5638,8 @@ function AngelWingsModel({ flightRef, currentZone = ZONES.outside }) {
     const opacity = MathUtils.damp(opacityRef.current, target, 9, delta)
     opacityRef.current = opacity
     for (const material of materials) material.opacity = opacity
-    if (opacity < 0.01) return // ailes repliées : pas d'animation à payer
+    wings.visible = flight.active || opacity >= 0.01
+    if (!wings.visible) return
     if (flapAction) flapAction.timeScale = flight.launching ? 2.4 : 0.9
     mixer.update(delta)
   })
@@ -5813,12 +5830,18 @@ function CharacterAuraGlow({ visible }) {
   }, [])
 
   useFrame((state) => {
+    if (!visible) return
     const t = state.clock.elapsedTime
     hazeMaterial.uniforms.uTime.value = t
-    hazeMaterial.uniforms.opacity.value = visible ? 0.44 : 0
+    hazeMaterial.uniforms.opacity.value = 0.44
     particlesMaterial.uniforms.uTime.value = t
-    particlesMaterial.uniforms.uOpacity.value = visible ? 0.92 : 0
+    particlesMaterial.uniforms.uOpacity.value = 0.92
   })
+
+  useEffect(() => {
+    hazeMaterial.uniforms.opacity.value = visible ? 0.44 : 0
+    particlesMaterial.uniforms.uOpacity.value = visible ? 0.92 : 0
+  }, [hazeMaterial, particlesMaterial, visible])
 
   useEffect(() => () => {
     hazeMaterial.dispose()
@@ -5827,7 +5850,10 @@ function CharacterAuraGlow({ visible }) {
   }, [hazeMaterial, particlesMaterial, particleGeometry])
 
   return (
-    <group>
+    <group
+      visible={visible}
+      userData={{ shaderWarmupWhenHidden: true }}
+    >
       {[0, Math.PI / 3, -Math.PI / 3].map((rotationY) => (
         <mesh key={rotationY} position={[0, 0.28, 0]} rotation={[0, rotationY, 0]} scale={[1.28, 1.92, 1]} renderOrder={-2}>
           <planeGeometry args={[1, 1, 1, 1]} />
@@ -6029,7 +6055,7 @@ function PlayerAvatar({
 
         mat._tintRecolorApplied = true
         mat.color.set('#FFFFFF') // neutre — le shader applique la couleur via le ratio
-        mat.stencilWrite = true
+        mat.stencilWrite = Boolean(app.auraEquipped)
         mat.stencilRef = 1
         mat.stencilFunc = AlwaysStencilFunc
         mat.stencilFail = KeepStencilOp
@@ -6076,6 +6102,7 @@ function PlayerAvatar({
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
       mats.forEach((mat) => {
         if (!mat) return
+        mat.stencilWrite = Boolean(app.auraEquipped)
         const materialKey = mat.userData.characterMaterialKey ?? getCharacterMaterialKey(mat.name)
         const colorKey = materialKey === 'pants_details'
           ? 'pantsDetailsColor'
@@ -7290,6 +7317,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
       programs: gl.info?.programs?.length ?? null,
     })
     const originalMask = cam.layers.mask
+    const restoreHiddenWarmupObjects = revealHiddenShaderWarmupObjects(scene)
     let failed = false
     try {
       // Deux couches (extérieure + défaut), comme compileAndRender du gate : on
@@ -7308,6 +7336,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
       console.warn('[loadTiming] Outdoor shader prewarm failed', error)
     } finally {
       cam.layers.mask = originalMask
+      restoreHiddenWarmupObjects()
       perfDiagnostics.event('outdoor:shader-prewarm-end', {
         pass,
         failed,
@@ -17533,6 +17562,7 @@ function ShaderWarmupGate({
 
       const compileScene = async (warmupCamera) => {
         const originalLayerMask = warmupCamera.layers.mask
+        const restoreHiddenWarmupObjects = revealHiddenShaderWarmupObjects(scene)
         try {
           for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
             warmupCamera.layers.set(layer)
@@ -17540,6 +17570,7 @@ function ShaderWarmupGate({
           }
         } finally {
           warmupCamera.layers.mask = originalLayerMask
+          restoreHiddenWarmupObjects()
         }
       }
 
