@@ -45,7 +45,10 @@ function applyBiomeUniformsToShader(shader, groundColors) {
   shader.uniforms.uGraveyardColdShadow.value = groundColors.coldShadow
 }
 
-function NaturalTerrainMaterial({ biomeAreas = MAP_BIOME_AREAS }) {
+function NaturalTerrainMaterial({
+  biomeAreas = MAP_BIOME_AREAS,
+  lightingModel = 'standard',
+}) {
   const materialRef = useRef()
   const [grassMap, dirtMap, grassNormalMap, dirtNormalMap, surfaceMask] = useTexture(SURFACE_TEXTURES)
   const groundColors = useMemo(
@@ -214,6 +217,21 @@ function NaturalTerrainMaterial({ biomeAreas = MAP_BIOME_AREAS }) {
     const material = materialRef.current
     if (material) material.needsUpdate = true
   }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap, surfaceMask])
+
+  if (lightingModel === 'lambert') {
+    return (
+      <meshLambertMaterial
+        ref={materialRef}
+        map={grassMap}
+        normalMap={grassNormalMap}
+        normalScale={new Vector2(0.34, 0.34)}
+        color="#ffffff"
+        emissive="#3c7010"
+        emissiveIntensity={0.07}
+        onBeforeCompile={handleBeforeCompile}
+      />
+    )
+  }
 
   return (
     <meshStandardMaterial

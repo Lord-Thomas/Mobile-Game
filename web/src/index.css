@@ -387,10 +387,34 @@ canvas {
   backdrop-filter: blur(8px);
 }
 
-.local-terrain-toggle.is-active {
+.local-terrain-toggle.is-full {
   border-color: rgba(141, 255, 176, 0.48);
   background: rgba(12, 52, 27, 0.84);
   color: #aaffc1;
+}
+
+.local-terrain-toggle.is-simple {
+  border-color: rgba(255, 220, 105, 0.56);
+  background: rgba(66, 52, 10, 0.86);
+  color: #ffe88a;
+}
+
+.local-terrain-toggle.is-standard {
+  border-color: rgba(112, 207, 255, 0.58);
+  background: rgba(9, 43, 66, 0.88);
+  color: #a8e7ff;
+}
+
+.local-terrain-toggle.is-lambert {
+  border-color: rgba(81, 238, 211, 0.58);
+  background: rgba(8, 61, 55, 0.88);
+  color: #9dfff0;
+}
+
+.local-terrain-toggle.is-texture {
+  border-color: rgba(202, 151, 255, 0.58);
+  background: rgba(47, 20, 70, 0.88);
+  color: #e1bdff;
 }
 
 .gpu-warning {

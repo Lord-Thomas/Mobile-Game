@@ -141,6 +141,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showGrass = true,
   showTrees = true,
   showTerrain = true,
+  terrainRenderMode = 'full',
   showRoad = true,
   showNeighborHouses = true,
   showMapObjects = true,
@@ -173,7 +174,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
         playerPositionRef={playerPositionRef}
         biomeAreas={biomeAreas}
       />
-      {showTerrain && <OutdoorGround biomeAreas={biomeAreas} />}
+      {showTerrain && <OutdoorGround biomeAreas={biomeAreas} renderMode={terrainRenderMode} />}
       {showPlayerPlot && <PlayerPlot />}
       {showRoad && <Road />}
       {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (

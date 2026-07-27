@@ -18230,7 +18230,7 @@ function App() {
   const [renderStats, setRenderStats] = useState(null)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
   const [freeCameraActive, setFreeCameraActive] = useState(false)
-  const [localTerrainEnabled, setLocalTerrainEnabled] = useState(true)
+  const [localTerrainMode, setLocalTerrainMode] = useState('full')
   const [debugToggles, setDebugToggles] = useState({
     grass: true,
     trees: true,
@@ -22821,7 +22821,8 @@ function App() {
             ballRef={ballRef}
             showGrass={outdoorGrassReady && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
             showTrees={outdoorVegetationReady && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
-            showTerrain={localTerrainEnabled && (!isDebugMode || debugToggles.terrain)}
+            showTerrain={localTerrainMode !== 'off' && (!isDebugMode || debugToggles.terrain)}
+            terrainRenderMode={localTerrainMode}
             showRoad={outdoorStaticReady}
             showNeighborHouses={outdoorStaticReady}
             showMapObjects={outdoorObjectsReady}
@@ -23145,12 +23146,23 @@ function App() {
       {mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
       {mode === 'play' && showCaptureUi && isLocalNetwork && currentZone === ZONES.outside && (
         <button
-          className={`local-terrain-toggle${localTerrainEnabled ? ' is-active' : ''}`}
+          className={`local-terrain-toggle is-${localTerrainMode}`}
           type="button"
-          onClick={() => setLocalTerrainEnabled((enabled) => !enabled)}
-          aria-pressed={localTerrainEnabled}
+          onClick={() => setLocalTerrainMode((current) => (
+            current === 'full'
+              ? 'lambert'
+              : current === 'lambert'
+                ? 'standard'
+                : current === 'standard'
+                  ? 'texture'
+                  : current === 'texture'
+                    ? 'simple'
+                    : current === 'simple' ? 'off' : 'full'
+          ))}
+          aria-label="Changer le mode de diagnostic du terrain"
+          title="NORMAL : PBR complet · LAMBERT : rendu complet avec éclairage léger · STANDARD : PBR sans texture · TEXTURE : une texture sans éclairage · SIMPLE : même maillage sans shader · OFF : terrain masqué"
         >
-          Terrain {localTerrainEnabled ? 'ON' : 'OFF'}
+          Terrain {localTerrainMode === 'full' ? 'NORMAL' : localTerrainMode.toUpperCase()}
         </button>
       )}
       <GpuWarning visible={mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
