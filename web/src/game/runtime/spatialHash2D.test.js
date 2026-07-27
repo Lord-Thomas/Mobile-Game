@@ -37,4 +37,18 @@ describe('SpatialHash2D', () => {
     expect(index.queryRadius(5, 0, 2).map(({ id }) => id)).toEqual(['first'])
     expect(index.queryAabb(-1, -1, 6, 1).map(({ id }) => id)).toEqual(['first', 'second'])
   })
+
+  it('reuses caller-owned query arrays and removes stale keyed entries', () => {
+    const index = new SpatialHash2D(2)
+    const result = [{ id: 'stale' }]
+    index.insertKeyedPoint('kept', { id: 'kept', position: { x: 0, z: 0 } }, 0, 0)
+    index.insertKeyedPoint('removed', { id: 'removed', position: { x: 1, z: 0 } }, 1, 0)
+
+    expect(index.queryRadiusInto(result, 0, 0, 2)).toBe(result)
+    expect(result.map(({ id }) => id)).toEqual(['kept', 'removed'])
+
+    index.removeKeysNotIn(new Map([['kept', true]]))
+
+    expect(index.queryRadiusInto(result, 0, 0, 2).map(({ id }) => id)).toEqual(['kept'])
+  })
 })
