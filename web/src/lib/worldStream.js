@@ -84,19 +84,31 @@ export function waitForRevealLevel(targetLevel, timeoutMs = 6000) {
   })
 }
 
-function useRevealLevel() {
-  const [level, setLevel] = useState(revealLevel)
+function useRevealReady(targetLevel) {
+  const [ready, setReady] = useState(() => revealLevel >= targetLevel)
+
   useEffect(() => {
-    const notify = (value) => setLevel(value)
+    if (ready) return undefined
+    if (revealLevel >= targetLevel) {
+      const timeoutId = window.setTimeout(() => setReady(true), 0)
+      return () => window.clearTimeout(timeoutId)
+    }
+
+    const notify = (value) => {
+      if (value < targetLevel) return
+      listeners.delete(notify)
+      setReady(true)
+    }
     listeners.add(notify)
     return () => listeners.delete(notify)
-  }, [])
-  return level
+  }, [ready, targetLevel])
+
+  return ready
 }
 
 // Monte ses enfants seulement quand le stream atteint `level`. Avant ça : rien
 // (donc aucun chargement/clone déclenché, le commit initial reste léger).
 export function Defer({ level = 1, children }) {
-  const current = useRevealLevel()
-  return current >= level ? children : null
+  const ready = useRevealReady(level)
+  return ready ? children : null
 }
