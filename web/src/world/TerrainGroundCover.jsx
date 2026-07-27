@@ -41,7 +41,27 @@ const QUADRANTS = [
   { id: 'se', minX: 0,               maxX: TERRAIN_HALF_SIZE,  minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
   { id: 'sw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: -TERRAIN_HALF_SIZE, maxZ: 0 },
 ]
-const MAX_QUADRANT_INSTANCES = 140_000
+const GLOBAL_GRASS_REGION_AXIS = 4
+const GLOBAL_GRASS_REGION_SIZE = (TERRAIN_HALF_SIZE * 2) / GLOBAL_GRASS_REGION_AXIS
+const GLOBAL_GRASS_REGIONS = Array.from(
+  { length: GLOBAL_GRASS_REGION_AXIS * GLOBAL_GRASS_REGION_AXIS },
+  (_, index) => {
+    const xIndex = index % GLOBAL_GRASS_REGION_AXIS
+    const zIndex = Math.floor(index / GLOBAL_GRASS_REGION_AXIS)
+    const minX = -TERRAIN_HALF_SIZE + xIndex * GLOBAL_GRASS_REGION_SIZE
+    const minZ = -TERRAIN_HALF_SIZE + zIndex * GLOBAL_GRASS_REGION_SIZE
+    return {
+      id: `${xIndex}:${zIndex}`,
+      minX,
+      maxX: minX + GLOBAL_GRASS_REGION_SIZE,
+      minZ,
+      maxZ: minZ + GLOBAL_GRASS_REGION_SIZE,
+    }
+  },
+)
+// Seven active chunks per axis at the densest grid, plus the existing 1.75x
+// compaction headroom, fit below 80k even when they all land in one quadrant.
+const MAX_QUADRANT_INSTANCES = 80_000
 const GRASS_GPU_CHUNK_WRITES_PER_FRAME = 1
 const GRASS_BUFFER_COMPACTION_RATIO = 1.75
 const GRASS_DEBUG_ESTIMATE_INTERVAL_MS = 600
@@ -61,6 +81,13 @@ const GRASS_LOCAL_FADE_START = 16
 const GRASS_LOCAL_FADE_END = 48
 const GRASS_GLOBAL_FADE_START = 12
 const GRASS_GLOBAL_FADE_END = 52
+// Keep a full two-chunk safety ring beyond the last potentially visible blade.
+// The old implementation streamed the entire 360 m world into four GPU buffers
+// and hid most instances in the vertex shader, so invisible grass still consumed
+// vertex bandwidth every frame.
+const GLOBAL_GRASS_ACTIVE_CHUNK_RADIUS = Math.ceil(
+  (GRASS_GLOBAL_FADE_END + GRASS_CHUNK_SIZE * 2) / GRASS_CHUNK_SIZE,
+)
 const GRASS_CHUNK_REVEAL_DURATION = 0.9
 const GRASS_CHUNK_REVEAL_STAGGER = 0.35
 const GRASS_FAR_WIDTH_SCALE = 1.65
@@ -69,7 +96,8 @@ const GLOBAL_GRASS_GRID_STEP = 0.9
 const GLOBAL_GRASS_START_DELAY_SECONDS = 4
 const GLOBAL_GRASS_WIDTH_SCALE = 2.15
 const GLOBAL_GRASS_HEIGHT_SCALE = 1.12
-const MAX_GLOBAL_GRASS_INSTANCES_PER_QUADRANT = 100_000
+// A 90m region contains at most ~12.5k authored global cards.
+const MAX_GLOBAL_GRASS_INSTANCES_PER_REGION = 15_000
 const GLOBAL_GRASS_BUILD_TIME_BUDGET_MS = 0.6
 const grassWindSettings = {
   strength: 0.13,
@@ -266,6 +294,22 @@ function getChunkQuadrantIndex(chunkX, chunkZ) {
   return (centerX >= 0 ? 0 : 1) + (centerZ >= 0 ? 0 : 2)
 }
 
+function getChunkGlobalRegionIndex(chunkX, chunkZ) {
+  const centerX = (chunkX + 0.5) * GRASS_CHUNK_SIZE
+  const centerZ = (chunkZ + 0.5) * GRASS_CHUNK_SIZE
+  const xIndex = MathUtils.clamp(
+    Math.floor((centerX + TERRAIN_HALF_SIZE) / GLOBAL_GRASS_REGION_SIZE),
+    0,
+    GLOBAL_GRASS_REGION_AXIS - 1,
+  )
+  const zIndex = MathUtils.clamp(
+    Math.floor((centerZ + TERRAIN_HALF_SIZE) / GLOBAL_GRASS_REGION_SIZE),
+    0,
+    GLOBAL_GRASS_REGION_AXIS - 1,
+  )
+  return zIndex * GLOBAL_GRASS_REGION_AXIS + xIndex
+}
+
 function getAllGrassChunkKeys() {
   const keys = []
   const minChunkX = getGrassChunkIndex(GRASS_AREA_MIN)
@@ -289,9 +333,14 @@ function getGrassChunkDistance(key, centerChunkX, centerChunkZ) {
   return Math.max(Math.abs(chunkX - centerChunkX), Math.abs(chunkZ - centerChunkZ))
 }
 
-function getActiveGrassChunkKeys(allKeys, centerChunkX, centerChunkZ) {
+function getActiveGrassChunkKeys(
+  allKeys,
+  centerChunkX,
+  centerChunkZ,
+  radius = GRASS_ACTIVE_CHUNK_RADIUS,
+) {
   return allKeys
-    .filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= GRASS_ACTIVE_CHUNK_RADIUS)
+    .filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= radius)
     .sort((a, b) => getGrassChunkDistance(a, centerChunkX, centerChunkZ) - getGrassChunkDistance(b, centerChunkX, centerChunkZ))
 }
 
@@ -371,7 +420,6 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
     shader.uniforms.uCullRadius = { value: GRASS_CULL_RADIUS }
     shader.uniforms.uFarWidthScale = { value: GRASS_FAR_WIDTH_SCALE }
     shader.uniforms.uFarHeightScale = { value: GRASS_FAR_HEIGHT_SCALE }
-    shader.uniforms.uGlobalLayer = { value: globalLayer ? 1 : 0 }
     shader.uniforms.uWindDirection = {
       value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
     }
@@ -399,7 +447,6 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
       uniform float uCullRadius;
       uniform float uFarWidthScale;
       uniform float uFarHeightScale;
-      uniform float uGlobalLayer;
       uniform vec3 uPlayerPosition;
       uniform vec3 uBallPosition;
       uniform float uBallInteractionRadius;
@@ -498,20 +545,23 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
         ${GRASS_GLOBAL_FADE_END.toFixed(1)} + transitionOffset,
         playerDistance
       );
-      float layerFade = mix(localFade, globalFade, uGlobalLayer);
+      float layerFade = ${globalLayer ? 'globalFade' : 'localFade'};
       keepProbability *= horizonFade * layerFade;
 
       // Distant blades represent small clusters: fewer instances, slightly wider cards.
       // The curve stays gradual so there is no visible LOD transition.
       float clusterT = thinningT * thinningT;
-      float widthScale = mix(uFarWidthScale, ${GLOBAL_GRASS_WIDTH_SCALE.toFixed(2)}, uGlobalLayer);
-      float heightScale = mix(uFarHeightScale, ${GLOBAL_GRASS_HEIGHT_SCALE.toFixed(2)}, uGlobalLayer);
+      float widthScale = ${globalLayer ? GLOBAL_GRASS_WIDTH_SCALE.toFixed(2) : 'uFarWidthScale'};
+      float heightScale = ${globalLayer ? GLOBAL_GRASS_HEIGHT_SCALE.toFixed(2) : 'uFarHeightScale'};
       transformed.x *= mix(1.0, widthScale, clusterT);
       transformed.y *= mix(1.0, heightScale, clusterT);
 
       float keep = step(grassHash(grassOrigin.xz), keepProbability);
       keep *= 1.0 - graveyardGrassCull;
 
+      ${globalLayer ? `
+      float revealGrowth = 1.0;
+      ` : `
       // Newly streamed local chunks grow in progressively instead of appearing at once.
       float spawnTime = instanceSpawnTime;
       float revealDelay = grassHash(grassOrigin.xz + vec2(4.1, 9.7)) * ${GRASS_CHUNK_REVEAL_STAGGER.toFixed(2)};
@@ -520,8 +570,8 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
         ${GRASS_CHUNK_REVEAL_DURATION.toFixed(2)},
         uTime - spawnTime - revealDelay
       );
-      reveal = mix(reveal, 1.0, uGlobalLayer);
       float revealGrowth = smoothstep(0.0, 1.0, reveal);
+      `}
       transformed.x *= mix(0.78, 1.0, revealGrowth);
       transformed.z *= mix(0.78, 1.0, revealGrowth);
       // Keep a valid card below the ground at the beginning. Collapsing it to
@@ -530,6 +580,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
       transformed.y -= (1.0 - revealGrowth) * 0.58;
       transformed.y -= (1.0 - keep) * 1000.0;
 
+      ${globalLayer ? '' : `
       float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
 
       if (playerDistance > 0.0001) {
@@ -548,6 +599,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
         transformed.z += ballPushDir.y * uInteractionStrength * ballInfluence;
         transformed.y -= uInteractionStrength * 0.06 * ballInfluence;
       }
+      `}
 `,
     )
 
@@ -564,7 +616,7 @@ function TerrainGroundCover({
   reducedDensity = false,
 }) {
   const maxQuadrantInstances = reducedDensity ? 50_000 : MAX_QUADRANT_INSTANCES
-  const maxGlobalGrassInstances = reducedDensity ? 30_000 : MAX_GLOBAL_GRASS_INSTANCES_PER_QUADRANT
+  const maxGlobalGrassInstances = reducedDensity ? 12_000 : MAX_GLOBAL_GRASS_INSTANCES_PER_REGION
   const localGrassGridStep = reducedDensity ? 0.3 : GRASS_GRID_STEP
   const globalGrassGridStep = reducedDensity ? 1.2 : GLOBAL_GRASS_GRID_STEP
   const rocks = useMemo(() => createRockCover(), [])
@@ -585,10 +637,11 @@ function TerrainGroundCover({
   // 4 quadrant instancedMeshes — each has a correct bounding box so Three.js can
   // frustum-cull entire quadrants that fall outside the camera view (4 draw calls).
   const grassMeshRefs = useRef([null, null, null, null])
-  const globalGrassMeshRefs = useRef([null, null, null, null])
+  const globalGrassMeshRefs = useRef(Array(GLOBAL_GRASS_REGIONS.length).fill(null))
   const globalGrassChunkQueueRef = useRef([])
+  const globalGrassCenterRef = useRef(null)
   const globalGrassWrittenKeysRef = useRef(new Set())
-  const globalGrassOffsetsRef = useRef([0, 0, 0, 0])
+  const globalGrassOffsetsRef = useRef(Array(GLOBAL_GRASS_REGIONS.length).fill(0))
   // Quadrant bounding spheres stored so we can re-apply them after each GPU write.
   // Three.js r175+ uses mesh.boundingSphere in priority over geometry.boundingSphere,
   // and may auto-recompute it from newly added instances only → wrong frustum culling.
@@ -648,6 +701,30 @@ function TerrainGroundCover({
   }, [grassBaseGeometry, maxQuadrantInstances])
   const grassGeometries = grassGeometryData.geometries
   const grassQuadrantSpheres = grassGeometryData.spheres
+  const globalGrassGeometryData = useMemo(() => {
+    const geometries = GLOBAL_GRASS_REGIONS.map(({ minX, maxX, minZ, maxZ }) => {
+      const geometry = grassBaseGeometry.clone()
+      geometry.setAttribute('instanceSpawnTime', new InstancedBufferAttribute(
+        new Float32Array(maxGlobalGrassInstances),
+        1,
+      ))
+      const centerX = (minX + maxX) / 2
+      const centerZ = (minZ + maxZ) / 2
+      const radius = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 6
+      geometry.boundingBox = new Box3(
+        new Vector3(minX, -2, minZ),
+        new Vector3(maxX, 5, maxZ),
+      )
+      geometry.boundingSphere = new Sphere(new Vector3(centerX, 1.5, centerZ), radius)
+      return geometry
+    })
+    return {
+      geometries,
+      spheres: geometries.map((geometry) => geometry.boundingSphere.clone()),
+    }
+  }, [grassBaseGeometry, maxGlobalGrassInstances])
+  const globalGrassGeometries = globalGrassGeometryData.geometries
+  const globalGrassRegionSpheres = globalGrassGeometryData.spheres
 
   // One shared material for all 4 quadrants — single shader compilation, single uniform set.
   const grassMaterial = useMemo(() => {
@@ -665,6 +742,7 @@ function TerrainGroundCover({
       shaderRef.current = shader
     // eslint-disable-next-line react-hooks/refs
     }, false, () => grassBiomeDataRef.current)
+    mat.customProgramCacheKey = () => 'terrain-grass-local-v2'
     return mat
   }, [grassTexture])
   useEffect(() => () => grassMaterial.dispose(), [grassMaterial])
@@ -684,6 +762,7 @@ function TerrainGroundCover({
       globalShaderRef.current = shader
     // eslint-disable-next-line react-hooks/refs
     }, true, () => grassBiomeDataRef.current)
+    mat.customProgramCacheKey = () => 'terrain-grass-global-v2'
     return mat
   }, [grassTexture])
   useEffect(() => () => globalGrassMaterial.dispose(), [globalGrassMaterial])
@@ -695,10 +774,19 @@ function TerrainGroundCover({
 
   useLayoutEffect(() => {
     globalGrassMeshRefs.current.forEach((mesh) => { if (mesh) mesh.count = 0 })
-    globalGrassChunkQueueRef.current = [...allGrassChunkKeys]
+    const position = playerPositionRef?.current
+    const centerChunkX = position ? getGrassChunkIndex(position.x) : 0
+    const centerChunkZ = position ? getGrassChunkIndex(position.z) : 0
+    globalGrassCenterRef.current = getGrassChunkKey(centerChunkX, centerChunkZ)
+    globalGrassChunkQueueRef.current = getActiveGrassChunkKeys(
+      allGrassChunkKeys,
+      centerChunkX,
+      centerChunkZ,
+      GLOBAL_GRASS_ACTIVE_CHUNK_RADIUS,
+    )
     globalGrassWrittenKeysRef.current.clear()
-    globalGrassOffsetsRef.current = [0, 0, 0, 0]
-  }, [allGrassChunkKeys])
+    globalGrassOffsetsRef.current = Array(GLOBAL_GRASS_REGIONS.length).fill(0)
+  }, [allGrassChunkKeys, playerPositionRef])
 
   const resetGrassGpuBuffers = () => {
     grassMeshRefs.current.forEach((mesh) => {
@@ -754,24 +842,24 @@ function TerrainGroundCover({
   const writeGlobalGrassChunkToGPU = (key, items) => {
     if (globalGrassWrittenKeysRef.current.has(key)) return
     const [chunkX, chunkZ] = key.split(':').map(Number)
-    const quadrantIndex = getChunkQuadrantIndex(chunkX, chunkZ)
-    const mesh = globalGrassMeshRefs.current[quadrantIndex]
+    const regionIndex = getChunkGlobalRegionIndex(chunkX, chunkZ)
+    const mesh = globalGrassMeshRefs.current[regionIndex]
     if (!mesh) return
 
-    const startIndex = globalGrassOffsetsRef.current[quadrantIndex]
+    const startIndex = globalGrassOffsetsRef.current[regionIndex]
     items.forEach((grass) => {
-      const index = globalGrassOffsetsRef.current[quadrantIndex]
+      const index = globalGrassOffsetsRef.current[regionIndex]
       if (index >= maxGlobalGrassInstances) return
       dummy.position.set(...grass.position)
       dummy.rotation.set(0, 0, 0)
       dummy.scale.setScalar(grass.scale)
       dummy.updateMatrix()
       mesh.setMatrixAt(index, dummy.matrix)
-      globalGrassOffsetsRef.current[quadrantIndex] += 1
+      globalGrassOffsetsRef.current[regionIndex] += 1
     })
 
     globalGrassWrittenKeysRef.current.add(key)
-    const endIndex = globalGrassOffsetsRef.current[quadrantIndex]
+    const endIndex = globalGrassOffsetsRef.current[regionIndex]
     mesh.count = endIndex
     if (endIndex > startIndex) {
       mesh.instanceMatrix.addUpdateRange({
@@ -780,7 +868,7 @@ function TerrainGroundCover({
       })
       mesh.instanceMatrix.needsUpdate = true
     }
-    mesh.boundingSphere = grassQuadrantSpheres[quadrantIndex]
+    mesh.boundingSphere = globalGrassRegionSpheres[regionIndex]
   }
 
   const processGlobalGrassBatch = () => {
@@ -1034,6 +1122,37 @@ function TerrainGroundCover({
     publishGrassDebugStats()
   }
 
+  const updateGlobalGrassQueueIncremental = (centerChunkX, centerChunkZ) => {
+    const centerKey = getGrassChunkKey(centerChunkX, centerChunkZ)
+    if (globalGrassCenterRef.current === centerKey) return
+    globalGrassCenterRef.current = centerKey
+
+    const activeKeys = getActiveGrassChunkKeys(
+      allGrassChunkKeys,
+      centerChunkX,
+      centerChunkZ,
+      GLOBAL_GRASS_ACTIVE_CHUNK_RADIUS,
+    )
+    const activeKeySet = new Set(activeKeys)
+
+    // Drop queued work that moved outside the invisible safety ring. Already
+    // uploaded chunks remain valid and are hidden by the existing distance fade;
+    // new nearby chunks are appended without causing a visible reset/pop.
+    globalGrassChunkQueueRef.current = globalGrassChunkQueueRef.current.filter(
+      (key) => activeKeySet.has(key),
+    )
+    const queued = new Set(globalGrassChunkQueueRef.current)
+    activeKeys.forEach((key) => {
+      if (globalGrassWrittenKeysRef.current.has(key) || queued.has(key)) return
+      globalGrassChunkQueueRef.current.push(key)
+      queued.add(key)
+    })
+    globalGrassChunkQueueRef.current.sort((a, b) => (
+      getGrassChunkDistance(a, centerChunkX, centerChunkZ)
+      - getGrassChunkDistance(b, centerChunkX, centerChunkZ)
+    ))
+  }
+
   useFrame((state) => {
     if (!active) return
     grassElapsedTimeRef.current = state.clock.elapsedTime
@@ -1059,6 +1178,8 @@ function TerrainGroundCover({
           updateGrassQueueIncremental(centerChunkX, centerChunkZ)
         }
       }
+
+      updateGlobalGrassQueueIncremental(centerChunkX, centerChunkZ)
     }
 
     const localGrassBusy = (
@@ -1155,14 +1276,18 @@ function TerrainGroundCover({
           userData={{ debugCategory: 'grass-mesh' }}
         />
       ))}
-      {QUADRANTS.map((quadrant, qi) => (
+      {GLOBAL_GRASS_REGIONS.map((region, regionIndex) => (
         <instancedMesh
-          key={`global-${quadrant.id}`}
+          key={`global-${region.id}`}
           ref={(el) => {
-            globalGrassMeshRefs.current[qi] = el
+            globalGrassMeshRefs.current[regionIndex] = el
             if (el) el.count = 0
           }}
-          args={[grassGeometries[qi], globalGrassMaterial, maxGlobalGrassInstances]}
+          args={[
+            globalGrassGeometries[regionIndex],
+            globalGrassMaterial,
+            maxGlobalGrassInstances,
+          ]}
           frustumCulled
           userData={{ debugCategory: 'global-grass-mesh' }}
         />

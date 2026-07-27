@@ -8,7 +8,11 @@ varying vec3 vWorldDirection;
 
 void main() {
   vWorldDirection = normalize(position);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 clipPosition = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  // Pin the sky to the far plane. Rendering it after opaque geometry with depth
+  // testing means its expensive cloud shader only runs for actual background
+  // pixels instead of being overwritten by the entire world.
+  gl_Position = clipPosition.xyww;
 }
 `
 
@@ -164,7 +168,7 @@ function CloudSky({
   })
 
   return (
-    <mesh ref={skyRef} scale={120} renderOrder={-100} frustumCulled={false}>
+    <mesh ref={skyRef} scale={120} renderOrder={1000} frustumCulled={false}>
       <sphereGeometry args={[1, 40, 20]} />
       <shaderMaterial
         ref={materialRef}
@@ -173,7 +177,7 @@ function CloudSky({
         fragmentShader={SKY_FRAGMENT_SHADER}
         side={BackSide}
         depthWrite={false}
-        depthTest={false}
+        depthTest
         fog={false}
         toneMapped
       />
