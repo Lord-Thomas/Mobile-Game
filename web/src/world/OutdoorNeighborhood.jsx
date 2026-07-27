@@ -66,7 +66,7 @@ function OutdoorSun({ castShadows, intensity, active, viewerOutside, playerPosit
         position={OUTDOOR_SUN_DIRECTION.map((value) => value * 32)}
         intensity={intensity}
         color="#fffaf0"
-        castShadow={active}
+        castShadow={active && castShadows}
         shadow-intensity={castShadows ? 1 : 0}
         shadow-mapSize={[512, 512]}
         shadow-camera-left={-28}

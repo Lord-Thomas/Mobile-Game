@@ -7,7 +7,7 @@ const SCHEDULER_DRIVER_PRIORITY = -1000
 
 export default function GameFrameSchedulerDriver() {
   useLayoutEffect(() => gameFrameScheduler.register(
-    (_, delta) => gameAnimationMixerRegistry.update(delta),
+    (state, delta) => gameAnimationMixerRegistry.update(delta, state),
     {
       label: 'animation-mixers',
       phase: FRAME_PHASES.POST_SIMULATION,

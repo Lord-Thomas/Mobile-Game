@@ -22,8 +22,8 @@ export function useScheduledAnimations(clips, root) {
     [clips, root],
   )
   useLayoutEffect(
-    () => gameAnimationMixerRegistry.register(api.mixer),
-    [api.mixer],
+    () => gameAnimationMixerRegistry.register(api.mixer, { root }),
+    [api.mixer, root],
   )
 
   useEffect(() => {

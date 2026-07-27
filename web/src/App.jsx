@@ -11348,6 +11348,8 @@ function measureEnemyGlbIdleBounds(original, idleClip) {
 const SLIME_SQUASH = { idle: 0.04, move: 0.12, hit: 0.34 }
 const SLIME_ATTACK_JUMP = 0.35  // hauteur du bond (unités monde)
 const SLIME_ATTACK_LUNGE = 0.30 // avancée vers le joueur pendant le coup de tête
+const ENEMY_PROCEDURAL_ANIMATION_CULL_DISTANCE_SQ = 55 * 55
+const ENEMY_PROCEDURAL_ANIMATION_VIEW_MARGIN = 1.35
 
 function slimeAttackPose(p) {
   // p ∈ [0,1] sur toute la durée de l'attaque. squash>0 = écrasé, squash<0 = étiré.
@@ -11370,16 +11372,35 @@ function SquashStretchModel({ object, offset, scale, renderOrder = 0, positionRe
   const lastPosRef = useRef(null)
   const attackAnimRef = useRef(null)
   const seenAttackRef = useRef(0)
+  const projectedPositionRef = useRef(new Vector3())
 
   useGameFrameTask((state, delta) => {
     const inner = innerRef.current
     const offsetGroup = offsetGroupRef.current
     if (!inner || !offsetGroup) return
+    const pos = positionRef?.current
+    const camera = state.camera
+    if (pos && camera?.position) {
+      const dx = pos.x - camera.position.x
+      const dy = pos.y - camera.position.y
+      const dz = pos.z - camera.position.z
+      if (dx * dx + dy * dy + dz * dz > ENEMY_PROCEDURAL_ANIMATION_CULL_DISTANCE_SQ) {
+        const projected = projectedPositionRef.current
+        projected.set(pos.x, pos.y + 1, pos.z).project(camera)
+        if (
+          projected.z < -1
+          || projected.z > 1
+          || Math.abs(projected.x) > ENEMY_PROCEDURAL_ANIMATION_VIEW_MARGIN
+          || Math.abs(projected.y) > ENEMY_PROCEDURAL_ANIMATION_VIEW_MARGIN
+        ) {
+          return
+        }
+      }
+    }
     const t = state.clock.elapsedTime
     const dt = Math.min(Math.max(delta, 1 / 240), 1 / 20)
 
     // Vitesse planaire réelle (indépendante des anims : le slime est un mesh statique).
-    const pos = positionRef?.current
     let speed = 0
     if (pos) {
       const last = lastPosRef.current
@@ -11504,6 +11525,13 @@ function SmallMushroomEnemy({
   const nextWanderAtRef = useRef(getSeededUnitValue(wanderSeedRef.current + 6.41) * (cfg.wanderMaxWait ?? MUSHROOM_ENEMY_WANDER_MAX_WAIT))
   const threatRef = useRef(new Map())
   const currentPositionRef = useRef({ x: 0, y: 0, z: 0 })
+  const hasResolvedFootYRef = useRef(false)
+  const playerAggroTargetRef = useRef({
+    id: 'player',
+    position: null,
+    isPlayer: true,
+    takeDamage: null,
+  })
   const nearbyMobsScratchRef = useRef([])
   const respawnTimerRef = useRef(null)
   const hudTimerRef = useRef(null)
@@ -11516,6 +11544,7 @@ function SmallMushroomEnemy({
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
     currentPositionRef.current.z = spawnPosition[2]
+    hasResolvedFootYRef.current = false
     if (groupRef.current) groupRef.current.rotation.y = initialYawRef.current
   }, [spawnPosition])
   const targetRef = useRef({
@@ -11733,6 +11762,7 @@ function SmallMushroomEnemy({
     currentPositionRef.current.x = spawnPosition[0]
     currentPositionRef.current.y = spawnPosition[1]
     currentPositionRef.current.z = spawnPosition[2]
+    hasResolvedFootYRef.current = false
     if (groupRef.current) groupRef.current.rotation.y = initialYawRef.current
     hpRef.current = cfg.maxHp
     recoilRef.current.x = 0
@@ -11934,6 +11964,7 @@ function SmallMushroomEnemy({
     {
       const pp = playerPositionRef?.current
       if (pp && active && !passive && aggressive && !defeatedRef.current) {
+        playerAggroTargetRef.current.position = pp
         let best = null
         let bestThreat = 0
         for (const [aid, threat] of threatRef.current) {
@@ -11948,18 +11979,23 @@ function SmallMushroomEnemy({
         }
         aggroTarget = (best && !best.isPlayer)
           ? { id: best.id, position: best.position, isPlayer: false, takeDamage: best.takeDamage }
-          : { id: 'player', position: pp, isPlayer: true, takeDamage: null }
+          : playerAggroTargetRef.current
       }
     }
 
     if (groupRef.current && !active) {
       groupRef.current.position.set(0, -500, 0)
     } else if (groupRef.current) {
-      groupRef.current.position.set(
-        enemyPosition.x + recoil.x,
-        enemyPosition.y + recoil.y,
-        enemyPosition.z + recoil.z,
-      )
+      const nextX = enemyPosition.x + recoil.x
+      const nextY = enemyPosition.y + recoil.y
+      const nextZ = enemyPosition.z + recoil.z
+      if (
+        groupRef.current.position.x !== nextX
+        || groupRef.current.position.y !== nextY
+        || groupRef.current.position.z !== nextZ
+      ) {
+        groupRef.current.position.set(nextX, nextY, nextZ)
+      }
       const playerPosition = playerPositionRef?.current
       const shouldFacePlayer = stateRef.current === 'chase' || stateRef.current === 'attack' || Boolean(attackRef.current)
       const lookTarget = stateRef.current === 'return'
@@ -11999,14 +12035,21 @@ function SmallMushroomEnemy({
       aggroPosition.x - enemyPosition.x,
       aggroPosition.z - enemyPosition.z,
     )
-    const effectiveAggroTarget = aggroTarget ?? { id: 'player', position: playerPosition, isPlayer: true }
+    playerAggroTargetRef.current.position = playerPosition
+    const effectiveAggroTarget = aggroTarget ?? playerAggroTargetRef.current
     const weightedDistanceToTarget = getWeightedMobTargetDistance(enemyPosition, effectiveAggroTarget)
     const distanceToSpawn = Math.hypot(enemyPosition.x - spawnPosition[0], enemyPosition.z - spawnPosition[2])
     const canAct = !attackRef.current
 
     if (aggressive && (stateRef.current === 'idle' || stateRef.current === 'wander' || stateRef.current === 'investigate')) {
       const enemyYaw = groupRef.current?.rotation.y ?? cfg.spawnYaw
-      const seesPlayer = canMobSeePlayer(enemyPosition, enemyYaw, playerPosition, cfg.visibilityRange, cfg.viewConeDegrees)
+      const seesPlayer = distanceToPlayer <= cfg.visibilityRange && canMobSeePlayer(
+        enemyPosition,
+        enemyYaw,
+        playerPosition,
+        cfg.visibilityRange,
+        cfg.viewConeDegrees,
+      )
       const acquire = () => {
         closeAlertTimerRef.current = 0
         investigateTimerRef.current = 0
@@ -12205,6 +12248,7 @@ function SmallMushroomEnemy({
     }
 
     // ── Séparation : empêche les monstres de se chevaucher ────────────────────
+    let separatedThisFrame = false
     if (mobGroupRef?.current) {
       let pushX = 0
       let pushZ = 0
@@ -12247,10 +12291,16 @@ function SmallMushroomEnemy({
       if (pushX !== 0 || pushZ !== 0) {
         enemyPosition.x += pushX * MOB_SEPARATION_STRENGTH * delta
         enemyPosition.z += pushZ * MOB_SEPARATION_STRENGTH * delta
+        separatedThisFrame = true
       }
     }
 
-    enemyPosition.y = getMobOutdoorFootY(enemyPosition.x, enemyPosition.z, enemyPosition.y)
+    // Les fonctions de déplacement résolvent déjà la hauteur. Il ne reste à la
+    // recalculer qu'au premier tick ou après une poussée de séparation.
+    if (!hasResolvedFootYRef.current || separatedThisFrame) {
+      enemyPosition.y = getMobOutdoorFootY(enemyPosition.x, enemyPosition.z, enemyPosition.y)
+      hasResolvedFootYRef.current = true
+    }
 
     targetRef.current.position.x = enemyPosition.x
     targetRef.current.position.y = enemyPosition.y
@@ -17728,7 +17778,7 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
       categoryElapsedRef.current = 0
     }
 
-    onStatsChange({
+    const nextStats = {
       fps,
       frameTimeMs: averageFrameTimeMs,
       maxFrameTimeMs: maxFrameTimeRef.current,
@@ -17742,7 +17792,9 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
       drawCallsByCategory: categoryStatsRef.current.drawCallsByCategory,
       trianglesByCategory: categoryStatsRef.current.trianglesByCategory,
       grassDebug: typeof window !== 'undefined' ? window.__grassDebug ?? null : null,
-    })
+    }
+    if (typeof window !== 'undefined') window.__gameRenderStats = nextStats
+    onStatsChange(nextStats)
 
     elapsedRef.current = 0
     framesRef.current = 0
