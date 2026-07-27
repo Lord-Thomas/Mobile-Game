@@ -174,6 +174,8 @@ const LOW_FPS_THRESHOLD = 48
 const HIGH_FPS_THRESHOLD = 57
 const FPS_SAMPLE_WINDOW_SECONDS = 2
 const RENDER_SCALE_STEP = 0.05
+const RENDER_BENCHMARK_SECONDS = 15
+const RENDER_BENCHMARK_SETTLE_SECONDS = 2
 const BASE_CAMERA_VERTICAL_FOV = 52
 const MAX_CAMERA_HORIZONTAL_FOV = 72
 const MULTIPLAYER_INTERP_DELAY_MS = 150
@@ -766,6 +768,15 @@ function getNextTerrainRenderMode(current) {
   if (current === 'texture') return 'simple'
   if (current === 'simple') return 'off'
   return 'full'
+}
+
+function getPercentile(sortedValues, percentile) {
+  if (sortedValues.length === 0) return 0
+  const index = Math.min(
+    sortedValues.length - 1,
+    Math.max(0, Math.ceil(sortedValues.length * percentile) - 1),
+  )
+  return sortedValues[index]
 }
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
 const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) ?? null
@@ -17737,12 +17748,21 @@ function PerfFrameProbe({
   return null
 }
 
-function RenderStatsProbe({ onStatsChange, onRendererInfo, active, resetKey }) {
+function RenderStatsProbe({
+  onStatsChange,
+  onRendererInfo,
+  active,
+  resetKey,
+  measurementEpoch = 0,
+}) {
   const { gl, scene } = useThree()
   const elapsedRef = useRef(0)
   const framesRef = useRef(0)
   const maxFrameTimeRef = useRef(0)
+  const intervalFrameTimesRef = useRef([])
   const rollingSamplesRef = useRef([])
+  const settleRemainingRef = useRef(0)
+  const previousMeasurementEpochRef = useRef(measurementEpoch)
   const drawingBufferRef = useRef(new Vector2())
   const categoryElapsedRef = useRef(1)
   const categoryStatsRef = useRef({
@@ -17755,19 +17775,33 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active, resetKey }) {
   }, [gl, onRendererInfo])
 
   useEffect(() => {
+    const benchmarkRestarted = previousMeasurementEpochRef.current !== measurementEpoch
+    previousMeasurementEpochRef.current = measurementEpoch
     elapsedRef.current = 0
     framesRef.current = 0
     maxFrameTimeRef.current = 0
+    intervalFrameTimesRef.current = []
     rollingSamplesRef.current = []
-  }, [resetKey])
+    settleRemainingRef.current = benchmarkRestarted ? RENDER_BENCHMARK_SETTLE_SECONDS : 0
+  }, [measurementEpoch, resetKey])
 
   useFrame((_, delta) => {
     if (!active) return
+
+    if (settleRemainingRef.current > 0) {
+      settleRemainingRef.current = Math.max(0, settleRemainingRef.current - delta)
+      elapsedRef.current = 0
+      framesRef.current = 0
+      maxFrameTimeRef.current = 0
+      intervalFrameTimesRef.current = []
+      return
+    }
 
     const frameTimeMs = delta * 1000
     elapsedRef.current += delta
     framesRef.current += 1
     maxFrameTimeRef.current = Math.max(maxFrameTimeRef.current, frameTimeMs)
+    intervalFrameTimesRef.current.push(frameTimeMs)
 
     if (elapsedRef.current < 0.25) return
 
@@ -17778,12 +17812,16 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active, resetKey }) {
       elapsed: elapsedRef.current,
       frames: framesRef.current,
       maxFrameTimeMs: maxFrameTimeRef.current,
+      frameTimes: intervalFrameTimesRef.current,
     })
     let rollingDuration = rollingSamplesRef.current.reduce(
       (total, sample) => total + sample.elapsed,
       0,
     )
-    while (rollingSamplesRef.current.length > 1 && rollingDuration > 5) {
+    while (
+      rollingSamplesRef.current.length > 1 &&
+      rollingDuration - rollingSamplesRef.current[0].elapsed >= RENDER_BENCHMARK_SECONDS
+    ) {
       rollingDuration -= rollingSamplesRef.current.shift().elapsed
     }
     const rollingFrames = rollingSamplesRef.current.reduce(
@@ -17795,6 +17833,23 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active, resetKey }) {
       (maximum, sample) => Math.max(maximum, sample.maxFrameTimeMs),
       0,
     )
+    const sortedFrameTimes = rollingSamplesRef.current
+      .flatMap((sample) => sample.frameTimes)
+      .sort((left, right) => left - right)
+    const stableMedianFrameTimeMs = getPercentile(sortedFrameTimes, 0.5)
+    const stableP95FrameTimeMs = getPercentile(sortedFrameTimes, 0.95)
+    const stableP99FrameTimeMs = getPercentile(sortedFrameTimes, 0.99)
+    const onePercentLowFps = 1000 / Math.max(0.001, stableP99FrameTimeMs)
+    const fpsBuckets = rollingSamplesRef.current.map((sample) => sample.frames / sample.elapsed)
+    const bucketAverageFps = fpsBuckets.reduce((total, value) => total + value, 0) / fpsBuckets.length
+    const bucketVariance = fpsBuckets.reduce(
+      (total, value) => total + ((value - bucketAverageFps) ** 2),
+      0,
+    ) / fpsBuckets.length
+    const fpsVariationPercent = (
+      Math.sqrt(bucketVariance) /
+      Math.max(0.001, bucketAverageFps)
+    ) * 100
     categoryElapsedRef.current += elapsedRef.current
     if (categoryElapsedRef.current >= 1) {
       const trianglesByCategory = {}
@@ -17819,10 +17874,16 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active, resetKey }) {
     const nextStats = {
       fps,
       stableFps,
-      stableWindowSeconds: rollingDuration,
+      stableWindowSeconds: Math.min(RENDER_BENCHMARK_SECONDS, rollingDuration),
       frameTimeMs: averageFrameTimeMs,
       maxFrameTimeMs: maxFrameTimeRef.current,
       stableMaxFrameTimeMs,
+      stableMedianFrameTimeMs,
+      stableP95FrameTimeMs,
+      stableP99FrameTimeMs,
+      onePercentLowFps,
+      fpsVariationPercent,
+      measurementEpoch,
       drawCalls: gl.info.render.calls,
       triangles: gl.info.render.triangles,
       textures: gl.info.memory.textures,
@@ -17840,6 +17901,7 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active, resetKey }) {
     elapsedRef.current = 0
     framesRef.current = 0
     maxFrameTimeRef.current = 0
+    intervalFrameTimesRef.current = []
   })
 
   return null
@@ -17849,22 +17911,80 @@ function RenderStatsOverlay({
   stats,
   toggles,
   terrainRenderMode,
+  measurementEpoch,
+  onStartBenchmark,
   onTerrainRenderModeChange,
   onToggle,
 }) {
   const [expanded, setExpanded] = useState(() => !isLikelyMobileDevice())
+  const [activeBenchmarkEpoch, setActiveBenchmarkEpoch] = useState(null)
+  const [benchmarkConfig, setBenchmarkConfig] = useState('')
+  const [benchmarkResults, setBenchmarkResults] = useState([])
+
+  const benchmarkRunning = activeBenchmarkEpoch !== null
+  const benchmarkCollecting = (
+    benchmarkRunning &&
+    stats?.measurementEpoch === activeBenchmarkEpoch
+  )
+
+  useEffect(() => {
+    if (
+      !benchmarkCollecting ||
+      (stats?.stableWindowSeconds ?? 0) < RENDER_BENCHMARK_SECONDS
+    ) return
+
+    const result = {
+      config: benchmarkConfig,
+      stableFps: stats.stableFps,
+      onePercentLowFps: stats.onePercentLowFps,
+      medianFrameTimeMs: stats.stableMedianFrameTimeMs,
+      p95FrameTimeMs: stats.stableP95FrameTimeMs,
+      variationPercent: stats.fpsVariationPercent,
+      drawCalls: stats.drawCalls,
+      triangles: stats.triangles,
+    }
+    setBenchmarkResults((current) => [...current.slice(-1), result])
+    setActiveBenchmarkEpoch(null)
+    setExpanded(true)
+  }, [benchmarkCollecting, benchmarkConfig, stats])
 
   if (!stats) return null
+
+  const startBenchmark = () => {
+    const disabledElements = [
+      ['grass', 'herbe'],
+      ['trees', 'arbres'],
+      ['terrain', 'terrain'],
+      ['sky', 'ciel'],
+      ['shadows', 'ombres'],
+      ['house', 'maison'],
+      ['player', 'joueur'],
+      ['plot', 'parcelle'],
+    ]
+      .filter(([key]) => !toggles[key])
+      .map(([, label]) => label)
+    const terrainLabel = terrainRenderMode === 'full' ? 'normal' : terrainRenderMode
+    setBenchmarkConfig(
+      `Terrain ${terrainLabel}${disabledElements.length > 0 ? ` · sans ${disabledElements.join(', ')}` : ' · tout actif'}`,
+    )
+    setActiveBenchmarkEpoch(measurementEpoch + 1)
+    setExpanded(false)
+    onStartBenchmark()
+  }
 
   const rows = [
     ['FPS', stats.fps.toFixed(1)],
     [
-      `FPS moyen ${Math.min(5, stats.stableWindowSeconds ?? 0).toFixed(1)} s`,
+      `FPS moyen ${Math.min(RENDER_BENCHMARK_SECONDS, stats.stableWindowSeconds ?? 0).toFixed(1)} s`,
       (stats.stableFps ?? stats.fps).toFixed(1),
     ],
     ['Frame', `${stats.frameTimeMs.toFixed(1)} ms`],
     ['Max frame', `${stats.maxFrameTimeMs.toFixed(1)} ms`],
-    ['Pire frame 5 s', `${(stats.stableMaxFrameTimeMs ?? stats.maxFrameTimeMs).toFixed(1)} ms`],
+    ['Frame médiane', `${(stats.stableMedianFrameTimeMs ?? stats.frameTimeMs).toFixed(1)} ms`],
+    ['Frame P95', `${(stats.stableP95FrameTimeMs ?? stats.maxFrameTimeMs).toFixed(1)} ms`],
+    ['1 % low', `${(stats.onePercentLowFps ?? stats.fps).toFixed(1)} FPS`],
+    ['Variation', `${(stats.fpsVariationPercent ?? 0).toFixed(1)} %`],
+    ['Pire frame 15 s', `${(stats.stableMaxFrameTimeMs ?? stats.maxFrameTimeMs).toFixed(1)} ms`],
     ['Draw calls', stats.drawCalls.toLocaleString('fr-FR')],
     ['Triangles', stats.triangles.toLocaleString('fr-FR')],
     ['Textures', stats.textures.toLocaleString('fr-FR')],
@@ -17911,13 +18031,33 @@ function RenderStatsOverlay({
   ))
   const stableFps = stats.stableFps ?? stats.fps
   const fpsLevel = stableFps >= 30 ? 'good' : stableFps >= 24 ? 'ok' : 'low'
+  const benchmarkProgress = benchmarkCollecting
+    ? Math.min(RENDER_BENCHMARK_SECONDS, stats.stableWindowSeconds ?? 0)
+    : 0
+  const comparison = benchmarkResults.length >= 2
+    ? {
+        fps: benchmarkResults.at(-1).stableFps - benchmarkResults.at(-2).stableFps,
+        percent: (
+          (benchmarkResults.at(-1).stableFps / Math.max(0.001, benchmarkResults.at(-2).stableFps) - 1) *
+          100
+        ),
+      }
+    : null
 
   return (
     <aside className={`render-stats${expanded ? ' is-expanded' : ' is-collapsed'}`} aria-label="Statistiques de rendu">
       <div className="render-stats-summary">
         <div className={`render-stats-summary-fps fps-${fpsLevel}`}>
-          <strong>{stableFps.toFixed(1)}</strong>
-          <span>FPS · moy. 5 s</span>
+          <strong>
+            {benchmarkRunning
+              ? benchmarkCollecting ? `${benchmarkProgress.toFixed(1)} s` : '…'
+              : stableFps.toFixed(1)}
+          </strong>
+          <span>
+            {benchmarkRunning
+              ? benchmarkCollecting ? `mesure / ${RENDER_BENCHMARK_SECONDS} s` : 'stabilisation 2 s'
+              : 'FPS · moy. 15 s'}
+          </span>
         </div>
         <div className="render-stats-summary-metric">
           <strong>{stats.frameTimeMs.toFixed(1)} ms</strong>
@@ -17932,7 +18072,8 @@ function RenderStatsOverlay({
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
-          aria-label={expanded ? 'Replier les statistiques' : 'Déplier les statistiques'}
+          aria-label={benchmarkRunning ? 'Test de performance en cours' : expanded ? 'Replier les statistiques' : 'Déplier les statistiques'}
+          disabled={benchmarkRunning}
         >
           {expanded ? '×' : '≡'}
         </button>
@@ -17972,6 +18113,38 @@ function RenderStatsOverlay({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="render-stats-panel render-benchmark-panel">
+            <div className="render-stats-section-title">Test fiable</div>
+            <p>
+              Stabilisation 2 s, puis mesure 15 s. Le panneau se replie pour ne pas influencer le GPU.
+            </p>
+            <button
+              className="render-benchmark-start"
+              type="button"
+              onClick={startBenchmark}
+            >
+              Lancer une mesure
+            </button>
+            {benchmarkResults.map((result, index) => (
+              <div className="render-benchmark-result" key={`${result.config}-${index}`}>
+                <strong>{index === benchmarkResults.length - 1 ? 'Dernier test' : 'Test précédent'}</strong>
+                <span>{result.config}</span>
+                <span>
+                  {result.stableFps.toFixed(1)} FPS · 1 % low {result.onePercentLowFps.toFixed(1)}
+                </span>
+                <span>
+                  P95 {result.p95FrameTimeMs.toFixed(1)} ms · variation {result.variationPercent.toFixed(1)} %
+                </span>
+              </div>
+            ))}
+            {comparison && (
+              <div className={`render-benchmark-comparison${comparison.fps >= 0 ? ' is-positive' : ' is-negative'}`}>
+                Écart : {comparison.fps >= 0 ? '+' : ''}{comparison.fps.toFixed(1)} FPS
+                {' '}({comparison.percent >= 0 ? '+' : ''}{comparison.percent.toFixed(1)} %)
+              </div>
+            )}
           </div>
 
           <div className="render-stats-panel">
@@ -18320,6 +18493,7 @@ function App() {
     }
   }, [dynamicRenderScale, effectiveRenderScale, performanceSettings, renderSettings, rendererInfo])
   const [renderStats, setRenderStats] = useState(null)
+  const [renderBenchmarkEpoch, setRenderBenchmarkEpoch] = useState(0)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
   const [freeCameraActive, setFreeCameraActive] = useState(false)
   const [terrainRenderMode, setTerrainRenderMode] = useState(
@@ -22670,7 +22844,7 @@ function App() {
       <Canvas
         dpr={renderSettings.dpr}
         camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 420 }}
-        shadows={{ enabled: true, type: PCFShadowMap }}
+        shadows={shadowsEnabled ? { enabled: true, type: PCFShadowMap } : false}
         gl={{
           antialias: renderSettings.antialias && !performanceSettings.lowResolution,
           powerPreference: 'high-performance',
@@ -22717,12 +22891,15 @@ function App() {
         <LayeredSceneRenderer currentZone={currentZone} />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
-        {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
+        {performanceSettings.autoQuality && !isDebugMode && (
+          <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
+        )}
         <RenderStatsProbe
           onStatsChange={setRenderStats}
           onRendererInfo={setRendererInfo}
           active={isDebugMode || performanceSettings.showFps}
-          resetKey={`${terrainRenderMode}:${Object.entries(debugToggles).map(([key, value]) => `${key}:${value ? 1 : 0}`).join(',')}`}
+          resetKey={`${terrainRenderMode}:${renderBenchmarkEpoch}:${Object.entries(debugToggles).map(([key, value]) => `${key}:${value ? 1 : 0}`).join(',')}`}
+          measurementEpoch={renderBenchmarkEpoch}
         />
         {perfDiagnosticsActive && (
           <PerfFrameProbe
@@ -23240,6 +23417,8 @@ function App() {
           stats={renderStats}
           toggles={debugToggles}
           terrainRenderMode={terrainRenderMode}
+          measurementEpoch={renderBenchmarkEpoch}
+          onStartBenchmark={() => setRenderBenchmarkEpoch((current) => current + 1)}
           onTerrainRenderModeChange={() => setTerrainRenderMode(getNextTerrainRenderMode)}
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
         />

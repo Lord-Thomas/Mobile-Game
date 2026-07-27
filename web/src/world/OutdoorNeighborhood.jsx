@@ -186,10 +186,23 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
           onReady={onMapObjectsPreloaded}
         />
       )}
-      {showMapObjects && <MapObjectPlaceables objects={DECOR_MAP_OBJECT_PLACEMENTS} batchStaticTrees />}
+      {showMapObjects && (
+        <MapObjectPlaceables
+          objects={DECOR_MAP_OBJECT_PLACEMENTS}
+          batchStaticTrees
+          showTrees={showTrees}
+        />
+      )}
       {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
       {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
-      {showTrees && <InstancedTreeBatch trees={DISTANT_TREES} animated={false} forceSimplified />}
+      {showTrees && (
+        <InstancedTreeBatch
+          trees={DISTANT_TREES}
+          animated={false}
+          forceSimplified
+          castShadows={false}
+        />
+      )}
       {showGrass && (
         <TerrainGroundCover
           playerPositionRef={playerPositionRef}

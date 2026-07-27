@@ -544,15 +544,22 @@ export default function MapObjectPlaceables({
   onStartDragging = null,
   registerRef = null,
   batchStaticTrees = false,
+  showTrees = true,
 }) {
   useEffect(() => {
     preloadMapObjectAssets(objects)
   }, [objects])
 
   const canBatchStaticObjects = batchStaticTrees && !onSelect && !onStartDragging && !registerRef
+  const visibleObjects = useMemo(
+    () => showTrees
+      ? objects
+      : objects.filter((placement) => getMapObjectCatalogItem(placement.objectId)?.type !== 'tree'),
+    [objects, showTrees],
+  )
   const { treeEntries, instancedModelGroups, objectPlacements } = useMemo(
-    () => splitStaticPlacements(objects, canBatchStaticObjects),
-    [canBatchStaticObjects, objects],
+    () => splitStaticPlacements(visibleObjects, canBatchStaticObjects),
+    [canBatchStaticObjects, visibleObjects],
   )
 
   return (

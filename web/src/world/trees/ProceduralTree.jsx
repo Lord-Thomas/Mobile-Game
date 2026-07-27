@@ -15,6 +15,13 @@ function disposeTree(tree) {
   })
 }
 
+function ProceduralTreeAnimator({ treeRef }) {
+  useFrame(({ clock }) => {
+    treeRef.current?.update(clock.getElapsedTime())
+  })
+  return null
+}
+
 function ProceduralTree({ config, animated = true }) {
   const treeRef = useRef(null)
   const normalized = useMemo(() => normalizeTreeConfig(config), [config])
@@ -28,21 +35,20 @@ function ProceduralTree({ config, animated = true }) {
     return () => disposeTree(tree)
   }, [tree])
 
-  useFrame(({ clock }) => {
-    if (animated) treeRef.current?.update(clock.getElapsedTime())
-  })
-
   return (
-    <primitive
-      object={tree}
-      position={[
-        normalized.position.x,
-        terrainY + normalized.position.y,
-        normalized.position.z,
-      ]}
-      rotation={[0, normalized.rotationY, 0]}
-      scale={normalized.scale}
-    />
+    <>
+      {animated && <ProceduralTreeAnimator treeRef={treeRef} />}
+      <primitive
+        object={tree}
+        position={[
+          normalized.position.x,
+          terrainY + normalized.position.y,
+          normalized.position.z,
+        ]}
+        rotation={[0, normalized.rotationY, 0]}
+        scale={normalized.scale}
+      />
+    </>
   )
 }
 
