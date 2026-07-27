@@ -28,10 +28,14 @@ export function useScheduledAnimations(clips, root) {
 
   useEffect(() => {
     return () => {
+      // Ne pas appeler uncacheRoot ici. En développement, StrictMode exécute
+      // volontairement setup -> cleanup -> setup sans recréer le useMemo.
+      // uncacheRoot détruirait alors les bindings des AnimationAction conservées,
+      // et leur prochain play() échouerait dans AnimationMixer._lendBinding.
+      // Le mixer et sa racine deviennent naturellement collectables au démontage.
       api.mixer.stopAllAction()
-      if (root) api.mixer.uncacheRoot(root)
     }
-  }, [api.mixer, root])
+  }, [api.mixer])
 
   return api
 }

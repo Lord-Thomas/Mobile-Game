@@ -14224,6 +14224,8 @@ function EditableObject({ object, selected, mode, onSelect, onStartDragging, onO
   )
 }
 
+const MemoizedEditableObject = memo(EditableObject)
+
 const CUSTOMIZE_PAN_BOUNDS = { minX: -6, maxX: 6, minZ: -6, maxZ: 12 }
 
 function RoomBorder({ width, depth, posX = 0, posZ = 0, visible = true }) {
@@ -15622,6 +15624,32 @@ function CustomizationLayer({
   registerCombatTarget,
   onTrainingDummyDefeated,
 }) {
+  // Le parent App évolue souvent pendant le chargement. Des ponts stables
+  // empêchent ces mises à jour de recalculer tous les meubles déjà montés.
+  const onSelectRef = useRef(onSelect)
+  const onStartDraggingRef = useRef(onStartDragging)
+  const registerCombatTargetRef = useRef(registerCombatTarget)
+  const onTrainingDummyDefeatedRef = useRef(onTrainingDummyDefeated)
+  useEffect(() => {
+    onSelectRef.current = onSelect
+    onStartDraggingRef.current = onStartDragging
+    registerCombatTargetRef.current = registerCombatTarget
+    onTrainingDummyDefeatedRef.current = onTrainingDummyDefeated
+  }, [onSelect, onStartDragging, onTrainingDummyDefeated, registerCombatTarget])
+  const stableOnSelect = useCallback((...args) => onSelectRef.current?.(...args), [])
+  const stableOnStartDragging = useCallback((id, dragOffset) => {
+    dragOffsetRef.current = dragOffset ?? { x: 0, z: 0 }
+    onStartDraggingRef.current?.(id)
+  }, [])
+  const stableRegisterCombatTarget = useCallback(
+    (...args) => registerCombatTargetRef.current?.(...args),
+    [],
+  )
+  const stableOnTrainingDummyDefeated = useCallback(
+    (...args) => onTrainingDummyDefeatedRef.current?.(...args),
+    [],
+  )
+
   const rooms = layout.rooms ?? houseLayout.rooms
   const placedObjects = useMemo(() => objects.filter((object) => (
     object.status !== 'stored' &&
@@ -15820,19 +15848,16 @@ function CustomizationLayer({
         />
       )}
       {visiblePlacedObjects.map((object) => (
-        <EditableObject
+        <MemoizedEditableObject
           key={object.id}
           object={object}
           selected={selectedObjectId === object.id}
           mode={mode}
-          onSelect={onSelect}
-          onStartDragging={(id, dragOffset) => {
-            dragOffsetRef.current = dragOffset ?? { x: 0, z: 0 }
-            onStartDragging(id)
-          }}
+          onSelect={stableOnSelect}
+          onStartDragging={stableOnStartDragging}
           onObjectRef={registerPlaceableRef}
-          registerCombatTarget={registerCombatTarget}
-          onTrainingDummyDefeated={onTrainingDummyDefeated}
+          registerCombatTarget={stableRegisterCombatTarget}
+          onTrainingDummyDefeated={stableOnTrainingDummyDefeated}
         />
       ))}
       <PlacementPreview object={placingObject} preview={placementPreview} groupRef={previewGroupRef} />
@@ -17202,7 +17227,7 @@ function ShaderWarmupGate({
         })
       }
 
-      const compileAndRender = async (warmupCamera) => {
+      const compileScene = async (warmupCamera) => {
         const originalLayerMask = warmupCamera.layers.mask
         try {
           for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
@@ -17212,7 +17237,6 @@ function ShaderWarmupGate({
             } else {
               gl.compile(scene, warmupCamera)
             }
-            gl.render(scene, warmupCamera)
           }
         } finally {
           warmupCamera.layers.mask = originalLayerMask
@@ -17224,14 +17248,14 @@ function ShaderWarmupGate({
           percent: 94,
           phase: 'Préparation des textures, de l’herbe et des effets...',
         })
-        await compileAndRender(camera)
+        await compileScene(camera)
         markLoad('warmup:runtime')
 
         const warmupLabels = ['warmup:customize', 'warmup:outside']
         const warmupCameras = PERF_SHADER_WARMUP ? [customizeCamera, outsideCamera] : []
         for (let i = 0; i < warmupCameras.length; i += 1) {
           if (cancelled) break
-          await compileAndRender(warmupCameras[i])
+          await compileScene(warmupCameras[i])
           markLoad(warmupLabels[i])
         }
       } catch (error) {
@@ -22245,7 +22269,11 @@ function App() {
           criticalPlaceableModelUrls={criticalPlaceableModelUrls}
           worldDataReady={worldDataReady}
         />
-        {PERF_RUNTIME_WARMUP_RIG && <RuntimeWarmupRig />}
+        {PERF_RUNTIME_WARMUP_RIG && (
+          <Suspense fallback={null}>
+            <RuntimeWarmupRig />
+          </Suspense>
+        )}
         {!PERF_NO_OUTDOOR_PREWARM && (
           <OutdoorShaderPrewarm
             stage={outdoorContentMounted ? outdoorContentStage : 0}

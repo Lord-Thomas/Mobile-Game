@@ -83,17 +83,30 @@ export class FrameScheduler {
     }
   }
 
+  runTask(task, state, delta) {
+    try {
+      task.callback(state, delta)
+      return true
+    } catch (error) {
+      // Une tâche défectueuse ne doit jamais interrompre toutes les autres tâches
+      // de la frame ni répéter la même exception 60 fois par seconde.
+      if (this.tasks.delete(task.id)) this.sortDirty = true
+      console.error(`[FrameScheduler] Tâche désactivée après une erreur (${task.label}).`, error)
+      return false
+    }
+  }
+
   tick(state, delta) {
     const tasks = this.getSortedTasks()
     if (!this.metricsEnabled) {
-      tasks.forEach((task) => task.callback(state, delta))
+      tasks.forEach((task) => this.runTask(task, state, delta))
       return
     }
 
     const frameStart = now()
     tasks.forEach((task) => {
       const taskStart = now()
-      task.callback(state, delta)
+      this.runTask(task, state, delta)
       const samples = this.taskSamples.get(task.label) ?? []
       this.recordSample(samples, now() - taskStart)
       this.taskSamples.set(task.label, samples)

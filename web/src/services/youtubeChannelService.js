@@ -1,3 +1,5 @@
+import { loadSharedRequest } from './sharedRequestCache'
+
 export const YOUTUBE_CHANNEL_FALLBACK = {
   title: 'Thoms_gail',
   handle: '@Thoms_gail',
@@ -45,8 +47,11 @@ export function normalizeYouTubeChannelUrl(value) {
 export async function loadYouTubeChannel(channelUrl, signal) {
   const url = new URL(getStatsUrl(), window.location.origin)
   if (channelUrl) url.searchParams.set('channel', channelUrl)
-  const response = await fetch(url.toString(), { signal })
-  if (!response.ok) throw new Error(`YouTube channel request failed (${response.status})`)
-  const channel = await response.json()
+  const requestUrl = url.toString()
+  const channel = await loadSharedRequest(`youtube:${requestUrl}`, async () => {
+    const response = await fetch(requestUrl)
+    if (!response.ok) throw new Error(`YouTube channel request failed (${response.status})`)
+    return response.json()
+  }, { signal })
   return { ...YOUTUBE_CHANNEL_FALLBACK, ...channel }
 }

@@ -1,3 +1,5 @@
+import { loadSharedRequest } from './sharedRequestCache'
+
 const TIKTOK_HOSTS = new Set(['tiktok.com', 'www.tiktok.com', 'm.tiktok.com'])
 
 export const TIKTOK_PROFILE_FALLBACK = {
@@ -49,7 +51,11 @@ function getProfileEndpoint() {
 export async function loadTikTokProfile(profileUrl, signal) {
   const url = new URL(getProfileEndpoint(), window.location.origin)
   if (profileUrl) url.searchParams.set('profile', profileUrl)
-  const response = await fetch(url.toString(), { signal })
-  if (!response.ok) throw new Error(`TikTok profile request failed (${response.status})`)
-  return { ...TIKTOK_PROFILE_FALLBACK, ...await response.json() }
+  const requestUrl = url.toString()
+  const profile = await loadSharedRequest(`tiktok:${requestUrl}`, async () => {
+    const response = await fetch(requestUrl)
+    if (!response.ok) throw new Error(`TikTok profile request failed (${response.status})`)
+    return response.json()
+  }, { signal })
+  return { ...TIKTOK_PROFILE_FALLBACK, ...profile }
 }
