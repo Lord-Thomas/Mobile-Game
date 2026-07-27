@@ -5,7 +5,7 @@ import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMi
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { FBXLoader, GLTFLoader } from 'three-stdlib'
-import { Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
@@ -12347,6 +12347,8 @@ function SmallMushroomEnemy({
 // les slots. Comme le modèle/les animations sont déjà construits, l'invocation
 // ne provoque aucun freeze (le coût est payé une fois au montage, comme les
 // squelettes ennemis qui existent dès le chargement du monde).
+const MemoizedSmallMushroomEnemy = memo(SmallMushroomEnemy)
+
 function ProgressiveOutdoorEnemyLayer({
   enabled,
   assetsReady,
@@ -12361,6 +12363,29 @@ function ProgressiveOutdoorEnemyLayer({
   onProgress,
   onReady,
 }) {
+  // App.jsx met à jour la progression pendant le montage. Ces ponts conservent
+  // une identité stable : ajouter l'ennemi N ne recalcule plus les ennemis 1…N-1.
+  const registerCombatTargetRef = useRef(registerCombatTarget)
+  const onDefeatedRef = useRef(onDefeated)
+  const onHitPlayerRef = useRef(onHitPlayer)
+  useEffect(() => {
+    registerCombatTargetRef.current = registerCombatTarget
+    onDefeatedRef.current = onDefeated
+    onHitPlayerRef.current = onHitPlayer
+  }, [onDefeated, onHitPlayer, registerCombatTarget])
+  const stableRegisterCombatTarget = useCallback(
+    (...args) => registerCombatTargetRef.current?.(...args),
+    [],
+  )
+  const stableOnDefeated = useCallback(
+    (...args) => onDefeatedRef.current?.(...args),
+    [],
+  )
+  const stableOnHitPlayer = useCallback(
+    (...args) => onHitPlayerRef.current?.(...args),
+    [],
+  )
+
   const targetCount = enabled && assetsReady ? slots.length : 0
   const { count, complete } = useProgressiveMountCount({
     enabled: true,
@@ -12398,16 +12423,16 @@ function ProgressiveOutdoorEnemyLayer({
     <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
       <Suspense fallback={null}>
         {orderedSlots.map(({ slot, index }) => (
-          <SmallMushroomEnemy
+          <MemoizedSmallMushroomEnemy
             key={slot.id}
             enemyId={slot.id}
             spawnIndex={index}
             spawnPositionOverride={slot.spawnPosition}
             active
             playerPositionRef={playerPositionRef}
-            registerCombatTarget={registerCombatTarget}
-            onDefeated={onDefeated}
-            onHitPlayer={onHitPlayer}
+            registerCombatTarget={stableRegisterCombatTarget}
+            onDefeated={stableOnDefeated}
+            onHitPlayer={stableOnHitPlayer}
             config={slot.config}
             monsterType={slot.monsterType}
             aggressive={slot.aggressive}
@@ -16859,7 +16884,7 @@ const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 220
 // après le délai minimal ci-dessus, mais ne le retient JAMAIS au-delà de cette borne,
 // même si la compilation traîne ou échoue (sécurité anti-blocage, comme le garde-fou
 // du gate de boot). Au-delà : on rend la main quoi qu'il arrive.
-const OUTDOOR_EXIT_FADE_MAX_HOLD_MS = 1800
+const OUTDOOR_EXIT_FADE_MAX_HOLD_MS = 12000
 const OUTDOOR_CONTENT_STAGES = [
   { level: 1, delay: 0 },
   { level: 2, delay: 80 },
