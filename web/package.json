@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "check": "npm run test && npm run build",
     "preview": "vite preview",
+    "terrain-mask": "node scripts/generate-terrain-surface-mask.mjs",
     "thumbnails": "vite --host 127.0.0.1 --port 5173 --open /?tool=thumbnail"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import { Buffer } from 'node:buffer'
 import { writeFile, readFile, mkdir, readdir } from 'node:fs/promises'
 import { basename, extname, join, relative, sep } from 'node:path'
 import process from 'node:process'
+import { generateTerrainSurfaceMask } from './scripts/generate-terrain-surface-mask.mjs'
 
 const MAP_MODEL_EXTENSIONS = new Set(['.glb', '.gltf', '.fbx'])
 const LOOT_MODEL_EXTENSIONS = new Set(['.glb', '.gltf'])
@@ -702,6 +703,7 @@ function saveThumbnailPlugin() {
               '',
             ].join('\n')
             await writeFile(join(process.cwd(), 'src', 'world', 'biomeAreas.generated.js'), biomeSource)
+            await generateTerrainSurfaceMask({ biomeAreas: sanitizedBiomes })
 
             const terrainSource = [
               `export const MAP_TERRAIN_MODIFICATIONS = ${JSON.stringify(sanitizedTerrainModifications, null, 2)}`,

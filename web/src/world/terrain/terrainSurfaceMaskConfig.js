@@ -1,0 +1,4 @@
+export const TERRAIN_SURFACE_MASK_RESOLUTION = 2048
+export const TERRAIN_SURFACE_MASK_WORLD_SIZE = 376
+export const TERRAIN_SURFACE_MASK_HALF_SIZE = TERRAIN_SURFACE_MASK_WORLD_SIZE * 0.5
+export const TERRAIN_SURFACE_MASK_URL = '/textures/outdoor/terrain-surface-mask.png'

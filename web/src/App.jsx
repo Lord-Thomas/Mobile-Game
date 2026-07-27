@@ -18230,6 +18230,7 @@ function App() {
   const [renderStats, setRenderStats] = useState(null)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
   const [freeCameraActive, setFreeCameraActive] = useState(false)
+  const [localTerrainEnabled, setLocalTerrainEnabled] = useState(true)
   const [debugToggles, setDebugToggles] = useState({
     grass: true,
     trees: true,
@@ -22820,7 +22821,7 @@ function App() {
             ballRef={ballRef}
             showGrass={outdoorGrassReady && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
             showTrees={outdoorVegetationReady && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
-            showTerrain
+            showTerrain={localTerrainEnabled && (!isDebugMode || debugToggles.terrain)}
             showRoad={outdoorStaticReady}
             showNeighborHouses={outdoorStaticReady}
             showMapObjects={outdoorObjectsReady}
@@ -23142,6 +23143,16 @@ function App() {
         />
       )}
       {mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
+      {mode === 'play' && showCaptureUi && isLocalNetwork && currentZone === ZONES.outside && (
+        <button
+          className={`local-terrain-toggle${localTerrainEnabled ? ' is-active' : ''}`}
+          type="button"
+          onClick={() => setLocalTerrainEnabled((enabled) => !enabled)}
+          aria-pressed={localTerrainEnabled}
+        >
+          Terrain {localTerrainEnabled ? 'ON' : 'OFF'}
+        </button>
+      )}
       <GpuWarning visible={mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
       {mode === 'play' && (
