@@ -1,4 +1,4 @@
-const PERF_DIAGNOSTICS_VERSION = 1
+const PERF_DIAGNOSTICS_VERSION = 2
 const DEFAULT_EVENT_LIMIT = 8000
 const FREEZE_BEFORE_MS = 2000
 const FREEZE_AFTER_MS = 1000
@@ -406,6 +406,98 @@ function summary() {
     .join('\n\n---\n\n')
 }
 
+function getLatestTransitionEntries() {
+  let startIndex = -1
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index]?.type === 'transition:start') {
+      startIndex = index
+      break
+    }
+  }
+  if (startIndex < 0) return []
+
+  const transitionEntries = []
+  for (let index = startIndex; index < events.length; index += 1) {
+    const entry = events[index]
+    if (index > startIndex && entry?.type === 'transition:start') break
+    transitionEntries.push(entry)
+  }
+  return transitionEntries
+}
+
+function buildTransitionSummary() {
+  if (!mode.enabled) {
+    return 'Diagnostic de transition inactif. Ajoute ?perfdiag=deep à l’URL.'
+  }
+
+  const transitionEntries = getLatestTransitionEntries()
+  if (transitionEntries.length === 0) {
+    return 'Aucune transition enregistrée dans cette session.'
+  }
+
+  const start = transitionEntries[0]
+  const end = [...transitionEntries].reverse().find((entry) => (
+    entry.type === 'transition:first-playable-frame'
+    || entry.type === 'transition:fade-release'
+  ))
+  const milestones = transitionEntries.filter((entry) => (
+    entry.type.startsWith('transition:')
+    || entry.type.startsWith('outdoor:')
+  ))
+  const longTasks = transitionEntries
+    .filter((entry) => entry.type === 'browser:long-task')
+    .sort((left, right) => (
+      Number(right.data?.durationMs ?? 0) - Number(left.data?.durationMs ?? 0)
+    ))
+  const frames = transitionEntries.filter((entry) => entry.type === 'frame')
+  const slowFrames = frames.filter((entry) => entry.severity)
+  const freezesDuringTransition = freezes.filter((capture) => (
+    capture.freeze?.t >= start.t
+    && (!end || capture.freeze?.t <= end.t + FREEZE_AFTER_MS)
+  ))
+
+  const lines = [
+    '[PERF TRANSITION]',
+    `Trajet : ${start.data?.from ?? '?'} → ${start.data?.to ?? '?'}`,
+    `Durée jusqu’à la première image jouable : ${end ? formatMs(end.t - start.t) : 'transition en cours'}`,
+    `Long tasks : ${longTasks.length} (${formatMs(longTasks.reduce((sum, entry) => sum + Number(entry.data?.durationMs ?? 0), 0))} cumulées)`,
+    `Frames lentes : ${slowFrames.length} / ${frames.length}`,
+    `Freezes : ${freezesDuringTransition.length}`,
+    '',
+    'Étapes :',
+  ]
+
+  milestones.forEach((entry, index) => {
+    const elapsed = formatMs(entry.t - start.t)
+    const duration = entry.data?.durationMs != null
+      ? `, durée ${formatMs(entry.data.durationMs)}`
+      : ''
+    const status = entry.data?.timedOut ? ', délai maximal atteint' : ''
+    lines.push(`${index + 1}. +${elapsed} ${entry.type}${duration}${status}`)
+  })
+
+  if (longTasks.length > 0) {
+    lines.push('', 'Plus gros blocages :')
+    longTasks.slice(0, 8).forEach((entry, index) => {
+      lines.push(
+        `${index + 1}. ${formatMs(entry.data?.durationMs)} à +${formatMs(entry.t - start.t)} (${entry.data?.source ?? 'window'})`,
+      )
+    })
+  }
+
+  return lines.join('\n')
+}
+
+function transitionData() {
+  return getLatestTransitionEntries().map((entry) => cloneData(entry))
+}
+
+function transitionSummary() {
+  const value = buildTransitionSummary()
+  if (typeof console !== 'undefined') console.log(value)
+  return value
+}
+
 function clear() {
   events.length = 0
   freezes.length = 0
@@ -433,6 +525,8 @@ export const perfDiagnostics = {
   recordFrame,
   export: exportData,
   summary,
+  transitionData,
+  transitionSummary,
   clear,
 }
 

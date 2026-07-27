@@ -2397,25 +2397,51 @@ function LayeredSceneRenderer({ currentZone }) {
 // (= ciel noir si null). Lecture seule, ne modifie rien. À retirer après diag.
 const TRANSITION_DIAG_ENABLED = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('transitiondiag')
 
-function TransitionDiagProbe({ currentZone }) {
+function TransitionDiagProbe({ currentZone, zoneFadeActive }) {
   const { scene, gl } = useThree()
   const prevZoneRef = useRef(currentZone)
+  const prevFadeActiveRef = useRef(zoneFadeActive)
   const watchRef = useRef(0)
   const lastTimeRef = useRef(0)
   const frameNoRef = useRef(0)
 
   useFrame(() => {
-    if (!TRANSITION_DIAG_ENABLED) return
     const now = performance.now()
     if (prevZoneRef.current !== currentZone) {
       prevZoneRef.current = currentZone
       if (currentZone === ZONES.outside) {
-        watchRef.current = 45
+        watchRef.current = TRANSITION_DIAG_ENABLED ? 45 : 0
         frameNoRef.current = 0
         lastTimeRef.current = now
         const info = gl.info?.programs?.length
-        console.log(`%c[diag] → EXTÉRIEUR (programmes shaders en cache : ${info ?? '?'})`, 'color:#0a0;font-weight:bold')
+        perfDiagnostics.event('transition:first-outdoor-frame', {
+          programs: info ?? null,
+          fadeActive: zoneFadeActive,
+        })
+        if (TRANSITION_DIAG_ENABLED) {
+          console.log(`%c[diag] → EXTÉRIEUR (programmes shaders en cache : ${info ?? '?'})`, 'color:#0a0;font-weight:bold')
+        }
       }
+    }
+    if (
+      prevFadeActiveRef.current
+      && !zoneFadeActive
+      && currentZone === ZONES.outside
+    ) {
+      perfDiagnostics.event('transition:first-playable-frame', {
+        programs: gl.info?.programs?.length ?? null,
+        calls: gl.info?.render?.calls ?? null,
+        triangles: gl.info?.render?.triangles ?? null,
+      })
+      if (TRANSITION_DIAG_ENABLED) {
+        window.setTimeout(() => perfDiagnostics.transitionSummary(), 1100)
+      }
+    }
+    prevFadeActiveRef.current = zoneFadeActive
+
+    if (!TRANSITION_DIAG_ENABLED) {
+      lastTimeRef.current = now
+      return
     }
     if (watchRef.current > 0) {
       const dt = now - lastTimeRef.current
@@ -7235,24 +7261,39 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
   const { gl, scene, camera } = useThree()
   const pass1Ref = useRef(false)
   const pass2Ref = useRef(false)
+  const pass1PromiseRef = useRef(Promise.resolve())
 
-  const compileWith = useCallback(async (cam) => {
+  const compileWith = useCallback(async (cam, pass) => {
+    const startedAt = performance.now()
+    perfDiagnostics.event('outdoor:shader-prewarm-start', {
+      pass,
+      programs: gl.info?.programs?.length ?? null,
+    })
     const originalMask = cam.layers.mask
+    let failed = false
     try {
       // Deux couches (extérieure + défaut), comme compileAndRender du gate : on
       // couvre les matériaux quelle que soit leur couche de rendu.
       for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
         cam.layers.set(layer)
-        if (typeof gl.compileAsync === 'function') {
-          await gl.compileAsync(scene, cam)
-        } else {
-          gl.compile(scene, cam)
-        }
+        // compileAsync sonde les programmes sur plusieurs ticks. Si React
+        // remplace un matériau entre deux sondes, Three peut alors lire un
+        // programme déjà supprimé (GL_INVALID_VALUE / checkMaterialsReady).
+        // La compilation synchrone reste entièrement sous le voile et travaille
+        // sur un graphe de scène cohérent pendant toute la traversée.
+        gl.compile(scene, cam)
       }
     } catch (error) {
+      failed = true
       console.warn('[loadTiming] Outdoor shader prewarm failed', error)
     } finally {
       cam.layers.mask = originalMask
+      perfDiagnostics.event('outdoor:shader-prewarm-end', {
+        pass,
+        failed,
+        durationMs: performance.now() - startedAt,
+        programs: gl.info?.programs?.length ?? null,
+      })
     }
   }, [gl, scene])
 
@@ -7278,7 +7319,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
         cam.lookAt(spawn[0], spawn[1] + 1.1, spawn[2])
         cam.updateProjectionMatrix()
         cam.updateMatrixWorld(true)
-        void compileWith(cam)
+        pass1PromiseRef.current = compileWith(cam, 1)
       })
     })
     return () => {
@@ -7297,9 +7338,16 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
     let raf2 = 0
     raf1 = window.requestAnimationFrame(() => {
       raf2 = window.requestAnimationFrame(() => {
-        void compileWith(camera).finally(() => {
-          if (readyRef) readyRef.current = true
-        })
+        // WebGL ne doit pas compiler deux traversées de la même scène en
+        // parallèle. Sur certains GPU, le chevauchement des deux passes
+        // produisait des glGetProgramiv(GL_INVALID_VALUE) et rallongeait le gel.
+        void pass1PromiseRef.current
+          .catch(() => null)
+          .then(() => compileWith(camera, 2))
+          .finally(() => {
+            if (readyRef) readyRef.current = true
+            perfDiagnostics.event('outdoor:shader-prewarm-ready')
+          })
       })
     })
     return () => {
@@ -9787,8 +9835,12 @@ function applyCustomizeOrbitPan(dxPixels, dyPixels) {
     CUSTOMIZE_ORBIT_TARGET_MAX,
   )
 }
-const PLACEABLE_PLAY_INITIAL_RENDER_COUNT = 1
-const PLACEABLE_PLAY_REVEAL_BATCH_SIZE = 1
+// Deux objets au maximum par commit : assez petit pour préserver le budget
+// d'une frame mobile, mais deux fois moins de commits React qu'un montage unitaire.
+const PLACEABLE_PLAY_INITIAL_RENDER_COUNT = 2
+const PLACEABLE_PLAY_REVEAL_BATCH_SIZE = 2
+const MODULAR_SOFA_MODEL_URL = '/models/placeables/modular-sofa/modular-sofa.fbx'
+const MODULAR_SOFA_TEXTURE_URL = '/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG'
 
 function CustomizationCamera({ active, view = 'top' }) {
   const { gl } = useThree()
@@ -9965,8 +10017,8 @@ function CustomizationCamera({ active, view = 'top' }) {
 }
 
 function SofaModel() {
-  const model = useFBX('/models/placeables/modular-sofa/modular-sofa.fbx')
-  const texture = useTexture('/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG')
+  const model = useFBX(MODULAR_SOFA_MODEL_URL)
+  const texture = useTexture(MODULAR_SOFA_TEXTURE_URL)
   const prepared = useMemo(() => getOrCreatePreparedAsset(
     'placeable-sofa',
     `${model.uuid}:${texture.uuid}`,
@@ -16919,6 +16971,13 @@ const OUTDOOR_CONTENT_STAGES = [
 ]
 const OUTDOOR_ENEMY_PRELOAD_DELAY_MS = 120
 
+function preloadPlaceableAsset(asset) {
+  if (!asset?.url) return null
+  if (asset.kind === 'fbx') return useFBX.preload(asset.url)
+  if (asset.kind === 'texture') return useTexture.preload(asset.url)
+  return useGLTF.preload(asset.url)
+}
+
 const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload(PLAYER_MODEL_URL),
   () => useTexture.preload(PLAYER_FACE_DETAILS_MASK_URL),
@@ -17086,23 +17145,26 @@ function WorldLoadingOverlay({ active, experience }) {
 function ShaderWarmupGate({
   onComplete,
   onProgress,
-  criticalPlaceableModelUrls = [],
+  criticalPlaceableAssets = [],
   worldDataReady = true,
 }) {
   const { gl, scene, camera } = useThree()
   const [initialAssetsReady, setInitialAssetsReady] = useState(() => isInitialAssetBatchReady())
   const completedRef = useRef(false)
   const gateStartedRef = useRef(false)
-  const criticalPlaceableModelUrlsRef = useRef(criticalPlaceableModelUrls)
+  const criticalPlaceableAssetsRef = useRef(criticalPlaceableAssets)
   const onProgressRef = useRef(onProgress)
 
   useEffect(() => {
-    criticalPlaceableModelUrlsRef.current = criticalPlaceableModelUrls
+    criticalPlaceableAssetsRef.current = criticalPlaceableAssets
     onProgressRef.current = onProgress
-  }, [criticalPlaceableModelUrls, onProgress])
+  }, [criticalPlaceableAssets, onProgress])
 
   useEffect(() => {
-    if (gateStartedRef.current) return undefined
+    // La sauvegarde distante définit la liste réelle des meubles. Verrouiller le
+    // lot avant son hydratation faisait découvrir canapé/tapis plusieurs secondes
+    // plus tard, pendant le montage progressif.
+    if (!worldDataReady || gateStartedRef.current) return undefined
     gateStartedRef.current = true
 
     let cancelled = false
@@ -17119,7 +17181,8 @@ function ShaderWarmupGate({
 
     const unsubscribe = subscribeInitialAssetBatch(refresh)
     startInitialAssetBatchCollection()
-    criticalPlaceableModelUrlsRef.current.forEach((url) => useGLTF.preload(url))
+    startStableInitialAssetPreloads()
+    criticalPlaceableAssetsRef.current.forEach(preloadPlaceableAsset)
     onProgressRef.current?.({ percent: 18, phase: 'Chargement de la maison...' })
     markLoad('gate:lock')
     lockInitialAssetBatch()
@@ -17136,7 +17199,7 @@ function ShaderWarmupGate({
       unsubscribe()
       if (timeoutId) window.clearTimeout(timeoutId)
     }
-  }, [])
+  }, [worldDataReady])
 
   useEffect(() => {
     if (completedRef.current) return undefined
@@ -17157,8 +17220,8 @@ function ShaderWarmupGate({
       // Jalon : le lot initial est prêt ou libéré par le garde-fou. Les assets
       // démarrés ensuite ne peuvent plus garder l'overlay ouvert.
       const criticalPlaceablePreloads = Promise.allSettled(
-        criticalPlaceableModelUrlsRef.current.map((url) => (
-          Promise.resolve().then(() => useGLTF.preload(url))
+        criticalPlaceableAssetsRef.current.map((asset) => (
+          Promise.resolve().then(() => preloadPlaceableAsset(asset))
         )),
       )
       const preloadResult = await waitForPromiseWithTimeout(
@@ -17232,11 +17295,7 @@ function ShaderWarmupGate({
         try {
           for (const layer of [OUTDOOR_LIGHT_LAYER, 0]) {
             warmupCamera.layers.set(layer)
-            if (typeof gl.compileAsync === 'function') {
-              await gl.compileAsync(scene, warmupCamera)
-            } else {
-              gl.compile(scene, warmupCamera)
-            }
+            gl.compile(scene, warmupCamera)
           }
         } finally {
           warmupCamera.layers.mask = originalLayerMask
@@ -18353,6 +18412,7 @@ function App() {
   // les programmes en cache GPU, les sorties suivantes n'attendent plus.
   const outdoorPrewarmReadyRef = useRef(false)
   const outdoorZoneReadyRef = useRef(false)
+  const outdoorReadinessSnapshotRef = useRef('')
   const [spawnRequest, setSpawnRequest] = useState(null)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
   const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
@@ -18596,6 +18656,7 @@ function App() {
 
     const timerIds = OUTDOOR_CONTENT_STAGES.map(({ level, delay }) => (
       window.setTimeout(() => {
+        perfDiagnostics.event('outdoor:content-stage', { level, configuredDelayMs: delay })
         setOutdoorContentStage((stage) => Math.max(stage, level))
       }, delay)
     ))
@@ -18685,7 +18746,7 @@ function App() {
   ])
 
   useEffect(() => {
-    outdoorZoneReadyRef.current = currentZone === ZONES.outside
+    const ready = currentZone === ZONES.outside
       && outdoorContentStage >= 5
       && outdoorRuntimeRevealStage >= 3
       && outdoorMapAssetsReady
@@ -18693,13 +18754,33 @@ function App() {
         monsterSpawnSlots.length === 0
         || outdoorEnemiesMounted
       )
+    outdoorZoneReadyRef.current = ready
+
+    const snapshot = {
+      ready,
+      zone: currentZone,
+      contentStage: outdoorContentStage,
+      runtimeRevealStage: outdoorRuntimeRevealStage,
+      mapAssetsReady: outdoorMapAssetsReady,
+      enemyAssetsReady: outdoorEnemyAssetsReady,
+      enemiesMounted: outdoorEnemiesMounted,
+      visibleEnemies: visibleOutdoorEnemyCount,
+      totalEnemies: monsterSpawnSlots.length,
+    }
+    const key = JSON.stringify(snapshot)
+    if (outdoorReadinessSnapshotRef.current !== key) {
+      outdoorReadinessSnapshotRef.current = key
+      perfDiagnostics.event('outdoor:readiness', snapshot)
+    }
   }, [
     currentZone,
     monsterSpawnSlots.length,
     outdoorContentStage,
     outdoorRuntimeRevealStage,
+    outdoorEnemyAssetsReady,
     outdoorMapAssetsReady,
     outdoorEnemiesMounted,
+    visibleOutdoorEnemyCount,
   ])
 
   // Fin de la période de silence : les déblocages suivants affichent un toast.
@@ -20354,14 +20435,32 @@ function App() {
   )
   const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
-  const criticalPlaceableModelUrls = useMemo(() => (
-    [...new Set(
-      editableObjects
-        .filter((object) => object.status !== 'stored')
-        .map((object) => objectCatalog[object.objectId]?.modelUrl)
-        .filter(Boolean),
-    )]
-  ), [editableObjects])
+  const criticalPlaceableAssets = useMemo(() => {
+    const assets = new Map()
+    const add = (kind, url) => {
+      if (!url) return
+      assets.set(`${kind}:${url}`, { kind, url })
+    }
+
+    editableObjects
+      .filter((object) => object.status !== 'stored')
+      .forEach((object) => {
+        const item = objectCatalog[object.objectId]
+        if (!item) return
+        add('gltf', item.modelUrl)
+        add('texture', item.imageUrl)
+
+        // Le canapé modulaire est encore un FBX avec texture externe. Ces deux
+        // ressources étaient absentes de l'ancien manifeste GLB et démarraient
+        // donc seulement lorsque le composant devenait visible.
+        if (item.type === 'sofa' && !item.modelUrl) {
+          add('fbx', item.thumbnailModelUrl ?? MODULAR_SOFA_MODEL_URL)
+          add('texture', item.thumbnailTextureUrl ?? MODULAR_SOFA_TEXTURE_URL)
+        }
+      })
+
+    return [...assets.values()]
+  }, [editableObjects])
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
@@ -21532,11 +21631,14 @@ function App() {
         // shaders extérieurs pré-compilés, pour que la 1re frame jouable dehors
         // ne tombe pas en plein freeze de compilation. Plafonné par
         // OUTDOOR_EXIT_FADE_MAX_HOLD_MS pour ne jamais coincer le joueur.
-        const releaseFade = () => {
+        const releaseFade = ({ timedOut = false, holdDurationMs = 0 } = {}) => {
           perfDiagnostics.event('transition:fade-release', {
             from: currentZone,
             to: nextZone,
             prewarmReady: outdoorPrewarmReadyRef.current,
+            outdoorReady: outdoorZoneReadyRef.current,
+            timedOut,
+            holdDurationMs,
           })
           updateLoadingExperience({ percent: 100, phase: 'Extérieur prêt !' })
           window.requestAnimationFrame(() => {
@@ -21553,14 +21655,14 @@ function App() {
         }
         const holdStartedAt = Date.now()
         const pollPrewarm = () => {
-          if (
-            (
-              (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current)
-              && outdoorZoneReadyRef.current
-            ) ||
-            Date.now() - holdStartedAt >= OUTDOOR_EXIT_FADE_MAX_HOLD_MS
-          ) {
-            releaseFade()
+          const holdDurationMs = Date.now() - holdStartedAt
+          const ready = (
+            (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current)
+            && outdoorZoneReadyRef.current
+          )
+          const timedOut = holdDurationMs >= OUTDOOR_EXIT_FADE_MAX_HOLD_MS
+          if (ready || timedOut) {
+            releaseFade({ timedOut, holdDurationMs })
             return
           }
           updateLoadingExperience({
@@ -22266,7 +22368,7 @@ function App() {
         <ShaderWarmupGate
           onComplete={completeShaderWarmup}
           onProgress={updateLoadingExperience}
-          criticalPlaceableModelUrls={criticalPlaceableModelUrls}
+          criticalPlaceableAssets={criticalPlaceableAssets}
           worldDataReady={worldDataReady}
         />
         {PERF_RUNTIME_WARMUP_RIG && (
@@ -22281,7 +22383,12 @@ function App() {
             readyRef={outdoorPrewarmReadyRef}
           />
         )}
-        {TRANSITION_DIAG_ENABLED && <TransitionDiagProbe currentZone={currentZone} />}
+        {(TRANSITION_DIAG_ENABLED || perfDiagnosticsActive) && (
+          <TransitionDiagProbe
+            currentZone={currentZone}
+            zoneFadeActive={zoneFadeActive}
+          />
+        )}
         <LayeredSceneRenderer currentZone={currentZone} />
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
