@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { Buffer } from 'node:buffer'
 import { writeFile, readFile, mkdir, readdir } from 'node:fs/promises'
 import { basename, extname, join, relative, sep } from 'node:path'
+import process from 'node:process'
 
 const MAP_MODEL_EXTENSIONS = new Set(['.glb', '.gltf', '.fbx'])
 const LOOT_MODEL_EXTENSIONS = new Set(['.glb', '.gltf'])
@@ -751,9 +752,44 @@ function saveThumbnailPlugin() {
   }
 }
 
+function ezTreeSourcePlugin() {
+  const lazyTexturesModule = join(process.cwd(), 'src', 'vendor', 'ezTreeTextures.js')
+
+  return {
+    name: 'ez-tree-source',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      const normalizedImporter = importer?.split('\\').join('/') ?? ''
+      if (
+        source === './textures'
+        && normalizedImporter.endsWith('/@dgreenheck/ez-tree/src/lib/tree.js')
+      ) {
+        return lazyTexturesModule
+      }
+      return null
+    },
+  }
+}
+
 export default defineConfig({
   cacheDir: '../.npm-cache/vite-web',
-  plugins: [react(), saveThumbnailPlugin()],
+  plugins: [ezTreeSourcePlugin(), react(), saveThumbnailPlugin()],
+  resolve: {
+    alias: {
+      // The published EZ Tree bundle inlines all of its textures as base64 and
+      // bundles its own Three.js copy. Its source entry exposes the exact same
+      // API while allowing Vite to share Three.js and emit textures as assets.
+      '@dgreenheck/ez-tree': join(
+        process.cwd(),
+        'node_modules',
+        '@dgreenheck',
+        'ez-tree',
+        'src',
+        'lib',
+        'index.js',
+      ),
+    },
+  },
   server: {
     proxy: {
       '/youtube-channel': {
