@@ -758,6 +758,15 @@ const CHEAT_SWORD_GRIP = {
   // Repli utilisé uniquement par les anciens GLB dépourvus de weapon_grip_r.
   modelOffset: [0, -0.13, 0],
 }
+
+function getNextTerrainRenderMode(current) {
+  if (current === 'full') return 'lambert'
+  if (current === 'lambert') return 'standard'
+  if (current === 'standard') return 'texture'
+  if (current === 'texture') return 'simple'
+  if (current === 'simple') return 'off'
+  return 'full'
+}
 const MAGIC_SKULL_TOWER_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === 'skeleton_tower') ?? null
 const MAGIC_SKULL_DISCOVERY_PLACEMENT = MAP_OBJECT_PLACEMENTS.find((placement) => placement.objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) ?? null
 // PNJ de quête placés depuis l'éditeur (statique au chargement, comme les autres
@@ -17728,11 +17737,12 @@ function PerfFrameProbe({
   return null
 }
 
-function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
+function RenderStatsProbe({ onStatsChange, onRendererInfo, active, resetKey }) {
   const { gl, scene } = useThree()
   const elapsedRef = useRef(0)
   const framesRef = useRef(0)
   const maxFrameTimeRef = useRef(0)
+  const rollingSamplesRef = useRef([])
   const drawingBufferRef = useRef(new Vector2())
   const categoryElapsedRef = useRef(1)
   const categoryStatsRef = useRef({
@@ -17743,6 +17753,13 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
   useEffect(() => {
     onRendererInfo(getRendererInfo(gl))
   }, [gl, onRendererInfo])
+
+  useEffect(() => {
+    elapsedRef.current = 0
+    framesRef.current = 0
+    maxFrameTimeRef.current = 0
+    rollingSamplesRef.current = []
+  }, [resetKey])
 
   useFrame((_, delta) => {
     if (!active) return
@@ -17757,6 +17774,27 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
     gl.getDrawingBufferSize(drawingBufferRef.current)
     const fps = framesRef.current / elapsedRef.current
     const averageFrameTimeMs = (elapsedRef.current / framesRef.current) * 1000
+    rollingSamplesRef.current.push({
+      elapsed: elapsedRef.current,
+      frames: framesRef.current,
+      maxFrameTimeMs: maxFrameTimeRef.current,
+    })
+    let rollingDuration = rollingSamplesRef.current.reduce(
+      (total, sample) => total + sample.elapsed,
+      0,
+    )
+    while (rollingSamplesRef.current.length > 1 && rollingDuration > 5) {
+      rollingDuration -= rollingSamplesRef.current.shift().elapsed
+    }
+    const rollingFrames = rollingSamplesRef.current.reduce(
+      (total, sample) => total + sample.frames,
+      0,
+    )
+    const stableFps = rollingFrames / Math.max(0.001, rollingDuration)
+    const stableMaxFrameTimeMs = rollingSamplesRef.current.reduce(
+      (maximum, sample) => Math.max(maximum, sample.maxFrameTimeMs),
+      0,
+    )
     categoryElapsedRef.current += elapsedRef.current
     if (categoryElapsedRef.current >= 1) {
       const trianglesByCategory = {}
@@ -17780,8 +17818,11 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
 
     const nextStats = {
       fps,
+      stableFps,
+      stableWindowSeconds: rollingDuration,
       frameTimeMs: averageFrameTimeMs,
       maxFrameTimeMs: maxFrameTimeRef.current,
+      stableMaxFrameTimeMs,
       drawCalls: gl.info.render.calls,
       triangles: gl.info.render.triangles,
       textures: gl.info.memory.textures,
@@ -17804,13 +17845,26 @@ function RenderStatsProbe({ onStatsChange, onRendererInfo, active }) {
   return null
 }
 
-function RenderStatsOverlay({ stats, toggles, onToggle }) {
+function RenderStatsOverlay({
+  stats,
+  toggles,
+  terrainRenderMode,
+  onTerrainRenderModeChange,
+  onToggle,
+}) {
+  const [expanded, setExpanded] = useState(() => !isLikelyMobileDevice())
+
   if (!stats) return null
 
   const rows = [
     ['FPS', stats.fps.toFixed(1)],
+    [
+      `FPS moyen ${Math.min(5, stats.stableWindowSeconds ?? 0).toFixed(1)} s`,
+      (stats.stableFps ?? stats.fps).toFixed(1),
+    ],
     ['Frame', `${stats.frameTimeMs.toFixed(1)} ms`],
     ['Max frame', `${stats.maxFrameTimeMs.toFixed(1)} ms`],
+    ['Pire frame 5 s', `${(stats.stableMaxFrameTimeMs ?? stats.maxFrameTimeMs).toFixed(1)} ms`],
     ['Draw calls', stats.drawCalls.toLocaleString('fr-FR')],
     ['Triangles', stats.triangles.toLocaleString('fr-FR')],
     ['Textures', stats.textures.toLocaleString('fr-FR')],
@@ -17855,58 +17909,96 @@ function RenderStatsOverlay({ stats, toggles, onToggle }) {
       <strong>{value}</strong>
     </div>
   ))
+  const stableFps = stats.stableFps ?? stats.fps
+  const fpsLevel = stableFps >= 30 ? 'good' : stableFps >= 24 ? 'ok' : 'low'
 
   return (
-    <aside className="render-stats" aria-label="Statistiques de rendu">
-      <div className="render-stats-panel render-stats-controls-panel">
-        <div className="render-stats-section-title">Toggles</div>
-        <div className="render-stats-controls">
-          {[
-            ['grass', 'Herbe'],
-            ['trees', 'Arbres'],
-            ['terrain', 'Terrain'],
-            ['sky', 'Ciel'],
-            ['shadows', 'Ombres'],
-            ['house', 'Maison'],
-            ['player', 'Joueur'],
-            ['plot', 'Parcelle'],
-            ['portrait', '9:16'],
-          ].map(([key, label]) => (
-            <button
-              className={toggles[key] ? 'is-active' : ''}
-              key={key}
-              type="button"
-              onClick={() => onToggle(key)}
-            >
-              {label}
-            </button>
-          ))}
+    <aside className={`render-stats${expanded ? ' is-expanded' : ' is-collapsed'}`} aria-label="Statistiques de rendu">
+      <div className="render-stats-summary">
+        <div className={`render-stats-summary-fps fps-${fpsLevel}`}>
+          <strong>{stableFps.toFixed(1)}</strong>
+          <span>FPS · moy. 5 s</span>
         </div>
+        <div className="render-stats-summary-metric">
+          <strong>{stats.frameTimeMs.toFixed(1)} ms</strong>
+          <span>frame</span>
+        </div>
+        <div className="render-stats-summary-metric">
+          <strong>{stats.drawCalls}</strong>
+          <span>draws</span>
+        </div>
+        <button
+          className="render-stats-expand"
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Replier les statistiques' : 'Déplier les statistiques'}
+        >
+          {expanded ? '×' : '≡'}
+        </button>
       </div>
 
-      <div className="render-stats-panel">
-        <div className="render-stats-section-title">Rendu</div>
-        {renderDebugRows(rows, 'render-')}
-      </div>
+      {expanded && (
+        <div className="render-stats-content">
+          <div className="render-stats-panel render-stats-controls-panel">
+            <div className="render-stats-section-title">Éléments affichés</div>
+            <div className="render-stats-controls">
+              <button
+                className="render-stats-terrain-mode is-active"
+                type="button"
+                onClick={onTerrainRenderModeChange}
+                title="Faire défiler les modes de diagnostic du terrain"
+              >
+                Terrain : {terrainRenderMode === 'full' ? 'NORMAL' : terrainRenderMode.toUpperCase()}
+              </button>
+              {[
+                ['grass', 'Herbe'],
+                ['trees', 'Arbres'],
+                ['terrain', 'Terrain'],
+                ['sky', 'Ciel'],
+                ['shadows', 'Ombres'],
+                ['house', 'Maison'],
+                ['player', 'Joueur'],
+                ['plot', 'Parcelle'],
+                ['portrait', '9:16'],
+              ].map(([key, label]) => (
+                <button
+                  className={toggles[key] ? 'is-active' : ''}
+                  key={key}
+                  type="button"
+                  onClick={() => onToggle(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {grassRows.length > 0 && (
-        <div className="render-stats-panel render-stats-tall-panel">
-          <div className="render-stats-section-title">Herbe</div>
-          {renderDebugRows(grassRows, 'grass-')}
-        </div>
-      )}
+          <div className="render-stats-panel">
+            <div className="render-stats-section-title">Rendu</div>
+            {renderDebugRows(rows, 'render-')}
+          </div>
 
-      {drawCallRows.length > 0 && (
-        <div className="render-stats-panel">
-          <div className="render-stats-section-title">Draw calls / categorie</div>
-          {renderDebugRows(drawCallRows, 'draw-')}
-        </div>
-      )}
+          {grassRows.length > 0 && (
+            <div className="render-stats-panel render-stats-tall-panel">
+              <div className="render-stats-section-title">Herbe</div>
+              {renderDebugRows(grassRows, 'grass-')}
+            </div>
+          )}
 
-      {triangleRows.length > 0 && (
-        <div className="render-stats-panel">
-          <div className="render-stats-section-title">Triangles / categorie</div>
-          {renderDebugRows(triangleRows, 'tri-')}
+          {drawCallRows.length > 0 && (
+            <div className="render-stats-panel">
+              <div className="render-stats-section-title">Draw calls / catégorie</div>
+              {renderDebugRows(drawCallRows, 'draw-')}
+            </div>
+          )}
+
+          {triangleRows.length > 0 && (
+            <div className="render-stats-panel">
+              <div className="render-stats-section-title">Triangles / catégorie</div>
+              {renderDebugRows(triangleRows, 'tri-')}
+            </div>
+          )}
         </div>
       )}
     </aside>
@@ -18230,7 +18322,9 @@ function App() {
   const [renderStats, setRenderStats] = useState(null)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
   const [freeCameraActive, setFreeCameraActive] = useState(false)
-  const [localTerrainMode, setLocalTerrainMode] = useState('full')
+  const [terrainRenderMode, setTerrainRenderMode] = useState(
+    () => isLikelyMobileDevice() ? 'lambert' : 'full',
+  )
   const [debugToggles, setDebugToggles] = useState({
     grass: true,
     trees: true,
@@ -22624,7 +22718,12 @@ function App() {
         <AdaptiveCameraFov />
         <FreeCameraController active={isLocalNetwork && freeCameraActive} touchRef={touchRef} />
         {performanceSettings.autoQuality && <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />}
-        <RenderStatsProbe onStatsChange={setRenderStats} onRendererInfo={setRendererInfo} active={isDebugMode || performanceSettings.showFps} />
+        <RenderStatsProbe
+          onStatsChange={setRenderStats}
+          onRendererInfo={setRendererInfo}
+          active={isDebugMode || performanceSettings.showFps}
+          resetKey={`${terrainRenderMode}:${Object.entries(debugToggles).map(([key, value]) => `${key}:${value ? 1 : 0}`).join(',')}`}
+        />
         {perfDiagnosticsActive && (
           <PerfFrameProbe
             currentZone={currentZone}
@@ -22821,8 +22920,8 @@ function App() {
             ballRef={ballRef}
             showGrass={outdoorGrassReady && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
             showTrees={outdoorVegetationReady && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
-            showTerrain={localTerrainMode !== 'off' && (!isDebugMode || debugToggles.terrain)}
-            terrainRenderMode={localTerrainMode}
+            showTerrain={terrainRenderMode !== 'off' && (!isDebugMode || debugToggles.terrain)}
+            terrainRenderMode={terrainRenderMode}
             showRoad={outdoorStaticReady}
             showNeighborHouses={outdoorStaticReady}
             showMapObjects={outdoorObjectsReady}
@@ -23140,29 +23239,21 @@ function App() {
         <RenderStatsOverlay
           stats={renderStats}
           toggles={debugToggles}
+          terrainRenderMode={terrainRenderMode}
+          onTerrainRenderModeChange={() => setTerrainRenderMode(getNextTerrainRenderMode)}
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
         />
       )}
       {mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
-      {mode === 'play' && showCaptureUi && isLocalNetwork && currentZone === ZONES.outside && (
+      {mode === 'play' && !isDebugMode && showCaptureUi && isLocalNetwork && currentZone === ZONES.outside && (
         <button
-          className={`local-terrain-toggle is-${localTerrainMode}`}
+          className={`local-terrain-toggle is-${terrainRenderMode}`}
           type="button"
-          onClick={() => setLocalTerrainMode((current) => (
-            current === 'full'
-              ? 'lambert'
-              : current === 'lambert'
-                ? 'standard'
-                : current === 'standard'
-                  ? 'texture'
-                  : current === 'texture'
-                    ? 'simple'
-                    : current === 'simple' ? 'off' : 'full'
-          ))}
+          onClick={() => setTerrainRenderMode(getNextTerrainRenderMode)}
           aria-label="Changer le mode de diagnostic du terrain"
           title="NORMAL : PBR complet · LAMBERT : rendu complet avec éclairage léger · STANDARD : PBR sans texture · TEXTURE : une texture sans éclairage · SIMPLE : même maillage sans shader · OFF : terrain masqué"
         >
-          Terrain {localTerrainMode === 'full' ? 'NORMAL' : localTerrainMode.toUpperCase()}
+          Terrain {terrainRenderMode === 'full' ? 'NORMAL' : terrainRenderMode.toUpperCase()}
         </button>
       )}
       <GpuWarning visible={mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
