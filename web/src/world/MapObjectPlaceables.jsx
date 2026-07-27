@@ -8,6 +8,7 @@ import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import ProceduralTree from './trees/ProceduralTree'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, getMapObjectCatalogItem } from './mapObjects'
 import { getTerrainHeight } from './terrain/terrainGeometry'
+import { getOrCreatePreparedAsset } from '../lib/assetPreparationCache'
 
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
@@ -39,24 +40,31 @@ function cloneInPlaceAnimationClip(clip, fallbackName) {
 
 function MapObjectGltfModel({ catalogItem }) {
   const gltf = useGLTF(catalogItem.modelUrl)
-  const model = useMemo(() => {
-    const object = clone(gltf.scene)
+  const prepared = useMemo(() => getOrCreatePreparedAsset(
+    'map-object-gltf',
+    `${catalogItem.modelUrl}:${catalogItem.targetHeightMeters ?? 0}`,
+    () => {
+      const object = clone(gltf.scene)
 
-    object.traverse((child) => {
-      if (child instanceof Mesh) {
-        child.castShadow = true
-        child.receiveShadow = true
+      object.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.castShadow = true
+          child.receiveShadow = true
+        }
+      })
+
+      const transform = getModelFitTransform(object, catalogItem)
+      return {
+        template: object,
+        offset: transform.offsetArray,
+        scale: transform.scale,
       }
-    })
-
-    const transform = getModelFitTransform(object, catalogItem)
-
-    return {
-      object,
-      offset: transform.offsetArray,
-      scale: transform.scale,
-    }
-  }, [catalogItem, gltf.scene])
+    },
+  ), [catalogItem, gltf.scene])
+  const model = useMemo(() => ({
+    ...prepared,
+    object: clone(prepared.template),
+  }), [prepared])
 
   return (
     <group scale={model.scale}>
@@ -67,24 +75,31 @@ function MapObjectGltfModel({ catalogItem }) {
 
 function MapObjectFbxModel({ catalogItem }) {
   const fbx = useFBX(catalogItem.modelUrl)
-  const model = useMemo(() => {
-    const object = clone(fbx)
+  const prepared = useMemo(() => getOrCreatePreparedAsset(
+    'map-object-fbx',
+    `${catalogItem.modelUrl}:${catalogItem.targetHeightMeters ?? 0}`,
+    () => {
+      const object = clone(fbx)
 
-    object.traverse((child) => {
-      if (child instanceof Mesh) {
-        child.castShadow = true
-        child.receiveShadow = true
+      object.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.castShadow = true
+          child.receiveShadow = true
+        }
+      })
+
+      const transform = getModelFitTransform(object, catalogItem)
+      return {
+        template: object,
+        offset: transform.offsetArray,
+        scale: transform.scale,
       }
-    })
-
-    const transform = getModelFitTransform(object, catalogItem)
-
-    return {
-      object,
-      offset: transform.offsetArray,
-      scale: transform.scale,
-    }
-  }, [catalogItem, fbx])
+    },
+  ), [catalogItem, fbx])
+  const model = useMemo(() => ({
+    ...prepared,
+    object: clone(prepared.template),
+  }), [prepared])
   const animationClips = useMemo(
     () => (fbx.animations ?? []).map((clip, index) => {
       return cloneInPlaceAnimationClip(clip, `fbxIdle${index}`)
@@ -120,19 +135,63 @@ function getModelExtension(modelUrl = '') {
   return modelUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
 }
 
-function preloadMapObjectAssets(objects = MAP_OBJECT_PLACEMENTS) {
-  objects.forEach((placement) => {
-    const item = MAP_OBJECT_CATALOG[placement.objectId]
-    if (!item?.modelUrl) return
-    if (getModelExtension(item.modelUrl) === 'fbx') useFBX.preload(item.modelUrl)
-    else useGLTF.preload(item.modelUrl)
+const mapObjectAssetPromises = new Map()
+
+function waitForIdleTurn() {
+  if (typeof window === 'undefined') return Promise.resolve()
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => resolve(), { timeout: 800 })
+    } else {
+      window.setTimeout(resolve, 16)
+    }
   })
 }
 
-export function MapObjectAssetsPreloader({ objects = MAP_OBJECT_PLACEMENTS }) {
+function preloadMapObjectAssets(objects = MAP_OBJECT_PLACEMENTS) {
+  const uniqueItems = []
+  const seenUrls = new Set()
+  objects.forEach((placement) => {
+    const item = MAP_OBJECT_CATALOG[placement.objectId]
+    if (!item?.modelUrl || seenUrls.has(item.modelUrl)) return
+    seenUrls.add(item.modelUrl)
+    uniqueItems.push(item)
+  })
+
+  let nextIndex = 0
+  const runWorker = async () => {
+    while (nextIndex < uniqueItems.length) {
+      const item = uniqueItems[nextIndex]
+      nextIndex += 1
+      if (!mapObjectAssetPromises.has(item.modelUrl)) {
+        await waitForIdleTurn()
+        const preload = getModelExtension(item.modelUrl) === 'fbx'
+          ? () => useFBX.preload(item.modelUrl)
+          : () => useGLTF.preload(item.modelUrl)
+        mapObjectAssetPromises.set(
+          item.modelUrl,
+          Promise.resolve().then(preload).catch(() => null),
+        )
+      }
+      await mapObjectAssetPromises.get(item.modelUrl)
+    }
+  }
+
+  const workerCount = Math.min(2, uniqueItems.length)
+  return Promise.all(Array.from({ length: workerCount }, runWorker))
+}
+
+export function MapObjectAssetsPreloader({
+  objects = MAP_OBJECT_PLACEMENTS,
+  onReady = null,
+}) {
   useEffect(() => {
-    preloadMapObjectAssets(objects)
-  }, [objects])
+    let cancelled = false
+    preloadMapObjectAssets(objects).finally(() => {
+      if (!cancelled) onReady?.()
+    })
+    return () => { cancelled = true }
+  }, [objects, onReady])
   return null
 }
 

@@ -26,8 +26,11 @@ import { SpatialHash2D } from './game/runtime/spatialHash2D'
 import { useGameFrameTask } from './game/runtime/useGameFrameTask'
 import { useScheduledAnimations } from './game/runtime/useScheduledAnimations'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
+import { getOrCreatePreparedAsset } from './lib/assetPreparationCache'
+import { completeLoadTask, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
+import { useProgressiveMountCount } from './lib/useProgressiveMountCount'
 import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
 import { useGameStore } from './stores/useGameStore'
 import { GENERATED_ENEMY_DEFINITIONS } from './enemies/enemyDefinitions.generated'
@@ -9784,11 +9787,8 @@ function applyCustomizeOrbitPan(dxPixels, dyPixels) {
     CUSTOMIZE_ORBIT_TARGET_MAX,
   )
 }
-const PLACEABLE_PLAY_INITIAL_RENDER_COUNT = 6
-const PLACEABLE_PLAY_REVEAL_BATCH_SIZE = 3
-const PLACEABLE_PLAY_REVEAL_INTERVAL_MS = 180
-const PLACEABLE_PLAY_STUTTER_PAUSE_MS = 450
-const PLACEABLE_PLAY_FREEZE_PAUSE_MS = 1000
+const PLACEABLE_PLAY_INITIAL_RENDER_COUNT = 1
+const PLACEABLE_PLAY_REVEAL_BATCH_SIZE = 1
 
 function CustomizationCamera({ active, view = 'top' }) {
   const { gl } = useThree()
@@ -9967,37 +9967,45 @@ function CustomizationCamera({ active, view = 'top' }) {
 function SofaModel() {
   const model = useFBX('/models/placeables/modular-sofa/modular-sofa.fbx')
   const texture = useTexture('/models/placeables/modular-sofa/tripo_convert_9412eb1b-7c85-49b7-86b8-96b1b5cc9732.fbm/modularsofa3dmodel_basecolor.JPEG')
-  const sofa = useMemo(() => {
-    const object = clone(model)
-    texture.colorSpace = SRGBColorSpace
-    texture.needsUpdate = true
+  const prepared = useMemo(() => getOrCreatePreparedAsset(
+    'placeable-sofa',
+    `${model.uuid}:${texture.uuid}`,
+    () => {
+      const object = clone(model)
+      texture.colorSpace = SRGBColorSpace
+      texture.needsUpdate = true
 
-    object.traverse((child) => {
-      if (child instanceof Mesh) {
-        child.castShadow = true
-        child.receiveShadow = true
-        if (child.material) {
-          child.material = child.material.clone()
-          child.material.map = texture
-          child.material.needsUpdate = true
+      object.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.castShadow = true
+          child.receiveShadow = true
+          if (child.material) {
+            child.material = child.material.clone()
+            child.material.map = texture
+            child.material.needsUpdate = true
+          }
         }
+      })
+
+      object.updateWorldMatrix(true, true)
+      const box = new Box3().setFromObject(object)
+      const size = box.getSize(new Vector3())
+      const center = box.getCenter(new Vector3())
+      const longestSide = Math.max(size.x, size.z, 0.001)
+      const targetWidth = SOFA_WIDTH_METERS * WORLD_UNITS_PER_METER
+      const scale = targetWidth / longestSide
+
+      return {
+        template: object,
+        offset: [-center.x, -box.min.y, -center.z],
+        scale,
       }
-    })
-
-    object.updateWorldMatrix(true, true)
-    const box = new Box3().setFromObject(object)
-    const size = box.getSize(new Vector3())
-    const center = box.getCenter(new Vector3())
-    const longestSide = Math.max(size.x, size.z, 0.001)
-    const targetWidth = SOFA_WIDTH_METERS * WORLD_UNITS_PER_METER
-    const scale = targetWidth / longestSide
-
-    return {
-      object,
-      offset: [-center.x, -box.min.y, -center.z],
-      scale,
-    }
-  }, [model, texture])
+    },
+  ), [model, texture])
+  const sofa = useMemo(() => ({
+    ...prepared,
+    object: clone(prepared.template),
+  }), [prepared])
 
   return (
     <group scale={sofa.scale}>
@@ -10065,34 +10073,47 @@ function mergeStaticModelMeshes(root) {
 function GlbPlaceableModel({ objectId }) {
   const catalogItem = objectCatalog[objectId]
   const gltf = useGLTF(catalogItem.modelUrl)
-  const model = useMemo(() => {
-    const object = clone(gltf.scene)
+  const preparationKey = [
+    catalogItem.modelUrl,
+    catalogItem.targetWidthMeters ?? 0,
+    catalogItem.targetHeightMeters ?? 0,
+  ].join(':')
+  const prepared = useMemo(() => getOrCreatePreparedAsset(
+    'placeable-glb',
+    preparationKey,
+    () => {
+      const object = clone(gltf.scene)
 
-    object.traverse((child) => {
-      if (child instanceof Mesh) {
-        child.castShadow = true
-        child.receiveShadow = true
+      object.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.castShadow = true
+          child.receiveShadow = true
+        }
+      })
+      mergeStaticModelMeshes(object)
+
+      object.updateWorldMatrix(true, true)
+      const box = new Box3().setFromObject(object)
+      const size = box.getSize(new Vector3())
+      const center = box.getCenter(new Vector3())
+      const targetWidth = (catalogItem.targetWidthMeters ?? 0) * WORLD_UNITS_PER_METER
+      const targetHeight = (catalogItem.targetHeightMeters ?? 0) * WORLD_UNITS_PER_METER
+      const horizontalSize = Math.max(size.x, size.z, 0.001)
+      const sourceSize = targetHeight > 0 ? Math.max(size.y, 0.001) : horizontalSize
+      const targetSize = targetHeight > 0 ? targetHeight : targetWidth
+      const scale = targetSize > 0 ? targetSize / sourceSize : 1
+
+      return {
+        template: object,
+        offset: [-center.x, -box.min.y, -center.z],
+        scale,
       }
-    })
-    mergeStaticModelMeshes(object)
-
-    object.updateWorldMatrix(true, true)
-    const box = new Box3().setFromObject(object)
-    const size = box.getSize(new Vector3())
-    const center = box.getCenter(new Vector3())
-    const targetWidth = (catalogItem.targetWidthMeters ?? 0) * WORLD_UNITS_PER_METER
-    const targetHeight = (catalogItem.targetHeightMeters ?? 0) * WORLD_UNITS_PER_METER
-    const horizontalSize = Math.max(size.x, size.z, 0.001)
-    const sourceSize = targetHeight > 0 ? Math.max(size.y, 0.001) : horizontalSize
-    const targetSize = targetHeight > 0 ? targetHeight : targetWidth
-    const scale = targetSize > 0 ? targetSize / sourceSize : 1
-
-    return {
-      object,
-      offset: [-center.x, -box.min.y, -center.z],
-      scale,
-    }
-  }, [catalogItem.targetHeightMeters, catalogItem.targetWidthMeters, gltf.scene])
+    },
+  ), [catalogItem.targetHeightMeters, catalogItem.targetWidthMeters, gltf.scene, preparationKey])
+  const model = useMemo(() => ({
+    ...prepared,
+    object: clone(prepared.template),
+  }), [prepared])
 
   return (
     <group scale={model.scale} rotation={[0, catalogItem.modelRotationY ?? 0, 0]}>
@@ -12326,6 +12347,81 @@ function SmallMushroomEnemy({
 // les slots. Comme le modèle/les animations sont déjà construits, l'invocation
 // ne provoque aucun freeze (le coût est payé une fois au montage, comme les
 // squelettes ennemis qui existent dès le chargement du monde).
+function ProgressiveOutdoorEnemyLayer({
+  enabled,
+  assetsReady,
+  slots,
+  playerPositionRef,
+  registerCombatTarget,
+  onDefeated,
+  onHitPlayer,
+  mobGroupRef,
+  mobSpatialIndexRef,
+  allyTargetsRef,
+  onProgress,
+  onReady,
+}) {
+  const targetCount = enabled && assetsReady ? slots.length : 0
+  const { count, complete } = useProgressiveMountCount({
+    enabled: true,
+    total: targetCount,
+    initialCount: 1,
+    batchSize: 1,
+    onComplete: ({ total }) => {
+      if (total > 0) onReady?.(total)
+    },
+  })
+  const orderedSlots = useMemo(() => {
+    if (count <= 0) return []
+    const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
+    const originX = spawn[0] ?? 0
+    const originZ = spawn[2] ?? 0
+    return slots
+      .map((slot, index) => {
+        const slotSpawn = slot.spawnPosition ?? getMushroomEnemySpawnPosition(index)
+        return {
+          slot,
+          index,
+          distance: Math.hypot((slotSpawn[0] ?? 0) - originX, (slotSpawn[2] ?? 0) - originZ),
+        }
+      })
+      .sort((left, right) => left.distance - right.distance)
+      .slice(0, count)
+  }, [count, slots])
+
+  useEffect(() => {
+    onProgress?.(count, targetCount, complete)
+  }, [complete, count, onProgress, targetCount])
+
+  if (!enabled || orderedSlots.length === 0) return null
+  return (
+    <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
+      <Suspense fallback={null}>
+        {orderedSlots.map(({ slot, index }) => (
+          <SmallMushroomEnemy
+            key={slot.id}
+            enemyId={slot.id}
+            spawnIndex={index}
+            spawnPositionOverride={slot.spawnPosition}
+            active
+            playerPositionRef={playerPositionRef}
+            registerCombatTarget={registerCombatTarget}
+            onDefeated={onDefeated}
+            onHitPlayer={onHitPlayer}
+            config={slot.config}
+            monsterType={slot.monsterType}
+            aggressive={slot.aggressive}
+            patrol={slot.patrol}
+            mobGroupRef={mobGroupRef}
+            mobSpatialIndexRef={mobSpatialIndexRef}
+            allyTargetsRef={allyTargetsRef}
+          />
+        ))}
+      </Suspense>
+    </Profiler>
+  )
+}
+
 function SummonedSkeleton({
   index,
   slotRef,
@@ -15454,6 +15550,7 @@ function CustomizationLayer({
   mode,
   view = 'top',
   streamPlaceables = true,
+  onPlaceablesReady = null,
   showBuildHandles = true,
   canEditStructure = true,
   coins = 0,
@@ -15513,84 +15610,28 @@ function CustomizationLayer({
     && mode !== 'customize'
     && !draggingObjectId
     && !placingObjectId
-  const [visiblePlaceableCount, setVisiblePlaceableCount] = useState(() => (
-    shouldStreamPlaceables
-      ? Math.min(PLACEABLE_PLAY_INITIAL_RENDER_COUNT, renderablePlacedObjects.length)
-      : renderablePlacedObjects.length
-  ))
-  const visiblePlaceableCountRef = useRef(visiblePlaceableCount)
-  const revealBudgetRef = useRef({ nextAt: 0, pauseUntil: 0 })
-
-  useEffect(() => {
-    const initialCount = shouldStreamPlaceables
-      ? Math.min(PLACEABLE_PLAY_INITIAL_RENDER_COUNT, renderablePlacedObjects.length)
-      : renderablePlacedObjects.length
-    visiblePlaceableCountRef.current = initialCount
-    revealBudgetRef.current.nextAt = performance.now() + PLACEABLE_PLAY_REVEAL_INTERVAL_MS
-    revealBudgetRef.current.pauseUntil = 0
-    setVisiblePlaceableCount(initialCount)
-  }, [renderablePlacedObjects.length, shouldStreamPlaceables])
-
-  useFrame((_, delta) => {
-    if (!shouldStreamPlaceables) {
-      return
-    }
-    if (visiblePlaceableCountRef.current >= renderablePlacedObjects.length) {
-      return
-    }
-
-    const now = performance.now()
-    const frameMs = delta * 1000
-    if (frameMs > 100) {
-      revealBudgetRef.current.pauseUntil = Math.max(
-        revealBudgetRef.current.pauseUntil,
-        now + PLACEABLE_PLAY_FREEZE_PAUSE_MS,
-      )
-      perfDiagnostics.event('placeables:reveal-paused', {
-        reason: 'freeze-frame',
-        frameMs,
-        visible: visiblePlaceableCountRef.current,
-        total: renderablePlacedObjects.length,
-      })
-      return
-    }
-    if (frameMs > 50) {
-      revealBudgetRef.current.pauseUntil = Math.max(
-        revealBudgetRef.current.pauseUntil,
-        now + PLACEABLE_PLAY_STUTTER_PAUSE_MS,
-      )
-      perfDiagnostics.event('placeables:reveal-paused', {
-        reason: 'stutter-frame',
-        frameMs,
-        visible: visiblePlaceableCountRef.current,
-        total: renderablePlacedObjects.length,
-      })
-      return
-    }
-    if (now < revealBudgetRef.current.pauseUntil || now < revealBudgetRef.current.nextAt) {
-      return
-    }
-
-    const previousCount = visiblePlaceableCountRef.current
-    const nextCount = Math.min(
-      previousCount + PLACEABLE_PLAY_REVEAL_BATCH_SIZE,
-      renderablePlacedObjects.length,
-    )
-    visiblePlaceableCountRef.current = nextCount
-    revealBudgetRef.current.nextAt = now + PLACEABLE_PLAY_REVEAL_INTERVAL_MS
-    perfDiagnostics.event('placeables:reveal', {
-      visible: nextCount,
-      total: renderablePlacedObjects.length,
-      objectIds: renderablePlacedObjects
-        .slice(previousCount, nextCount)
-        .map((object) => object.objectId),
-    })
-    setVisiblePlaceableCount(nextCount)
+  const {
+    count: visiblePlaceableCount,
+    complete: placeablesReady,
+  } = useProgressiveMountCount({
+    enabled: shouldStreamPlaceables,
+    total: renderablePlacedObjects.length,
+    initialCount: PLACEABLE_PLAY_INITIAL_RENDER_COUNT,
+    batchSize: PLACEABLE_PLAY_REVEAL_BATCH_SIZE,
+    onComplete: ({ total }) => {
+      perfDiagnostics.event('placeables:prepared', { total })
+      onPlaceablesReady?.({ total })
+    },
   })
 
   const visiblePlacedObjects = shouldStreamPlaceables
     ? renderablePlacedObjects.slice(0, visiblePlaceableCount)
     : renderablePlacedObjects
+  useEffect(() => {
+    if (!shouldStreamPlaceables && placeablesReady) {
+      onPlaceablesReady?.({ total: renderablePlacedObjects.length })
+    }
+  }, [onPlaceablesReady, placeablesReady, renderablePlacedObjects.length, shouldStreamPlaceables])
   const placingObject = objects.find((object) => object.id === placingObjectId)
   const movingObject = objects.find((object) => object.id === (draggingObjectId ?? placingObjectId))
   const isMovingWallObject = objectCatalog[movingObject?.objectId]?.placementSurface === 'wall'
@@ -16793,6 +16834,8 @@ function RenderQualityGovernor({ onScaleChange }) {
 
 const INITIAL_ASSET_BATCH_MAX_WAIT_MS = 1800
 const STABLE_INITIAL_ASSET_MAX_WAIT_MS = 9000
+const INITIAL_PLACEABLES_LOAD_TASK = 'initial-placeables'
+const INITIAL_SCENE_PREPARATION_MAX_WAIT_MS = 9000
 // Niveau de révélation atteint avant de lever l'écran de chargement. On attend
 // désormais le niveau 6 (= ennemis niv.2, squelettes niv.4 ET objets placés niv.6)
 // au lieu de 2 : le rideau reste baissé un peu plus longtemps pour que le pop-in
@@ -16990,7 +17033,12 @@ function WorldLoadingOverlay({ active, experience }) {
   )
 }
 
-function ShaderWarmupGate({ onComplete, onProgress, criticalPlaceableModelUrls = [] }) {
+function ShaderWarmupGate({
+  onComplete,
+  onProgress,
+  criticalPlaceableModelUrls = [],
+  worldDataReady = true,
+}) {
   const { gl, scene, camera } = useThree()
   const [initialAssetsReady, setInitialAssetsReady] = useState(() => isInitialAssetBatchReady())
   const completedRef = useRef(false)
@@ -17013,6 +17061,7 @@ function ShaderWarmupGate({ onComplete, onProgress, criticalPlaceableModelUrls =
     // Sonde : QUAND l'effet du gate s'exécute = quand le gate s'est monté. S'il
     // est suspendu par la scène, ce jalon arrive tard (≈ fin de chargement).
     markLoad('gate:mount')
+    resetLoadTask(INITIAL_PLACEABLES_LOAD_TASK)
 
     const refresh = () => {
       if (!cancelled) setInitialAssetsReady(isInitialAssetBatchReady())
@@ -17041,7 +17090,7 @@ function ShaderWarmupGate({ onComplete, onProgress, criticalPlaceableModelUrls =
 
   useEffect(() => {
     if (completedRef.current) return undefined
-    if (!initialAssetsReady) return undefined
+    if (!initialAssetsReady || !worldDataReady) return undefined
 
     let cancelled = false
     let frameId = 0
@@ -17057,8 +17106,16 @@ function ShaderWarmupGate({ onComplete, onProgress, criticalPlaceableModelUrls =
       })
       // Jalon : le lot initial est prêt ou libéré par le garde-fou. Les assets
       // démarrés ensuite ne peuvent plus garder l'overlay ouvert.
+      const criticalPlaceablePreloads = Promise.allSettled(
+        criticalPlaceableModelUrlsRef.current.map((url) => (
+          Promise.resolve().then(() => useGLTF.preload(url))
+        )),
+      )
       const preloadResult = await waitForPromiseWithTimeout(
-        startStableInitialAssetPreloads(),
+        Promise.allSettled([
+          startStableInitialAssetPreloads(),
+          criticalPlaceablePreloads,
+        ]),
         STABLE_INITIAL_ASSET_MAX_WAIT_MS,
       )
       if (preloadResult.timedOut) {
@@ -17084,6 +17141,14 @@ function ShaderWarmupGate({ onComplete, onProgress, criticalPlaceableModelUrls =
         percent: 84,
         phase: 'Préparation des joueurs et des ennemis...',
       })
+      const scenePreparation = await waitForLoadTasks(
+        [INITIAL_PLACEABLES_LOAD_TASK],
+        INITIAL_SCENE_PREPARATION_MAX_WAIT_MS,
+      )
+      if (!scenePreparation.ready) {
+        console.warn('[loadTiming] Initial scene preparation timed out', scenePreparation.pending)
+      }
+      markLoad('scenePrepared')
       // Let the loading overlay and the initial scene commit before WebGL shader work starts.
       await waitFrame()
       await waitFrame()
@@ -17176,7 +17241,7 @@ function ShaderWarmupGate({ onComplete, onProgress, criticalPlaceableModelUrls =
       cancelled = true
       if (frameId) window.cancelAnimationFrame(frameId)
     }
-  }, [camera, gl, initialAssetsReady, onComplete, onProgress, scene])
+  }, [camera, gl, initialAssetsReady, onComplete, onProgress, scene, worldDataReady])
 
   return null
 }
@@ -18222,7 +18287,10 @@ function App() {
   const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
   const [outdoorRuntimeRevealStage, setOutdoorRuntimeRevealStage] = useState(0)
+  const [outdoorEnemyAssetsReady, setOutdoorEnemyAssetsReady] = useState(false)
   const [visibleOutdoorEnemyCount, setVisibleOutdoorEnemyCount] = useState(0)
+  const [outdoorEnemiesMounted, setOutdoorEnemiesMounted] = useState(false)
+  const [outdoorMapAssetsReady, setOutdoorMapAssetsReady] = useState(false)
   const [loadingExperience, setLoadingExperience] = useState(() => (
     createLoadingExperience({
       kind: 'initial',
@@ -18355,6 +18423,7 @@ function App() {
   const latestProgressRef = useRef(null)
   const personalProgressRef = useRef(null)
   const [personalProgressVersion, setPersonalProgressVersion] = useState(0)
+  const [worldDataReady, setWorldDataReady] = useState(() => !isSupabaseConfigured)
   const cloudSaveTimeoutRef = useRef(null)
   const onlinePresenceRef = useRef(null)
   const multiplayerChannelRef = useRef(null)
@@ -18470,37 +18539,9 @@ function App() {
   }, [mobKillCount, coins, editableObjects, ownedMounts, ownedMagicBook, ownedMagicSkull, unlockAchievement])
 
   useEffect(() => {
-    if (!shaderWarmupComplete || currentZone === ZONES.outside || outdoorTransitionPrimed) {
-      return undefined
-    }
-
-    let idleId = 0
-    const timerId = window.setTimeout(() => {
-      const primeOutdoor = () => {
-        setOutdoorTransitionPrimed(true)
-        setOutdoorContentStage((stage) => Math.max(stage, 1))
-        perfDiagnostics.event('outdoor:background-prime')
-      }
-      if (typeof window.requestIdleCallback === 'function') {
-        idleId = window.requestIdleCallback(primeOutdoor, { timeout: 1200 })
-      } else {
-        primeOutdoor()
-      }
-    }, 250)
-
-    return () => {
-      window.clearTimeout(timerId)
-      if (idleId && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleId)
-      }
-    }
-  }, [currentZone, outdoorTransitionPrimed, shaderWarmupComplete])
-
-  useEffect(() => {
     const shouldPrepareOutdoor = (
       currentZone === ZONES.outside ||
-      outdoorTransitionPrimed ||
-      (shaderWarmupComplete && currentZone !== ZONES.outside && isNearOutdoorDoor)
+      outdoorTransitionPrimed
     )
     if (!shouldPrepareOutdoor) return undefined
 
@@ -18513,7 +18554,7 @@ function App() {
     return () => {
       timerIds.forEach((timerId) => window.clearTimeout(timerId))
     }
-  }, [currentZone, isNearOutdoorDoor, outdoorTransitionPrimed, shaderWarmupComplete])
+  }, [currentZone, outdoorTransitionPrimed])
 
   useEffect(() => {
     if (currentZone !== ZONES.outside) {
@@ -18562,53 +18603,54 @@ function App() {
     }
   }, [currentZone, monsterSpawnSlots, outdoorContentStage, outdoorTransitionPrimed])
 
-  useEffect(() => {
-    const enemiesRevealReady = (
-      currentZone === ZONES.outside
-      || outdoorEntryPreparing
-    )
-      && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 3)
-      && outdoorContentStage >= 5
+  const enemiesRevealReady = (
+    currentZone === ZONES.outside
+    || outdoorEntryPreparing
+  )
+    && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 3)
+    && outdoorContentStage >= 5
 
+  useEffect(() => {
     if (!enemiesRevealReady || monsterSpawnSlots.length === 0) {
-      const timerId = window.setTimeout(() => setVisibleOutdoorEnemyCount(0), 0)
-      return () => window.clearTimeout(timerId)
+      setOutdoorEnemyAssetsReady(false)
+      setOutdoorEnemiesMounted(false)
+      setVisibleOutdoorEnemyCount(0)
+      return undefined
     }
 
     let cancelled = false
     preloadMonsterSpawnSlotAssets(monsterSpawnSlots).finally(() => {
       if (cancelled) return
-      perfDiagnostics.event('outdoor:enemies-reveal', {
+      perfDiagnostics.event('outdoor:enemy-assets-ready', {
         total: monsterSpawnSlots.length,
       })
-      setVisibleOutdoorEnemyCount(monsterSpawnSlots.length)
+      setOutdoorEnemyAssetsReady(true)
     })
 
     return () => {
       cancelled = true
     }
   }, [
-    currentZone,
+    enemiesRevealReady,
     monsterSpawnSlots,
-    outdoorContentStage,
-    outdoorEntryPreparing,
-    outdoorRuntimeRevealStage,
   ])
 
   useEffect(() => {
     outdoorZoneReadyRef.current = currentZone === ZONES.outside
       && outdoorContentStage >= 5
       && outdoorRuntimeRevealStage >= 3
+      && outdoorMapAssetsReady
       && (
         monsterSpawnSlots.length === 0
-        || visibleOutdoorEnemyCount >= monsterSpawnSlots.length
+        || outdoorEnemiesMounted
       )
   }, [
     currentZone,
     monsterSpawnSlots.length,
     outdoorContentStage,
     outdoorRuntimeRevealStage,
-    visibleOutdoorEnemyCount,
+    outdoorMapAssetsReady,
+    outdoorEnemiesMounted,
   ])
 
   // Fin de la période de silence : les déblocages suivants affichent un toast.
@@ -19636,8 +19678,18 @@ function App() {
     if (!isSupabaseConfigured) return undefined
 
     let cancelled = false
+    const hydrationTimeoutId = window.setTimeout(() => {
+      if (!cancelled) {
+        perfDiagnostics.event('world-data:hydration-timeout')
+        setWorldDataReady(true)
+      }
+    }, 8000)
 
-    const loadCloudProgress = async (user) => {
+    let activeHydrationKey = null
+    let activeHydrationPromise = null
+    let hydratedKey = null
+
+    const hydrateCloudProgress = async (user) => {
       setAccount('user',user)
       authUserRef.current = user
       if (!user) {
@@ -19671,42 +19723,44 @@ function App() {
       }
     }
 
+    const loadCloudProgress = (user) => {
+      const key = user?.id ?? 'offline'
+      if (hydratedKey === key) return Promise.resolve()
+      if (activeHydrationPromise && activeHydrationKey === key) {
+        return activeHydrationPromise
+      }
+
+      activeHydrationKey = key
+      activeHydrationPromise = hydrateCloudProgress(user).finally(() => {
+        if (!cancelled) hydratedKey = key
+        if (activeHydrationKey === key) {
+          activeHydrationKey = null
+          activeHydrationPromise = null
+        }
+      })
+      return activeHydrationPromise
+    }
+
     getCurrentUser()
-      .then(async (user) => {
-        if (cancelled) return
-        setAccount('user',user)
-        authUserRef.current = user
-        if (!user) {
-          setAccount('cloudSaveState','offline')
-          const currentTitleIds = useGameStore.getState().equipment.ownedTitleIds
-          setEquipment('ownedTitleIds',currentTitleIds.filter((titleId) => LOCAL_TITLE_IDS.has(titleId)))
-          if (!LOCAL_TITLE_IDS.has(useGameStore.getState().equipment.equippedTitleId)) setEquipment('equippedTitleId',null)
-          return null
-        }
-        setAccount('displayName',(current) => current || getUserDisplayName(user))
-        setAccount('cloudSaveState','loading')
-        const cloudProgress = await loadPlayerProgress({ scope: progressScope })
-        if (cloudProgress) {
-          rememberPersonalProgress(cloudProgress)
-          skipNextCloudSaveRef.current = true
-          applyProgressSnapshot(cloudProgress, { includeWorld: !hasSavedGuestSession(user.id) })
-        } else {
-          const snapshot = latestProgressRef.current ?? createCurrentProgressSnapshot()
-          await savePlayerProgress(snapshot, { scope: progressScope })
-          rememberPersonalProgress(snapshot)
-        }
-        await refreshPlayerTitles()
-        hasLoadedCloudProgressRef.current = true
-        setAccount('cloudSaveState','synced')
-        return cloudProgress
+      .then((user) => {
+        if (cancelled) return undefined
+        return loadCloudProgress(user)
       })
       .catch(() => {
         if (!cancelled) setAccount('cloudSaveState','offline')
+      })
+      .finally(() => {
+        if (!cancelled) {
+          window.clearTimeout(hydrationTimeoutId)
+          perfDiagnostics.event('world-data:hydrated')
+          setWorldDataReady(true)
+        }
       })
 
     const unsubscribe = onAuthStateChange(loadCloudProgress)
     return () => {
       cancelled = true
+      window.clearTimeout(hydrationTimeoutId)
       unsubscribe()
     }
   }, [progressScope])
@@ -21356,33 +21410,44 @@ function App() {
         })
       }, outdoorFadeSettleDelay)
     }
-    setNear('outdoorDoor', false)
-    setNear('skinStation', false)
-    setNear('environmentStation', false)
-    setNear('customizationStation', false)
-    setNear('magicSkullDiscovery', false)
-    setNear('seat', null)
-    setNear('tv', null)
-    setNear('youtubeFrame', null)
-    setYoutubeFrameEditor(null)
-    setSeatedState(null)
-    setView('mode','play')
-    setMenuOpen('skin', false)
-    setMenuOpen('environment', false)
-    setMenuOpen('character', false)
-    setMenuOpen('customizationChoice', false)
-    setUi('accountOpen',false)
-    setUi('weaponMenuOpen',false)
-    setUi('lightMenuOpen',false)
-    setQuest('journalOpen',false)
-    setQuest('dialogOpen',false)
-    setQuest('vendorOpen',false)
-    setIsGameChatOpen(false)
-    setEditor('selectedObjectId',null)
-    setEditor('draggingObjectId',null)
-    setEditor('placingObjectId',null)
-    setEditor('placementLocked',false)
-    setEditor('placementPreview',null)
+    // The first update contains only the loading veil. The broad UI reset is
+    // deliberately deferred until two painted frames later so it cannot delay
+    // the visual feedback of the click.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        perfDiagnostics.event('transition:overlay-painted', {
+          from: currentZone,
+          to: nextZone,
+        })
+        setNear('outdoorDoor', false)
+        setNear('skinStation', false)
+        setNear('environmentStation', false)
+        setNear('customizationStation', false)
+        setNear('magicSkullDiscovery', false)
+        setNear('seat', null)
+        setNear('tv', null)
+        setNear('youtubeFrame', null)
+        setYoutubeFrameEditor(null)
+        setSeatedState(null)
+        setView('mode','play')
+        setMenuOpen('skin', false)
+        setMenuOpen('environment', false)
+        setMenuOpen('character', false)
+        setMenuOpen('customizationChoice', false)
+        setUi('accountOpen',false)
+        setUi('weaponMenuOpen',false)
+        setUi('lightMenuOpen',false)
+        setQuest('journalOpen',false)
+        setQuest('dialogOpen',false)
+        setQuest('vendorOpen',false)
+        setIsGameChatOpen(false)
+        setEditor('selectedObjectId',null)
+        setEditor('draggingObjectId',null)
+        setEditor('placingObjectId',null)
+        setEditor('placementLocked',false)
+        setEditor('placementPreview',null)
+      })
+    })
     window.setTimeout(() => {
       const spawn = PLAYER_SPAWNS[nextZone] ?? PLAYER_SPAWNS.interior
       perfDiagnostics.event('transition:zone-switch', {
@@ -21998,6 +22063,42 @@ function App() {
     setLoadingExperience((current) => advanceLoadingExperience(current, next))
   }, [])
 
+  const handleOutdoorMapAssetsReady = useCallback(() => {
+    perfDiagnostics.event('outdoor:map-assets-ready')
+    setOutdoorMapAssetsReady(true)
+  }, [])
+
+  const handleOutdoorEnemyMountProgress = useCallback((count, total, complete) => {
+    if (count === 0 || complete || count % 4 === 0) {
+      setVisibleOutdoorEnemyCount(count)
+    }
+  }, [])
+
+  const handleOutdoorEnemiesMounted = useCallback((total) => {
+    perfDiagnostics.event('outdoor:enemies-mounted', { total })
+    setVisibleOutdoorEnemyCount(total)
+    setOutdoorEnemiesMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!zoneFadeActive || !outdoorEntryPreparing || monsterSpawnSlots.length === 0) return
+    if (
+      visibleOutdoorEnemyCount !== monsterSpawnSlots.length
+      && visibleOutdoorEnemyCount % 4 !== 0
+    ) return
+    const ratio = visibleOutdoorEnemyCount / monsterSpawnSlots.length
+    updateLoadingExperience({
+      percent: Math.round(78 + ratio * 16),
+      phase: `PrÃ©paration des crÃ©atures (${visibleOutdoorEnemyCount}/${monsterSpawnSlots.length})...`,
+    })
+  }, [
+    monsterSpawnSlots.length,
+    outdoorEntryPreparing,
+    updateLoadingExperience,
+    visibleOutdoorEnemyCount,
+    zoneFadeActive,
+  ])
+
   const completeShaderWarmup = useCallback(() => {
     perfDiagnostics.event('load:warmup-complete')
     updateLoadingExperience({ percent: 100, phase: 'Monde prêt !' })
@@ -22072,25 +22173,8 @@ function App() {
     && outdoorContentStage >= 5
   const outdoorVisualsReady = outdoorEnemiesReady && (
     monsterSpawnSlots.length === 0
-    || visibleOutdoorEnemyCount >= monsterSpawnSlots.length
+    || outdoorEnemiesMounted
   )
-  const visibleMonsterSpawnSlots = useMemo(() => {
-    if (!outdoorEnemiesReady || visibleOutdoorEnemyCount <= 0) return []
-    const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
-    const originX = spawn[0] ?? 0
-    const originZ = spawn[2] ?? 0
-    return monsterSpawnSlots
-      .map((slot, index) => {
-        const slotSpawn = slot.spawnPosition ?? getMushroomEnemySpawnPosition(index)
-        return {
-          slot,
-          index,
-          distance: Math.hypot((slotSpawn[0] ?? 0) - originX, (slotSpawn[2] ?? 0) - originZ),
-        }
-      })
-      .sort((left, right) => left.distance - right.distance)
-      .slice(0, visibleOutdoorEnemyCount)
-  }, [monsterSpawnSlots, outdoorEnemiesReady, visibleOutdoorEnemyCount])
   const shadowsEnabled = !performanceSettings.disableShadows && (!isDebugMode || debugToggles.shadows)
   const showInteriorHouseDetails = !isOutsideZone
   const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
@@ -22134,6 +22218,7 @@ function App() {
           onComplete={completeShaderWarmup}
           onProgress={updateLoadingExperience}
           criticalPlaceableModelUrls={criticalPlaceableModelUrls}
+          worldDataReady={worldDataReady}
         />
         {PERF_RUNTIME_WARMUP_RIG && <RuntimeWarmupRig />}
         {!PERF_NO_OUTDOOR_PREWARM && (
@@ -22270,7 +22355,8 @@ function App() {
           <CustomizationLayer
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             view={customizeView}
-            streamPlaceables={shaderWarmupComplete && !zoneFadeActive}
+            streamPlaceables
+            onPlaceablesReady={() => completeLoadTask(INITIAL_PLACEABLES_LOAD_TASK)}
             showBuildHandles={customizeTab !== 'furniture'}
             canEditStructure={customizeTab === 'build'}
             coins={coins}
@@ -22348,7 +22434,8 @@ function App() {
             showRoad={outdoorStaticReady}
             showNeighborHouses={outdoorStaticReady}
             showMapObjects={outdoorObjectsReady}
-            preloadMapObjects={outdoorContentStage >= 3}
+            preloadMapObjects={shaderWarmupComplete}
+            onMapObjectsPreloaded={handleOutdoorMapAssetsReady}
             showBiomeEffects={outdoorVegetationReady}
             showSky={outdoorStaticReady && performanceSettings.sky && (!isDebugMode || debugToggles.sky)}
             castShadows={shadowsEnabled}
@@ -22430,30 +22517,20 @@ function App() {
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
           {outdoorEnemiesReady && (
             <Defer level={2}>
-            <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
-            <Suspense fallback={null}>
-              {visibleMonsterSpawnSlots.map(({ slot, index }) => (
-                <SmallMushroomEnemy
-                  key={slot.id}
-                  enemyId={slot.id}
-                  spawnIndex={index}
-                  spawnPositionOverride={slot.spawnPosition}
-                  active
-                  playerPositionRef={playerPositionRef}
-                  registerCombatTarget={registerCombatTarget}
-                  onDefeated={handleSmallEnemyDefeated}
-                  onHitPlayer={handlePlayerHit}
-                  config={slot.config}
-                  monsterType={slot.monsterType}
-                  aggressive={slot.aggressive}
-                  patrol={slot.patrol}
-                  mobGroupRef={mobGroupRef}
-                  mobSpatialIndexRef={mobSpatialIndexRef}
-                  allyTargetsRef={allyTargetsRef}
-                />
-              ))}
-            </Suspense>
-            </Profiler>
+            <ProgressiveOutdoorEnemyLayer
+              enabled={outdoorEnemiesReady}
+              assetsReady={outdoorEnemyAssetsReady}
+              slots={monsterSpawnSlots}
+              playerPositionRef={playerPositionRef}
+              registerCombatTarget={registerCombatTarget}
+              onDefeated={handleSmallEnemyDefeated}
+              onHitPlayer={handlePlayerHit}
+              mobGroupRef={mobGroupRef}
+              mobSpatialIndexRef={mobSpatialIndexRef}
+              allyTargetsRef={allyTargetsRef}
+              onProgress={handleOutdoorEnemyMountProgress}
+              onReady={handleOutdoorEnemiesMounted}
+            />
             </Defer>
           )}
           <FireballManager

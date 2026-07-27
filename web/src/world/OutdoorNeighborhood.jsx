@@ -145,6 +145,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   showNeighborHouses = true,
   showMapObjects = true,
   preloadMapObjects = false,
+  onMapObjectsPreloaded = null,
   showBiomeEffects = true,
   showSky = true,
   castShadows = true,
@@ -178,8 +179,11 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
       {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
         <NeighborHouse key={house.id} {...house} />
       ))}
-      {preloadMapObjects && !showMapObjects && (
-        <MapObjectAssetsPreloader objects={DECOR_MAP_OBJECT_PLACEMENTS} />
+      {preloadMapObjects && (
+        <MapObjectAssetsPreloader
+          objects={DECOR_MAP_OBJECT_PLACEMENTS}
+          onReady={onMapObjectsPreloaded}
+        />
       )}
       {showMapObjects && <MapObjectPlaceables objects={DECOR_MAP_OBJECT_PLACEMENTS} batchStaticTrees />}
       {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}

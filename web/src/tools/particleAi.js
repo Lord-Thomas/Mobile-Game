@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk'
 import { normalizeParticlePreset } from '../effects/particlePresets'
 
 // "Vibe coding" bridge: a prompt goes in, a particle preset JSON comes out.
@@ -137,6 +136,7 @@ ${buildParticlePrompt(userText, currentPreset)}`
 }
 
 export async function generateParticlePreset({ apiKey, userText, currentPreset }) {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk')
   const client = new Anthropic({
     apiKey,
     dangerouslyAllowBrowser: true,
