@@ -8492,6 +8492,16 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
 }
 
 function CoinsOverlay({ coins }) {
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    setVisible(true)
+    const timeout = window.setTimeout(() => setVisible(false), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [coins])
+
+  if (!visible) return null
+
   return (
     <div className="score-wrap">
       <div className="score">
@@ -8504,6 +8514,20 @@ function CoinsOverlay({ coins }) {
 
 function PlayerHealthOverlay({ hp }) {
   const ratio = MathUtils.clamp(hp / PLAYER_MAX_HP, 0, 1)
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    if (hp < PLAYER_MAX_HP) {
+      setVisible(true)
+      return undefined
+    }
+
+    setVisible(true)
+    const timeout = window.setTimeout(() => setVisible(false), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [hp])
+
+  if (!visible) return null
 
   return (
     <div className={`player-health-wrap ${hp <= 0 ? 'is-down' : ''}`}>
@@ -8516,10 +8540,10 @@ function PlayerHealthOverlay({ hp }) {
 }
 
 function HudUtilityRail({
-  showBag,
   leftHanded,
   controlSettings,
-  onOpenBag,
+  menuOpen,
+  onToggleMenu,
   onOpenQuests,
 }) {
   const [open, setOpen] = useState(true)
@@ -8533,23 +8557,26 @@ function HudUtilityRail({
         className="hud-utility-toggle"
         type="button"
         onClick={() => setOpen((current) => !current)}
-        aria-label={open ? 'Replier les quêtes' : 'Afficher les quêtes'}
+        aria-label={open ? 'Replier les raccourcis' : 'Afficher les raccourcis'}
         aria-expanded={open}
       >
         <span aria-hidden="true">{leftHanded ? (open ? '‹' : '›') : (open ? '›' : '‹')}</span>
       </button>
-      <div className="hud-utility-items">
-        {showBag && (
-          <button className="weapon-inventory-btn" type="button" onClick={onOpenBag} aria-label="Sac">
-            🎒
+      {open && (
+        <div className="hud-utility-items">
+          <button
+            className={`hud-rail-menu-btn${menuOpen ? ' is-active' : ''}`}
+            type="button"
+            onClick={onToggleMenu}
+            aria-label="Menu"
+          >
+            ☰
           </button>
-        )}
-        {open && (
           <button className="quest-journal-btn" type="button" onClick={onOpenQuests} aria-label="Journal de quêtes">
             📜
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -8800,6 +8827,7 @@ function GameMenuPanel({
   showLocalCoinButton,
   fullscreenSupported,
   fullscreenActive,
+  hideToggle = false,
   onToggle,
   onTabChange,
   onEmailChange,
@@ -8860,10 +8888,12 @@ function GameMenuPanel({
 
   return (
     <div className={`account-sync ${open ? 'open' : ''}`}>
-      <button className="account-sync-toggle" type="button" onClick={onToggle} aria-label="Menu">
-        <span className={`account-sync-dot ${isConnected ? 'connected' : ''}`} />
-        <span>Menu</span>
-      </button>
+      {!hideToggle && (
+        <button className="account-sync-toggle" type="button" onClick={onToggle} aria-label="Menu">
+          <span className={`account-sync-dot ${isConnected ? 'connected' : ''}`} />
+          <span>Menu</span>
+        </button>
+      )}
       {open && (
         <div className="account-sync-panel">
           <div className="main-menu-tabs">
@@ -23509,12 +23539,24 @@ function App() {
       {showGameplayUi && isLocalNetwork && freeCameraActive && (
         <div className="free-camera-badge">Camera libre</div>
       )}
+      {showCaptureUi && mode === 'play' && PUBLIC_BUILD_FLAGS.showWeaponInventory && (
+        <button
+          className={`weapon-inventory-btn hud-persistent-bag${controlSettings.leftHanded ? ' hud-persistent-bag--left' : ''}`}
+          type="button"
+          style={getControlCssVariables(controlSettings)}
+          onClick={() => setUi('weaponMenuOpen', (current) => !current)}
+          aria-label="Sac"
+          aria-pressed={isWeaponMenuOpen}
+        >
+          🎒
+        </button>
+      )}
       {showCaptureUi && mode === 'play' && (
         <HudUtilityRail
-          showBag={PUBLIC_BUILD_FLAGS.showWeaponInventory}
           leftHanded={controlSettings.leftHanded}
           controlSettings={controlSettings}
-          onOpenBag={() => setUi('weaponMenuOpen',(v) => !v)}
+          menuOpen={isAccountOpen}
+          onToggleMenu={() => setUi('accountOpen', (current) => !current)}
           onOpenQuests={() => setQuest('journalOpen',(v) => !v)}
         />
       )}
@@ -23631,6 +23673,7 @@ function App() {
           showLocalCoinButton={showLocalCoinButton}
           fullscreenSupported={fullscreenSupported}
           fullscreenActive={fullscreenActive}
+          hideToggle
           onToggle={() => setUi('accountOpen',(current) => !current)}
           onTabChange={(v) => setUi('mainMenuTab', v)}
           onEmailChange={(v) => setAccount('email', v)}

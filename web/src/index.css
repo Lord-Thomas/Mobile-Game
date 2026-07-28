@@ -963,7 +963,7 @@ canvas {
   left: 50%;
   width: 132px;
   transform: translateX(-50%);
-  z-index: 4;
+  z-index: 3;
   pointer-events: none;
 }
 
@@ -6172,7 +6172,7 @@ html[data-orientation='landscape'] .quest-journal-btn {
 /* ---- HUD aventure : rail latéral et barre de capacités ---- */
 .hud-utility-rail {
   position: fixed;
-  top: max(132px, calc(env(safe-area-inset-top) + 112px));
+  top: max(202px, calc(env(safe-area-inset-top) + 182px));
   right: 0;
   z-index: 118;
   display: flex;
@@ -6226,7 +6226,7 @@ html[data-orientation='landscape'] .quest-journal-btn {
   border-radius: 0 16px 16px 0;
 }
 
-.hud-utility-items .weapon-inventory-btn,
+.hud-utility-items .hud-rail-menu-btn,
 .hud-utility-items .quest-journal-btn {
   position: static;
   width: 54px;
@@ -6237,6 +6237,43 @@ html[data-orientation='landscape'] .quest-journal-btn {
   box-shadow:
     inset 0 0 0 3px rgba(5, 12, 20, 0.55),
     0 5px 14px rgba(0, 0, 0, 0.34);
+}
+
+.hud-rail-menu-btn {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  color: #efd596;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.hud-rail-menu-btn.is-active {
+  border-color: rgba(255, 220, 139, 0.92);
+  box-shadow:
+    inset 0 0 0 3px rgba(5, 12, 20, 0.55),
+    0 0 16px rgba(230, 195, 116, 0.34);
+}
+
+.hud-persistent-bag {
+  top: auto;
+  right: calc(6px - var(--actions-offset-x, 0px));
+  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 164px - var(--actions-offset-y, 0px));
+  width: 40px;
+  height: 40px;
+  border-color: rgba(230, 195, 116, 0.68);
+  background: radial-gradient(circle at 35% 28%, rgba(52, 74, 96, 0.96), rgba(8, 18, 30, 0.97));
+  font-size: 1.05rem;
+  box-shadow:
+    inset 0 0 0 3px rgba(5, 12, 20, 0.55),
+    0 5px 14px rgba(0, 0, 0, 0.34);
+  opacity: var(--control-opacity, 1);
+}
+
+.hud-persistent-bag--left {
+  right: auto;
+  left: calc(6px + var(--actions-offset-x, 0px));
 }
 
 @media (orientation: portrait) and (max-width: 600px) {
@@ -6301,11 +6338,11 @@ html[data-orientation='landscape'] .quest-journal-btn {
   }
 
   .player-health-wrap {
-    top: max(25px, calc(env(safe-area-inset-top) + 11px));
-    right: 96px;
-    left: 76px;
-    width: auto;
-    transform: none;
+    top: max(68px, calc(env(safe-area-inset-top) + 56px));
+    right: auto;
+    left: 50%;
+    width: min(164px, calc(100vw - 32px));
+    transform: translateX(-50%);
   }
 
   .player-health-bar {
@@ -6493,11 +6530,11 @@ html[data-orientation='landscape'] .quest-journal-btn {
   }
 
   .player-health-wrap {
-    top: max(22px, calc(env(safe-area-inset-top) + 10px));
-    right: 108px;
-    left: 70px;
-    width: auto;
-    transform: none;
+    top: max(62px, calc(env(safe-area-inset-top) + 50px));
+    right: auto;
+    left: 50%;
+    width: min(156px, calc(100vw - 32px));
+    transform: translateX(-50%);
   }
 
   .player-health-bar {
@@ -6566,7 +6603,21 @@ html[data-orientation='landscape'] .quest-journal-btn {
 
 @media (orientation: landscape) {
   .hud-utility-rail {
-    top: max(72px, calc(env(safe-area-inset-top) + 58px));
+    top: max(126px, calc(env(safe-area-inset-top) + 110px));
+  }
+
+  html[data-orientation='landscape'] .hud-persistent-bag {
+    top: auto;
+    right: max(4px, env(safe-area-inset-right));
+    bottom: calc(max(10px, env(safe-area-inset-bottom)) + 68px);
+    width: 38px;
+    height: 38px;
+    font-size: 0.95rem;
+  }
+
+  html[data-orientation='landscape'] .hud-persistent-bag--left {
+    right: auto;
+    left: max(4px, env(safe-area-inset-left));
   }
 
   .hud-utility-items {
@@ -6574,7 +6625,7 @@ html[data-orientation='landscape'] .quest-journal-btn {
     padding: 7px 6px;
   }
 
-  .hud-utility-items .weapon-inventory-btn,
+  .hud-utility-items .hud-rail-menu-btn,
   .hud-utility-items .quest-journal-btn {
     width: 42px;
     height: 42px;
