@@ -1552,8 +1552,7 @@ function CombatActionDock({
   const wingsUi = useWingsSpellUi(wingsUiRef)
   const showWings = wingsUi.visible && !wingsUi.flying
   const showWingsBoost = wingsUi.visible && wingsUi.flying
-  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
-  if (count === 0) return null
+  const count = 1 + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
 
   const queuePunch = () => {
     touchRef.current.punchQueued = true
@@ -1598,29 +1597,28 @@ function CombatActionDock({
       className={`combat-action-dock combat-action-dock--count-${count}${controlSettings.leftHanded ? ' combat-action-dock--left-handed' : ''}`}
       style={getControlCssVariables(controlSettings)}
     >
-      {canPunch && (
-        <button
-          className="combat-action-btn combat-action-btn--punch"
-          type="button"
-          aria-label="Taper"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            if (swordEquipped) event.currentTarget.classList.add('combat-action-btn--charging')
-            startPunchCharge()
-          }}
-          onPointerUp={(event) => {
-            event.currentTarget.classList.remove('combat-action-btn--charging')
-            releasePunchCharge()
-          }}
-          onPointerCancel={(event) => {
-            event.currentTarget.classList.remove('combat-action-btn--charging')
-            releasePunchCharge()
-          }}
-        >
-          <span className="combat-action-icon" aria-hidden="true">👊</span>
-          <span className="combat-action-label">{swordEquipped ? 'Maintenir' : 'Taper'}</span>
-        </button>
-      )}
+      <button
+        className={`combat-action-btn combat-action-btn--punch${canPunch ? '' : ' is-unavailable'}`}
+        type="button"
+        aria-label="Taper"
+        disabled={!canPunch}
+        onPointerDown={(event) => {
+          event.preventDefault()
+          if (swordEquipped) event.currentTarget.classList.add('combat-action-btn--charging')
+          startPunchCharge()
+        }}
+        onPointerUp={(event) => {
+          event.currentTarget.classList.remove('combat-action-btn--charging')
+          releasePunchCharge()
+        }}
+        onPointerCancel={(event) => {
+          event.currentTarget.classList.remove('combat-action-btn--charging')
+          releasePunchCharge()
+        }}
+      >
+        <span className="combat-action-icon" aria-hidden="true">👊</span>
+        <span className="combat-action-label">{swordEquipped ? 'Maintenir' : 'Taper'}</span>
+      </button>
       {canKick && (
         <button
           className="combat-action-btn combat-action-btn--kick"
@@ -8061,11 +8059,6 @@ function ControlsOverlay({
     )
   }
 
-  const changeCameraDistance = (delta) => {
-    const currentDistance = touchRef.current.cameraDistance ?? CAMERA_DISTANCE
-    setCameraDistance(currentDistance + delta)
-  }
-
   const getPinchDistance = () => {
     const points = Array.from(lookPointersRef.current.values())
     if (points.length < 2) return 0
@@ -8351,7 +8344,7 @@ function ControlsOverlay({
           onPointerCancel={onJumpUp}
           aria-label={mountFlying ? 'Monter' : 'Sauter'}
         >
-          <span className="action-symbol">{mountFlying ? '\u25b2' : '\u2423'}</span>
+          <span className="action-symbol">{mountFlying ? '\u25b2' : '\u2191'}</span>
         </button>
       )}
       {!uiHidden && showDodgeAction && (
@@ -8368,26 +8361,6 @@ function ControlsOverlay({
         >
           <span aria-hidden="true">↻</span>
         </button>
-      )}
-      {!uiHidden && isLikelyMobileDevice() && (
-        <div className="camera-zoom-controls" aria-label="Zoom caméra">
-          <button
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => changeCameraDistance(1)}
-            aria-label="Éloigner la caméra"
-          >
-            −
-          </button>
-          <button
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => changeCameraDistance(-1)}
-            aria-label="Rapprocher la caméra"
-          >
-            +
-          </button>
-        </div>
       )}
       {!uiHidden && mountFlying && (
         <button
@@ -8542,6 +8515,45 @@ function PlayerHealthOverlay({ hp }) {
   )
 }
 
+function HudUtilityRail({
+  showBag,
+  leftHanded,
+  controlSettings,
+  onOpenBag,
+  onOpenQuests,
+}) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <div
+      className={`hud-utility-rail${open ? ' is-open' : ''}${leftHanded ? ' hud-utility-rail--left' : ''}`}
+      style={getControlCssVariables(controlSettings)}
+    >
+      <button
+        className="hud-utility-toggle"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-label={open ? 'Replier les quêtes' : 'Afficher les quêtes'}
+        aria-expanded={open}
+      >
+        <span aria-hidden="true">{leftHanded ? (open ? '‹' : '›') : (open ? '›' : '‹')}</span>
+      </button>
+      <div className="hud-utility-items">
+        {showBag && (
+          <button className="weapon-inventory-btn" type="button" onClick={onOpenBag} aria-label="Sac">
+            🎒
+          </button>
+        )}
+        {open && (
+          <button className="quest-journal-btn" type="button" onClick={onOpenQuests} aria-label="Journal de quêtes">
+            📜
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function AchievementToast({ toast }) {
   if (!toast) return null
 
@@ -8577,6 +8589,8 @@ function AchievementToast({ toast }) {
 function SettingsPanel({
   settings,
   onToggle,
+  terrainRenderMode = 'full',
+  onTerrainRenderModeChange,
   controlSettings,
   onControlSettingChange,
   onResetControlSettings,
@@ -8721,6 +8735,16 @@ function SettingsPanel({
       {isLocalNetwork && (
         <>
           <div className="settings-group-title">Local</div>
+          <button
+            type="button"
+            className="settings-action-row"
+            onClick={onTerrainRenderModeChange}
+          >
+            <span>
+              <strong>Rendu du terrain : {terrainRenderMode === 'full' ? 'NORMAL' : terrainRenderMode.toUpperCase()}</strong>
+              <small>Change le mode de rendu local du terrain.</small>
+            </span>
+          </button>
           <label className="settings-toggle-row">
             <input
               type="checkbox"
@@ -8770,6 +8794,7 @@ function GameMenuPanel({
   achievementProgress,
   soloNameplateVisible,
   performanceSettings,
+  terrainRenderMode,
   controlSettings,
   isLocalNetwork,
   showLocalCoinButton,
@@ -8795,6 +8820,7 @@ function GameMenuPanel({
   onToggleTitle,
   onToggleSoloNameplate,
   onTogglePerformanceSetting,
+  onTerrainRenderModeChange,
   onControlSettingChange,
   onResetControlSettings,
   onToggleLocalCoinButton,
@@ -8936,6 +8962,8 @@ function GameMenuPanel({
             <SettingsPanel
               settings={performanceSettings}
               onToggle={onTogglePerformanceSetting}
+              terrainRenderMode={terrainRenderMode}
+              onTerrainRenderModeChange={onTerrainRenderModeChange}
               controlSettings={controlSettings}
               onControlSettingChange={onControlSettingChange}
               onResetControlSettings={onResetControlSettings}
@@ -23460,17 +23488,6 @@ function App() {
         />
       )}
       {mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
-      {mode === 'play' && !isDebugMode && showCaptureUi && isLocalNetwork && currentZone === ZONES.outside && (
-        <button
-          className={`local-terrain-toggle is-${terrainRenderMode}`}
-          type="button"
-          onClick={() => setTerrainRenderMode(getNextTerrainRenderMode)}
-          aria-label="Changer le mode de diagnostic du terrain"
-          title="NORMAL : PBR complet · LAMBERT : rendu complet avec éclairage léger · STANDARD : PBR sans texture · TEXTURE : une texture sans éclairage · SIMPLE : même maillage sans shader · OFF : terrain masqué"
-        >
-          Terrain {terrainRenderMode === 'full' ? 'NORMAL' : terrainRenderMode.toUpperCase()}
-        </button>
-      )}
       <GpuWarning visible={mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
       {mode === 'play' && (
@@ -23488,29 +23505,18 @@ function App() {
           d'une dépense sans voir son solde. */}
       {showCaptureUi && (mode === 'play' || mode === 'customize') && <CoinsOverlay coins={coins} />}
       {showGameplayUi && <AchievementToast toast={achievementToast} />}
-      {showCaptureUi && currentZone === ZONES.outside && <PlayerHealthOverlay hp={playerHp} />}
+      {showCaptureUi && <PlayerHealthOverlay hp={playerHp} />}
       {showGameplayUi && isLocalNetwork && freeCameraActive && (
         <div className="free-camera-badge">Camera libre</div>
       )}
-      {showCaptureUi && PUBLIC_BUILD_FLAGS.showWeaponInventory && mode === 'play' && (
-        <button
-          className="weapon-inventory-btn"
-          type="button"
-          onClick={() => setUi('weaponMenuOpen',(v) => !v)}
-          aria-label="Sac"
-        >
-          🎒
-        </button>
-      )}
       {showCaptureUi && mode === 'play' && (
-        <button
-          className="quest-journal-btn"
-          type="button"
-          onClick={() => setQuest('journalOpen',(v) => !v)}
-          aria-label="Journal de quêtes"
-        >
-          📜
-        </button>
+        <HudUtilityRail
+          showBag={PUBLIC_BUILD_FLAGS.showWeaponInventory}
+          leftHanded={controlSettings.leftHanded}
+          controlSettings={controlSettings}
+          onOpenBag={() => setUi('weaponMenuOpen',(v) => !v)}
+          onOpenQuests={() => setQuest('journalOpen',(v) => !v)}
+        />
       )}
       {showGameplayUi && isCharging && (
         <div className="charge-bar-wrap">
@@ -23619,6 +23625,7 @@ function App() {
           achievementProgress={achievementProgress}
           soloNameplateVisible={soloNameplateVisible}
           performanceSettings={performanceSettings}
+          terrainRenderMode={terrainRenderMode}
           controlSettings={controlSettings}
           isLocalNetwork={isLocalNetwork}
           showLocalCoinButton={showLocalCoinButton}
@@ -23647,6 +23654,7 @@ function App() {
           onToggleTitle={toggleEquippedTitle}
           onToggleSoloNameplate={() => setSoloNameplateVisible((current) => !current)}
           onTogglePerformanceSetting={togglePerformanceSetting}
+          onTerrainRenderModeChange={() => setTerrainRenderMode(getNextTerrainRenderMode)}
           onControlSettingChange={changeControlSetting}
           onResetControlSettings={resetControlSettings}
           onToggleLocalCoinButton={toggleLocalCoinButton}
