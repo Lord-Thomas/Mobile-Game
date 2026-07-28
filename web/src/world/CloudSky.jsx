@@ -89,15 +89,16 @@ void main() {
   float cloudLight = 0.55 + 0.45 * pow(clamp(dot(normalize(vec3(direction.x, 0.34, direction.z)), normalize(uSunDirection)), 0.0, 1.0), 1.4);
   float silverEdge = pow(sunDot, 18.0) * smoothstep(0.18, 0.86, cloudDensity);
 
-  vec3 cloudColor = mix(uCloudShadeColor, uCloudBaseColor, cloudLight);
+  vec3 cloudColor = mix(uCloudShadeColor, uCloudBaseColor, smoothstep(0.42, 0.94, cloudLight));
   cloudColor = mix(cloudColor, uCloudWarmColor, silverEdge * 0.55 + sunGlow * 0.12);
   cloudColor += vec3(0.16, 0.13, 0.08) * silverEdge;
 
   float cloudMask = cloudDensity * smoothstep(0.14, 0.44, altitude) * (1.0 - smoothstep(0.94, 1.0, altitude));
-  vec3 color = mix(skyColor, cloudColor, cloudMask * 0.66);
+  vec3 color = mix(skyColor, cloudColor, cloudMask * 0.74);
   color += vec3(1.0, 0.82, 0.48) * sunGlow * smoothstep(0.05, 0.5, altitude);
-  color = mix(color, uHorizonColor, horizon * 0.22);
+  color = mix(color, uHorizonColor, horizon * 0.18);
   float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+  color = mix(vec3(luminance), color, 1.0);
   color = mix(color, vec3(luminance), uDesaturation);
   color *= uBrightness;
 
@@ -106,6 +107,7 @@ void main() {
 `
 
 const DEFAULT_SUN_DIRECTION = OUTDOOR_DAY_ATMOSPHERE.sunDirection
+const BASE_CLOUD_COVERAGE_BOOST = OUTDOOR_DAY_ATMOSPHERE.cloudCoverageBoost
 const BASE_SKY_COLORS = {
   horizon: new Color(OUTDOOR_DAY_ATMOSPHERE.sky.horizon),
   zenith: new Color(OUTDOOR_DAY_ATMOSPHERE.sky.zenith),
@@ -140,7 +142,7 @@ function CloudSky({
     uCloudBaseColor: { value: BASE_SKY_COLORS.cloudBase.clone() },
     uCloudWarmColor: { value: BASE_SKY_COLORS.cloudWarm.clone() },
     uCloudShadeColor: { value: BASE_SKY_COLORS.cloudShade.clone() },
-    uCloudCoverageBoost: { value: 0 },
+    uCloudCoverageBoost: { value: BASE_CLOUD_COVERAGE_BOOST },
     uDesaturation: { value: 0 },
     uBrightness: { value: OUTDOOR_DAY_ATMOSPHERE.skyBrightness },
   }), [sunDirection])
@@ -166,7 +168,11 @@ function CloudSky({
     shaderUniforms.uCloudBaseColor.value.copy(BASE_SKY_COLORS.cloudBase).lerp(GRAVEYARD_SKY_COLORS.cloudBase, influence)
     shaderUniforms.uCloudWarmColor.value.copy(BASE_SKY_COLORS.cloudWarm).lerp(GRAVEYARD_SKY_COLORS.cloudWarm, influence)
     shaderUniforms.uCloudShadeColor.value.copy(BASE_SKY_COLORS.cloudShade).lerp(GRAVEYARD_SKY_COLORS.cloudShade, influence)
-    shaderUniforms.uCloudCoverageBoost.value = GRAVEYARD_ATMOSPHERE.cloudCoverageBoost * influence
+    shaderUniforms.uCloudCoverageBoost.value = MathUtils.lerp(
+      BASE_CLOUD_COVERAGE_BOOST,
+      GRAVEYARD_ATMOSPHERE.cloudCoverageBoost,
+      influence,
+    )
     shaderUniforms.uDesaturation.value = GRAVEYARD_ATMOSPHERE.desaturation * influence
   })
 

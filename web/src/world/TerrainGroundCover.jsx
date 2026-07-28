@@ -13,6 +13,7 @@ import {
 } from './biomeAreas'
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
+import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 
 const dummy = new Object3D()
 const _cameraForward = new Vector3()
@@ -67,9 +68,21 @@ const GRASS_BUFFER_COMPACTION_RATIO = 1.75
 const GRASS_DEBUG_ESTIMATE_INTERVAL_MS = 600
 const GRASS_DEBUG_MAX_SAMPLES = 60_000
 const GRASS_TEXTURE = '/textures/outdoor/grass-001-white.png'
-const grassBottomColor = new Color('#638b0f')
-const grassMiddleColor = new Color('#6f970e')
-const grassTopColor = new Color('#8aac22')
+const grassBottomColor = new Color('#339632')
+const grassMiddleColor = new Color('#59bd36')
+const grassTopColor = new Color('#8fd642')
+const grassSunColorGlsl = new Color(OUTDOOR_DAY_ATMOSPHERE.sunColor)
+  .toArray()
+  .map((value) => value.toFixed(3))
+  .join(', ')
+const grassSkyColorGlsl = new Color(OUTDOOR_DAY_ATMOSPHERE.skyLightColor)
+  .toArray()
+  .map((value) => value.toFixed(3))
+  .join(', ')
+const grassGroundColorGlsl = new Color(OUTDOOR_DAY_ATMOSPHERE.groundLightColor)
+  .toArray()
+  .map((value) => value.toFixed(3))
+  .join(', ')
 const GRASS_CARD_HEIGHT = 0.78
 const GRASS_VERTICAL_SEGMENTS = 1
 const GRASS_FULL_DENSITY_RADIUS = 10
@@ -456,6 +469,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
       uniform float uGraveyardGroundIntensities[${BIOME_SHADER_MAX_AREAS}];
       uniform int uGraveyardAreaCount;
       attribute float instanceSpawnTime;
+      varying vec3 vOutdoorGrassLight;
 
       float grassHash(vec2 value) {
         return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
@@ -500,6 +514,20 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
         vec3 grassOrigin = vec3(0.0);
       #endif
       float graveyardGrassCull = smoothstep(0.18, 0.42, grassGraveyardInfluence(grassOrigin.xz));
+      float grassLightVariation = 0.88 + grassHash(grassOrigin.xz + vec2(5.3, 8.7)) * 0.12;
+      vec3 grassAmbientLight = mix(
+        vec3(${grassGroundColorGlsl}),
+        vec3(${grassSkyColorGlsl}),
+        0.58 + heightFactor * 0.34
+      ) * 0.82;
+      vec3 grassSunLight = vec3(${grassSunColorGlsl})
+        * (0.14 + heightFactor * 0.10)
+        * grassLightVariation;
+      vOutdoorGrassLight = clamp(
+        grassAmbientLight + grassSunLight,
+        vec3(0.48, 0.62, 0.42),
+        vec3(1.06, 1.12, 0.96)
+      );
 
       float travel = dot(grassOrigin.xz, uWindDirection.xz) * uWindScale;
       float cross = dot(grassOrigin.xz, vec2(-uWindDirection.z, uWindDirection.x)) * 0.06;
@@ -601,6 +629,21 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
       }
       `}
 `,
+    )
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `
+      #include <common>
+      varying vec3 vOutdoorGrassLight;
+      `,
+    )
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `
+      #include <map_fragment>
+      diffuseColor.rgb *= vOutdoorGrassLight;
+      `,
     )
 
     onShaderReady(shader)
@@ -742,7 +785,7 @@ function TerrainGroundCover({
       shaderRef.current = shader
     // eslint-disable-next-line react-hooks/refs
     }, false, () => grassBiomeDataRef.current)
-    mat.customProgramCacheKey = () => 'terrain-grass-local-v2'
+    mat.customProgramCacheKey = () => 'terrain-grass-local-v7'
     return mat
   }, [grassTexture])
   useEffect(() => () => grassMaterial.dispose(), [grassMaterial])
@@ -762,7 +805,7 @@ function TerrainGroundCover({
       globalShaderRef.current = shader
     // eslint-disable-next-line react-hooks/refs
     }, true, () => grassBiomeDataRef.current)
-    mat.customProgramCacheKey = () => 'terrain-grass-global-v2'
+    mat.customProgramCacheKey = () => 'terrain-grass-global-v7'
     return mat
   }, [grassTexture])
   useEffect(() => () => globalGrassMaterial.dispose(), [globalGrassMaterial])

@@ -155,16 +155,16 @@ function NaturalTerrainMaterial({
 
       // Keep the terrain close to the blade palette so sparse distant grass blends into it.
       float grassLum = dot(naturalGrassColor.rgb, vec3(0.299, 0.587, 0.114));
-      vec3 grassTarget = vec3(0.20, 0.43, 0.035);
+      vec3 grassTarget = vec3(0.055, 0.37, 0.035);
       vec3 grassGraded = mix(
         naturalGrassColor.rgb,
         grassTarget * clamp(grassLum * 2.8 + 0.10, 0.0, 0.84),
-        0.74
+        0.90
       );
 
       // Grade dirt toward warm amber-ochre: harmonious earth tones under green (linear: ~#b87a30)
       float dirtLum = dot(naturalDirtColor.rgb, vec3(0.299, 0.587, 0.114));
-      vec3 dirtTarget = vec3(0.49, 0.20, 0.03);
+      vec3 dirtTarget = vec3(0.49, 0.23, 0.04);
       vec3 dirtGraded = mix(
         naturalDirtColor.rgb,
         dirtTarget * clamp(dirtLum * 2.5 + 0.08, 0.0, 0.90),
@@ -226,8 +226,8 @@ function NaturalTerrainMaterial({
         normalMap={grassNormalMap}
         normalScale={new Vector2(0.34, 0.34)}
         color="#ffffff"
-        emissive="#3c7010"
-        emissiveIntensity={0.07}
+        emissive="#328f22"
+        emissiveIntensity={0.05}
         onBeforeCompile={handleBeforeCompile}
       />
     )
@@ -240,8 +240,8 @@ function NaturalTerrainMaterial({
       normalMap={grassNormalMap}
       normalScale={new Vector2(0.34, 0.34)}
       color="#ffffff"
-      emissive="#3c7010"
-      emissiveIntensity={0.07}
+      emissive="#328f22"
+      emissiveIntensity={0.05}
       roughness={0.88}
       onBeforeCompile={handleBeforeCompile}
     />

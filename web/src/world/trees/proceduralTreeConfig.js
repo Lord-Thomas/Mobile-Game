@@ -13,13 +13,25 @@ export const treeLeafWindUniforms = {
   uTreeHeight: { value: 52.0 },
 }
 
-const leafBottomColor = new Color('#638b0f')
-const leafMiddleColor = new Color('#6f970e')
-const leafTopColor = new Color('#8aac22')
-const leafCoolShade = new Color('#557f25')
-const leafWarmHighlight = new Color('#a6bf36')
+const leafBottomColor = new Color('#348d35')
+const leafMiddleColor = new Color('#58b33a')
+const leafTopColor = new Color('#8dce48')
+const leafCoolShade = new Color('#2e7c48')
+const leafWarmHighlight = new Color('#b9d957')
 const leafSunDirectionGlsl = OUTDOOR_DAY_ATMOSPHERE.sunDirection
   .map((value) => Number(value).toFixed(3))
+  .join(', ')
+const leafSunColorGlsl = new Color(OUTDOOR_DAY_ATMOSPHERE.sunColor)
+  .toArray()
+  .map((value) => value.toFixed(3))
+  .join(', ')
+const leafSkyColorGlsl = new Color(OUTDOOR_DAY_ATMOSPHERE.skyLightColor)
+  .toArray()
+  .map((value) => value.toFixed(3))
+  .join(', ')
+const leafGroundColorGlsl = new Color(OUTDOOR_DAY_ATMOSPHERE.groundLightColor)
+  .toArray()
+  .map((value) => value.toFixed(3))
   .join(', ')
 
 function getPresetOptions(preset) {
@@ -272,14 +284,14 @@ function stylizeLeafColors(tree, config, animated = false) {
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
       `#include <common>
-      varying float vOutdoorLeafLight;
+      varying vec3 vOutdoorLeafLight;
       `,
     )
 
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <common>',
       `#include <common>
-      varying float vOutdoorLeafLight;
+      varying vec3 vOutdoorLeafLight;
       `,
     )
 
@@ -302,14 +314,23 @@ function stylizeLeafColors(tree, config, animated = false) {
       #else
         vec3 outdoorLeafNormal = normalize(normalMatrix * normal);
       #endif
-      float outdoorLeafFacing = dot(
+      float outdoorLeafSunFacing = max(dot(
         outdoorLeafNormal,
         normalize(vec3(${leafSunDirectionGlsl}))
-      ) * 0.5 + 0.5;
-      vOutdoorLeafLight = mix(
-        ${OUTDOOR_DAY_ATMOSPHERE.leaves.shade.toFixed(3)},
-        ${OUTDOOR_DAY_ATMOSPHERE.leaves.highlight.toFixed(3)},
-        outdoorLeafFacing
+      ), 0.0);
+      float outdoorLeafSkyFacing = outdoorLeafNormal.y * 0.5 + 0.5;
+      vec3 outdoorLeafAmbient = mix(
+        vec3(${leafGroundColorGlsl}),
+        vec3(${leafSkyColorGlsl}),
+        0.35 + outdoorLeafSkyFacing * 0.65
+      ) * ${OUTDOOR_DAY_ATMOSPHERE.leaves.skyStrength.toFixed(3)};
+      vec3 outdoorLeafSun = vec3(${leafSunColorGlsl})
+        * pow(outdoorLeafSunFacing, 0.72)
+        * ${OUTDOOR_DAY_ATMOSPHERE.leaves.sunStrength.toFixed(3)};
+      vOutdoorLeafLight = clamp(
+        outdoorLeafAmbient + outdoorLeafSun,
+        vec3(${OUTDOOR_DAY_ATMOSPHERE.leaves.shade.toFixed(3)}),
+        vec3(${OUTDOOR_DAY_ATMOSPHERE.leaves.highlight.toFixed(3)})
       );
       `,
     )
@@ -364,7 +385,7 @@ function stylizeLeafColors(tree, config, animated = false) {
       `,
     )
   }
-  stylizedMaterial.customProgramCacheKey = () => `stylized-leaves-v2-${animated ? 'wind' : 'still'}`
+  stylizedMaterial.customProgramCacheKey = () => `stylized-leaves-v7-${animated ? 'wind' : 'still'}`
 
   material.dispose()
   tree.leavesMesh.material = stylizedMaterial

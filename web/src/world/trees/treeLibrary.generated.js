@@ -38,7 +38,7 @@ export const SAVED_TREE_LIBRARY = {
         "normalStrength": 0.78,
         "colorMode": "gameGrass",
         "colorVariation": 0.34,
-        "hueShift": 0.03,
+        "hueShift": 0.02,
         "saturation": 0.98,
         "brightness": 1
       }
@@ -83,7 +83,7 @@ export const SAVED_TREE_LIBRARY = {
         "normalStrength": 0.78,
         "colorMode": "gameGrass",
         "colorVariation": 0.3,
-        "hueShift": -0.02,
+        "hueShift": 0,
         "saturation": 0.98,
         "brightness": 1
       }
@@ -128,7 +128,7 @@ export const SAVED_TREE_LIBRARY = {
         "normalStrength": 0.78,
         "colorMode": "gameGrass",
         "colorVariation": 0.28,
-        "hueShift": 0.05,
+        "hueShift": 0.03,
         "saturation": 0.98,
         "brightness": 0.98
       }
@@ -173,7 +173,7 @@ export const SAVED_TREE_LIBRARY = {
         "normalStrength": 0.78,
         "colorMode": "gameGrass",
         "colorVariation": 0.28,
-        "hueShift": -0.04,
+        "hueShift": 0,
         "saturation": 0.98,
         "brightness": 0.98
       }
