@@ -8012,6 +8012,9 @@ function ControlsOverlay({
   showJumpAction = true,
   showDodgeAction = false,
   mountFlying = false,
+  selectedMount = null,
+  mountActive = false,
+  onToggleMount,
   controlSettings = DEFAULT_CONTROL_SETTINGS,
   onTap,
 }) {
@@ -8362,6 +8365,22 @@ function ControlsOverlay({
           <span aria-hidden="true">↻</span>
         </button>
       )}
+      {!uiHidden && selectedMount && onToggleMount && (
+        <button
+          className={`mount-summon-action-btn${mountActive ? ' is-active' : ''}`}
+          type="button"
+          aria-label={mountActive ? `Désinvoquer ${selectedMount.label}` : `Invoquer ${selectedMount.label}`}
+          title={mountActive ? `Désinvoquer ${selectedMount.label}` : `Invoquer ${selectedMount.label}`}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            triggerControlHaptic(controlSettings.vibration)
+            onToggleMount(selectedMount.id)
+          }}
+        >
+          <span aria-hidden="true">{selectedMount.icon}</span>
+        </button>
+      )}
       {!uiHidden && mountFlying && (
         <button
           className="action-btn action-btn-descend"
@@ -8386,7 +8405,7 @@ const BAG_ITEM_DEFS = [
 
 const BAG_GRID_SIZE = 12
 
-function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharacter, ownedMountIds = [], mountedMountId, onToggleMount, onClose, materials = {} }) {
+function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose, materials = {}, coins = 0 }) {
   const lastTapRef = useRef({})
 
   function handleSlotInteraction(itemId) {
@@ -8402,52 +8421,50 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
 
   if (!open) return null
 
-  const slots = Array.from({ length: BAG_GRID_SIZE }, (_, i) => ownedItems[i] ?? null)
   const materialEntries = getMaterialEntries(materials)
+  const bagEntries = [
+    ...ownedItems.map((item) => ({ ...item, kind: 'equipment' })),
+    ...materialEntries.map(({ itemId, def, count }) => ({
+      id: `material:${itemId}`,
+      itemId,
+      kind: 'material',
+      name: def?.name ?? itemId,
+      def,
+      count,
+    })),
+  ]
+  const slots = Array.from(
+    { length: Math.max(BAG_GRID_SIZE, bagEntries.length) },
+    (_, index) => bagEntries[index] ?? null,
+  )
 
   return (
     <div className="weapon-inventory-overlay" onClick={onClose}>
       <div className="bag-panel" onClick={(e) => e.stopPropagation()}>
         <div className="weapon-inventory-header">
           <span>🎒 Sac</span>
+          <span className="bag-coins">
+            <img src="/ui/coins.png" alt="" aria-hidden="true" />
+            {coins}
+          </span>
           <button type="button" className="weapon-inventory-close" onClick={onClose}>✕</button>
         </div>
-        {onCustomizeCharacter && (
-          <button
-            type="button"
-            className="bag-character-customization-btn"
-            onClick={onCustomizeCharacter}
-          >
-            <span aria-hidden="true">{'\u{1F464}'}</span>
-            Personnaliser le personnage
-          </button>
-        )}
-        {onToggleMount && MOUNT_SHOP_ITEMS.filter((mount) => ownedMountIds.includes(mount.id)).map((mount) => (
-          <button
-            key={mount.id}
-            type="button"
-            className="bag-character-customization-btn"
-            onClick={() => onToggleMount(mount.id)}
-          >
-            <span aria-hidden="true">{mount.icon}</span>
-            {mountedMountId === mount.id ? `Désinvoquer ${mount.label}` : `Invoquer ${mount.label}`}
-          </button>
-        ))}
         <p className="bag-hint">Double-cliquer pour équiper</p>
         <div className="bag-grid">
           {slots.map((item, i) => {
-            const isEquipped = item && equippedWeapon === item.id
+            const isEquipment = item?.kind === 'equipment'
+            const isEquipped = isEquipment && equippedWeapon === item.id
             return (
               <div
                 key={item ? item.id : `empty-${i}`}
                 className={`bag-slot ${item ? 'has-item' : ''} ${isEquipped ? 'equipped' : ''}`}
-                onClick={() => item && handleSlotInteraction(item.id)}
-                title={item ? `${item.name} — ${item.desc}` : ''}
-                role={item ? 'button' : undefined}
-                tabIndex={item ? 0 : undefined}
-                onKeyDown={item ? (e) => e.key === 'Enter' && handleSlotInteraction(item.id) : undefined}
+                onClick={() => isEquipment && handleSlotInteraction(item.id)}
+                title={item ? `${item.name}${item.desc ? ` — ${item.desc}` : ''}` : ''}
+                role={isEquipment ? 'button' : undefined}
+                tabIndex={isEquipment ? 0 : undefined}
+                onKeyDown={isEquipment ? (e) => e.key === 'Enter' && handleSlotInteraction(item.id) : undefined}
               >
-                {item && (
+                {isEquipment && (
                   <>
                     {item.thumbnail ? (
                       <>
@@ -8469,24 +8486,103 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onCustomizeCharac
                     {isEquipped && <span className="bag-slot-equipped-dot" title="Équipé" />}
                   </>
                 )}
+                {item?.kind === 'material' && (
+                  <>
+                    <ItemIcon def={item.def} className="bag-slot-material-icon" />
+                    <span className="bag-slot-count">x{item.count}</span>
+                  </>
+                )}
               </div>
             )
           })}
         </div>
-        {materialEntries.length > 0 && (
-          <>
-            <p className="bag-hint">Objets</p>
-            <div className="bag-materials">
-              {materialEntries.map(({ itemId, def, count }) => (
-                <div key={itemId} className="bag-material" title={def?.name ?? itemId}>
-                  <ItemIcon def={def} className="bag-material-icon" />
-                  <span className="bag-material-count">x{count}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
       </div>
+    </div>
+  )
+}
+
+function CompanionMenu({
+  open,
+  activeTab,
+  onTabChange,
+  ownedMountIds,
+  selectedMountId,
+  mountedMountId,
+  onSelectMount,
+  onToggleMount,
+  ownedCat,
+  catActive,
+  onToggleCat,
+  ownedSlimePets,
+  activeSlimePetId,
+  onToggleSlimePet,
+  onClose,
+}) {
+  if (!open) return null
+
+  const mounts = MOUNT_SHOP_ITEMS.filter((mount) => ownedMountIds.includes(mount.id))
+  const slimePets = SLIME_PET_DEFINITIONS.filter((pet) => ownedSlimePets.includes(pet.petId))
+
+  return (
+    <div className="companion-menu-overlay">
+      <section className="companion-menu-panel" aria-label="Montures et familiers">
+        <header className="companion-menu-header">
+          <strong>Compagnons</strong>
+          <button type="button" onClick={onClose} aria-label="Fermer">✕</button>
+        </header>
+        <div className="companion-menu-tabs">
+          <button type="button" className={activeTab === 'mounts' ? 'is-active' : ''} onClick={() => onTabChange('mounts')}>
+            Montures
+          </button>
+          <button type="button" className={activeTab === 'pets' ? 'is-active' : ''} onClick={() => onTabChange('pets')}>
+            Familiers
+          </button>
+        </div>
+        <div className="companion-menu-grid">
+          {activeTab === 'mounts' && mounts.map((mount) => (
+            <button
+              key={mount.id}
+              type="button"
+              className={`companion-card${selectedMountId === mount.id ? ' is-selected' : ''}`}
+              onClick={() => onSelectMount(mount.id)}
+              aria-pressed={selectedMountId === mount.id}
+            >
+              <span className="companion-card-icon" aria-hidden="true">{mount.icon}</span>
+              <strong>{mount.label}</strong>
+              <small>{mountedMountId === mount.id ? 'Invoquée' : selectedMountId === mount.id ? 'Sélectionnée' : 'Sélectionner'}</small>
+            </button>
+          ))}
+          {activeTab === 'pets' && ownedCat && (
+            <button type="button" className={`companion-card${catActive ? ' is-selected' : ''}`} onClick={onToggleCat}>
+              <span className="companion-card-icon" aria-hidden="true">🐱</span>
+              <strong>Chat</strong>
+              <small>{catActive ? 'Désinvoquer' : 'Invoquer'}</small>
+            </button>
+          )}
+          {activeTab === 'pets' && slimePets.map((pet) => {
+            const active = activeSlimePetId === pet.petId
+            return (
+              <button key={pet.petId} type="button" className={`companion-card${active ? ' is-selected' : ''}`} onClick={() => onToggleSlimePet(pet.petId)}>
+                <ItemIcon def={getItemDefinition(pet.itemId)} className="companion-card-image" />
+                <strong>{pet.name}</strong>
+                <small>{active ? 'Désinvoquer' : 'Invoquer'}</small>
+              </button>
+            )
+          })}
+          {((activeTab === 'mounts' && mounts.length === 0) || (activeTab === 'pets' && !ownedCat && slimePets.length === 0)) && (
+            <p className="companion-menu-empty">Aucun compagnon débloqué.</p>
+          )}
+        </div>
+        {activeTab === 'mounts' && selectedMountId && (
+          <button
+            type="button"
+            className={`companion-mount-toggle${mountedMountId === selectedMountId ? ' is-active' : ''}`}
+            onClick={() => onToggleMount(selectedMountId)}
+          >
+            {mountedMountId === selectedMountId ? 'Désinvoquer la monture' : 'Invoquer la monture'}
+          </button>
+        )}
+      </section>
     </div>
   )
 }
@@ -8543,10 +8639,14 @@ function HudUtilityRail({
   leftHanded,
   controlSettings,
   menuOpen,
+  characterOpen,
+  companionOpen,
   onToggleMenu,
   onOpenQuests,
+  onOpenCharacter,
+  onOpenCompanions,
 }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
 
   return (
     <div
@@ -8574,6 +8674,22 @@ function HudUtilityRail({
           </button>
           <button className="quest-journal-btn" type="button" onClick={onOpenQuests} aria-label="Journal de quêtes">
             📜
+          </button>
+          <button
+            className={`hud-rail-character-btn${characterOpen ? ' is-active' : ''}`}
+            type="button"
+            onClick={onOpenCharacter}
+            aria-label="Personnalisation du personnage"
+          >
+            👤
+          </button>
+          <button
+            className={`hud-rail-companion-btn${companionOpen ? ' is-active' : ''}`}
+            type="button"
+            onClick={onOpenCompanions}
+            aria-label="Montures et familiers"
+          >
+            🐾
           </button>
         </div>
       )}
@@ -18927,6 +19043,9 @@ function App() {
     ready: false,
   })
   const [mountedMountId, setMountedMountId] = useState(null)
+  const [selectedMountId, setSelectedMountId] = useState(null)
+  const [companionMenuOpen, setCompanionMenuOpen] = useState(false)
+  const [companionMenuTab, setCompanionMenuTab] = useState('mounts')
   const dragonMounted = mountedMountId !== null
   const activeMountConfig = getMountConfig(mountedMountId)
   const [cameraOnCat, setCameraOnCat] = useState(false)
@@ -19046,6 +19165,7 @@ function App() {
   const summonCooldownRef = useRef(0)
   const [summonCooldownUntil, setSummonCooldownUntil] = useState(0)
   const ownedMounts = useGameStore((s) => s.equipment.ownedMounts)
+  const selectedMountConfig = getMountConfig(selectedMountId)
   const equippedWeapon = useGameStore((s) => s.equipment.equippedWeapon)
   const isWeaponMenuOpen = useGameStore((s) => s.ui.weaponMenuOpen)
   const characterAppearance = useGameStore((s) => s.equipment.characterAppearance)
@@ -19426,6 +19546,11 @@ function App() {
       setInventory('activeSlimePetId',null)
     }
   }, [activeSlimePetId, ownedSlimePets])
+
+  useEffect(() => {
+    if (selectedMountId && ownedMounts.includes(selectedMountId)) return
+    setSelectedMountId(ownedMounts[0] ?? null)
+  }, [ownedMounts, selectedMountId])
 
   useEffect(() => {
     if (!authUser?.id) return
@@ -21067,7 +21192,7 @@ function App() {
   const inventoryCards = getInventoryCards(editableObjects)
   const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
   const showGameplayUi = showCaptureUi && mode === 'play'
-  const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen || Boolean(youtubeFrameEditor)
+  const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || companionMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen || Boolean(youtubeFrameEditor)
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
   const furnitureInventoryObjects = isGuestVisit && personalProgressVersion >= 0
     ? personalProgressRef.current?.editableObjects ?? []
@@ -21353,12 +21478,6 @@ function App() {
     setMenuOpen('environment', false)
     setMenuOpen('character', false)
     setMenuOpen('customizationChoice', true)
-  }
-
-  const openCharacterCustomizationFromBag = () => {
-    if (!PUBLIC_BUILD_FLAGS.showCharacterCustomization) return
-    setUi('weaponMenuOpen',false)
-    setMenuOpen('character', true)
   }
 
   const goPreview = (direction) => {
@@ -23528,6 +23647,9 @@ function App() {
           uiHidden={!showCaptureUi}
           showDodgeAction={currentZone === ZONES.outside}
           mountFlying={dragonMounted && activeMountConfig?.canFly === true}
+          selectedMount={selectedMountConfig}
+          mountActive={mountedMountId === selectedMountId}
+          onToggleMount={toggleMount}
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
       )}
@@ -23544,7 +23666,11 @@ function App() {
           className={`weapon-inventory-btn hud-persistent-bag${controlSettings.leftHanded ? ' hud-persistent-bag--left' : ''}`}
           type="button"
           style={getControlCssVariables(controlSettings)}
-          onClick={() => setUi('weaponMenuOpen', (current) => !current)}
+          onClick={() => {
+            setCompanionMenuOpen(false)
+            setMenuOpen('character', false)
+            setUi('weaponMenuOpen', (current) => !current)
+          }}
           aria-label="Sac"
           aria-pressed={isWeaponMenuOpen}
         >
@@ -23556,8 +23682,34 @@ function App() {
           leftHanded={controlSettings.leftHanded}
           controlSettings={controlSettings}
           menuOpen={isAccountOpen}
-          onToggleMenu={() => setUi('accountOpen', (current) => !current)}
-          onOpenQuests={() => setQuest('journalOpen',(v) => !v)}
+          characterOpen={isCharacterMenuOpen}
+          companionOpen={companionMenuOpen}
+          onToggleMenu={() => {
+            setCompanionMenuOpen(false)
+            setMenuOpen('character', false)
+            setQuest('journalOpen', false)
+            setUi('accountOpen', (current) => !current)
+          }}
+          onOpenQuests={() => {
+            setCompanionMenuOpen(false)
+            setMenuOpen('character', false)
+            setUi('accountOpen', false)
+            setQuest('journalOpen', (current) => !current)
+          }}
+          onOpenCharacter={() => {
+            setCompanionMenuOpen(false)
+            setUi('weaponMenuOpen', false)
+            setUi('accountOpen', false)
+            setQuest('journalOpen', false)
+            setMenuOpen('character', !isCharacterMenuOpen)
+          }}
+          onOpenCompanions={() => {
+            setMenuOpen('character', false)
+            setUi('weaponMenuOpen', false)
+            setUi('accountOpen', false)
+            setQuest('journalOpen', false)
+            setCompanionMenuOpen((current) => !current)
+          }}
         />
       )}
       {showGameplayUi && isCharging && (
@@ -23593,6 +23745,25 @@ function App() {
           onClose={() => setMenuOpen('character', false)}
         />
       )}
+      {showGameplayUi && (
+        <CompanionMenu
+          open={companionMenuOpen}
+          activeTab={companionMenuTab}
+          onTabChange={setCompanionMenuTab}
+          ownedMountIds={ownedMounts}
+          selectedMountId={selectedMountId}
+          mountedMountId={mountedMountId}
+          onSelectMount={setSelectedMountId}
+          onToggleMount={toggleMount}
+          ownedCat={ownedCat}
+          catActive={catActive}
+          onToggleCat={toggleCat}
+          ownedSlimePets={ownedSlimePets}
+          activeSlimePetId={activeSlimePetId}
+          onToggleSlimePet={toggleSlimePet}
+          onClose={() => setCompanionMenuOpen(false)}
+        />
+      )}
       {showGameplayUi && canModifyWorld && (
         <CustomizationChoiceMenu
           open={isCustomizationChoiceOpen}
@@ -23612,16 +23783,9 @@ function App() {
             }))}
           equippedWeapon={equippedWeapon}
           onEquip={(weapon) => { setEquipment('equippedWeapon',weapon) }}
-          onCustomizeCharacter={
-            PUBLIC_BUILD_FLAGS.showCharacterCustomization
-              ? openCharacterCustomizationFromBag
-              : undefined
-          }
-          ownedMountIds={ownedMounts}
-          mountedMountId={mountedMountId}
-          onToggleMount={mode === 'play' ? toggleMount : undefined}
           onClose={() => setUi('weaponMenuOpen',false)}
           materials={materials}
+          coins={coins}
         />
       )}
       {showGameplayUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (
@@ -23728,7 +23892,7 @@ function App() {
         onRequestSit={requestSit}
         onRequestStandUp={requestStandUp}
         onTalk={() => setQuest('dialogOpen',true)}
-        contextWindowOpen={questDialogOpen || questJournalOpen || vendorOpen}
+        contextWindowOpen={questDialogOpen || questJournalOpen || vendorOpen || companionMenuOpen}
       />
       <BossHud
         placements={SUMMONING_ALTAR_PLACEMENTS}
