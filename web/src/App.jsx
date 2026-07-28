@@ -13,6 +13,7 @@ import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS,
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
+import { OUTDOOR_PLAYER_COLLISION_HEIGHT, overlapsOutdoorColliderHeight } from './game/outdoorObstacleCollision'
 import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
 import { WORLD_LOADING_TIPS, advanceLoadingExperience, createLoadingExperience } from './game/loadingExperience'
 import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
@@ -13363,15 +13364,34 @@ function getTwitchParentHost() {
   return window.location.hostname || 'localhost'
 }
 
-function collidesWithEditableTree(nextX, nextZ, radius = PLAYER_CAPSULE_RADIUS) {
+function collidesWithEditableTree(
+  nextX,
+  nextZ,
+  footY = getTerrainHeight(nextX, nextZ),
+  radius = PLAYER_CAPSULE_RADIUS,
+) {
   return EDITABLE_TREE_PLACEMENTS.some((treeEntry) => {
     const { x, z } = getEditableTreePosition(treeEntry)
+    const treeBaseY = treeEntry.placement.position?.[1] ?? getTerrainHeight(x, z)
+    const treeHeight = (treeEntry.catalogItem.heightWorldUnits ?? 0) * (treeEntry.placement.scale ?? 1)
+    if (
+      treeHeight > 0 &&
+      !overlapsOutdoorColliderHeight(
+        { y: treeBaseY + treeHeight * 0.5, hy: treeHeight * 0.5 },
+        footY,
+        OUTDOOR_PLAYER_COLLISION_HEIGHT,
+      )
+    ) {
+      return false
+    }
     return Math.hypot(nextX - x, nextZ - z) <= getEditableTreeCollisionRadius(treeEntry) + radius
   })
 }
 
 function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(nextX, nextZ), radius = PLAYER_CAPSULE_RADIUS) {
   const collidesWithAuthoredObstacle = OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
+    if (!overlapsOutdoorColliderHeight(collider, footY)) return false
+
     if (collider.type === 'circle') {
       return Math.hypot(nextX - collider.x, nextZ - collider.z) <= collider.radius + radius
     }
@@ -13391,7 +13411,7 @@ function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(next
 
   return (
     collidesWithAuthoredObstacle ||
-    collidesWithEditableTree(nextX, nextZ, radius) ||
+    collidesWithEditableTree(nextX, nextZ, footY, radius) ||
     collidesWithMapObjectSolid(nextX, nextZ, footY, radius)
   )
 }

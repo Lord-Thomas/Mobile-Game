@@ -5,7 +5,7 @@ import { LOOT_TABLES } from '../items/lootTable'
 import { MAP_OBJECT_DEFINITIONS } from './mapObjectLibrary'
 import { AUTHORED_TREES } from './outdoorData'
 import { getTerrainHeight } from './terrain/terrainGeometry'
-import { estimateTreeHeight } from './trees/proceduralTreeConfig'
+import { estimateTreeHeight, estimateTreeTrunkCollisionRadius } from './trees/proceduralTreeConfig'
 import {
   getRuntimeTreeLibrary,
   getTreeMapObjectEntries,
@@ -139,7 +139,7 @@ function createTreeMapObjectCatalog() {
       treeId: tree.id,
       treeConfig: tree.config,
       heightWorldUnits,
-      colliderRadius: Math.max(0.65, heightWorldUnits * 0.11),
+      colliderRadius: estimateTreeTrunkCollisionRadius(tree.config),
       selectionRadius: Math.max(0.8, heightWorldUnits * 0.13),
       hitRadius: Math.max(0.9, heightWorldUnits * 0.16),
       hitHeightWorldUnits: Math.max(2.2, heightWorldUnits),

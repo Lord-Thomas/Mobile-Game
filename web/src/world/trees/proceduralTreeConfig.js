@@ -1,5 +1,6 @@
 import { Tree } from '@dgreenheck/ez-tree'
 import { BufferAttribute, Box3, Color, DoubleSide, Float32BufferAttribute, FrontSide, MathUtils, MeshBasicMaterial, Vector3 } from 'three'
+import { getScaledTreeTrunkCollisionRadius } from '../../game/outdoorObstacleCollision'
 import { OUTDOOR_DAY_ATMOSPHERE } from '../outdoorAtmosphere'
 
 // Shared uniform objects — all animated leaf shaders reference these same objects.
@@ -471,4 +472,13 @@ export function estimateTreeHeight(config) {
   const leafContribution = values.leafSize * 1.2
 
   return Math.max(2.5, (values.trunkLength + branchContribution + leafContribution) * normalizeTreeConfig(config).scale)
+}
+
+export function estimateTreeTrunkCollisionRadius(config) {
+  const normalized = normalizeTreeConfig(config)
+  const values = getTreeEditorValues(normalized)
+
+  // Légère marge pour éviter que le modèle visible traverse le joueur, sans
+  // englober les branches ou le feuillage.
+  return getScaledTreeTrunkCollisionRadius(values.trunkRadius, normalized.scale)
 }
