@@ -447,7 +447,7 @@ function TreeLodVariant({
           variantId={variantId}
           capacity={placements.length}
           playerPositionRef={lodLevel === 0 ? playerPositionRef : null}
-          castShadows={castShadows}
+          castShadows={castShadows && (forceSimplified || lodLevel <= 1)}
           lodLevel={lodLevel}
           lodPlacementsRef={lodPlacementsRef}
           lodVersionRef={lodVersionRef}

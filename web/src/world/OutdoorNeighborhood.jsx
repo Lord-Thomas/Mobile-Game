@@ -1,7 +1,7 @@
 import React from 'react'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Color, MathUtils } from 'three'
+import { Color, MathUtils, Vector3 } from 'three'
 import OutdoorGround from './OutdoorGround'
 import PlayerPlot from './PlayerPlot'
 import Road from './Road'
@@ -20,6 +20,23 @@ import { OUTDOOR_LIGHT_LAYER } from './lightingLayers'
 import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 
 const OUTDOOR_SUN_DIRECTION = OUTDOOR_DAY_ATMOSPHERE.sunDirection
+const OUTDOOR_SUN_VECTOR = new Vector3(...OUTDOOR_SUN_DIRECTION).normalize()
+const OUTDOOR_SHADOW_MAP_SIZE = 512
+const OUTDOOR_SHADOW_HALF_EXTENT = 24
+const OUTDOOR_SHADOW_FORWARD_OFFSET = 10
+const OUTDOOR_SHADOW_LIGHT_DISTANCE = 42
+const OUTDOOR_SHADOW_TEXEL_SIZE = (OUTDOOR_SHADOW_HALF_EXTENT * 2) / OUTDOOR_SHADOW_MAP_SIZE
+const OUTDOOR_SHADOW_VIEW_DIRECTION = OUTDOOR_SUN_VECTOR.clone().negate()
+const OUTDOOR_SHADOW_RIGHT = new Vector3()
+  .crossVectors(OUTDOOR_SHADOW_VIEW_DIRECTION, new Vector3(0, 1, 0))
+  .normalize()
+const OUTDOOR_SHADOW_UP = new Vector3()
+  .crossVectors(OUTDOOR_SHADOW_RIGHT, OUTDOOR_SHADOW_VIEW_DIRECTION)
+  .normalize()
+const OUTDOOR_SUN_INITIAL_POSITION = OUTDOOR_SUN_VECTOR
+  .clone()
+  .multiplyScalar(OUTDOOR_SHADOW_LIGHT_DISTANCE)
+  .toArray()
 const BASE_SUN_COLOR = new Color(OUTDOOR_DAY_ATMOSPHERE.sunColor)
 const BASE_SKY_LIGHT_COLOR = new Color(OUTDOOR_DAY_ATMOSPHERE.skyLightColor)
 const BASE_GROUND_LIGHT_COLOR = new Color(OUTDOOR_DAY_ATMOSPHERE.groundLightColor)
@@ -31,6 +48,20 @@ const DECOR_MAP_OBJECT_PLACEMENTS = MAP_OBJECT_PLACEMENTS.filter((placement) => 
   placement.objectId !== MAGIC_SKULL_DISCOVERY_OBJECT_ID
 ))
 
+function snapShadowCenterToTexels(center, target) {
+  const right = Math.round(center.dot(OUTDOOR_SHADOW_RIGHT) / OUTDOOR_SHADOW_TEXEL_SIZE)
+    * OUTDOOR_SHADOW_TEXEL_SIZE
+  const up = Math.round(center.dot(OUTDOOR_SHADOW_UP) / OUTDOOR_SHADOW_TEXEL_SIZE)
+    * OUTDOOR_SHADOW_TEXEL_SIZE
+  const depth = center.dot(OUTDOOR_SHADOW_VIEW_DIRECTION)
+
+  return target
+    .copy(OUTDOOR_SHADOW_RIGHT)
+    .multiplyScalar(right)
+    .addScaledVector(OUTDOOR_SHADOW_UP, up)
+    .addScaledVector(OUTDOOR_SHADOW_VIEW_DIRECTION, depth)
+}
+
 function getGraveyardAtmosphereInfluence(playerPositionRef, viewerOutside, active, biomeAreas) {
   const position = playerPositionRef?.current
   if (!active || !viewerOutside || !position) return 0
@@ -41,6 +72,10 @@ function OutdoorSun({ castShadows, intensity, active, viewerOutside, playerPosit
   const lightRef = useRef()
   const targetRef = useRef()
   const influenceRef = useRef(0)
+  const cameraForwardRef = useRef(new Vector3(0, 0, -1))
+  const desiredCenterRef = useRef(new Vector3())
+  const snappedCenterRef = useRef(new Vector3())
+  const appliedCenterRef = useRef(new Vector3(Number.POSITIVE_INFINITY, 0, 0))
 
   useEffect(() => {
     if (!lightRef.current || !targetRef.current) return
@@ -49,9 +84,41 @@ function OutdoorSun({ castShadows, intensity, active, viewerOutside, playerPosit
     lightRef.current.target.updateMatrixWorld()
   }, [])
 
-  useFrame((_, delta) => {
+  useFrame(({ camera }, delta) => {
     const light = lightRef.current
-    if (!light) return
+    const target = targetRef.current
+    if (!light || !target) return
+
+    const playerPosition = playerPositionRef?.current
+    if (playerPosition) {
+      const cameraForward = camera.getWorldDirection(cameraForwardRef.current)
+      cameraForward.y = 0
+      if (cameraForward.lengthSq() < 0.0001) {
+        cameraForward.set(0, 0, -1)
+      } else {
+        cameraForward.normalize()
+      }
+
+      const desiredCenter = desiredCenterRef.current
+        .set(
+          playerPosition.x,
+          Number.isFinite(playerPosition.y) ? playerPosition.y : 0,
+          playerPosition.z,
+        )
+        .addScaledVector(cameraForward, OUTDOOR_SHADOW_FORWARD_OFFSET)
+      const snappedCenter = snapShadowCenterToTexels(desiredCenter, snappedCenterRef.current)
+
+      if (appliedCenterRef.current.distanceToSquared(snappedCenter) > 0.000001) {
+        appliedCenterRef.current.copy(snappedCenter)
+        target.position.copy(snappedCenter)
+        light.position
+          .copy(snappedCenter)
+          .addScaledVector(OUTDOOR_SUN_VECTOR, OUTDOOR_SHADOW_LIGHT_DISTANCE)
+        target.updateMatrixWorld()
+        light.updateMatrixWorld()
+      }
+    }
+
     const targetInfluence = getGraveyardAtmosphereInfluence(playerPositionRef, viewerOutside, active, biomeAreas)
     influenceRef.current = MathUtils.lerp(influenceRef.current, targetInfluence, 1 - Math.exp(-delta * 0.9))
     const influence = influenceRef.current
@@ -61,23 +128,24 @@ function OutdoorSun({ castShadows, intensity, active, viewerOutside, playerPosit
 
   return (
     <>
-      <object3D ref={targetRef} position={[-5, 0, 7]} />
+      <object3D ref={targetRef} />
       <directionalLight
         ref={lightRef}
-        position={OUTDOOR_SUN_DIRECTION.map((value) => value * 32)}
+        position={OUTDOOR_SUN_INITIAL_POSITION}
         intensity={intensity}
         color={OUTDOOR_DAY_ATMOSPHERE.sunColor}
         castShadow={active && castShadows}
         shadow-intensity={castShadows ? 1 : 0}
-        shadow-mapSize={[512, 512]}
-        shadow-camera-left={-28}
-        shadow-camera-right={28}
-        shadow-camera-top={28}
-        shadow-camera-bottom={-28}
-        shadow-camera-near={8}
-        shadow-camera-far={62}
-        shadow-bias={-0.00035}
-        shadow-normalBias={0.028}
+        shadow-mapSize={[OUTDOOR_SHADOW_MAP_SIZE, OUTDOOR_SHADOW_MAP_SIZE]}
+        shadow-camera-left={-OUTDOOR_SHADOW_HALF_EXTENT}
+        shadow-camera-right={OUTDOOR_SHADOW_HALF_EXTENT}
+        shadow-camera-top={OUTDOOR_SHADOW_HALF_EXTENT}
+        shadow-camera-bottom={-OUTDOOR_SHADOW_HALF_EXTENT}
+        shadow-camera-near={3}
+        shadow-camera-far={84}
+        shadow-bias={-0.00025}
+        shadow-normalBias={0.022}
+        shadow-radius={1.35}
       />
     </>
   )
