@@ -17,6 +17,7 @@ import { OUTDOOR_PLAYER_COLLISION_HEIGHT, overlapsOutdoorColliderHeight } from '
 import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
 import { WORLD_LOADING_TIPS, advanceLoadingExperience, createLoadingExperience } from './game/loadingExperience'
 import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
+import { MOUNT_AIRBORNE_THRESHOLD, rebaseMountAltitudeForSurface } from './game/mountGrounding'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
@@ -57,6 +58,7 @@ import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { OUTDOOR_DAY_ATMOSPHERE } from './world/outdoorAtmosphere'
 import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts, syncPlayerHouseOutdoorColliders } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
+import { collidesWithOutdoorHouseRoof, getOutdoorHouseRoofHeight, syncPlayerHouseOutdoorRoofs } from './world/outdoorRoofCollision'
 import { collisionReady } from './world/mapObjectCollisionData'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, SUMMONING_ALTAR_OBJECT_ID } from './world/mapObjects'
 import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
@@ -4318,7 +4320,12 @@ function Player({
         forwardInput = MathUtils.clamp(controlLength, 0, 1)
       }
 
-      const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
+      const groundY = currentZone === ZONES.outside
+        ? Math.max(
+            getOutdoorWalkableHeight(pos.x, pos.z, pos.y),
+            getOutdoorHouseRoofHeight(pos.x, pos.z, pos.y) ?? -Infinity,
+          )
+        : 0
       const altitude = pos.y - groundY
       let nextAltitude = altitude
       let nextIsJumping = false
@@ -4350,8 +4357,7 @@ function Player({
         nextIsJumping = nextAltitude > 0.02
       }
 
-      const nextIsFlying = mountConfig.canFly && nextAltitude > 0.05
-      if (nextIsFlying) dragonRide.onFlight?.()
+      let nextIsFlying = mountConfig.canFly && nextAltitude > MOUNT_AIRBORNE_THRESHOLD
       const speed = nextIsFlying ? mountConfig.flySpeed : mountConfig.groundSpeed
       const dirX = Math.sin(yaw)
       const dirZ = Math.cos(yaw)
@@ -4359,26 +4365,50 @@ function Player({
       const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
       let nextX = MathUtils.clamp(pos.x + dirX * forwardInput * speed * delta, limits.minX, limits.maxX)
       let nextZ = MathUtils.clamp(pos.z + dirZ * forwardInput * speed * delta, limits.minZ, limits.maxZ)
-      let nextGroundY = currentZone === ZONES.outside ? getTerrainHeight(nextX, nextZ) : 0
+      let nextGroundY = currentZone === ZONES.outside
+        ? Math.max(
+            getOutdoorWalkableHeight(nextX, nextZ, pos.y),
+            getOutdoorHouseRoofHeight(nextX, nextZ, pos.y) ?? -Infinity,
+          )
+        : 0
+
+      // En vol, l'altitude change de référentiel lorsque le dragon passe
+      // au-dessus d'un toit. On conserve sa hauteur monde pour qu'il puisse
+      // descendre dessus sans bondir vers le haut. En quittant un toit, une
+      // chute importante le remet naturellement en vol au lieu de le
+      // téléporter au niveau du terrain.
+      nextAltitude = rebaseMountAltitudeForSurface({
+        currentGroundY: groundY,
+        nextGroundY,
+        currentAltitude: altitude,
+        nextAltitude,
+        canFly: mountConfig.canFly,
+        ledgeDrop: PLAYER_GROUNDED_DROP_TO_FALL,
+      })
+      nextIsFlying = mountConfig.canFly && nextAltitude > MOUNT_AIRBORNE_THRESHOLD
+
       const mountBodyWidth = dragonRide.mountProfileRef?.current?.width ?? mountConfig.defaultBodyWidth ?? DRAGON_RIDE_DEFAULT_BODY_WIDTH
       const mountCollisionRadius = Math.max(PLAYER_CAPSULE_RADIUS, mountBodyWidth * 0.5 + 0.08)
-      const collidesWithLowOutdoorObstacle = currentZone === ZONES.outside &&
-        nextAltitude <= 1.25 &&
-        collidesWithOutdoorObstacle(nextX, nextZ, nextGroundY, mountCollisionRadius)
-      const collidesWithTallMapObject = currentZone === ZONES.outside &&
-        nextAltitude > 1.25 &&
-        collidesWithMapObjectSolid(nextX, nextZ, nextGroundY + nextAltitude, mountCollisionRadius)
-      if (
-        collidesWithLowOutdoorObstacle ||
-        collidesWithTallMapObject
-      ) {
+      const mountFootY = nextGroundY + nextAltitude
+      const collidesWithOutdoorStructure = currentZone === ZONES.outside &&
+        collidesWithOutdoorObstacle(
+          nextX,
+          nextZ,
+          mountFootY,
+          mountCollisionRadius,
+          OUTDOOR_PLAYER_COLLISION_HEIGHT,
+        )
+      if (collidesWithOutdoorStructure) {
         nextX = pos.x
         nextZ = pos.z
         nextGroundY = groundY
+        nextAltitude = altitude
+        nextIsFlying = mountConfig.canFly && nextAltitude > MOUNT_AIRBORNE_THRESHOLD
         if (forwardInput > 0) {
           mountJumpRef.current.vy = Math.min(mountJumpRef.current.vy, 0)
         }
       }
+      if (nextIsFlying) dragonRide.onFlight?.()
       const nextY = nextGroundY + nextAltitude
 
       dragonRide.positionRef.current.x = nextX
@@ -5017,7 +5047,10 @@ function Player({
     }
     const currentFootY = playerPosRef.current.y - PLAYER_HEIGHT
     const outdoorGroundY = currentZone === ZONES.outside
-      ? getOutdoorWalkableHeight(nextX, nextZ, currentFootY)
+      ? Math.max(
+          getOutdoorWalkableHeight(nextX, nextZ, currentFootY),
+          getOutdoorHouseRoofHeight(nextX, nextZ, currentFootY) ?? -Infinity,
+        )
       : 0
     const floorY = currentZone === ZONES.outside
       ? outdoorGroundY + PLAYER_HEIGHT
@@ -13388,9 +13421,15 @@ function collidesWithEditableTree(
   })
 }
 
-function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(nextX, nextZ), radius = PLAYER_CAPSULE_RADIUS) {
+function collidesWithOutdoorObstacle(
+  nextX,
+  nextZ,
+  footY = getTerrainHeight(nextX, nextZ),
+  radius = PLAYER_CAPSULE_RADIUS,
+  bodyHeight = OUTDOOR_PLAYER_COLLISION_HEIGHT,
+) {
   const collidesWithAuthoredObstacle = OUTDOOR_PLAYER_COLLIDERS.some((collider) => {
-    if (!overlapsOutdoorColliderHeight(collider, footY)) return false
+    if (!overlapsOutdoorColliderHeight(collider, footY, bodyHeight)) return false
 
     if (collider.type === 'circle') {
       return Math.hypot(nextX - collider.x, nextZ - collider.z) <= collider.radius + radius
@@ -13411,6 +13450,7 @@ function collidesWithOutdoorObstacle(nextX, nextZ, footY = getTerrainHeight(next
 
   return (
     collidesWithAuthoredObstacle ||
+    collidesWithOutdoorHouseRoof(nextX, nextZ, footY, radius, bodyHeight) ||
     collidesWithEditableTree(nextX, nextZ, footY, radius) ||
     collidesWithMapObjectSolid(nextX, nextZ, footY, radius)
   )
@@ -21120,6 +21160,7 @@ function App() {
     syncPlayerHouseTerrainFootprint(activeHouseLayout.footprintRects)
     syncInteriorWallColliders(buildInteriorWallColliderBoxes(activeHouseLayout))
     syncPlayerHouseOutdoorColliders(activeHouseLayout)
+    syncPlayerHouseOutdoorRoofs(activeHouseLayout)
     syncInteriorCameraSpaces(activeHouseLayout)
 
     // Les stations ne peuvent jamais rester sur une ancienne cellule supprimée.
