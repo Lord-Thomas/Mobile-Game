@@ -17579,10 +17579,13 @@ function WorldLoadingOverlay({ active, experience }) {
     <div className={`game-loading-overlay game-loading-overlay--${experience.kind}`} role="status" aria-live="polite">
       <div className="game-loading-panel">
         <div className="game-loading-title">{title}</div>
-        <div className="game-loading-progress-row">
-          <div className="game-loading-text">{experience.phase}</div>
-          <strong>{experience.percent}%</strong>
+        <div className="game-loading-title-divider" aria-hidden="true">
+          <i />
+          <b />
+          <i />
         </div>
+        <div className="game-loading-text">{experience.phase}</div>
+        <div className="game-loading-percent">{experience.percent}%</div>
         <div
           className="game-loading-bar"
           role="progressbar"
@@ -17594,8 +17597,12 @@ function WorldLoadingOverlay({ active, experience }) {
           <span style={{ width: `${experience.percent}%` }} />
         </div>
         <div className="game-loading-tip">
-          <span>Astuce</span>
-          {WORLD_LOADING_TIPS[tipIndex]}
+          <div className="game-loading-tip-heading">
+            <i />
+            <span>Astuce</span>
+            <i />
+          </div>
+          <p>{WORLD_LOADING_TIPS[tipIndex]}</p>
         </div>
       </div>
     </div>
