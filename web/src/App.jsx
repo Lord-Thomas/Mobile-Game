@@ -67,7 +67,6 @@ import { createBossActionGuard, handleHostBossAction, sendBossHitRequest, sendBo
 import { SLIME_BOSS } from './game/boss/bossConfig'
 import LootDrops from './world/loot/LootDrops'
 import QuestDialog from './ui/QuestDialog'
-import QuestTalkPrompt from './ui/QuestTalkPrompt'
 import InteractionPrompts from './ui/InteractionPrompts'
 import QuestJournal from './ui/QuestJournal'
 import QuestTracker from './ui/QuestTracker'
@@ -1547,14 +1546,13 @@ function CombatActionDock({
   spellUi,
   onSpellPress,
   wingsUiRef,
-  showDodge = false,
   swordEquipped = false,
   controlSettings = DEFAULT_CONTROL_SETTINGS,
 }) {
   const wingsUi = useWingsSpellUi(wingsUiRef)
   const showWings = wingsUi.visible && !wingsUi.flying
   const showWingsBoost = wingsUi.visible && wingsUi.flying
-  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0) + (showDodge ? 1 : 0)
+  const count = (canPunch ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
   if (count === 0) return null
 
   const queuePunch = () => {
@@ -1621,22 +1619,6 @@ function CombatActionDock({
         >
           <span className="combat-action-icon" aria-hidden="true">👊</span>
           <span className="combat-action-label">{swordEquipped ? 'Maintenir' : 'Taper'}</span>
-        </button>
-      )}
-      {showDodge && (
-        <button
-          className="combat-action-btn combat-action-btn--dodge"
-          type="button"
-          aria-label="Esquive"
-          title="Esquive (Ctrl)"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            triggerControlHaptic(controlSettings.vibration)
-            touchRef.current.dodgeQueued = true
-          }}
-        >
-          <span className="combat-action-icon" aria-hidden="true">↻</span>
-          <span className="combat-action-label">Esquive</span>
         </button>
       )}
       {canKick && (
@@ -4832,7 +4814,9 @@ function Player({
 
     if (playerCombatActionsRef) {
       const inPlay = mode === 'play'
-      playerCombatActionsRef.current.canPunch = inPlay && !isDodging && Boolean(punchTarget && onGroundRef.current)
+      // Le poing est une commande de combat permanente. La présence d'une
+      // cible décide uniquement si le coup inflige des dégâts.
+      playerCombatActionsRef.current.canPunch = inPlay && !isDodging && Boolean(onGroundRef.current)
       playerCombatActionsRef.current.canKick = inPlay && !isDodging && Boolean(kickInArc && onGroundRef.current)
     }
 
@@ -4892,7 +4876,7 @@ function Player({
       planarVelocityRef.current.z = 0
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
-    } else if (wantsPunch && punchTarget && onGroundRef.current) {
+    } else if (wantsPunch && onGroundRef.current) {
       const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
       const charged = wantsChargedSwordAttack
       if (equippedWeapon === 'cheat_sword') {
@@ -4907,13 +4891,15 @@ function Player({
         }
       }
       punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
-      pendingPunchRef.current = {
-        targetId: punchTarget.target.id,
-        contactAt,
-        expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
-        charged,
-        fired: false,
-      }
+      pendingPunchRef.current = punchTarget
+        ? {
+            targetId: punchTarget.target.id,
+            contactAt,
+            expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
+            charged,
+            fired: false,
+          }
+        : null
     } else if (wantsKick && kickInArc && onGroundRef.current) {
       const contactAt = state.clock.elapsedTime + PLAYER_KICK_CONTACT_DELAY
       kickUntilRef.current = state.clock.elapsedTime + PLAYER_KICK_DURATION
@@ -8026,6 +8012,7 @@ function ControlsOverlay({
   adminCameraControls = false,
   uiHidden = false,
   showJumpAction = true,
+  showDodgeAction = false,
   mountFlying = false,
   controlSettings = DEFAULT_CONTROL_SETTINGS,
   onTap,
@@ -8365,6 +8352,21 @@ function ControlsOverlay({
           aria-label={mountFlying ? 'Monter' : 'Sauter'}
         >
           <span className="action-symbol">{mountFlying ? '\u25b2' : '\u2423'}</span>
+        </button>
+      )}
+      {!uiHidden && showDodgeAction && (
+        <button
+          className="mobility-dodge-btn"
+          type="button"
+          aria-label="Esquive"
+          title="Esquive (Ctrl)"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            triggerControlHaptic(controlSettings.vibration)
+            touchRef.current.dodgeQueued = true
+          }}
+        >
+          <span aria-hidden="true">↻</span>
         </button>
       )}
       {!uiHidden && isLikelyMobileDevice() && (
@@ -22872,19 +22874,8 @@ function App() {
   )
   const shadowsEnabled = !performanceSettings.disableShadows && (!isDebugMode || debugToggles.shadows)
   const showInteriorHouseDetails = !isOutsideZone
-  const hasBottomInteractionPrompt = showCaptureUi && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen && (
-    isNearOutdoorDoor ||
-    (currentZone === ZONES.outside && isNearMagicSkullDiscovery && !magicSkullDiscovered) ||
-    isNearSkinStation ||
-    (currentZone !== ZONES.outside && isNearEnvironmentStation) ||
-    (canModifyWorld && currentZone !== ZONES.outside && isNearCustomizationStation) ||
-    Boolean(nearbyTv) ||
-    Boolean(nearbyYouTubeFrame) ||
-    Boolean(nearbySeat) ||
-    seatedState?.phase === 'sitting'
-  )
   const gameView = (
-    <main className={`app app-${viewportOrientation}${isFramedViewport ? ' app-framed' : ''}${hasBottomInteractionPrompt ? ' app--bottom-interaction-prompt' : ''}`}>
+    <main className={`app app-${viewportOrientation}${isFramedViewport ? ' app-framed' : ''}`}>
       <div className={`canvas-wrap${isDebugMode && debugToggles.portrait ? ' debug-portrait' : ''}`}>
       <Canvas
         dpr={renderSettings.dpr}
@@ -23488,6 +23479,7 @@ function App() {
           controlSettings={controlSettings}
           adminCameraControls={isAdminMode || isVerticalFrameMode || (isLocalNetwork && freeCameraActive)}
           uiHidden={!showCaptureUi}
+          showDodgeAction={currentZone === ZONES.outside}
           mountFlying={dragonMounted && activeMountConfig?.canFly === true}
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />
@@ -23541,7 +23533,6 @@ function App() {
           spellUi={spellUi}
           onSpellPress={handleSpellPress}
           wingsUiRef={wingsUiRef}
-          showDodge={currentZone === ZONES.outside}
           swordEquipped={equippedWeapon === 'cheat_sword'}
           controlSettings={controlSettings}
         />
@@ -23685,6 +23676,8 @@ function App() {
         onEditYouTubeFrame={requestYouTubeFrameEditor}
         onRequestSit={requestSit}
         onRequestStandUp={requestStandUp}
+        onTalk={() => setQuest('dialogOpen',true)}
+        contextWindowOpen={questDialogOpen || questJournalOpen || vendorOpen}
       />
       <BossHud
         placements={SUMMONING_ALTAR_PLACEMENTS}
@@ -23726,10 +23719,6 @@ function App() {
           </form>
         </div>
       )}
-      <QuestTalkPrompt
-        canShow={showCaptureUi && !questDialogOpen && mode === 'play' && !isSkinMenuOpen && !isEnvironmentMenuOpen && !isCustomizationChoiceOpen && !isCharacterMenuOpen}
-        onTalk={() => setQuest('dialogOpen',true)}
-      />
       {showGameplayUi && questDialogOpen && (
         <QuestDialog
           questId={FIRST_QUEST_ID}

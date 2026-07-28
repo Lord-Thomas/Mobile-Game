@@ -13,7 +13,7 @@ export default function QuestJournal({ questProgress, pinnedQuestId, onPin, onCl
   const quests = getJournalQuests(questProgress)
 
   return (
-    <div className="quest-journal-overlay" onClick={onClose}>
+    <div className="quest-journal-overlay">
       <div className="quest-journal" onClick={(event) => event.stopPropagation()}>
         <div className="quest-journal-header">
           <strong>📜 Journal de quêtes</strong>

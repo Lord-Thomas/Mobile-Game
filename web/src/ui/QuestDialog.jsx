@@ -59,7 +59,7 @@ export default function QuestDialog({ questId, questProgress, onAccept, onComple
   const showReward = rewardCoins > 0 && status !== QUEST_STATUS.COMPLETED
 
   return (
-    <div className="quest-dialog-overlay" onClick={onClose}>
+    <div className="quest-dialog-overlay">
       <div className="quest-dialog" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="quest-dialog-close" onClick={onClose} aria-label="Fermer">✕</button>
         <div className="quest-dialog-npc">{def.npcName}</div>

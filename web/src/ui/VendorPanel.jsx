@@ -7,7 +7,7 @@ export default function VendorPanel({ materials, onSell, onSellAll, onClose }) {
   const totalValue = sellAll(materials).coins
 
   return (
-    <div className="vendor-overlay" onClick={onClose}>
+    <div className="vendor-overlay">
       <div className="vendor-panel" onClick={(event) => event.stopPropagation()}>
         <div className="vendor-header">
           <strong>🪙 Vendre des objets</strong>

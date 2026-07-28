@@ -33,6 +33,8 @@ export default function InteractionPrompts({
   onEditYouTubeFrame,
   onRequestSit,
   onRequestStandUp,
+  onTalk,
+  contextWindowOpen = false,
 }) {
   const nearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
   const nearMagicSkull = useGameStore((s) => s.near.magicSkullDiscovery ?? false)
@@ -42,62 +44,65 @@ export default function InteractionPrompts({
   const nearTv = useGameStore((s) => s.near.tv ?? null)
   const nearYouTubeFrame = useGameStore((s) => s.near.youtubeFrame ?? null)
   const nearSeat = useGameStore((s) => s.near.seat ?? null)
+  const nearbyQuestNpcId = useGameStore((s) => s.near.questNpcId ?? null)
 
   const menuSkin = useGameStore((s) => s.menus.skin ?? false)
   const menuEnvironment = useGameStore((s) => s.menus.environment ?? false)
   const menuCustomizationChoice = useGameStore((s) => s.menus.customizationChoice ?? false)
   const menuCharacter = useGameStore((s) => s.menus.character ?? false)
 
-  // Exclusion identique à l'original : tous menus fermés.
-  const noChoiceMenu = !menuSkin && !menuEnvironment && !menuCustomizationChoice && !menuCharacter
+  const noChoiceMenu = !menuSkin && !menuEnvironment && !menuCustomizationChoice && !menuCharacter && !contextWindowOpen
+
+  if (!showCaptureUi || !modePlay || !noChoiceMenu) return null
+
+  // Une seule action contextuelle peut occuper ce slot. L'ordre encode la
+  // priorité lorsque plusieurs volumes de proximité se chevauchent.
+  const action =
+    seatedPhase === 'sitting'
+      ? { key: 'stand', label: 'Se relever', className: 'seat-open-btn', onClick: onRequestStandUp }
+      : nearbyQuestNpcId
+        ? { key: 'talk', label: 'Parler', className: 'custom-open-btn', onClick: onTalk }
+        : isOutsideZone && nearMagicSkull && !magicSkullDiscovered
+          ? {
+              key: 'learn',
+              label: isLearningMagicSkull ? 'Apprentissage...' : 'Apprendre',
+              className: 'custom-open-btn',
+              onClick: onLearnSkull,
+              disabled: isLearningMagicSkull,
+            }
+          : nearOutdoorDoor
+            ? { key: 'door', label: isOutsideZone ? 'Entrer' : 'Sortir', className: 'outdoor-open-btn', onClick: onOutdoorToggle }
+            : nearSeat && !seatedPhase
+              ? { key: 'sit', label: "S'asseoir", className: 'seat-open-btn', onClick: onRequestSit }
+              : canModifyWorld && nearYouTubeFrame && !youtubeFrameEditorOpen
+                ? {
+                    key: 'frame',
+                    label: nearYouTubeFrame.objectId === 'tiktok_profile_frame' ? 'Modifier le profil TikTok' : 'Modifier la chaîne',
+                    className: 'youtube-frame-open-btn',
+                    onClick: onEditYouTubeFrame,
+                  }
+                : canModifyWorld && nearTv
+                  ? { key: 'tv', label: 'TV', className: 'tv-open-btn', onClick: onRequestTv }
+                  : nearSkinStation
+                    ? { key: 'skin', label: 'Personnaliser le ballon', className: '', onClick: onOpenSkinMenu }
+                    : !isOutsideZone && nearEnvironmentStation
+                      ? { key: 'shop', label: 'Boutique', className: 'environment-open-btn', onClick: onOpenEnvironmentMenu }
+                      : canModifyWorld && !isOutsideZone && nearCustomizationStation
+                        ? { key: 'customize', label: 'Personnaliser', className: 'custom-open-btn', onClick: onOpenCustomizationChoice }
+                        : null
+
+  if (!action) return null
 
   return (
-    <>
-      {showCaptureUi && nearOutdoorDoor && modePlay && noChoiceMenu && (
-        <button className="skin-open-btn outdoor-open-btn" type="button" onClick={onOutdoorToggle}>
-          {isOutsideZone ? 'Entrer' : 'Sortir'}
-        </button>
-      )}
-      {showCaptureUi && isOutsideZone && nearMagicSkull && !magicSkullDiscovered && modePlay && noChoiceMenu && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={onLearnSkull} disabled={isLearningMagicSkull}>
-          {isLearningMagicSkull ? 'Apprentissage...' : 'Apprendre'}
-        </button>
-      )}
-      {showCaptureUi && nearSkinStation && !menuSkin && !menuCustomizationChoice && !menuCharacter && modePlay && (
-        <button className="skin-open-btn" type="button" onClick={onOpenSkinMenu}>
-          Personnaliser le ballon
-        </button>
-      )}
-      {showCaptureUi && !isOutsideZone && nearEnvironmentStation && !menuEnvironment && !menuCustomizationChoice && !menuCharacter && modePlay && (
-        <button className="skin-open-btn environment-open-btn" type="button" onClick={onOpenEnvironmentMenu}>
-          Boutique
-        </button>
-      )}
-      {showCaptureUi && canModifyWorld && !isOutsideZone && nearCustomizationStation && modePlay && noChoiceMenu && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={onOpenCustomizationChoice}>
-          Personnaliser
-        </button>
-      )}
-      {showCaptureUi && canModifyWorld && nearTv && modePlay && noChoiceMenu && (
-        <button className="skin-open-btn tv-open-btn" type="button" onClick={onRequestTv}>
-          TV
-        </button>
-      )}
-      {showCaptureUi && canModifyWorld && nearYouTubeFrame && !youtubeFrameEditorOpen && modePlay && noChoiceMenu && (
-        <button className="skin-open-btn youtube-frame-open-btn" type="button" onClick={onEditYouTubeFrame}>
-          {nearYouTubeFrame.objectId === 'tiktok_profile_frame' ? 'Modifier le profil TikTok' : 'Modifier la chaîne'}
-        </button>
-      )}
-      {showCaptureUi && nearSeat && modePlay && !seatedPhase && noChoiceMenu && (
-        <button className="skin-open-btn seat-open-btn" type="button" onClick={onRequestSit}>
-          S'asseoir
-        </button>
-      )}
-      {showCaptureUi && seatedPhase === 'sitting' && (
-        <button className="skin-open-btn seat-open-btn" type="button" onClick={onRequestStandUp}>
-          Se relever
-        </button>
-      )}
-    </>
+    <div className="interaction-action-slot" role="group" aria-label="Action contextuelle">
+      <button
+        className={`skin-open-btn interaction-action-btn ${action.className}`.trim()}
+        type="button"
+        onClick={action.onClick}
+        disabled={action.disabled}
+      >
+        {action.label}
+      </button>
+    </div>
   )
 }
