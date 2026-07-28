@@ -22877,7 +22877,7 @@ function App() {
         camera={{ fov: BASE_CAMERA_VERTICAL_FOV, position: [0, 2.4, 6], near: 0.1, far: 420 }}
         shadows={shadowsEnabled ? { enabled: true, type: PCFShadowMap } : false}
         gl={{
-          antialias: renderSettings.antialias && !performanceSettings.lowResolution,
+          antialias: renderSettings.antialias,
           powerPreference: 'high-performance',
           stencil: true,
           depth: true,
