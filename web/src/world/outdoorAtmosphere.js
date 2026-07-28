@@ -1,0 +1,26 @@
+export const OUTDOOR_DAY_ATMOSPHERE = Object.freeze({
+  exposure: 1.08,
+  background: '#e4f4fa',
+  fog: '#e4f4fa',
+  fogDensity: 0.00075,
+  sunDirection: [0.46, 0.83, 0.22],
+  sunColor: '#fff4dc',
+  sunIntensityOutside: 4.15,
+  sunIntensityFromInside: 3.75,
+  skyLightColor: '#e7f4ff',
+  groundLightColor: '#9eae8c',
+  hemisphereIntensityOutside: 2.2,
+  hemisphereIntensityFromInside: 1.9,
+  skyBrightness: 1.1,
+  sky: Object.freeze({
+    horizon: '#e4f4fa',
+    zenith: '#94cbed',
+    cloudBase: '#fffdf4',
+    cloudWarm: '#ffedc9',
+    cloudShade: '#c5d5dc',
+  }),
+  leaves: Object.freeze({
+    shade: 0.96,
+    highlight: 1.08,
+  }),
+})

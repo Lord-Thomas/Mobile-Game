@@ -17,11 +17,12 @@ import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './biomeAreas'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_OBJECT_PLACEMENTS } from './mapObjects'
 import { DISTANT_TREES, NEIGHBOR_HOUSES } from './outdoorData'
 import { OUTDOOR_LIGHT_LAYER } from './lightingLayers'
+import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 
-const OUTDOOR_SUN_DIRECTION = [0.42, 0.9, 0.18]
-const BASE_SUN_COLOR = new Color('#fffaf0')
-const BASE_SKY_LIGHT_COLOR = new Color('#ffffff')
-const BASE_GROUND_LIGHT_COLOR = new Color('#a8d87b')
+const OUTDOOR_SUN_DIRECTION = OUTDOOR_DAY_ATMOSPHERE.sunDirection
+const BASE_SUN_COLOR = new Color(OUTDOOR_DAY_ATMOSPHERE.sunColor)
+const BASE_SKY_LIGHT_COLOR = new Color(OUTDOOR_DAY_ATMOSPHERE.skyLightColor)
+const BASE_GROUND_LIGHT_COLOR = new Color(OUTDOOR_DAY_ATMOSPHERE.groundLightColor)
 const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
 const GRAVEYARD_SUN_COLOR = new Color(GRAVEYARD_ATMOSPHERE.sun)
 const GRAVEYARD_SKY_LIGHT_COLOR = new Color(GRAVEYARD_ATMOSPHERE.sky)
@@ -65,7 +66,7 @@ function OutdoorSun({ castShadows, intensity, active, viewerOutside, playerPosit
         ref={lightRef}
         position={OUTDOOR_SUN_DIRECTION.map((value) => value * 32)}
         intensity={intensity}
-        color="#fffaf0"
+        color={OUTDOOR_DAY_ATMOSPHERE.sunColor}
         castShadow={active && castShadows}
         shadow-intensity={castShadows ? 1 : 0}
         shadow-mapSize={[512, 512]}
@@ -92,8 +93,16 @@ export function OutdoorLighting({
 }) {
   const hemiRef = useRef()
   const hemiInfluenceRef = useRef(0)
-  const sunIntensity = active ? (viewerOutside ? 4.25 : 3.9) : 0
-  const hemiIntensity = active ? (viewerOutside ? 2.65 : 2.25) : 0
+  const sunIntensity = active
+    ? (viewerOutside
+        ? OUTDOOR_DAY_ATMOSPHERE.sunIntensityOutside
+        : OUTDOOR_DAY_ATMOSPHERE.sunIntensityFromInside)
+    : 0
+  const hemiIntensity = active
+    ? (viewerOutside
+        ? OUTDOOR_DAY_ATMOSPHERE.hemisphereIntensityOutside
+        : OUTDOOR_DAY_ATMOSPHERE.hemisphereIntensityFromInside)
+    : 0
 
   useEffect(() => {
     hemiRef.current?.layers.set(OUTDOOR_LIGHT_LAYER)
@@ -121,7 +130,14 @@ export function OutdoorLighting({
           biomeAreas={biomeAreas}
         />
       )}
-      <hemisphereLight ref={hemiRef} args={['#ffffff', '#a8d87b', hemiIntensity]} />
+      <hemisphereLight
+        ref={hemiRef}
+        args={[
+          OUTDOOR_DAY_ATMOSPHERE.skyLightColor,
+          OUTDOOR_DAY_ATMOSPHERE.groundLightColor,
+          hemiIntensity,
+        ]}
+      />
       <OutdoorSun
         castShadows={castShadows}
         intensity={sunIntensity}

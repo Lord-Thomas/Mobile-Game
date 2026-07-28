@@ -53,6 +53,7 @@ import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
+import { OUTDOOR_DAY_ATMOSPHERE } from './world/outdoorAtmosphere'
 import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts, syncPlayerHouseOutdoorColliders } from './world/outdoorData'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { collisionReady } from './world/mapObjectCollisionData'
@@ -2318,8 +2319,8 @@ function HouseOpeningReveals({ walls }) {
   )
 }
 
-const BASE_SCENE_BACKGROUND = new Color('#ecfdff')
-const BASE_SCENE_FOG = new Color('#fbffff')
+const BASE_SCENE_BACKGROUND = new Color(OUTDOOR_DAY_ATMOSPHERE.background)
+const BASE_SCENE_FOG = new Color(OUTDOOR_DAY_ATMOSPHERE.fog)
 const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
 const GRAVEYARD_SCENE_BACKGROUND = new Color(GRAVEYARD_ATMOSPHERE.background)
 const GRAVEYARD_SCENE_FOG = new Color(GRAVEYARD_ATMOSPHERE.fog)
@@ -2329,11 +2330,14 @@ function SceneAtmosphere({
   playerPositionRef,
   biomeAreas = MAP_BIOME_AREAS,
 }) {
-  const { scene } = useThree()
+  const { gl, scene } = useThree()
   const isOutside = currentZone === ZONES.outside
-  const backgroundColor = '#ecfdff'
+  const backgroundColor = OUTDOOR_DAY_ATMOSPHERE.background
   const backgroundRef = useRef()
-  const atmosphereFog = useMemo(() => new FogExp2(BASE_SCENE_FOG, 0.0008), [])
+  const atmosphereFog = useMemo(
+    () => new FogExp2(BASE_SCENE_FOG, OUTDOOR_DAY_ATMOSPHERE.fogDensity),
+    [],
+  )
   const influenceRef = useRef(0)
 
   useEffect(() => {
@@ -2363,7 +2367,17 @@ function SceneAtmosphere({
     }
 
     atmosphereFog.color.copy(BASE_SCENE_FOG).lerp(GRAVEYARD_SCENE_FOG, fogInfluence)
-    atmosphereFog.density = MathUtils.lerp(isOutside ? 0.0008 : 0.0016, GRAVEYARD_ATMOSPHERE.fogDensity, fogInfluence)
+    atmosphereFog.density = MathUtils.lerp(
+      isOutside ? OUTDOOR_DAY_ATMOSPHERE.fogDensity : 0.0016,
+      GRAVEYARD_ATMOSPHERE.fogDensity,
+      fogInfluence,
+    )
+    const targetExposure = isOutside ? OUTDOOR_DAY_ATMOSPHERE.exposure : 1.1
+    gl.toneMappingExposure = MathUtils.lerp(
+      gl.toneMappingExposure,
+      targetExposure,
+      1 - Math.exp(-delta * 2.4),
+    )
   })
 
   return (

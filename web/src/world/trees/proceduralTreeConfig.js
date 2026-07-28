@@ -1,5 +1,6 @@
 import { Tree } from '@dgreenheck/ez-tree'
 import { BufferAttribute, Box3, Color, DoubleSide, Float32BufferAttribute, FrontSide, MathUtils, MeshBasicMaterial, Vector3 } from 'three'
+import { OUTDOOR_DAY_ATMOSPHERE } from '../outdoorAtmosphere'
 
 // Shared uniform objects — all animated leaf shaders reference these same objects.
 // Updating .value once per frame updates every tree variant simultaneously.
@@ -17,6 +18,9 @@ const leafMiddleColor = new Color('#6f970e')
 const leafTopColor = new Color('#8aac22')
 const leafCoolShade = new Color('#557f25')
 const leafWarmHighlight = new Color('#a6bf36')
+const leafSunDirectionGlsl = OUTDOOR_DAY_ATMOSPHERE.sunDirection
+  .map((value) => Number(value).toFixed(3))
+  .join(', ')
 
 function getPresetOptions(preset) {
   const tree = new Tree()
@@ -265,6 +269,20 @@ function stylizeLeafColors(tree, config, animated = false) {
   })
 
   stylizedMaterial.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+      varying float vOutdoorLeafLight;
+      `,
+    )
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+      varying float vOutdoorLeafLight;
+      `,
+    )
+
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `
@@ -272,6 +290,27 @@ function stylizeLeafColors(tree, config, animated = false) {
         vec4 sampledDiffuseColor = texture2D(map, vMapUv);
         diffuseColor.a *= sampledDiffuseColor.a;
       #endif
+      diffuseColor.rgb *= vOutdoorLeafLight;
+      `,
+    )
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        vec3 outdoorLeafNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal);
+      #else
+        vec3 outdoorLeafNormal = normalize(normalMatrix * normal);
+      #endif
+      float outdoorLeafFacing = dot(
+        outdoorLeafNormal,
+        normalize(vec3(${leafSunDirectionGlsl}))
+      ) * 0.5 + 0.5;
+      vOutdoorLeafLight = mix(
+        ${OUTDOOR_DAY_ATMOSPHERE.leaves.shade.toFixed(3)},
+        ${OUTDOOR_DAY_ATMOSPHERE.leaves.highlight.toFixed(3)},
+        outdoorLeafFacing
+      );
       `,
     )
 
@@ -325,6 +364,7 @@ function stylizeLeafColors(tree, config, animated = false) {
       `,
     )
   }
+  stylizedMaterial.customProgramCacheKey = () => `stylized-leaves-v2-${animated ? 'wind' : 'still'}`
 
   material.dispose()
   tree.leavesMesh.material = stylizedMaterial

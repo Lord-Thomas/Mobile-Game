@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BackSide, Color, MathUtils, Vector3 } from 'three'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './biomeAreas'
+import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 
 const SKY_VERTEX_SHADER = `
 varying vec3 vWorldDirection;
@@ -26,6 +27,7 @@ uniform vec3 uCloudWarmColor;
 uniform vec3 uCloudShadeColor;
 uniform float uCloudCoverageBoost;
 uniform float uDesaturation;
+uniform float uBrightness;
 varying vec3 vWorldDirection;
 
 float hash(vec2 p) {
@@ -97,19 +99,19 @@ void main() {
   color = mix(color, uHorizonColor, horizon * 0.22);
   float luminance = dot(color, vec3(0.299, 0.587, 0.114));
   color = mix(color, vec3(luminance), uDesaturation);
-  color *= 1.12;
+  color *= uBrightness;
 
   gl_FragColor = vec4(color, 1.0);
 }
 `
 
-const DEFAULT_SUN_DIRECTION = [0.62, 0.74, 0.2]
+const DEFAULT_SUN_DIRECTION = OUTDOOR_DAY_ATMOSPHERE.sunDirection
 const BASE_SKY_COLORS = {
-  horizon: new Color('#d7edf6'),
-  zenith: new Color('#8fc5e8'),
-  cloudBase: new Color('#fff8e9'),
-  cloudWarm: new Color('#ffe9b8'),
-  cloudShade: new Color('#bfd2d8'),
+  horizon: new Color(OUTDOOR_DAY_ATMOSPHERE.sky.horizon),
+  zenith: new Color(OUTDOOR_DAY_ATMOSPHERE.sky.zenith),
+  cloudBase: new Color(OUTDOOR_DAY_ATMOSPHERE.sky.cloudBase),
+  cloudWarm: new Color(OUTDOOR_DAY_ATMOSPHERE.sky.cloudWarm),
+  cloudShade: new Color(OUTDOOR_DAY_ATMOSPHERE.sky.cloudShade),
 }
 const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
 const GRAVEYARD_SKY_COLORS = {
@@ -140,6 +142,7 @@ function CloudSky({
     uCloudShadeColor: { value: BASE_SKY_COLORS.cloudShade.clone() },
     uCloudCoverageBoost: { value: 0 },
     uDesaturation: { value: 0 },
+    uBrightness: { value: OUTDOOR_DAY_ATMOSPHERE.skyBrightness },
   }), [sunDirection])
 
   useFrame(({ clock, camera }, delta) => {
