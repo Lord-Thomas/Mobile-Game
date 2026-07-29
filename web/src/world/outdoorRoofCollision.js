@@ -1,6 +1,7 @@
 import { NEIGHBOR_HOUSES } from './outdoorData'
 import { houseLayout } from './house/houseLayout'
 import { collidesWithRoofStructure, getWalkableRoofHeight } from './house/roofCollision'
+import { localHousePointToWorld } from './house/houseTransforms'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 
 const PLAYER_ROOF_PITCH = 32
@@ -39,12 +40,13 @@ function createPlayerRoofSurfaces(layout = houseLayout) {
 }
 
 function transformLocalCenter(house, group) {
-  const cos = Math.cos(house.rotationY)
-  const sin = Math.sin(house.rotationY)
-  return {
-    x: house.position[0] + group.center[0] * cos - group.center[2] * sin,
-    z: house.position[2] + group.center[0] * sin + group.center[2] * cos,
-  }
+  return localHousePointToWorld(
+    house.position[0],
+    house.position[2],
+    house.rotationY,
+    group.center[0],
+    group.center[2],
+  )
 }
 
 function guessAttachSide(group, primaryGroup) {

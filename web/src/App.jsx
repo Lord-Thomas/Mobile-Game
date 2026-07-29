@@ -59,6 +59,7 @@ import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
 import { OUTDOOR_DAY_ATMOSPHERE } from './world/outdoorAtmosphere'
 import { NEIGHBOR_HOUSES, OUTDOOR_HALF_SIZE, OUTDOOR_PLAYER_COLLIDERS, PLAYER_PLOT_SIZE, getNeighborHouseParts, syncPlayerHouseOutdoorColliders } from './world/outdoorData'
+import { localHousePointToWorld } from './world/house/houseTransforms'
 import { collidesWithMapObjectSolid, getMapObjectBaseY, getOutdoorWalkableHeight } from './world/mapObjectCollision'
 import { collidesWithOutdoorHouseRoof, getOutdoorHouseRoofHeight, syncPlayerHouseOutdoorRoofs } from './world/outdoorRoofCollision'
 import { collisionReady } from './world/mapObjectCollisionData'
@@ -11041,12 +11042,17 @@ function getDistanceToPlayerHouse(x, z) {
 
 function getDistanceToNeighborHouses(x, z) {
   return NEIGHBOR_HOUSES.reduce((closest, house) => {
-    const cos = Math.cos(house.rotationY)
-    const sin = Math.sin(house.rotationY)
     const houseDistance = getNeighborHouseParts(house).reduce((partClosest, part) => {
+      const worldCenter = localHousePointToWorld(
+        house.position[0],
+        house.position[2],
+        house.rotationY,
+        part.offset[0],
+        part.offset[1],
+      )
       const footprint = {
-        x: house.position[0] + part.offset[0] * cos - part.offset[1] * sin,
-        z: house.position[2] + part.offset[0] * sin + part.offset[1] * cos,
+        x: worldCenter.x,
+        z: worldCenter.z,
         hx: part.size[0] * 0.5,
         hz: part.size[2] * 0.5,
         rotationY: house.rotationY,

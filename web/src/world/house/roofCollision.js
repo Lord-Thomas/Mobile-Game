@@ -1,18 +1,17 @@
+import { worldPointToHouseLocal } from './houseTransforms'
+
 const DEFAULT_MAX_STEP_UP = 0.58
 const DEFAULT_SEARCH_DOWN = 3.2
 const EDGE_TOLERANCE = 0.025
 
 function worldToRoofLocal(x, z, roof) {
-  const dx = x - (roof.centerX ?? 0)
-  const dz = z - (roof.centerZ ?? 0)
-  const rotationY = roof.rotationY ?? 0
-  const cos = Math.cos(rotationY)
-  const sin = Math.sin(rotationY)
-
-  return {
-    x: dx * cos + dz * sin,
-    z: -dx * sin + dz * cos,
-  }
+  return worldPointToHouseLocal(
+    roof.centerX ?? 0,
+    roof.centerZ ?? 0,
+    roof.rotationY ?? 0,
+    x,
+    z,
+  )
 }
 
 function isInside(value, min, max) {

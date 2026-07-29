@@ -1,5 +1,6 @@
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { getRoomBounds, houseLayout } from '../house/houseLayout'
+import { localHousePointToWorld } from '../house/houseTransforms'
 import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
@@ -298,14 +299,18 @@ function getNeighborHousePadHeightAt(x, z) {
   let targetHeight = 0
 
   NEIGHBOR_HOUSES.forEach((house) => {
-    const cos = Math.cos(house.rotationY)
-    const sin = Math.sin(house.rotationY)
-
     getNeighborHouseParts(house).forEach((part) => {
+      const worldCenter = localHousePointToWorld(
+        house.position[0],
+        house.position[2],
+        house.rotationY,
+        part.offset[0],
+        part.offset[1],
+      )
       const center = [
-        house.position[0] + part.offset[0] * cos - part.offset[1] * sin,
+        worldCenter.x,
         0,
-        house.position[2] + part.offset[0] * sin + part.offset[1] * cos,
+        worldCenter.z,
       ]
       const mask = softRectMask(
         x,

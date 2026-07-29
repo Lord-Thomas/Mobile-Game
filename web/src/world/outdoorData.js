@@ -1,5 +1,6 @@
 import { houseLayout } from './house/houseLayout'
 import { createNeighborFloorplan } from './house/neighborFloorplan'
+import { localHousePointToWorld } from './house/houseTransforms'
 import { getWallColliderTransform, splitWallIntoSolidRects } from './house/wallUtils'
 import { roadLayout } from './roads/roadLayout'
 import { getRoadLotTransform } from './roads/roadGeometry'
@@ -237,14 +238,19 @@ function createWallCollider(wall, rect, worldTransform = null) {
     }
   }
 
-  const cos = Math.cos(worldTransform.rotationY)
-  const sin = Math.sin(worldTransform.rotationY)
+  const worldPoint = localHousePointToWorld(
+    worldTransform.x,
+    worldTransform.z,
+    worldTransform.rotationY,
+    localX,
+    localZ,
+  )
 
   return {
     type: 'box',
-    x: worldTransform.x + localX * cos - localZ * sin,
+    x: worldPoint.x,
     y,
-    z: worldTransform.z + localX * sin + localZ * cos,
+    z: worldPoint.z,
     hx: transform.args[0],
     hy: transform.args[1],
     hz: transform.args[2],
