@@ -235,23 +235,29 @@ export function parseArtDirectionDocument(input) {
   return sourcePresets.map(normalizePreset)
 }
 
+function createStateFromDocument(document) {
+  const presets = ensureBuiltinPresets(parseArtDirectionDocument(document))
+  const activePresetId = presets.some((preset) => preset.id === document?.activePresetId)
+    ? document.activePresetId
+    : presets[0].id
+  return {
+    presets,
+    activePresetId,
+    comparisonPresetId: presets.some((preset) => preset.id === document?.comparisonPresetId)
+      ? document.comparisonPresetId
+      : presets.find((preset) => preset.id !== activePresetId)?.id ?? activePresetId,
+    comparisonView: 'active',
+    runtimeValues: null,
+  }
+}
+
 function loadPersistedState() {
   if (typeof window === 'undefined') return null
   try {
     const raw = window.localStorage.getItem(ART_DIRECTION_STORAGE_KEY)
     if (!raw) return null
     const document = JSON.parse(raw)
-    const presets = ensureBuiltinPresets(parseArtDirectionDocument(document))
-    const activePresetId = presets.some((preset) => preset.id === document.activePresetId)
-      ? document.activePresetId
-      : presets[0].id
-    return {
-      presets,
-      activePresetId,
-      comparisonPresetId: presets.some((preset) => preset.id === document.comparisonPresetId)
-        ? document.comparisonPresetId
-        : presets.find((preset) => preset.id !== activePresetId)?.id ?? activePresetId,
-    }
+    return createStateFromDocument(document)
   } catch {
     return null
   }
@@ -445,13 +451,52 @@ export function getArtDirectionColorMultiplier(surface, color) {
 }
 
 export function serializeArtDirectionDocument() {
+  return JSON.stringify(createArtDirectionDocument(), null, 2)
+}
+
+export function createArtDirectionDocument() {
   const state = useArtDirectionStore.getState()
-  return JSON.stringify({
+  return {
     version: ART_DIRECTION_DOCUMENT_VERSION,
     exportedAt: new Date().toISOString(),
     activePresetId: state.activePresetId,
+    comparisonPresetId: state.comparisonPresetId,
     presets: state.presets,
-  }, null, 2)
+  }
+}
+
+export function applyArtDirectionDocument(document) {
+  try {
+    useArtDirectionStore.setState(createStateFromDocument(
+      typeof document === 'string' ? JSON.parse(document) : document,
+    ))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function publishSharedDevArtDirection() {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return false
+  const response = await window.fetch('/dev/art-direction', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(createArtDirectionDocument()),
+  })
+  return response.ok
+}
+
+export async function hydrateSharedDevArtDirection() {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return false
+  const params = new URLSearchParams(window.location.search)
+  if (params.has('editor')) return false
+  try {
+    const response = await window.fetch('/dev/art-direction', { cache: 'no-store' })
+    if (!response.ok) return false
+    return applyArtDirectionDocument(await response.json())
+  } catch {
+    return false
+  }
 }
 
 useArtDirectionStore.subscribe((state, previousState) => {
@@ -475,3 +520,7 @@ useArtDirectionStore.subscribe((state, previousState) => {
     // L'outil reste utilisable si le stockage privé ou le quota bloque localStorage.
   }
 })
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  void hydrateSharedDevArtDirection()
+}

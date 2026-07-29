@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
+  publishSharedDevArtDirection,
   serializeArtDirectionDocument,
   useArtDirectionStore,
 } from '../artDirection/artDirectionStore'
@@ -94,6 +95,13 @@ export default function ArtDirectionPanel() {
   const [newPresetName, setNewPresetName] = useState('')
   const [message, setMessage] = useState('')
   const inputRef = useRef(null)
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      publishSharedDevArtDirection().catch(() => {})
+    }, 250)
+    return () => window.clearTimeout(timeoutId)
+  }, [activePresetId, comparisonPresetId, presets])
 
   const showMessage = (text) => {
     setMessage(text)
@@ -304,7 +312,7 @@ export default function ArtDirectionPanel() {
 
       {message && <p style={styles.message}>{message}</p>}
       <p style={styles.footer}>
-        Les valeurs sont sauvegardées automatiquement dans localStorage.
+        Les valeurs sont sauvegardées sur cet ordinateur et partagées avec les appareils connectés au serveur local.
       </p>
     </aside>
   )

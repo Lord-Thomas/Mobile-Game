@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   ART_DIRECTION_STORAGE_KEY,
   DEFAULT_ART_DIRECTION_VALUES,
+  applyArtDirectionDocument,
+  createArtDirectionDocument,
   getEffectiveArtDirectionValues,
   normalizeArtDirectionValues,
   parseArtDirectionDocument,
@@ -67,5 +69,16 @@ describe('artDirectionStore', () => {
 
     useArtDirectionStore.getState().setRuntimeValues(null)
     expect(useArtDirectionStore.getState().activePresetId).toBe(selectedPresetId)
+  })
+
+  it('applique un document partagé sans dupliquer les presets intégrés', () => {
+    const source = createArtDirectionDocument()
+    const daylight = source.presets.find((preset) => preset.id === 'factory-daylight')
+    daylight.values.lighting.sunIntensity = 6.4
+
+    expect(applyArtDirectionDocument(source)).toBe(true)
+    const state = useArtDirectionStore.getState()
+    expect(state.presets.find((preset) => preset.id === 'factory-daylight').values.lighting.sunIntensity).toBe(6.4)
+    expect(state.presets.filter((preset) => preset.id === 'factory-daylight')).toHaveLength(1)
   })
 })

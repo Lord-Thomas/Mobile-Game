@@ -31,9 +31,9 @@ export const useBossStore = create((set, get) => ({
     return next.hp < previous.hp
   },
 
-  damageMinion: (minionId, amount) => {
+  damageMinion: (minionId, amount, options) => {
     const previous = get()
-    const next = damageBossMinion(previous, minionId, amount)
+    const next = damageBossMinion(previous, minionId, amount, options)
     if (next !== previous) set(next)
     return next !== previous
   },

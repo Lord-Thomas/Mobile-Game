@@ -292,6 +292,60 @@ function saveThumbnailPlugin() {
   return {
     name: 'dev-save-assets',
     configureServer(server) {
+      server.middlewares.use('/dev/art-direction', async (req, res) => {
+        const directory = join(process.cwd(), '.codex')
+        const filePath = join(directory, 'dev-art-direction.json')
+        res.setHeader('cache-control', 'no-store')
+
+        if (req.method === 'GET') {
+          try {
+            const document = await readFile(filePath, 'utf8')
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.statusCode = 200
+            res.end(document)
+          } catch {
+            res.statusCode = 404
+            res.end()
+          }
+          return
+        }
+
+        if (req.method !== 'PUT') {
+          res.statusCode = 405
+          res.end()
+          return
+        }
+
+        const chunks = []
+        let byteLength = 0
+        req.on('data', (chunk) => {
+          byteLength += chunk.length
+          if (byteLength <= 512_000) chunks.push(chunk)
+        })
+        req.on('end', async () => {
+          try {
+            if (byteLength > 512_000) {
+              res.statusCode = 413
+              res.end('Document too large')
+              return
+            }
+            const document = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+            if (!Array.isArray(document.presets) || document.presets.length === 0) {
+              res.statusCode = 400
+              res.end('Invalid art direction document')
+              return
+            }
+            await mkdir(directory, { recursive: true })
+            await writeFile(filePath, `${JSON.stringify(document, null, 2)}\n`, 'utf8')
+            res.statusCode = 204
+            res.end()
+          } catch (error) {
+            res.statusCode = 500
+            res.end(error.message)
+          }
+        })
+      })
+
       server.middlewares.use('/dev/save-tree-library', async (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end(); return }
         const chunks = []

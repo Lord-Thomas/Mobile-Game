@@ -9,6 +9,42 @@ import { getBossJumpOffset, getShockwaveRadius } from './bossSimulation'
 import { getMeleeHitDamage } from '../meleeWeapons'
 import { ATTACK_TYPE } from '../damageTypes'
 
+const PREPARED_MINION_KINDS = ['green', 'blue', 'green', 'green', 'blue', 'green', 'blue', 'green']
+
+function clonePreparedBossAsset(scene) {
+  const cloned = scene.clone(true)
+  cloned.traverse((child) => {
+    if (child.isMesh || child.isSkinnedMesh) child.frustumCulled = false
+  })
+  return cloned
+}
+
+function BossPhasePrewarm({ greenScene, blueScene }) {
+  const warmupGreen = useMemo(() => clonePreparedBossAsset(greenScene), [greenScene])
+  const warmupBlue = useMemo(() => clonePreparedBossAsset(blueScene), [blueScene])
+
+  return (
+    <group
+      visible={false}
+      position={[0, -500, 0]}
+      scale={0.001}
+      userData={{ shaderWarmupWhenHidden: true, debugCategory: 'warmup' }}
+    >
+      <primitive object={warmupGreen} />
+      <primitive object={warmupBlue} position={[2, 0, 0]} />
+      <mesh position={[4, 0, 0]} rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false}>
+        <circleGeometry args={[SLIME_BOSS.projectile.poolRadius, 40]} />
+        <meshBasicMaterial color="#ff372f" transparent opacity={0.28} depthWrite={false} />
+      </mesh>
+      <mesh position={[6, 0, 0]} frustumCulled={false}>
+        <sphereGeometry args={[0.48, 16, 12]} />
+        <meshStandardMaterial color="#e31520" emissive="#7b0000" emissiveIntensity={0.8} roughness={0.55} />
+      </mesh>
+      <pointLight color="#ff1f18" intensity={0} distance={8} />
+    </group>
+  )
+}
+
 function AltarProximity({ placements, playerPositionRef, enabled }) {
   const currentRef = useRef(null)
 
@@ -198,10 +234,11 @@ const BossMinion = memo(function BossMinion({
   registerCombatTarget,
   swordEquipped,
   timeOffsetRef,
+  preparedScene = null,
 }) {
   const url = minion.kind === 'blue' ? SLIME_BOSS.summons.blueModelUrl : SLIME_BOSS.summons.greenModelUrl
   const { scene } = useGLTF(url)
-  const cloned = useMemo(() => scene.clone(true), [scene])
+  const cloned = useMemo(() => preparedScene ?? scene.clone(true), [preparedScene, scene])
   const groupRef = useRef(null)
   const lastDamageAtRef = useRef(0)
   const hitRef = useRef(onBossHit)
@@ -281,6 +318,7 @@ function BossModel({
   swordEquipped,
   movementSpeedMultiplierRef,
   timeOffsetRef,
+  preparedMinionScenes,
 }) {
   const gltf = useGLTF(SLIME_BOSS.modelUrl)
   const groupRef = useRef(null)
@@ -414,7 +452,7 @@ function BossModel({
     <>
       <group ref={groupRef} position={[spawn[0], spawn[1] + footOffset, spawn[2]]} scale={baseScale}>
         <primitive object={scene} />
-        {phase === 3 && <pointLight color="#ff1f18" intensity={2.2} distance={8} />}
+        <pointLight color="#ff1f18" intensity={phase === 3 ? 2.2 : 0} distance={8} />
       </group>
       <BossHazards
         playerPositionRef={playerPositionRef}
@@ -422,7 +460,7 @@ function BossModel({
         movementSpeedMultiplierRef={movementSpeedMultiplierRef}
         timeOffsetRef={timeOffsetRef}
       />
-      {minions.map((minion) => (
+      {minions.map((minion, index) => (
         <BossMinion
           key={minion.id}
           minion={minion}
@@ -432,6 +470,7 @@ function BossModel({
           registerCombatTarget={registerCombatTarget}
           swordEquipped={swordEquipped}
           timeOffsetRef={timeOffsetRef}
+          preparedScene={preparedMinionScenes[index] ?? null}
         />
       ))}
     </>
@@ -453,12 +492,18 @@ export default function SlimeBossSystem({
   enabled = true,
 }) {
   const active = useBossStore((state) => state.active)
+  const greenGltf = useGLTF(SLIME_BOSS.summons.greenModelUrl)
+  const blueGltf = useGLTF(SLIME_BOSS.summons.blueModelUrl)
+  const preparedMinionScenes = useMemo(() => PREPARED_MINION_KINDS.map((kind) => (
+    clonePreparedBossAsset(kind === 'blue' ? blueGltf.scene : greenGltf.scene)
+  )), [blueGltf.scene, greenGltf.scene])
   useEffect(() => () => {
     if (movementSpeedMultiplierRef) movementSpeedMultiplierRef.current = 1
   }, [movementSpeedMultiplierRef])
 
   return (
     <>
+      <BossPhasePrewarm greenScene={greenGltf.scene} blueScene={blueGltf.scene} />
       <AltarProximity placements={placements} playerPositionRef={playerPositionRef} enabled={enabled} />
       {active && (
         <BossModel
@@ -472,6 +517,7 @@ export default function SlimeBossSystem({
           swordEquipped={swordEquipped}
           movementSpeedMultiplierRef={movementSpeedMultiplierRef}
           timeOffsetRef={timeOffsetRef}
+          preparedMinionScenes={preparedMinionScenes}
         />
       )}
     </>

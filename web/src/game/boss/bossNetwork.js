@@ -78,6 +78,6 @@ export function handleHostBossAction({
     charged: Boolean(action.charged && swordEquipped),
   })
   return minion
-    ? useBossStore.getState().damageMinion(minion.id, damage)
+    ? useBossStore.getState().damageMinion(minion.id, damage, { now })
     : useBossStore.getState().damage(damage, { now })
 }

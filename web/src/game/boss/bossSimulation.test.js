@@ -59,13 +59,12 @@ describe('bossSimulation', () => {
     expect(SLIME_BOSS.shockwave.dodgeHeight).toBeGreaterThan(0)
   })
 
-  it('réinitialise un combat abandonné et nettoie ses entités', () => {
+  it('ne désinvoque jamais le boss lorsque les joueurs s’éloignent', () => {
     let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
-    state = stepBoss(state, { now: SLIME_BOSS.resetAfterMs + 1, dt: 0.1, players: [] })
-    expect(state.active).toBe(false)
-    expect(state.resetReason).toBe('abandoned')
-    expect(state.hazards).toEqual([])
-    expect(state.minions).toEqual([])
+    const distantPlayer = { ...player, position: [120, 0.9, 120] }
+    state = stepBoss(state, { now: 30_000, dt: 0.1, players: [distantPlayer] })
+    expect(state.active).toBe(true)
+    expect(state.resetReason).toBeNull()
   })
 
   it('réinitialise immédiatement lorsque tous les joueurs connus sont morts', () => {
@@ -108,6 +107,28 @@ describe('bossSimulation', () => {
 
     expect(state.active).toBe(true)
     expect(state.lastDamagedAt).toBe(50_000)
+  })
+
+  it('considère les dégâts aux slimes invoqués comme une activité de combat', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    state = damageBoss(state, SLIME_BOSS.maxHp * 0.45, { now: 10 })
+    state = stepBoss(state, { now: 1700, dt: 0.1, players: [player] })
+    state = damageBossMinion(state, state.minions[0].id, 5, { now: 59_000 })
+    state = stepBoss(state, { now: 60_001, dt: 0.1, players: [player] })
+
+    expect(state.active).toBe(true)
+    expect(state.lastDamagedAt).toBe(59_000)
+  })
+
+  it('poursuit un joueur au-delà de l’ancienne limite d’arène', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    const distantPlayer = { ...player, position: [0, 0.9, 120] }
+    for (let now = 1700; now < 20_000; now += 100) {
+      state = stepBoss(state, { now, dt: 0.1, players: [distantPlayer] })
+    }
+
+    expect(state.position[2]).toBeGreaterThan(18)
+    expect(state.active).toBe(true)
   })
 
   it('se rapproche du joueur avec une vitesse adaptée à son gabarit', () => {

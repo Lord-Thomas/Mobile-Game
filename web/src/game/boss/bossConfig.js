@@ -12,9 +12,6 @@ export const SLIME_BOSS = {
   summonRange: 3.0, // portée d'interaction avec l'autel
   // Seuils de phase (fraction de vie). Les attaques accélèrent selon la phase.
   phaseThresholds: [0.6, 0.3],
-  arenaRadius: 18,
-  resetDistance: 28,
-  resetAfterMs: 12_000,
   noDamageResetMs: 60_000,
   chaseSpeed: [2.45, 2.9, 3.35],
   attackRange: 8.5,

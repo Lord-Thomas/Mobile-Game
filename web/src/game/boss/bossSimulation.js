@@ -116,7 +116,7 @@ export function damageBoss(state, amount, { now = Date.now() } = {}) {
   }
 }
 
-export function damageBossMinion(state, minionId, amount) {
+export function damageBossMinion(state, minionId, amount, { now = Date.now() } = {}) {
   if (!state?.active || state.state !== 'active' || typeof minionId !== 'string') return state
   const damage = Math.max(0, finite(amount))
   const index = state.minions.findIndex((minion) => minion.id === minionId)
@@ -126,7 +126,12 @@ export function damageBossMinion(state, minionId, amount) {
   const minions = hp <= 0
     ? state.minions.filter((entry) => entry.id !== minionId)
     : state.minions.map((entry, entryIndex) => entryIndex === index ? { ...entry, hp } : entry)
-  return { ...state, revision: state.revision + 1, minions }
+  return {
+    ...state,
+    revision: state.revision + 1,
+    minions,
+    lastDamagedAt: now,
+  }
 }
 
 export function resetBoss(state, reason = 'manual') {
@@ -223,15 +228,13 @@ function startAttack(state, now, players) {
   }
 }
 
-function moveToward(position, target, speed, dt, maxDistanceFromSpawn, spawn) {
+function moveToward(position, target, speed, dt) {
   const dx = target[0] - position[0]
   const dz = target[2] - position[2]
   const length = Math.hypot(dx, dz)
   if (length < EPSILON) return position
   const step = Math.min(length, Math.max(0, speed * dt))
-  const next = [position[0] + (dx / length) * step, position[1], position[2] + (dz / length) * step]
-  if (distance2d(next, spawn) > maxDistanceFromSpawn) return position
-  return next
+  return [position[0] + (dx / length) * step, position[1], position[2] + (dz / length) * step]
 }
 
 export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {}) {
@@ -248,13 +251,7 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
   if (knownPlayers.length > 0 && availablePlayers.length === 0) {
     return resetBoss(state, 'all-dead')
   }
-  const playersInResetRange = availablePlayers.filter((player) => distance2d(player.position, state.spawn) <= SLIME_BOSS.resetDistance)
   let next = state
-  if (playersInResetRange.length > 0) {
-    next = { ...next, lastPlayerInArenaAt: now }
-  } else if (now - state.lastPlayerInArenaAt >= SLIME_BOSS.resetAfterMs) {
-    return resetBoss(state, 'abandoned')
-  }
 
   if (next.state === 'appearing') {
     if (now < next.nextAttackAt) return next
@@ -275,15 +272,9 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
       closest.position,
       SLIME_BOSS.chaseSpeed[next.phase - 1] ?? SLIME_BOSS.chaseSpeed[0],
       Math.min(Math.max(dt, 0), 0.25),
-      SLIME_BOSS.arenaRadius,
-      next.spawn,
     )
     if (position !== next.position) {
       next = { ...next, revision: next.revision + 1, position, stuckSince: 0 }
-    } else if (closest.distance > SLIME_BOSS.attackRange) {
-      const stuckSince = next.stuckSince || now
-      if (now - stuckSince >= 8000) return resetBoss(next, 'stuck')
-      if (stuckSince !== next.stuckSince) next = { ...next, revision: next.revision + 1, stuckSince }
     }
   }
 
@@ -298,8 +289,6 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
           target.position,
           SLIME_BOSS.summons.speed,
           Math.min(Math.max(dt, 0), 0.25),
-          SLIME_BOSS.arenaRadius + 4,
-          next.spawn,
         ),
       }
     })
