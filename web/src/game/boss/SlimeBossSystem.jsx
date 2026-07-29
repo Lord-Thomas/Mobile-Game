@@ -3,13 +3,33 @@ import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { getTerrainHeight } from '../../world/terrain/terrainGeometry'
+import { getOutdoorWalkableHeight } from '../../world/mapObjectCollision'
+import { getOutdoorHouseRoofHeight } from '../../world/outdoorRoofCollision'
 import { useBossStore } from './bossStore'
 import { SLIME_BOSS } from './bossConfig'
 import { getBossJumpOffset, getShockwaveRadius } from './bossSimulation'
+import { isGroundWaveContact } from './bossGroundContact'
 import { getMeleeHitDamage } from '../meleeWeapons'
 import { ATTACK_TYPE } from '../damageTypes'
+import { PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS } from '../constants'
 
 const PREPARED_MINION_KINDS = ['green', 'blue', 'green', 'green', 'blue', 'green', 'blue', 'green']
+const PLAYER_CENTER_TO_FOOT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
+const SHOCKWAVE_SEGMENT_COUNT = 48
+const SURFACE_VISUAL_SEARCH_HEIGHT = 2.4
+const PROJECTILE_IMPACT_FLASH_MS = 520
+
+function getBossGroundSurface(x, z, referenceFootY) {
+  const terrainY = getTerrainHeight(x, z)
+  const referenceY = Number.isFinite(referenceFootY)
+    ? referenceFootY
+    : terrainY + SURFACE_VISUAL_SEARCH_HEIGHT
+  return Math.max(
+    terrainY,
+    getOutdoorWalkableHeight(x, z, referenceY),
+    getOutdoorHouseRoofHeight(x, z, referenceY) ?? -Infinity,
+  )
+}
 
 function clonePreparedBossAsset(scene) {
   const cloned = scene.clone(true)
@@ -77,14 +97,267 @@ function AltarProximity({ placements, playerPositionRef, enabled }) {
   return null
 }
 
-function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplierRef, timeOffsetRef }) {
+function GroundShockwave({ attack, origin, timeOffsetRef }) {
+  const coreRef = useRef(null)
+  const glowRef = useRef(null)
+  const impactRingRef = useRef(null)
+  const impactFlashRef = useRef(null)
+  const dummy = useMemo(() => new THREE.Object3D(), [])
+  const lastRadiusRef = useRef(-1)
+
+  useFrame(() => {
+    const now = Date.now() + (timeOffsetRef?.current ?? 0)
+    const radius = getShockwaveRadius(attack, now)
+    const core = coreRef.current
+    const glow = glowRef.current
+    const visible = radius > 0
+
+    if (core) core.visible = visible
+    if (glow) glow.visible = visible
+    if (visible && Math.abs(radius - lastRadiusRef.current) > 0.12) {
+      const arcLength = Math.max(0.08, (Math.PI * 2 * radius) / SHOCKWAVE_SEGMENT_COUNT * 1.16)
+      for (let index = 0; index < SHOCKWAVE_SEGMENT_COUNT; index += 1) {
+        const angle = (index / SHOCKWAVE_SEGMENT_COUNT) * Math.PI * 2
+        const x = origin[0] + Math.cos(angle) * radius
+        const z = origin[2] + Math.sin(angle) * radius
+        const surfaceY = getBossGroundSurface(x, z)
+        dummy.position.set(x, surfaceY + 0.075, z)
+        dummy.rotation.set(-Math.PI / 2, 0, angle + Math.PI / 2)
+        dummy.scale.set(arcLength, 0.13, 1)
+        dummy.updateMatrix()
+        core?.setMatrixAt(index, dummy.matrix)
+        dummy.scale.set(arcLength * 1.08, 0.42, 1)
+        dummy.updateMatrix()
+        glow?.setMatrixAt(index, dummy.matrix)
+      }
+      if (core) core.instanceMatrix.needsUpdate = true
+      if (glow) glow.instanceMatrix.needsUpdate = true
+      lastRadiusRef.current = radius
+    }
+
+    const fade = visible ? 1 - radius / SLIME_BOSS.shockwave.maxRadius : 0
+    if (core?.material) core.material.opacity = visible ? 0.72 + fade * 0.22 : 0
+    if (glow?.material) glow.material.opacity = visible ? 0.2 + fade * 0.28 : 0
+
+    const impactAge = attack?.kind === 'shockwave' ? now - attack.jumpEndsAt : Infinity
+    const impactVisible = impactAge >= 0 && impactAge < PROJECTILE_IMPACT_FLASH_MS
+    const impactProgress = impactVisible ? impactAge / PROJECTILE_IMPACT_FLASH_MS : 1
+    const impactY = getBossGroundSurface(origin[0], origin[2])
+    for (const ref of [impactRingRef, impactFlashRef]) {
+      if (!ref.current) continue
+      ref.current.visible = impactVisible
+      ref.current.position.set(origin[0], impactY + 0.085, origin[2])
+    }
+    if (impactRingRef.current) {
+      const scale = 0.3 + impactProgress * SLIME_BOSS.shockwave.impactRadius
+      impactRingRef.current.scale.setScalar(scale)
+      impactRingRef.current.material.opacity = (1 - impactProgress) * 0.9
+    }
+    if (impactFlashRef.current) {
+      const scale = 0.6 + impactProgress * 2.5
+      impactFlashRef.current.scale.setScalar(scale)
+      impactFlashRef.current.material.opacity = (1 - impactProgress) * 0.42
+    }
+  })
+
+  return (
+    <>
+      <instancedMesh ref={glowRef} args={[null, null, SHOCKWAVE_SEGMENT_COUNT]} visible={false} frustumCulled={false}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial
+          color="#ff3a20"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </instancedMesh>
+      <instancedMesh ref={coreRef} args={[null, null, SHOCKWAVE_SEGMENT_COUNT]} visible={false} frustumCulled={false}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial
+          color="#ffd7a8"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </instancedMesh>
+      <mesh ref={impactFlashRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1, 48]} />
+        <meshBasicMaterial
+          color="#ff4b23"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh ref={impactRingRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.72, 1, 64]} />
+        <meshBasicMaterial
+          color="#fff1c2"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
+    </>
+  )
+}
+
+function BossProjectileHazard({ hazard, timeOffsetRef }) {
+  const fallingRef = useRef(null)
+  const telegraphRef = useRef(null)
+  const poolRef = useRef(null)
+  const impactRingRef = useRef(null)
+  const impactFlashRef = useRef(null)
+  const surfaceY = useMemo(
+    () => getBossGroundSurface(hazard.position[0], hazard.position[2]),
+    [hazard.position],
+  )
+
+  useFrame(() => {
+    const now = Date.now() + (timeOffsetRef?.current ?? 0)
+    const fallProgress = THREE.MathUtils.clamp(
+      (now - hazard.telegraphAt) / Math.max(1, hazard.impactAt - hazard.telegraphAt),
+      0,
+      1,
+    )
+    const falling = fallingRef.current
+    if (falling) {
+      falling.visible = now < hazard.impactAt
+      falling.position.y = 7 * (1 - fallProgress)
+      falling.rotation.y = now * 0.004
+      const pulse = 0.92 + Math.sin(now * 0.025) * 0.08
+      falling.scale.setScalar(pulse)
+    }
+
+    const telegraphProgress = 0.5 + Math.sin(now * 0.014) * 0.5
+    if (telegraphRef.current) {
+      telegraphRef.current.visible = now < hazard.impactAt
+      telegraphRef.current.scale.setScalar(0.9 + telegraphProgress * 0.12)
+      telegraphRef.current.material.opacity = 0.26 + telegraphProgress * 0.26
+    }
+    if (poolRef.current) {
+      poolRef.current.visible = now >= hazard.impactAt
+      poolRef.current.material.opacity = 0.28 + Math.sin(now * 0.01) * 0.07
+    }
+
+    const impactAge = now - hazard.impactAt
+    const impactVisible = impactAge >= 0 && impactAge < PROJECTILE_IMPACT_FLASH_MS
+    const progress = impactVisible ? impactAge / PROJECTILE_IMPACT_FLASH_MS : 1
+    if (impactRingRef.current) {
+      impactRingRef.current.visible = impactVisible
+      impactRingRef.current.scale.setScalar(0.25 + progress * hazard.radius)
+      impactRingRef.current.material.opacity = (1 - progress) * 0.9
+    }
+    if (impactFlashRef.current) {
+      impactFlashRef.current.visible = impactVisible
+      impactFlashRef.current.scale.setScalar(0.45 + progress * 1.5)
+      impactFlashRef.current.material.opacity = (1 - progress) * 0.55
+    }
+  })
+
+  return (
+    <group position={[hazard.position[0], surfaceY + 0.055, hazard.position[2]]}>
+      <mesh ref={poolRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[hazard.radius, 48]} />
+        <meshBasicMaterial
+          color="#8f0815"
+          transparent
+          opacity={0.32}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh ref={telegraphRef} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[hazard.radius * 0.78, hazard.radius, 48]} />
+        <meshBasicMaterial
+          color="#ff3b24"
+          transparent
+          opacity={0.4}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
+      <group ref={fallingRef} position={[0, 7, 0]}>
+        <mesh>
+          <sphereGeometry args={[0.52, 20, 14]} />
+          <meshBasicMaterial color="#ff3b1f" toneMapped={false} />
+        </mesh>
+        <mesh scale={1.55}>
+          <sphereGeometry args={[0.52, 16, 12]} />
+          <meshBasicMaterial
+            color="#ff1d18"
+            transparent
+            opacity={0.34}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+        <mesh position={[0, 0.95, 0]}>
+          <coneGeometry args={[0.38, 1.8, 16, 1, true]} />
+          <meshBasicMaterial
+            color="#ff552d"
+            transparent
+            opacity={0.32}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+            toneMapped={false}
+          />
+        </mesh>
+      </group>
+      <mesh ref={impactFlashRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1, 48]} />
+        <meshBasicMaterial
+          color="#ff4a25"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh ref={impactRingRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.72, 1, 48]} />
+        <meshBasicMaterial
+          color="#fff0bd"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function BossHazards({
+  playerPositionRef,
+  playerMountPositionRef,
+  onDamagePlayer,
+  movementSpeedMultiplierRef,
+  timeOffsetRef,
+}) {
   const hazards = useBossStore((state) => state.hazards)
   const attack = useBossStore((state) => state.attack)
   const spawn = useBossStore((state) => state.spawn)
   const bossPosition = useBossStore((state) => state.position)
-  const shockRingRef = useRef(null)
-  const fallingRefs = useRef(new Map())
-  const poolMaterialRefs = useRef(new Map())
   const damageTimesRef = useRef(new Map())
   const shockImpactRef = useRef(null)
   const shockHitRef = useRef(null)
@@ -99,12 +372,8 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
     const attackOrigin = bossPosition ?? spawn
     let slowed = false
 
-    if (shockRingRef.current) {
+    {
       const radius = getShockwaveRadius(attack, now)
-      shockRingRef.current.visible = radius > 0
-      shockRingRef.current.scale.set(Math.max(0.001, radius), Math.max(0.001, radius), 1)
-      shockRingRef.current.material.opacity = radius > 0 ? 0.18 + 0.5 * (1 - radius / SLIME_BOSS.shockwave.maxRadius) : 0
-
       if (
         attack?.kind === 'shockwave' &&
         now >= attack.jumpEndsAt &&
@@ -125,8 +394,19 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
 
       if (radius > 0 && player && shockHitRef.current !== attack?.id) {
         const distance = Math.hypot(player.x - attackOrigin[0], player.z - attackOrigin[2])
-        const airborne = player.y - getTerrainHeight(player.x, player.z) > SLIME_BOSS.shockwave.dodgeHeight
-        if (!airborne && Math.abs(distance - radius) < SLIME_BOSS.shockwave.band) {
+        const mountFootY = playerMountPositionRef?.current?.y
+        const playerFootY = Number.isFinite(mountFootY)
+          ? mountFootY
+          : player.y - PLAYER_CENTER_TO_FOOT
+        const surfaceY = getBossGroundSurface(player.x, player.z, playerFootY)
+        const touchesGroundWave = isGroundWaveContact({
+          playerCenterY: player.y,
+          playerCenterToFoot: PLAYER_CENTER_TO_FOOT,
+          mountFootY,
+          surfaceY,
+          dodgeHeight: SLIME_BOSS.shockwave.dodgeHeight,
+        })
+        if (touchesGroundWave && Math.abs(distance - radius) < SLIME_BOSS.shockwave.band) {
           shockHitRef.current = attack.id
           onDamagePlayer?.({
             damage: SLIME_BOSS.shockwave.damage,
@@ -138,14 +418,6 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
     }
 
     for (const hazard of hazards) {
-      const poolMaterial = poolMaterialRefs.current.get(hazard.id)
-      if (poolMaterial) poolMaterial.opacity = now < hazard.impactAt ? 0.28 : 0.48
-      const falling = fallingRefs.current.get(hazard.id)
-      if (falling) {
-        const progress = Math.max(0, Math.min(1, (now - hazard.telegraphAt) / Math.max(1, hazard.impactAt - hazard.telegraphAt)))
-        falling.visible = now < hazard.impactAt
-        falling.position.y = hazard.position[1] + 7 * (1 - progress)
-      }
       if (!player) continue
       const distance = Math.hypot(player.x - hazard.position[0], player.z - hazard.position[2])
       if (distance > hazard.radius) continue
@@ -180,47 +452,12 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
   })
 
   if (!spawn) return null
+  const attackOrigin = bossPosition ?? spawn
   return (
     <>
-      <mesh
-        ref={shockRingRef}
-        visible={false}
-        position={[
-          (bossPosition ?? spawn)[0],
-          (bossPosition ?? spawn)[1] + 0.08,
-          (bossPosition ?? spawn)[2],
-        ]}
-        rotation={[-Math.PI / 2, 0, 0]}
-      >
-        <ringGeometry args={[0.82, 1, 64]} />
-        <meshBasicMaterial color="#ff3b30" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
+      <GroundShockwave attack={attack} origin={attackOrigin} timeOffsetRef={timeOffsetRef} />
       {hazards.map((hazard) => (
-        <group key={hazard.id}>
-          <mesh position={[hazard.position[0], hazard.position[1] + 0.045, hazard.position[2]]} rotation={[-Math.PI / 2, 0, 0]}>
-            <circleGeometry args={[hazard.radius, 40]} />
-            <meshBasicMaterial
-              ref={(node) => {
-                if (node) poolMaterialRefs.current.set(hazard.id, node)
-                else poolMaterialRefs.current.delete(hazard.id)
-              }}
-              color="#ff372f"
-              transparent
-              opacity={0.28}
-              depthWrite={false}
-            />
-          </mesh>
-          <mesh
-            ref={(node) => {
-              if (node) fallingRefs.current.set(hazard.id, node)
-              else fallingRefs.current.delete(hazard.id)
-            }}
-            position={[hazard.position[0], hazard.position[1] + 7, hazard.position[2]]}
-          >
-            <sphereGeometry args={[0.48, 16, 12]} />
-            <meshStandardMaterial color="#e31520" emissive="#7b0000" emissiveIntensity={0.8} roughness={0.55} />
-          </mesh>
-        </group>
+        <BossProjectileHazard key={hazard.id} hazard={hazard} timeOffsetRef={timeOffsetRef} />
       ))}
     </>
   )
@@ -240,6 +477,8 @@ const BossMinion = memo(function BossMinion({
   const { scene } = useGLTF(url)
   const cloned = useMemo(() => preparedScene ?? scene.clone(true), [preparedScene, scene])
   const groupRef = useRef(null)
+  const summonRingRef = useRef(null)
+  const summonGlowRef = useRef(null)
   const lastDamageAtRef = useRef(0)
   const hitRef = useRef(onBossHit)
   const swordRef = useRef(swordEquipped)
@@ -287,8 +526,23 @@ const BossMinion = memo(function BossMinion({
     targetRef.current.position.y = live.position[1]
     targetRef.current.position.z = live.position[2]
 
-    const player = playerPositionRef?.current
     const now = Date.now() + (timeOffsetRef?.current ?? 0)
+    const summonAge = Math.max(0, now - (live.spawnedAt ?? 0))
+    const summonProgress = THREE.MathUtils.clamp(summonAge / 620, 0, 1)
+    const easedSummon = 1 - Math.pow(1 - summonProgress, 3)
+    group.scale.setScalar(0.55 * Math.max(0.08, easedSummon))
+    if (summonRingRef.current) {
+      summonRingRef.current.visible = summonProgress < 1
+      summonRingRef.current.scale.setScalar(0.4 + summonProgress * 2.8)
+      summonRingRef.current.material.opacity = (1 - summonProgress) * 0.85
+    }
+    if (summonGlowRef.current) {
+      summonGlowRef.current.visible = summonProgress < 1
+      summonGlowRef.current.scale.setScalar(1.4 - summonProgress * 0.5)
+      summonGlowRef.current.material.opacity = (1 - summonProgress) * 0.42
+    }
+
+    const player = playerPositionRef?.current
     if (!player || now - lastDamageAtRef.current < SLIME_BOSS.summons.attackCooldownMs) return
     if (Math.hypot(player.x - live.position[0], player.z - live.position[2]) <= SLIME_BOSS.summons.radius + 0.65) {
       lastDamageAtRef.current = now
@@ -303,6 +557,29 @@ const BossMinion = memo(function BossMinion({
   return (
     <group ref={groupRef} position={minion.position} scale={0.55}>
       <primitive object={cloned} />
+      <mesh ref={summonGlowRef} position={[0, -0.7, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <circleGeometry args={[1, 40]} />
+        <meshBasicMaterial
+          color={minion.kind === 'blue' ? '#38b8ff' : '#6bff75'}
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh ref={summonRingRef} position={[0, -0.68, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <ringGeometry args={[0.74, 1, 48]} />
+        <meshBasicMaterial
+          color="#fff2c2"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
     </group>
   )
 })
@@ -310,6 +587,7 @@ const BossMinion = memo(function BossMinion({
 function BossModel({
   authority,
   playerPositionRef,
+  playerMountPositionRef,
   remotePlayerStateRef,
   localPlayerAlive,
   onDamagePlayer,
@@ -456,6 +734,7 @@ function BossModel({
       </group>
       <BossHazards
         playerPositionRef={playerPositionRef}
+        playerMountPositionRef={playerMountPositionRef}
         onDamagePlayer={onDamagePlayer}
         movementSpeedMultiplierRef={movementSpeedMultiplierRef}
         timeOffsetRef={timeOffsetRef}
@@ -480,6 +759,7 @@ function BossModel({
 export default function SlimeBossSystem({
   placements = [],
   playerPositionRef,
+  playerMountPositionRef,
   remotePlayerStateRef,
   localPlayerAlive = true,
   onDamagePlayer,
@@ -509,6 +789,7 @@ export default function SlimeBossSystem({
         <BossModel
           authority={authority}
           playerPositionRef={playerPositionRef}
+          playerMountPositionRef={playerMountPositionRef}
           remotePlayerStateRef={remotePlayerStateRef}
           localPlayerAlive={localPlayerAlive}
           onDamagePlayer={onDamagePlayer}

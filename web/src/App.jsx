@@ -23765,6 +23765,7 @@ function App() {
           <SlimeBossSystem
             placements={SUMMONING_ALTAR_PLACEMENTS}
             playerPositionRef={playerPositionRef}
+            playerMountPositionRef={dragonMounted ? dragonRidePositionRef : null}
             remotePlayerStateRef={remotePlayerStateRef}
             localPlayerAlive={playerHp > 0}
             onDamagePlayer={({ damage, sourceId, attackType }) => handlePlayerHit({

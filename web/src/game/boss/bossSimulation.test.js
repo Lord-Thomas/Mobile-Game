@@ -12,6 +12,10 @@ import {
 const player = { id: 'p1', alive: true, position: [0, 0.9, 4] }
 
 describe('bossSimulation', () => {
+  it('équilibre le Roi Slime à 1 000 PV', () => {
+    expect(SLIME_BOSS.maxHp).toBe(1000)
+  })
+
   it('refuse une double invocation et démarre avec tous ses PV', () => {
     const first = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 100 })
     const second = summonBoss(first, { altarId: 'b', spawn: [4, 0, 4], now: 200 })
@@ -25,6 +29,7 @@ describe('bossSimulation', () => {
     state = damageBoss(state, SLIME_BOSS.maxHp * 0.45, { now: 10 })
     state = stepBoss(state, { now: 1700, dt: 0.1, players: [player] })
     const phase2Count = state.minions.length
+    expect(state.minions.every((minion) => minion.spawnedAt === 1700)).toBe(true)
     state = stepBoss(state, { now: 1800, dt: 0.1, players: [player] })
     expect(state.minions).toHaveLength(phase2Count)
 

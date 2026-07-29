@@ -6,7 +6,7 @@ export const SLIME_BOSS = {
   id: 'slime_boss',
   name: 'Roi Slime',
   modelUrl: '/models/enemies/slime_boss.glb',
-  maxHp: 2000,
+  maxHp: 1000,
   targetHeight: 4.5, // hauteur visuelle cible (unités monde), normalisée depuis la bbox
   spawnForwardOffset: 9, // distance d'apparition devant l'autel
   summonRange: 3.0, // portée d'interaction avec l'autel

@@ -141,7 +141,7 @@ export function resetBoss(state, reason = 'manual') {
   })
 }
 
-function spawnPhaseMinions(state, phase) {
+function spawnPhaseMinions(state, phase, now) {
   const count = SLIME_BOSS.summons.countByPhase[phase - 1] ?? 0
   if (!count || state.summonedPhases.includes(phase)) return state
   const minions = [...state.minions]
@@ -152,6 +152,7 @@ function spawnPhaseMinions(state, phase) {
       kind: index % 2 === 0 ? 'green' : 'blue',
       position: [state.position[0] + ox, state.position[1], state.position[2] + oz],
       spawnedPhase: phase,
+      spawnedAt: now,
       hp: SLIME_BOSS.summons.maxHpByKind[index % 2 === 0 ? 'green' : 'blue'],
       maxHp: SLIME_BOSS.summons.maxHpByKind[index % 2 === 0 ? 'green' : 'blue'],
     })
@@ -259,7 +260,7 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
   }
 
   for (const phase of SLIME_BOSS.summons.phases) {
-    if (next.phase >= phase) next = spawnPhaseMinions(next, phase)
+    if (next.phase >= phase) next = spawnPhaseMinions(next, phase, now)
   }
 
   const hazards = next.hazards.filter((hazard) => hazard.expiresAt > now)
@@ -352,6 +353,7 @@ export function sanitizeBossSnapshot(value) {
           kind,
           position: safePosition(minion?.position, value.spawn),
           spawnedPhase: minion?.spawnedPhase === 3 ? 3 : 2,
+          spawnedAt: finite(minion?.spawnedAt, 0),
           hp: Math.max(0, Math.min(maxHp, finite(minion?.hp, maxHp))),
           maxHp,
         }
