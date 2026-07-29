@@ -175,7 +175,7 @@ const MODES = [
   ...(import.meta.env.DEV ? [{ id: 'art', label: 'Direction artistique' }] : []),
   { id: 'tree', label: 'Arbre' },
   { id: 'house', label: 'Maison' },
-  { id: 'particles', label: 'Particules' },
+  { id: 'particles', label: 'Particules & VFX' },
   { id: 'map', label: 'Map' },
 ]
 

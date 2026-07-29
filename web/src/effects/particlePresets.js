@@ -15,6 +15,7 @@ export const EMITTER_SHAPES = [
   { value: 'sphere', label: 'Sphère' },
   { value: 'cone', label: 'Cône' },
   { value: 'circle', label: 'Cercle' },
+  { value: 'ring', label: 'Anneau' },
   { value: 'box', label: 'Boîte' },
 ]
 
@@ -40,6 +41,8 @@ export const EMITTER_BLENDINGS = [
 export const MAX_EMITTERS = 4
 export const MAX_PARTICLES_PER_EMITTER = 500
 export const MAX_SHELLS = 2
+export const MAX_GROUND_RINGS = 3
+export const MAX_GROUND_ZONES = 3
 
 export const DEFAULT_EMITTER = {
   shape: 'sphere',
@@ -65,6 +68,7 @@ export const DEFAULT_EMITTER = {
   lifetime: 0.7,
   lifetimeVariance: 0.3,
   radius: 0.1,
+  radiusEnd: 0.1,
   offset: [0, 0, 0],
   delay: 0,
 }
@@ -87,6 +91,52 @@ export const DEFAULT_SHELL = {
   offset: [0, 0.9, 0],
 }
 
+export const DEFAULT_GROUND_RING = {
+  name: 'Anneau incandescent',
+  enabled: true,
+  delay: 0,
+  duration: 0.9,
+  startRadius: 0.35,
+  endRadius: 6,
+  thickness: 0.58,
+  edgeSoftness: 0.28,
+  noiseScale: 5,
+  noiseStrength: 0.55,
+  flowSpeed: 1.4,
+  flameHeight: 1,
+  flameFrequency: 9,
+  intensity: 3,
+  opacity: 0.9,
+  colorHot: '#fff3b0',
+  colorMid: '#ff5a1f',
+  colorDark: '#8f0712',
+  offsetY: 0.06,
+  fadeOut: true,
+}
+
+export const DEFAULT_GROUND_ZONE = {
+  name: 'Zone incandescente',
+  enabled: true,
+  delay: 0,
+  duration: 4,
+  startRadius: 1.5,
+  endRadius: 1.5,
+  edgeSoftness: 0.22,
+  noiseScale: 4.5,
+  noiseStrength: 0.16,
+  flowSpeed: 0.7,
+  pulseSpeed: 2.2,
+  rimThickness: 0.16,
+  intensity: 2.2,
+  opacity: 0.65,
+  colorHot: '#ffcf70',
+  colorMid: '#d92818',
+  colorDark: '#47030b',
+  offsetY: 0.045,
+  fadeIn: true,
+  fadeOut: true,
+}
+
 export const DEFAULT_PARTICLE_PRESET = {
   id: 'new_effect',
   name: 'Nouvel effet',
@@ -95,6 +145,8 @@ export const DEFAULT_PARTICLE_PRESET = {
   loop: false,
   emitters: [{ ...DEFAULT_EMITTER }],
   shells: [],
+  groundRings: [],
+  groundZones: [],
   light: {
     enabled: false,
     color: '#ffaa44',
@@ -126,6 +178,7 @@ function asEnum(value, options, fallback) {
 
 export function normalizeEmitter(raw = {}) {
   const base = DEFAULT_EMITTER
+  const radius = clamp(asNumber(raw.radius, base.radius), 0, 30)
   return {
     shape: asEnum(raw.shape, EMITTER_SHAPES, base.shape),
     mode: asEnum(raw.mode, EMITTER_MODES, base.mode),
@@ -149,7 +202,8 @@ export function normalizeEmitter(raw = {}) {
     rotationSpeed: clamp(asNumber(raw.rotationSpeed, base.rotationSpeed), -12, 12),
     lifetime: clamp(asNumber(raw.lifetime, base.lifetime), 0.05, 8),
     lifetimeVariance: clamp(asNumber(raw.lifetimeVariance, base.lifetimeVariance), 0, 1),
-    radius: clamp(asNumber(raw.radius, base.radius), 0, 5),
+    radius,
+    radiusEnd: clamp(asNumber(raw.radiusEnd, radius), 0, 30),
     offset: asVec3(raw.offset, base.offset),
     delay: clamp(asNumber(raw.delay, base.delay), 0, 5),
   }
@@ -174,13 +228,73 @@ export function normalizeShell(raw = {}) {
   }
 }
 
+export function normalizeGroundRing(raw = {}) {
+  const base = DEFAULT_GROUND_RING
+  return {
+    name: typeof raw.name === 'string' && raw.name ? raw.name.slice(0, 80) : base.name,
+    enabled: raw.enabled === undefined ? base.enabled : Boolean(raw.enabled),
+    delay: clamp(asNumber(raw.delay, base.delay), 0, 10),
+    duration: clamp(asNumber(raw.duration, base.duration), 0.05, 10),
+    startRadius: clamp(asNumber(raw.startRadius, base.startRadius), 0.02, 30),
+    endRadius: clamp(asNumber(raw.endRadius, base.endRadius), 0.02, 30),
+    thickness: clamp(asNumber(raw.thickness, base.thickness), 0.03, 5),
+    edgeSoftness: clamp(asNumber(raw.edgeSoftness, base.edgeSoftness), 0.01, 1),
+    noiseScale: clamp(asNumber(raw.noiseScale, base.noiseScale), 0.2, 20),
+    noiseStrength: clamp(asNumber(raw.noiseStrength, base.noiseStrength), 0, 1.5),
+    flowSpeed: clamp(asNumber(raw.flowSpeed, base.flowSpeed), -6, 6),
+    flameHeight: clamp(asNumber(raw.flameHeight, base.flameHeight), 0, 2),
+    flameFrequency: clamp(asNumber(raw.flameFrequency, base.flameFrequency), 1, 30),
+    intensity: clamp(asNumber(raw.intensity, base.intensity), 0, 8),
+    opacity: clamp(asNumber(raw.opacity, base.opacity), 0, 1),
+    colorHot: asColor(raw.colorHot, base.colorHot),
+    colorMid: asColor(raw.colorMid, base.colorMid),
+    colorDark: asColor(raw.colorDark, base.colorDark),
+    offsetY: clamp(asNumber(raw.offsetY, base.offsetY), -1, 3),
+    fadeOut: raw.fadeOut === undefined ? base.fadeOut : Boolean(raw.fadeOut),
+  }
+}
+
+export function normalizeGroundZone(raw = {}) {
+  const base = DEFAULT_GROUND_ZONE
+  return {
+    name: typeof raw.name === 'string' && raw.name ? raw.name.slice(0, 80) : base.name,
+    enabled: raw.enabled === undefined ? base.enabled : Boolean(raw.enabled),
+    delay: clamp(asNumber(raw.delay, base.delay), 0, 10),
+    duration: clamp(asNumber(raw.duration, base.duration), 0.05, 30),
+    startRadius: clamp(asNumber(raw.startRadius, base.startRadius), 0.02, 30),
+    endRadius: clamp(asNumber(raw.endRadius, base.endRadius), 0.02, 30),
+    edgeSoftness: clamp(asNumber(raw.edgeSoftness, base.edgeSoftness), 0.01, 1),
+    noiseScale: clamp(asNumber(raw.noiseScale, base.noiseScale), 0.2, 20),
+    noiseStrength: clamp(asNumber(raw.noiseStrength, base.noiseStrength), 0, 1),
+    flowSpeed: clamp(asNumber(raw.flowSpeed, base.flowSpeed), -6, 6),
+    pulseSpeed: clamp(asNumber(raw.pulseSpeed, base.pulseSpeed), 0, 12),
+    rimThickness: clamp(asNumber(raw.rimThickness, base.rimThickness), 0.01, 0.8),
+    intensity: clamp(asNumber(raw.intensity, base.intensity), 0, 8),
+    opacity: clamp(asNumber(raw.opacity, base.opacity), 0, 1),
+    colorHot: asColor(raw.colorHot, base.colorHot),
+    colorMid: asColor(raw.colorMid, base.colorMid),
+    colorDark: asColor(raw.colorDark, base.colorDark),
+    offsetY: clamp(asNumber(raw.offsetY, base.offsetY), -1, 3),
+    fadeIn: raw.fadeIn === undefined ? base.fadeIn : Boolean(raw.fadeIn),
+    fadeOut: raw.fadeOut === undefined ? base.fadeOut : Boolean(raw.fadeOut),
+  }
+}
+
 export function normalizeParticlePreset(raw = {}) {
-  const emitters = Array.isArray(raw.emitters) && raw.emitters.length > 0
-    ? raw.emitters.slice(0, MAX_EMITTERS).map(normalizeEmitter)
-    : [{ ...DEFAULT_EMITTER }]
   const shells = Array.isArray(raw.shells)
     ? raw.shells.slice(0, MAX_SHELLS).map(normalizeShell)
     : []
+  const groundRings = Array.isArray(raw.groundRings)
+    ? raw.groundRings.slice(0, MAX_GROUND_RINGS).map(normalizeGroundRing)
+    : []
+  const groundZones = Array.isArray(raw.groundZones)
+    ? raw.groundZones.slice(0, MAX_GROUND_ZONES).map(normalizeGroundZone)
+    : []
+  const emitters = Array.isArray(raw.emitters) && raw.emitters.length > 0
+    ? raw.emitters.slice(0, MAX_EMITTERS).map(normalizeEmitter)
+    : (Array.isArray(raw.emitters) && (shells.length > 0 || groundRings.length > 0 || groundZones.length > 0)
+        ? []
+        : [{ ...DEFAULT_EMITTER }])
   const light = raw.light ?? {}
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : 'new_effect',
@@ -190,6 +304,8 @@ export function normalizeParticlePreset(raw = {}) {
     loop: Boolean(raw.loop),
     emitters,
     shells,
+    groundRings,
+    groundZones,
     light: {
       enabled: Boolean(light.enabled),
       color: asColor(light.color, '#ffaa44'),
@@ -199,6 +315,65 @@ export function normalizeParticlePreset(raw = {}) {
 }
 
 export const BUILTIN_PARTICLE_PRESETS = [
+  {
+    id: 'slime_shockwave_fire',
+    name: 'Onde enflammée du Roi Slime',
+    category: 'impact',
+    duration: 1.15,
+    loop: false,
+    emitters: [
+      {
+        shape: 'ring', mode: 'burst', count: 90, texture: 'flame', blending: 'additive',
+        colorStart: '#fff0a6', colorEnd: '#e8170c', alphaStart: 0.95, alphaEnd: 0,
+        sizeStart: 0.3, sizeEnd: 0.05, sizeVariance: 0.55,
+        speed: 1.6, speedVariance: 0.5, spread: 0.35, direction: [0, 1, 0],
+        gravity: 0.45, turbulence: 0.65, rotationSpeed: 1.8,
+        lifetime: 0.82, lifetimeVariance: 0.2, radius: 0.35, radiusEnd: 6, offset: [0, 0.08, 0], delay: 0.02,
+      },
+      {
+        shape: 'ring', mode: 'burst', count: 36, texture: 'spark', blending: 'additive',
+        colorStart: '#fff7cf', colorEnd: '#ff451c', alphaStart: 1, alphaEnd: 0,
+        sizeStart: 0.12, sizeEnd: 0.015, sizeVariance: 0.5,
+        speed: 3.2, speedVariance: 0.55, spread: 0.8, direction: [0, 1, 0],
+        gravity: -2.8, turbulence: 0.35, rotationSpeed: 4,
+        lifetime: 0.82, lifetimeVariance: 0.25, radius: 0.35, radiusEnd: 6, offset: [0, 0.08, 0], delay: 0.02,
+      },
+    ],
+    shells: [],
+    groundRings: [{ ...DEFAULT_GROUND_RING }],
+    light: { enabled: false, color: '#ff4b1f', intensity: 3 },
+  },
+  {
+    id: 'slime_projectile_zone',
+    name: 'Zone brûlante du Roi Slime',
+    category: 'loop',
+    duration: 7.2,
+    loop: false,
+    emitters: [],
+    shells: [],
+    groundRings: [],
+    groundZones: [{
+      ...DEFAULT_GROUND_ZONE,
+      name: 'Flaque brûlante',
+      duration: 7.2,
+      startRadius: 1.75,
+      endRadius: 1.82,
+      edgeSoftness: 0.24,
+      noiseScale: 5.8,
+      noiseStrength: 0.2,
+      flowSpeed: 0.9,
+      pulseSpeed: 2.6,
+      rimThickness: 0.18,
+      intensity: 2.7,
+      opacity: 0.72,
+      colorHot: '#ffc15a',
+      colorMid: '#d92116',
+      colorDark: '#3a0208',
+      fadeIn: true,
+      fadeOut: true,
+    }],
+    light: { enabled: false, color: '#ff321d', intensity: 2 },
+  },
   {
     id: 'fireball_hit',
     name: 'Impact boule de feu',

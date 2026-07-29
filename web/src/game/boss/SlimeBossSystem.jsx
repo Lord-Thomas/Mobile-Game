@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
@@ -12,6 +12,8 @@ import { isGroundWaveContact } from './bossGroundContact'
 import { getMeleeHitDamage } from '../meleeWeapons'
 import { ATTACK_TYPE } from '../damageTypes'
 import { PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS } from '../constants'
+import ParticleEffect from '../../effects/ParticleEffect'
+import { useStoredParticlePreset } from '../../effects/storedParticlePresets'
 
 const PREPARED_MINION_KINDS = ['green', 'blue', 'green', 'green', 'blue', 'green', 'blue', 'green']
 const PLAYER_CENTER_TO_FOOT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
@@ -39,7 +41,13 @@ function clonePreparedBossAsset(scene) {
   return cloned
 }
 
-function BossPhasePrewarm({ greenScene, blueScene }) {
+function BossPhasePrewarm({
+  greenScene,
+  blueScene,
+  shockwavePreset,
+  fireballPreset,
+  groundZonePreset,
+}) {
   const warmupGreen = useMemo(() => clonePreparedBossAsset(greenScene), [greenScene])
   const warmupBlue = useMemo(() => clonePreparedBossAsset(blueScene), [blueScene])
 
@@ -61,6 +69,9 @@ function BossPhasePrewarm({ greenScene, blueScene }) {
         <meshStandardMaterial color="#e31520" emissive="#7b0000" emissiveIntensity={0.8} roughness={0.55} />
       </mesh>
       <pointLight color="#ff1f18" intensity={0} distance={8} />
+      <ParticleEffect preset={shockwavePreset} playing={false} warmup />
+      <ParticleEffect preset={fireballPreset} playing={false} warmup position={[8, 0, 0]} />
+      <ParticleEffect preset={groundZonePreset} playing={false} warmup position={[10, 0, 0]} />
     </group>
   )
 }
@@ -97,13 +108,27 @@ function AltarProximity({ placements, playerPositionRef, enabled }) {
   return null
 }
 
-function GroundShockwave({ attack, origin, timeOffsetRef }) {
+function GroundShockwave({ attack, origin, timeOffsetRef, preset }) {
   const coreRef = useRef(null)
   const glowRef = useRef(null)
   const impactRingRef = useRef(null)
   const impactFlashRef = useRef(null)
   const dummy = useMemo(() => new THREE.Object3D(), [])
   const lastRadiusRef = useRef(-1)
+  const ring = preset.groundRings?.[0]
+  const vfxPreset = useMemo(() => ({
+    ...preset,
+    groundRings: [],
+    groundZones: [],
+    light: { ...preset.light, enabled: false },
+  }), [preset])
+  const ringScale = SLIME_BOSS.shockwave.maxRadius / Math.max(0.1, ring?.endRadius ?? SLIME_BOSS.shockwave.maxRadius)
+  const vfxTimeSource = useMemo(() => () => {
+    if (attack?.kind !== 'shockwave') return -1
+    const now = Date.now() + (timeOffsetRef?.current ?? 0)
+    const shockDuration = Math.max(0.05, (attack.activeEndsAt - attack.jumpEndsAt) / 1000)
+    return ((now - attack.jumpEndsAt) / 1000) * (preset.duration / shockDuration)
+  }, [attack, preset.duration, timeOffsetRef])
 
   useFrame(() => {
     const now = Date.now() + (timeOffsetRef?.current ?? 0)
@@ -123,10 +148,12 @@ function GroundShockwave({ attack, origin, timeOffsetRef }) {
         const surfaceY = getBossGroundSurface(x, z)
         dummy.position.set(x, surfaceY + 0.075, z)
         dummy.rotation.set(-Math.PI / 2, 0, angle + Math.PI / 2)
-        dummy.scale.set(arcLength, 0.13, 1)
+        const coreWidth = Math.max(0.08, (ring?.thickness ?? 0.42) * ringScale * 0.3)
+        const glowWidth = Math.max(0.2, (ring?.thickness ?? 0.42) * ringScale * 1.08)
+        dummy.scale.set(arcLength, coreWidth, 1)
         dummy.updateMatrix()
         core?.setMatrixAt(index, dummy.matrix)
-        dummy.scale.set(arcLength * 1.08, 0.42, 1)
+        dummy.scale.set(arcLength * 1.08, glowWidth, 1)
         dummy.updateMatrix()
         glow?.setMatrixAt(index, dummy.matrix)
       }
@@ -136,8 +163,10 @@ function GroundShockwave({ attack, origin, timeOffsetRef }) {
     }
 
     const fade = visible ? 1 - radius / SLIME_BOSS.shockwave.maxRadius : 0
-    if (core?.material) core.material.opacity = visible ? 0.72 + fade * 0.22 : 0
-    if (glow?.material) glow.material.opacity = visible ? 0.2 + fade * 0.28 : 0
+    const presetOpacity = ring?.opacity ?? 0.9
+    const presetIntensity = Math.min(1.5, (ring?.intensity ?? 3) / 3)
+    if (core?.material) core.material.opacity = visible ? presetOpacity * presetIntensity * (0.72 + fade * 0.22) : 0
+    if (glow?.material) glow.material.opacity = visible ? presetOpacity * presetIntensity * (0.2 + fade * 0.28) : 0
 
     const impactAge = attack?.kind === 'shockwave' ? now - attack.jumpEndsAt : Infinity
     const impactVisible = impactAge >= 0 && impactAge < PROJECTILE_IMPACT_FLASH_MS
@@ -162,10 +191,19 @@ function GroundShockwave({ attack, origin, timeOffsetRef }) {
 
   return (
     <>
+      <group position={origin} scale={ringScale}>
+        <ParticleEffect
+          preset={vfxPreset}
+          playing={attack?.kind === 'shockwave'}
+          forceOneShot
+          playbackId={attack?.id ?? 'shockwave-idle'}
+          timeSource={vfxTimeSource}
+        />
+      </group>
       <instancedMesh ref={glowRef} args={[null, null, SHOCKWAVE_SEGMENT_COUNT]} visible={false} frustumCulled={false}>
         <planeGeometry args={[1, 1]} />
         <meshBasicMaterial
-          color="#ff3a20"
+          color={ring?.colorMid ?? '#ff3a20'}
           transparent
           opacity={0}
           blending={THREE.AdditiveBlending}
@@ -177,7 +215,7 @@ function GroundShockwave({ attack, origin, timeOffsetRef }) {
       <instancedMesh ref={coreRef} args={[null, null, SHOCKWAVE_SEGMENT_COUNT]} visible={false} frustumCulled={false}>
         <planeGeometry args={[1, 1]} />
         <meshBasicMaterial
-          color="#ffd7a8"
+          color={ring?.colorHot ?? '#ffd7a8'}
           transparent
           opacity={0}
           blending={THREE.AdditiveBlending}
@@ -213,16 +251,31 @@ function GroundShockwave({ attack, origin, timeOffsetRef }) {
   )
 }
 
-function BossProjectileHazard({ hazard, timeOffsetRef }) {
+function BossProjectileHazard({
+  hazard,
+  origin,
+  timeOffsetRef,
+  fireballPreset,
+  groundZonePreset,
+}) {
   const fallingRef = useRef(null)
   const telegraphRef = useRef(null)
-  const poolRef = useRef(null)
   const impactRingRef = useRef(null)
   const impactFlashRef = useRef(null)
+  const [launchOrigin] = useState(() => [...origin])
   const surfaceY = useMemo(
     () => getBossGroundSurface(hazard.position[0], hazard.position[2]),
     [hazard.position],
   )
+  const launchSurfaceY = useMemo(
+    () => getBossGroundSurface(launchOrigin[0], launchOrigin[2]),
+    [launchOrigin],
+  )
+  const groundZone = groundZonePreset.groundZones?.[0]
+  const groundZoneScale = hazard.radius / Math.max(0.1, groundZone?.startRadius ?? hazard.radius)
+  const groundZoneTimeSource = useMemo(() => () => (
+    (Date.now() + (timeOffsetRef?.current ?? 0) - hazard.impactAt) / 1000
+  ), [hazard.impactAt, timeOffsetRef])
 
   useFrame(() => {
     const now = Date.now() + (timeOffsetRef?.current ?? 0)
@@ -234,9 +287,15 @@ function BossProjectileHazard({ hazard, timeOffsetRef }) {
     const falling = fallingRef.current
     if (falling) {
       falling.visible = now < hazard.impactAt
-      falling.position.y = 7 * (1 - fallProgress)
-      falling.rotation.y = now * 0.004
-      const pulse = 0.92 + Math.sin(now * 0.025) * 0.08
+      const eased = fallProgress * fallProgress * (3 - 2 * fallProgress)
+      falling.position.x = (launchOrigin[0] - hazard.position[0]) * (1 - eased)
+      falling.position.z = (launchOrigin[2] - hazard.position[2]) * (1 - eased)
+      falling.position.y = THREE.MathUtils.lerp(
+        launchSurfaceY - surfaceY + 3.2,
+        0.42,
+        eased,
+      ) + Math.sin(fallProgress * Math.PI) * 2.4
+      const pulse = (0.92 + Math.sin(now * 0.025) * 0.08) * 2.15
       falling.scale.setScalar(pulse)
     }
 
@@ -246,11 +305,6 @@ function BossProjectileHazard({ hazard, timeOffsetRef }) {
       telegraphRef.current.scale.setScalar(0.9 + telegraphProgress * 0.12)
       telegraphRef.current.material.opacity = 0.26 + telegraphProgress * 0.26
     }
-    if (poolRef.current) {
-      poolRef.current.visible = now >= hazard.impactAt
-      poolRef.current.material.opacity = 0.28 + Math.sin(now * 0.01) * 0.07
-    }
-
     const impactAge = now - hazard.impactAt
     const impactVisible = impactAge >= 0 && impactAge < PROJECTILE_IMPACT_FLASH_MS
     const progress = impactVisible ? impactAge / PROJECTILE_IMPACT_FLASH_MS : 1
@@ -268,17 +322,15 @@ function BossProjectileHazard({ hazard, timeOffsetRef }) {
 
   return (
     <group position={[hazard.position[0], surfaceY + 0.055, hazard.position[2]]}>
-      <mesh ref={poolRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[hazard.radius, 48]} />
-        <meshBasicMaterial
-          color="#8f0815"
-          transparent
-          opacity={0.32}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          toneMapped={false}
+      <group scale={[groundZoneScale, 1, groundZoneScale]}>
+        <ParticleEffect
+          preset={groundZonePreset}
+          playing
+          forceOneShot
+          playbackId={hazard.id}
+          timeSource={groundZoneTimeSource}
         />
-      </mesh>
+      </group>
       <mesh ref={telegraphRef} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[hazard.radius * 0.78, hazard.radius, 48]} />
         <meshBasicMaterial
@@ -291,34 +343,13 @@ function BossProjectileHazard({ hazard, timeOffsetRef }) {
           toneMapped={false}
         />
       </mesh>
-      <group ref={fallingRef} position={[0, 7, 0]}>
-        <mesh>
-          <sphereGeometry args={[0.52, 20, 14]} />
-          <meshBasicMaterial color="#ff3b1f" toneMapped={false} />
-        </mesh>
-        <mesh scale={1.55}>
-          <sphereGeometry args={[0.52, 16, 12]} />
-          <meshBasicMaterial
-            color="#ff1d18"
-            transparent
-            opacity={0.34}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-        <mesh position={[0, 0.95, 0]}>
-          <coneGeometry args={[0.38, 1.8, 16, 1, true]} />
-          <meshBasicMaterial
-            color="#ff552d"
-            transparent
-            opacity={0.32}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            side={THREE.DoubleSide}
-            toneMapped={false}
-          />
-        </mesh>
+      <group ref={fallingRef}>
+        <ParticleEffect
+          preset={fireballPreset}
+          playing
+          loop
+          position={[0, -0.9, 0]}
+        />
       </group>
       <mesh ref={impactFlashRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[1, 48]} />
@@ -361,6 +392,9 @@ function BossHazards({
   const damageTimesRef = useRef(new Map())
   const shockImpactRef = useRef(null)
   const shockHitRef = useRef(null)
+  const shockwavePreset = useStoredParticlePreset('slime_shockwave_fire')
+  const fireballPreset = useStoredParticlePreset('fireball_projectile')
+  const groundZonePreset = useStoredParticlePreset('slime_projectile_zone')
 
   useEffect(() => () => {
     if (movementSpeedMultiplierRef) movementSpeedMultiplierRef.current = 1
@@ -451,13 +485,25 @@ function BossHazards({
     }
   })
 
-  if (!spawn) return null
+  if (!spawn || !shockwavePreset || !fireballPreset || !groundZonePreset) return null
   const attackOrigin = bossPosition ?? spawn
   return (
     <>
-      <GroundShockwave attack={attack} origin={attackOrigin} timeOffsetRef={timeOffsetRef} />
+      <GroundShockwave
+        attack={attack}
+        origin={attackOrigin}
+        timeOffsetRef={timeOffsetRef}
+        preset={shockwavePreset}
+      />
       {hazards.map((hazard) => (
-        <BossProjectileHazard key={hazard.id} hazard={hazard} timeOffsetRef={timeOffsetRef} />
+        <BossProjectileHazard
+          key={hazard.id}
+          hazard={hazard}
+          origin={attackOrigin}
+          timeOffsetRef={timeOffsetRef}
+          fireballPreset={fireballPreset}
+          groundZonePreset={groundZonePreset}
+        />
       ))}
     </>
   )
@@ -772,6 +818,9 @@ export default function SlimeBossSystem({
   enabled = true,
 }) {
   const active = useBossStore((state) => state.active)
+  const shockwavePreset = useStoredParticlePreset('slime_shockwave_fire')
+  const fireballPreset = useStoredParticlePreset('fireball_projectile')
+  const groundZonePreset = useStoredParticlePreset('slime_projectile_zone')
   const greenGltf = useGLTF(SLIME_BOSS.summons.greenModelUrl)
   const blueGltf = useGLTF(SLIME_BOSS.summons.blueModelUrl)
   const preparedMinionScenes = useMemo(() => PREPARED_MINION_KINDS.map((kind) => (
@@ -783,7 +832,13 @@ export default function SlimeBossSystem({
 
   return (
     <>
-      <BossPhasePrewarm greenScene={greenGltf.scene} blueScene={blueGltf.scene} />
+      <BossPhasePrewarm
+        greenScene={greenGltf.scene}
+        blueScene={blueGltf.scene}
+        shockwavePreset={shockwavePreset}
+        fireballPreset={fireballPreset}
+        groundZonePreset={groundZonePreset}
+      />
       <AltarProximity placements={placements} playerPositionRef={playerPositionRef} enabled={enabled} />
       {active && (
         <BossModel

@@ -11,6 +11,8 @@ import {
 } from 'three'
 import { getParticleTexture } from './particleTextures'
 import ShaderShell from './ShaderShell'
+import ShaderGroundRing from './ShaderGroundRing'
+import ShaderGroundZone from './ShaderGroundZone'
 
 // GPU particle renderer. Each emitter is a single THREE.Points whose particles
 // are fully simulated in the vertex shader: the only per-frame CPU work is one
@@ -32,6 +34,7 @@ const VERTEX_SHADER = /* glsl */ `
   uniform float uGravity;
   uniform float uTurbulence;
   uniform float uRotationSpeed;
+  uniform float uRadiusScaleEnd;
   uniform float uSizeStart;
   uniform float uSizeEnd;
   uniform float uSizeVariance;
@@ -77,7 +80,9 @@ const VERTEX_SHADER = /* glsl */ `
 
     float age = t * life;
     float motionAge = age * uMotionScale;
-    vec3 pos = position + aVelocity * motionAge;
+    vec3 basePosition = position;
+    basePosition.xz *= mix(1.0, uRadiusScaleEnd, t);
+    vec3 pos = basePosition + aVelocity * motionAge;
     pos.y += 0.5 * uGravity * motionAge * motionAge;
     pos += vec3(
       sin(motionAge * 7.0 + aRandom.w * 41.0),
@@ -175,6 +180,13 @@ function buildGeometry(emitter, seed) {
         tmpDir.copy(tmpBase).lerp(tmpRandom, emitter.spread).normalize()
         break
       }
+      case 'ring': {
+        const angle = rng() * Math.PI * 2
+        px = Math.cos(angle) * emitter.radius
+        pz = Math.sin(angle) * emitter.radius
+        tmpDir.copy(tmpBase).lerp(tmpRandom, emitter.spread).normalize()
+        break
+      }
       case 'cone': {
         const angle = rng() * Math.PI * 2
         const r = Math.sqrt(rng()) * emitter.radius
@@ -246,6 +258,11 @@ function buildMaterial(emitter, preset, loop) {
       uGravity: { value: emitter.gravity },
       uTurbulence: { value: emitter.turbulence },
       uRotationSpeed: { value: emitter.rotationSpeed },
+      uRadiusScaleEnd: {
+        value: emitter.radius > 0.0001
+          ? (Number.isFinite(emitter.radiusEnd) ? emitter.radiusEnd : emitter.radius) / emitter.radius
+          : 1,
+      },
       uSizeStart: { value: emitter.sizeStart },
       uSizeEnd: { value: emitter.sizeEnd },
       uSizeVariance: { value: emitter.sizeVariance },
@@ -308,16 +325,26 @@ function computeEffectTotalTime(preset) {
       : emitter.delay + maxLife
     total = Math.max(total, end)
   }
+  for (const ring of preset.groundRings ?? []) {
+    total = Math.max(total, ring.delay + ring.duration)
+  }
+  for (const zone of preset.groundZones ?? []) {
+    total = Math.max(total, zone.delay + zone.duration)
+  }
   return total
 }
 
 export default function ParticleEffect({
   preset,
   playing = true,
+  warmup = false,
   loop = false,
   forceOneShot = false,
   playbackId = 0,
   position = [0, 0, 0],
+  manualTime = null,
+  timeSource,
+  onTimeUpdate,
   onComplete,
 }) {
   const isLoop = forceOneShot ? false : (loop || preset.loop)
@@ -329,6 +356,7 @@ export default function ParticleEffect({
   const timeRef = useRef(0)
   // Limite matérielle de taille de point-sprite, lue une seule fois (0 = pas encore lue).
   const maxPointSizeRef = useRef(0)
+  const lastReportedTimeRef = useRef(-1)
   const totalTime = useMemo(() => computeEffectTotalTime(preset), [preset])
 
   useEffect(() => {
@@ -344,8 +372,19 @@ export default function ParticleEffect({
   useFrame((state) => {
     if (!playing) return
     if (startRef.current === null) startRef.current = state.clock.elapsedTime
-    const time = state.clock.elapsedTime - startRef.current
+    const clockTime = state.clock.elapsedTime - startRef.current
+    const sourcedTime = timeSource?.()
+    const time = Number.isFinite(manualTime)
+      ? manualTime
+      : (Number.isFinite(sourcedTime) ? sourcedTime : clockTime)
     timeRef.current = time
+    if (
+      onTimeUpdate
+      && (lastReportedTimeRef.current < 0 || Math.abs(time - lastReportedTimeRef.current) >= 0.075)
+    ) {
+      lastReportedTimeRef.current = time
+      onTimeUpdate(isLoop ? time % Math.max(0.1, preset.duration) : Math.min(time, totalTime))
+    }
     const pixelScale = (state.size.height * state.viewport.dpr)
       / (2 * Math.tan((state.camera.fov * Math.PI) / 360))
 
@@ -376,14 +415,18 @@ export default function ParticleEffect({
       }
     }
 
-    if (!isLoop && !doneRef.current && time > totalTime) {
+    if (!Number.isFinite(manualTime) && !isLoop && !doneRef.current && time > totalTime) {
       doneRef.current = true
       onComplete?.()
     }
   })
 
   return (
-    <group position={position} visible={playing}>
+    <group
+      position={position}
+      visible={playing}
+      userData={warmup ? { shaderWarmupWhenHidden: true, debugCategory: 'warmup' } : undefined}
+    >
       {preset.emitters.map((emitter, index) => (
         <EmitterPoints
           key={index}
@@ -402,6 +445,20 @@ export default function ParticleEffect({
           loop={isLoop}
           timeRef={timeRef}
           phase={index * 7.3}
+        />
+      ))}
+      {(preset.groundRings ?? []).map((ring, index) => (
+        <ShaderGroundRing
+          key={`${ring.name}-${index}`}
+          ring={ring}
+          timeRef={timeRef}
+        />
+      ))}
+      {(preset.groundZones ?? []).map((zone, index) => (
+        <ShaderGroundZone
+          key={`${zone.name}-${index}`}
+          zone={zone}
+          timeRef={timeRef}
         />
       ))}
       {preset.light.enabled && (

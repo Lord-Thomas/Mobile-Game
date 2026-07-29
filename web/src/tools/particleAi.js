@@ -6,7 +6,7 @@ import { normalizeParticlePreset } from '../effects/particlePresets'
 
 const ENUMS = {
   category: ['impact', 'burst', 'loop', 'trail', 'death'],
-  shape: ['point', 'sphere', 'cone', 'circle', 'box'],
+  shape: ['point', 'sphere', 'cone', 'circle', 'ring', 'box'],
   mode: ['burst', 'loop'],
   texture: ['soft_glow', 'circle', 'star', 'spark', 'smoke', 'flame'],
   blending: ['additive', 'normal'],
@@ -38,6 +38,7 @@ const EMITTER_SCHEMA = {
     lifetime: { type: 'number', description: 'Durée de vie en secondes, 0.2 à 3 typique' },
     lifetimeVariance: { type: 'number', description: '0 à 1' },
     radius: { type: 'number', description: 'Rayon de la zone de spawn en mètres' },
+    radiusEnd: { type: 'number', description: 'Rayon en fin de vie ; différent de radius pour suivre une onde qui se propage' },
     offset: { type: 'array', items: { type: 'number' }, description: 'Décalage [x,y,z] depuis l\'origine de l\'effet' },
     delay: { type: 'number', description: 'Délai de démarrage en secondes' },
   },
@@ -47,7 +48,7 @@ const EMITTER_SCHEMA = {
     'sizeStart', 'sizeEnd', 'sizeVariance',
     'speed', 'speedVariance', 'spread', 'direction',
     'gravity', 'turbulence', 'rotationSpeed',
-    'lifetime', 'lifetimeVariance', 'radius', 'offset', 'delay',
+    'lifetime', 'lifetimeVariance', 'radius', 'radiusEnd', 'offset', 'delay',
   ],
 }
 
@@ -76,6 +77,72 @@ const SHELL_SCHEMA = {
   ],
 }
 
+const GROUND_RING_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    name: { type: 'string', description: 'Nom court de la couche VFX' },
+    enabled: { type: 'boolean' },
+    delay: { type: 'number', description: 'Début de la couche sur la timeline, en secondes' },
+    duration: { type: 'number', description: 'Durée de propagation, en secondes' },
+    startRadius: { type: 'number', description: 'Rayon initial en mètres' },
+    endRadius: { type: 'number', description: 'Rayon final en mètres' },
+    thickness: { type: 'number', description: 'Épaisseur du front lumineux' },
+    edgeSoftness: { type: 'number', description: 'Douceur du halo, 0.01 à 1' },
+    noiseScale: { type: 'number', description: 'Fréquence des détails du bruit, 0.2 à 20' },
+    noiseStrength: { type: 'number', description: 'Déformation irrégulière du cercle, 0 à 1.5' },
+    flowSpeed: { type: 'number', description: 'Vitesse du mouvement interne, -6 à 6' },
+    flameHeight: { type: 'number', description: 'Amplitude des langues de feu, 0 à 2' },
+    flameFrequency: { type: 'number', description: 'Nombre apparent de langues de feu, 1 à 30' },
+    intensity: { type: 'number', description: 'Luminosité HDR, 0 à 8' },
+    opacity: { type: 'number', description: '0 à 1' },
+    colorHot: { type: 'string', description: 'Couleur hex du cœur incandescent' },
+    colorMid: { type: 'string', description: 'Couleur hex principale' },
+    colorDark: { type: 'string', description: 'Couleur hex du bord sombre' },
+    offsetY: { type: 'number', description: 'Décalage vertical au-dessus du sol' },
+    fadeOut: { type: 'boolean' },
+  },
+  required: [
+    'name', 'enabled', 'delay', 'duration', 'startRadius', 'endRadius',
+    'thickness', 'edgeSoftness', 'noiseScale', 'noiseStrength', 'flowSpeed',
+    'flameHeight', 'flameFrequency', 'intensity', 'opacity',
+    'colorHot', 'colorMid', 'colorDark', 'offsetY', 'fadeOut',
+  ],
+}
+
+const GROUND_ZONE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    name: { type: 'string', description: 'Nom court de la couche VFX' },
+    enabled: { type: 'boolean' },
+    delay: { type: 'number', description: 'Début de la couche sur la timeline, en secondes' },
+    duration: { type: 'number', description: 'Durée de la zone, en secondes' },
+    startRadius: { type: 'number', description: 'Rayon initial en mètres' },
+    endRadius: { type: 'number', description: 'Rayon final en mètres' },
+    edgeSoftness: { type: 'number', description: 'Douceur du contour, 0.01 à 1' },
+    noiseScale: { type: 'number', description: 'Fréquence des détails internes, 0.2 à 20' },
+    noiseStrength: { type: 'number', description: 'Irrégularité du contour, 0 à 1' },
+    flowSpeed: { type: 'number', description: 'Vitesse du mouvement interne, -6 à 6' },
+    pulseSpeed: { type: 'number', description: 'Vitesse de pulsation lumineuse, 0 à 12' },
+    rimThickness: { type: 'number', description: 'Épaisseur relative du bord lumineux, 0.01 à 0.8' },
+    intensity: { type: 'number', description: 'Luminosité HDR, 0 à 8' },
+    opacity: { type: 'number', description: '0 à 1' },
+    colorHot: { type: 'string', description: 'Couleur hex des veines les plus chaudes' },
+    colorMid: { type: 'string', description: 'Couleur hex principale' },
+    colorDark: { type: 'string', description: 'Couleur hex du fond sombre' },
+    offsetY: { type: 'number', description: 'Décalage vertical au-dessus du sol' },
+    fadeIn: { type: 'boolean' },
+    fadeOut: { type: 'boolean' },
+  },
+  required: [
+    'name', 'enabled', 'delay', 'duration', 'startRadius', 'endRadius',
+    'edgeSoftness', 'noiseScale', 'noiseStrength', 'flowSpeed', 'pulseSpeed',
+    'rimThickness', 'intensity', 'opacity', 'colorHot', 'colorMid', 'colorDark',
+    'offsetY', 'fadeIn', 'fadeOut',
+  ],
+}
+
 const PRESET_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -85,8 +152,10 @@ const PRESET_SCHEMA = {
     category: { type: 'string', enum: ENUMS.category },
     duration: { type: 'number', description: 'Durée de l\'effet en secondes (0.3 à 2 typique)' },
     loop: { type: 'boolean', description: 'true pour les auras/feux permanents' },
-    emitters: { type: 'array', items: EMITTER_SCHEMA, description: '1 à 4 émetteurs' },
+    emitters: { type: 'array', items: EMITTER_SCHEMA, description: '0 à 4 émetteurs' },
     shells: { type: 'array', items: SHELL_SCHEMA, description: '0 à 2 coquilles shader : boules d\'énergie volumétriques déformées par du bruit (coeur de projectile, onde de choc)' },
+    groundRings: { type: 'array', items: GROUND_RING_SCHEMA, description: '0 à 3 anneaux VFX animés au sol' },
+    groundZones: { type: 'array', items: GROUND_ZONE_SCHEMA, description: '0 à 3 surfaces persistantes animées au sol' },
     light: {
       type: 'object',
       additionalProperties: false,
@@ -98,7 +167,7 @@ const PRESET_SCHEMA = {
       required: ['enabled', 'color', 'intensity'],
     },
   },
-  required: ['id', 'name', 'category', 'duration', 'loop', 'emitters', 'shells', 'light'],
+  required: ['id', 'name', 'category', 'duration', 'loop', 'emitters', 'shells', 'groundRings', 'groundZones', 'light'],
 }
 
 const SYSTEM_PROMPT = `Tu es un artiste VFX pour un jeu 3D low-poly cosy (style village, vue troisième personne, jouable sur mobile).
@@ -113,6 +182,9 @@ Principes pour des effets réussis et lisibles :
 - Mobile : reste sous ~200 particules au total. Lumière dynamique seulement si l'effet le mérite.
 - mode "loop" pour les émissions continues (aura, feu), "burst" pour les explosions.
 - Les "shells" sont des boules d'énergie volumétriques (sphère déformée par du bruit, style boule de feu). Utilise-les pour le coeur d'un projectile ou une onde de choc d'impact (scaleEnd 2-3 + fadeOut), et combine-les avec des particules autour. Maximum 2, et seulement quand l'effet le mérite.
+- Les "groundRings" sont des anneaux VFX procéduraux au sol. Utilise-les pour les ondes de choc, cercles magiques et fronts de flammes. Associe un cœur très clair, une couleur moyenne saturée et un bord sombre. L'intensité peut dépasser 1 pour une lumière HDR.
+- Les "groundZones" sont des surfaces persistantes remplies, avec un contour irrégulier et des veines animées. Utilise-les pour les flaques dangereuses, zones de corruption et télégraphes remplis ; ne les remplace pas par un anneau quand toute la surface doit rester lisible.
+- La forme d'émetteur "ring" place les particules sur la circonférence, pratique pour ajouter flammes et étincelles autour d'un anneau VFX.
 - Pour une boule de foudre : shell avec noiseScale 2-3, speed 2.5-4, distortion 0.5+, couleurs blanc/cyan/bleu profond, plus des particules spark.`
 
 export function buildParticlePrompt(userText, currentPreset) {

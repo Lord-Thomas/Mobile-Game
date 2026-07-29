@@ -2,15 +2,20 @@ import { useEffect, useState } from 'react'
 import {
   BUILTIN_PARTICLE_PRESETS,
   DEFAULT_EMITTER,
+  DEFAULT_GROUND_RING,
+  DEFAULT_GROUND_ZONE,
   DEFAULT_PARTICLE_PRESET,
   DEFAULT_SHELL,
   EMITTER_BLENDINGS,
   EMITTER_SHAPES,
   EMITTER_TEXTURES,
   MAX_EMITTERS,
+  MAX_GROUND_RINGS,
+  MAX_GROUND_ZONES,
   MAX_SHELLS,
   normalizeParticlePreset,
 } from '../effects/particlePresets'
+import { PARTICLE_LIBRARY_UPDATED_EVENT } from '../effects/storedParticlePresets'
 
 const DRAFT_STORAGE_KEY = 'lab_particle_editor_draft_v1'
 const LIBRARY_STORAGE_KEY = 'lab_particle_library_v1'
@@ -52,6 +57,8 @@ let state = {
   playing: true,
   loopPreview: true,
   playbackId: 1,
+  manualTime: null,
+  timelineTime: 0,
   target: 'mob',
   apiKey: typeof window === 'undefined' ? '' : loadApiKey(),
   aiBusy: false,
@@ -80,6 +87,7 @@ function persistDraft(preset) {
 function persistLibrary(library) {
   try {
     window.localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(library))
+    window.dispatchEvent(new Event(PARTICLE_LIBRARY_UPDATED_EVENT))
   } catch {
     // Local dev tool only: failing to persist should not break the editor.
   }
@@ -93,7 +101,13 @@ export function setParticlePreset(patch) {
 
 export function replaceParticlePreset(rawPreset) {
   const preset = normalizeParticlePreset(rawPreset)
-  setParticleEditorState({ preset, playbackId: state.playbackId + 1, playing: true })
+  setParticleEditorState({
+    preset,
+    playbackId: state.playbackId + 1,
+    playing: true,
+    manualTime: null,
+    timelineTime: 0,
+  })
   persistDraft(preset)
 }
 
@@ -110,7 +124,12 @@ export function addParticleEmitter() {
 }
 
 export function removeParticleEmitter(index) {
-  if (state.preset.emitters.length <= 1) return
+  if (
+    state.preset.emitters.length <= 1
+    && state.preset.shells.length === 0
+    && state.preset.groundRings.length === 0
+    && state.preset.groundZones.length === 0
+  ) return
   setParticlePreset({ emitters: state.preset.emitters.filter((_, i) => i !== index) })
 }
 
@@ -130,12 +149,103 @@ export function removeParticleShell(index) {
   setParticlePreset({ shells: state.preset.shells.filter((_, i) => i !== index) })
 }
 
+export function setParticleGroundRing(index, patch) {
+  const groundRings = state.preset.groundRings.map((ring, i) => (
+    i === index ? { ...ring, ...patch } : ring
+  ))
+  setParticlePreset({ groundRings })
+}
+
+export function addParticleGroundRing() {
+  if (state.preset.groundRings.length >= MAX_GROUND_RINGS) return
+  setParticlePreset({
+    groundRings: [
+      ...state.preset.groundRings,
+      {
+        ...DEFAULT_GROUND_RING,
+        name: `Anneau incandescent ${state.preset.groundRings.length + 1}`,
+      },
+    ],
+  })
+  playParticleEffect()
+}
+
+export function duplicateParticleGroundRing(index) {
+  if (state.preset.groundRings.length >= MAX_GROUND_RINGS) return
+  const source = state.preset.groundRings[index]
+  if (!source) return
+  const groundRings = [...state.preset.groundRings]
+  groundRings.splice(index + 1, 0, { ...source, name: `${source.name} (copie)` })
+  setParticlePreset({ groundRings })
+}
+
+export function removeParticleGroundRing(index) {
+  setParticlePreset({
+    groundRings: state.preset.groundRings.filter((_, i) => i !== index),
+  })
+}
+
+export function setParticleGroundZone(index, patch) {
+  const groundZones = state.preset.groundZones.map((zone, i) => (
+    i === index ? { ...zone, ...patch } : zone
+  ))
+  setParticlePreset({ groundZones })
+}
+
+export function addParticleGroundZone() {
+  if (state.preset.groundZones.length >= MAX_GROUND_ZONES) return
+  setParticlePreset({
+    groundZones: [
+      ...state.preset.groundZones,
+      {
+        ...DEFAULT_GROUND_ZONE,
+        name: `Zone au sol ${state.preset.groundZones.length + 1}`,
+      },
+    ],
+  })
+  playParticleEffect()
+}
+
+export function duplicateParticleGroundZone(index) {
+  if (state.preset.groundZones.length >= MAX_GROUND_ZONES) return
+  const source = state.preset.groundZones[index]
+  if (!source) return
+  const groundZones = [...state.preset.groundZones]
+  groundZones.splice(index + 1, 0, { ...source, name: `${source.name} (copie)` })
+  setParticlePreset({ groundZones })
+}
+
+export function removeParticleGroundZone(index) {
+  setParticlePreset({
+    groundZones: state.preset.groundZones.filter((_, i) => i !== index),
+  })
+}
+
 export function playParticleEffect() {
-  setParticleEditorState({ playing: true, playbackId: state.playbackId + 1 })
+  setParticleEditorState({
+    playing: true,
+    playbackId: state.playbackId + 1,
+    manualTime: null,
+    timelineTime: 0,
+  })
 }
 
 export function stopParticleEffect() {
   setParticleEditorState({ playing: false })
+}
+
+export function scrubParticleEffect(time) {
+  const timelineTime = Math.max(0, Math.min(state.preset.duration, Number(time) || 0))
+  setParticleEditorState({
+    playing: true,
+    manualTime: timelineTime,
+    timelineTime,
+  })
+}
+
+export function reportParticleTimelineTime(timelineTime) {
+  if (state.manualTime !== null) return
+  setParticleEditorState({ timelineTime })
 }
 
 export function setParticleApiKey(apiKey) {

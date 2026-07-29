@@ -7,6 +7,8 @@ import {
   EMITTER_SHAPES,
   EMITTER_TEXTURES,
   MAX_EMITTERS,
+  MAX_GROUND_RINGS,
+  MAX_GROUND_ZONES,
   MAX_SHELLS,
   PARTICLE_CATEGORIES,
 } from '../effects/particlePresets'
@@ -16,20 +18,30 @@ import { ColorField, Section, SelectField, SliderField } from './editorControls'
 import { styles } from './editorStyles'
 import {
   addParticleEmitter,
+  addParticleGroundRing,
+  addParticleGroundZone,
   addParticleShell,
   deleteParticleFromLibrary,
   duplicateParticlePreset,
+  duplicateParticleGroundRing,
+  duplicateParticleGroundZone,
   getParticleEditorState,
   loadParticleFromLibrary,
   playParticleEffect,
   randomizeParticlePreset,
+  reportParticleTimelineTime,
   removeParticleEmitter,
+  removeParticleGroundRing,
+  removeParticleGroundZone,
   removeParticleShell,
   replaceParticlePreset,
   saveParticleToLibrary,
+  scrubParticleEffect,
   setParticleApiKey,
   setParticleEditorState,
   setParticleEmitter,
+  setParticleGroundRing,
+  setParticleGroundZone,
   setParticlePreset,
   setParticleShell,
   stopParticleEffect,
@@ -99,7 +111,14 @@ function TargetDummy({ target }) {
 }
 
 export function ParticleDevScene() {
-  const { preset, playing, loopPreview, playbackId, target } = useParticleEditorStore()
+  const {
+    preset,
+    playing,
+    loopPreview,
+    playbackId,
+    target,
+    manualTime,
+  } = useParticleEditorStore()
   const groundY = useMemo(() => getTerrainHeight(0, 0), [])
   const groupRef = useRef()
 
@@ -119,6 +138,8 @@ export function ParticleDevScene() {
         playing={playing}
         loop={loopPreview}
         playbackId={playbackId}
+        manualTime={manualTime}
+        onTimeUpdate={reportParticleTimelineTime}
         onComplete={stopParticleEffect}
       />
     </group>
@@ -139,8 +160,9 @@ function TextField({ label, value, onChange }) {
   )
 }
 
-function EmitterSection({ emitter, index, total }) {
+function EmitterSection({ emitter, index, canRemove }) {
   const update = (key) => (value) => setParticleEmitter(index, { [key]: value })
+  const radiusEnd = Number.isFinite(emitter.radiusEnd) ? emitter.radiusEnd : emitter.radius
   const updateOffsetY = (value) => setParticleEmitter(index, {
     offset: [emitter.offset[0], value, emitter.offset[2]],
   })
@@ -161,14 +183,15 @@ function EmitterSection({ emitter, index, total }) {
       <SliderField label="Taille début" value={emitter.sizeStart} min={0} max={1.5} step={0.01} onChange={update('sizeStart')} />
       <SliderField label="Taille fin" value={emitter.sizeEnd} min={0} max={1.5} step={0.01} onChange={update('sizeEnd')} />
       <SliderField label="Rotation sprite" value={emitter.rotationSpeed} min={-8} max={8} step={0.1} onChange={update('rotationSpeed')} />
-      <SliderField label="Rayon de spawn" value={emitter.radius} min={0} max={2} step={0.02} onChange={update('radius')} />
+      <SliderField label="Rayon de spawn" value={emitter.radius} min={0} max={30} step={0.02} onChange={update('radius')} />
+      <SliderField label="Rayon final" value={radiusEnd} min={0} max={30} step={0.05} onChange={update('radiusEnd')} />
       <SliderField label="Hauteur (offset Y)" value={emitter.offset[1]} min={-1} max={3} step={0.05} onChange={updateOffsetY} />
       <SliderField label="Délai" value={emitter.delay} min={0} max={2} step={0.05} onChange={update('delay')} />
       <ColorField label="Couleur début" value={emitter.colorStart} onChange={update('colorStart')} />
       <ColorField label="Couleur fin" value={emitter.colorEnd} onChange={update('colorEnd')} />
       <SliderField label="Alpha début" value={emitter.alphaStart} min={0} max={1} step={0.01} onChange={update('alphaStart')} />
       <SliderField label="Alpha fin" value={emitter.alphaEnd} min={0} max={1} step={0.01} onChange={update('alphaEnd')} />
-      {total > 1 && (
+      {canRemove && (
         <button type="button" onClick={() => removeParticleEmitter(index)} style={styles.dangerButton}>
           Supprimer cet émetteur
         </button>
@@ -212,8 +235,143 @@ function ShellSection({ shell, index }) {
   )
 }
 
+function GroundRingSection({ ring, index }) {
+  const update = (key) => (value) => setParticleGroundRing(index, { [key]: value })
+
+  return (
+    <Section title={`Anneau VFX — ${ring.name}`}>
+      <TextField label="Nom de la couche" value={ring.name} onChange={update('name')} />
+      <label style={styles.checkboxRow}>
+        <input
+          type="checkbox"
+          checked={ring.enabled}
+          onChange={(event) => setParticleGroundRing(index, { enabled: event.target.checked })}
+        />
+        <span>Couche visible</span>
+      </label>
+      <SliderField label="Début (s)" value={ring.delay} min={0} max={5} step={0.01} onChange={update('delay')} />
+      <SliderField label="Durée (s)" value={ring.duration} min={0.05} max={5} step={0.01} onChange={update('duration')} />
+      <SliderField label="Rayon initial" value={ring.startRadius} min={0.02} max={15} step={0.02} onChange={update('startRadius')} />
+      <SliderField label="Rayon final" value={ring.endRadius} min={0.02} max={30} step={0.05} onChange={update('endRadius')} />
+      <SliderField label="Épaisseur" value={ring.thickness} min={0.03} max={3} step={0.01} onChange={update('thickness')} />
+      <SliderField label="Douceur des bords" value={ring.edgeSoftness} min={0.01} max={1} step={0.01} onChange={update('edgeSoftness')} />
+      <SliderField label="Échelle du bruit" value={ring.noiseScale} min={0.2} max={20} step={0.1} onChange={update('noiseScale')} />
+      <SliderField label="Déformation" value={ring.noiseStrength} min={0} max={1.5} step={0.01} onChange={update('noiseStrength')} />
+      <SliderField label="Vitesse du feu" value={ring.flowSpeed} min={-6} max={6} step={0.05} onChange={update('flowSpeed')} />
+      <SliderField label="Hauteur des flammes" value={ring.flameHeight} min={0} max={2} step={0.01} onChange={update('flameHeight')} />
+      <SliderField label="Fréquence des flammes" value={ring.flameFrequency} min={1} max={30} step={0.25} onChange={update('flameFrequency')} />
+      <SliderField label="Luminosité" value={ring.intensity} min={0} max={8} step={0.05} onChange={update('intensity')} />
+      <SliderField label="Opacité" value={ring.opacity} min={0} max={1} step={0.01} onChange={update('opacity')} />
+      <SliderField label="Décalage du sol" value={ring.offsetY} min={-0.2} max={1} step={0.01} onChange={update('offsetY')} />
+      <ColorField label="Cœur chaud" value={ring.colorHot} onChange={update('colorHot')} />
+      <ColorField label="Couleur moyenne" value={ring.colorMid} onChange={update('colorMid')} />
+      <ColorField label="Bord sombre" value={ring.colorDark} onChange={update('colorDark')} />
+      <label style={styles.checkboxRow}>
+        <input
+          type="checkbox"
+          checked={ring.fadeOut}
+          onChange={(event) => setParticleGroundRing(index, { fadeOut: event.target.checked })}
+        />
+        <span>Fondu pendant la propagation</span>
+      </label>
+      <div style={styles.actions}>
+        <button
+          type="button"
+          onClick={() => duplicateParticleGroundRing(index)}
+          style={styles.secondaryButton}
+        >
+          Dupliquer la couche
+        </button>
+        <button
+          type="button"
+          onClick={() => removeParticleGroundRing(index)}
+          style={styles.dangerButton}
+        >
+          Supprimer
+        </button>
+      </div>
+    </Section>
+  )
+}
+
+function GroundZoneSection({ zone, index }) {
+  const update = (key) => (value) => setParticleGroundZone(index, { [key]: value })
+
+  return (
+    <Section title={`Zone au sol — ${zone.name}`}>
+      <TextField label="Nom de la couche" value={zone.name} onChange={update('name')} />
+      <label style={styles.checkboxRow}>
+        <input
+          type="checkbox"
+          checked={zone.enabled}
+          onChange={(event) => setParticleGroundZone(index, { enabled: event.target.checked })}
+        />
+        <span>Couche visible</span>
+      </label>
+      <SliderField label="Début (s)" value={zone.delay} min={0} max={10} step={0.01} onChange={update('delay')} />
+      <SliderField label="Durée (s)" value={zone.duration} min={0.05} max={30} step={0.05} onChange={update('duration')} />
+      <SliderField label="Rayon initial" value={zone.startRadius} min={0.02} max={15} step={0.02} onChange={update('startRadius')} />
+      <SliderField label="Rayon final" value={zone.endRadius} min={0.02} max={30} step={0.05} onChange={update('endRadius')} />
+      <SliderField label="Douceur des bords" value={zone.edgeSoftness} min={0.01} max={1} step={0.01} onChange={update('edgeSoftness')} />
+      <SliderField label="Échelle du bruit" value={zone.noiseScale} min={0.2} max={20} step={0.1} onChange={update('noiseScale')} />
+      <SliderField label="Déformation du contour" value={zone.noiseStrength} min={0} max={1} step={0.01} onChange={update('noiseStrength')} />
+      <SliderField label="Vitesse interne" value={zone.flowSpeed} min={-6} max={6} step={0.05} onChange={update('flowSpeed')} />
+      <SliderField label="Vitesse de pulsation" value={zone.pulseSpeed} min={0} max={12} step={0.1} onChange={update('pulseSpeed')} />
+      <SliderField label="Épaisseur du bord" value={zone.rimThickness} min={0.01} max={0.8} step={0.01} onChange={update('rimThickness')} />
+      <SliderField label="Luminosité" value={zone.intensity} min={0} max={8} step={0.05} onChange={update('intensity')} />
+      <SliderField label="Opacité" value={zone.opacity} min={0} max={1} step={0.01} onChange={update('opacity')} />
+      <SliderField label="Décalage du sol" value={zone.offsetY} min={-0.2} max={1} step={0.01} onChange={update('offsetY')} />
+      <ColorField label="Veines chaudes" value={zone.colorHot} onChange={update('colorHot')} />
+      <ColorField label="Couleur principale" value={zone.colorMid} onChange={update('colorMid')} />
+      <ColorField label="Fond sombre" value={zone.colorDark} onChange={update('colorDark')} />
+      <label style={styles.checkboxRow}>
+        <input
+          type="checkbox"
+          checked={zone.fadeIn}
+          onChange={(event) => setParticleGroundZone(index, { fadeIn: event.target.checked })}
+        />
+        <span>Apparition progressive</span>
+      </label>
+      <label style={styles.checkboxRow}>
+        <input
+          type="checkbox"
+          checked={zone.fadeOut}
+          onChange={(event) => setParticleGroundZone(index, { fadeOut: event.target.checked })}
+        />
+        <span>Disparition progressive</span>
+      </label>
+      <div style={styles.actions}>
+        <button
+          type="button"
+          onClick={() => duplicateParticleGroundZone(index)}
+          style={styles.secondaryButton}
+        >
+          Dupliquer la couche
+        </button>
+        <button
+          type="button"
+          onClick={() => removeParticleGroundZone(index)}
+          style={styles.dangerButton}
+        >
+          Supprimer
+        </button>
+      </div>
+    </Section>
+  )
+}
+
 export function ParticleDevPanel() {
-  const { preset, library, playing, loopPreview, target, apiKey, aiBusy, aiError } = useParticleEditorStore()
+  const {
+    preset,
+    library,
+    playing,
+    loopPreview,
+    target,
+    apiKey,
+    aiBusy,
+    aiError,
+    timelineTime,
+  } = useParticleEditorStore()
   const [message, setMessage] = useState('')
   const [promptText, setPromptText] = useState('')
   const [importText, setImportText] = useState('')
@@ -317,8 +475,8 @@ export function ParticleDevPanel() {
       <aside style={styles.panel}>
         <header style={styles.header}>
           <div>
-            <strong style={styles.title}>Éditeur de particules</strong>
-            <span style={styles.subtitle}>Presets JSON, rendu GPU, IA + curseurs</span>
+            <strong style={styles.title}>Éditeur Particules & VFX</strong>
+            <span style={styles.subtitle}>Couches GPU, shaders, timeline et presets JSON</span>
           </div>
         </header>
 
@@ -326,7 +484,7 @@ export function ParticleDevPanel() {
           <TextField label="Nom" value={preset.name} onChange={(name) => setParticlePreset({ name })} />
           <TextField label="ID" value={preset.id} onChange={(id) => setParticlePreset({ id })} />
           <SelectField label="Catégorie" value={preset.category} options={PARTICLE_CATEGORIES} onChange={(category) => setParticlePreset({ category })} />
-          <SliderField label="Durée (s)" value={preset.duration} min={0.1} max={5} step={0.05} onChange={(duration) => setParticlePreset({ duration })} />
+          <SliderField label="Durée (s)" value={preset.duration} min={0.1} max={10} step={0.05} onChange={(duration) => setParticlePreset({ duration })} />
           <label style={styles.checkboxRow}>
             <input
               type="checkbox"
@@ -338,7 +496,12 @@ export function ParticleDevPanel() {
         </Section>
 
         {preset.emitters.map((emitter, index) => (
-          <EmitterSection key={index} emitter={emitter} index={index} total={preset.emitters.length} />
+          <EmitterSection
+            key={index}
+            emitter={emitter}
+            index={index}
+            canRemove={preset.emitters.length > 1 || preset.shells.length > 0 || preset.groundRings.length > 0 || preset.groundZones.length > 0}
+          />
         ))}
         {preset.emitters.length < MAX_EMITTERS && (
           <button type="button" onClick={addParticleEmitter} style={{ ...styles.primaryButton, marginTop: 10 }}>
@@ -352,6 +515,32 @@ export function ParticleDevPanel() {
         {preset.shells.length < MAX_SHELLS && (
           <button type="button" onClick={addParticleShell} style={{ ...styles.secondaryButton, width: '100%', marginTop: 10 }}>
             Ajouter une coquille shader (boule d'énergie)
+          </button>
+        )}
+
+        {preset.groundRings.map((ring, index) => (
+          <GroundRingSection key={`${ring.name}-${index}`} ring={ring} index={index} />
+        ))}
+        {preset.groundRings.length < MAX_GROUND_RINGS && (
+          <button
+            type="button"
+            onClick={addParticleGroundRing}
+            style={{ ...styles.primaryButton, width: '100%', marginTop: 10 }}
+          >
+            Ajouter un anneau VFX
+          </button>
+        )}
+
+        {preset.groundZones.map((zone, index) => (
+          <GroundZoneSection key={`${zone.name}-${index}`} zone={zone} index={index} />
+        ))}
+        {preset.groundZones.length < MAX_GROUND_ZONES && (
+          <button
+            type="button"
+            onClick={addParticleGroundZone}
+            style={{ ...styles.primaryButton, width: '100%', marginTop: 10 }}
+          >
+            Ajouter une zone au sol
           </button>
         )}
 
@@ -419,6 +608,21 @@ export function ParticleDevPanel() {
         </button>
         <button type="button" onClick={stopParticleEffect} style={playButtonStyle}>■ Stop</button>
         <button type="button" onClick={randomizeParticlePreset} style={playButtonStyle}>🎲 Random</button>
+        <label style={timelineStyle}>
+          <span>Timeline</span>
+          <input
+            type="range"
+            min={0}
+            max={preset.duration}
+            step={0.01}
+            value={Math.min(preset.duration, timelineTime)}
+            onChange={(event) => scrubParticleEffect(Number(event.target.value))}
+            style={timelineRangeStyle}
+          />
+          <span style={timelineTimeStyle}>
+            {Math.min(preset.duration, timelineTime).toFixed(2)} / {preset.duration.toFixed(2)} s
+          </span>
+        </label>
         <select
           value={target}
           onChange={(event) => setParticleEditorState({ target: event.target.value })}
@@ -527,6 +731,28 @@ const activePlayButtonStyle = {
   background: '#9fe0bc',
   borderColor: '#9fe0bc',
   fontWeight: 700,
+}
+
+const timelineStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'auto minmax(120px, 1fr) auto',
+  alignItems: 'center',
+  gap: 8,
+  flex: '1 1 320px',
+  minWidth: 250,
+  color: '#b9c8c3',
+}
+
+const timelineRangeStyle = {
+  width: '100%',
+  accentColor: '#ff6a32',
+}
+
+const timelineTimeStyle = {
+  minWidth: 88,
+  color: '#eef4f2',
+  fontVariantNumeric: 'tabular-nums',
+  textAlign: 'right',
 }
 
 const promptInputStyle = {
