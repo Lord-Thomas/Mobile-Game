@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { ACESFilmicToneMapping, MathUtils, MOUSE, SRGBColorSpace } from 'three'
@@ -22,6 +22,7 @@ import {
   normalizeBiomeArea,
 } from '../world/biomeAreas'
 import { MAP_PATHS, normalizePathStamp } from '../world/paths'
+import ArtDirectionRuntime from '../artDirection/ArtDirectionRuntime'
 
 // The whole outdoor world (terrain, houses, lights) lives on OUTDOOR_LIGHT_LAYER.
 // The editor camera must enable that layer or nothing renders, and the preview
@@ -91,6 +92,21 @@ function EditorCamera({ controlsRef, mode, mapCameraView, mapFocusRef }) {
       return
     }
 
+    if (mode === 'art') {
+      camera.position.set(30, 18, 30)
+      camera.lookAt(0, 3, 0)
+      if (controlsRef.current) {
+        controlsRef.current.target.set(0, 3, 0)
+        controlsRef.current.minDistance = 4
+        controlsRef.current.maxDistance = 180
+        controlsRef.current.enableRotate = true
+        controlsRef.current.enablePan = true
+        controlsRef.current.screenSpacePanning = false
+        controlsRef.current.update()
+      }
+      return
+    }
+
     if (mode === 'house') {
       camera.position.set(14, 9, 14)
       camera.lookAt(0, 2.2, 0)
@@ -151,7 +167,12 @@ function EditorCamera({ controlsRef, mode, mapCameraView, mapFocusRef }) {
   return null
 }
 
+const ArtDirectionPanel = import.meta.env.DEV
+  ? lazy(() => import('./ArtDirectionPanel'))
+  : null
+
 const MODES = [
+  ...(import.meta.env.DEV ? [{ id: 'art', label: 'Direction artistique' }] : []),
   { id: 'tree', label: 'Arbre' },
   { id: 'house', label: 'Maison' },
   { id: 'particles', label: 'Particules' },
@@ -600,6 +621,7 @@ export default function Editor({ initialMode = 'tree' }) {
           gl.toneMappingExposure = 1.1
         }}
       >
+        <ArtDirectionRuntime manageAtmosphere />
         <Suspense fallback={null}>
           <OutdoorNeighborhood
             lightingActive={true}
@@ -718,6 +740,11 @@ export default function Editor({ initialMode = 'tree' }) {
       {mode === 'tree' && <TreeDevPanel />}
       {mode === 'house' && <HouseDevPanel />}
       {mode === 'particles' && <ParticleDevPanel />}
+      {mode === 'art' && ArtDirectionPanel && (
+        <Suspense fallback={null}>
+          <ArtDirectionPanel />
+        </Suspense>
+      )}
       {mode === 'map' && (
         <MapEditorPanel
           objects={mapEditor.objects}

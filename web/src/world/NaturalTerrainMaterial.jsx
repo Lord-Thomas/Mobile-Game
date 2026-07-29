@@ -1,6 +1,6 @@
 import { useTexture } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
-import { ClampToEdgeWrapping, RepeatWrapping, SRGBColorSpace, Vector2 } from 'three'
+import { ClampToEdgeWrapping, Color, RepeatWrapping, SRGBColorSpace, Vector2 } from 'three'
 import {
   MAP_BIOME_AREAS,
   getBiomeGroundColorUniforms,
@@ -11,6 +11,10 @@ import {
   TERRAIN_SURFACE_MASK_URL,
   TERRAIN_SURFACE_MASK_WORLD_SIZE,
 } from './terrain/terrainSurfaceMaskConfig'
+import {
+  getArtDirectionColorMultiplier,
+  useArtDirectionValues,
+} from '../artDirection/artDirectionStore'
 
 const SURFACE_TEXTURES = [
   '/textures/outdoor/grass-patchy-basecolor-512.jpg',
@@ -49,12 +53,19 @@ function NaturalTerrainMaterial({
   biomeAreas = MAP_BIOME_AREAS,
   lightingModel = 'standard',
 }) {
+  const artDirection = useArtDirectionValues()
+  const terrainSurface = artDirection.surfaces.terrain
   const materialRef = useRef()
   const [grassMap, dirtMap, grassNormalMap, dirtNormalMap, surfaceMask] = useTexture(SURFACE_TEXTURES)
   const groundColors = useMemo(
     () => getBiomeGroundColorUniforms('graveyard', biomeAreas),
     [biomeAreas],
   )
+  const terrainTint = useMemo(() => {
+    const [r, g, b] = getArtDirectionColorMultiplier('terrain', terrainSurface.color)
+    return new Color().setRGB(r, g, b)
+  }, [terrainSurface.color])
+  const terrainTintRef = useRef(terrainTint)
 
   useMemo(() => {
     configureTexture(grassMap, SRGBColorSpace)
@@ -81,6 +92,7 @@ function NaturalTerrainMaterial({
     shader.uniforms.uGraveyardAsh = { value: groundColors.ash }
     shader.uniforms.uGraveyardBoneDust = { value: groundColors.boneDust }
     shader.uniforms.uGraveyardColdShadow = { value: groundColors.coldShadow }
+    shader.uniforms.uArtTerrainTint = { value: terrainTintRef.current.clone() }
 
     // The terrain meshes stay in world-aligned local coordinates. Reuse the final
     // local vertex position directly: unlike Three's conditional `worldPosition`,
@@ -101,6 +113,7 @@ function NaturalTerrainMaterial({
       uniform vec3 uGraveyardAsh;
       uniform vec3 uGraveyardBoneDust;
       uniform vec3 uGraveyardColdShadow;
+      uniform vec3 uArtTerrainTint;
       varying vec3 vNaturalWorldPosition;
 
       float naturalHash(vec2 p) {
@@ -184,6 +197,7 @@ function NaturalTerrainMaterial({
       graveColor = mix(graveColor, uGraveyardBoneDust, boneDust * 0.38);
       graveColor = mix(graveColor, uGraveyardColdShadow, coldPocket * 0.3);
       naturalColor = mix(naturalColor, graveColor, naturalGraveyard * 0.94);
+      naturalColor *= uArtTerrainTint;
       diffuseColor *= vec4(naturalColor, 1.0);
       `,
     )
@@ -214,6 +228,18 @@ function NaturalTerrainMaterial({
   }, [groundColors])
 
   useEffect(() => {
+    terrainTintRef.current.copy(terrainTint)
+    const material = materialRef.current
+    const shader = material?.userData?.shader
+    if (shader?.uniforms.uArtTerrainTint) {
+      shader.uniforms.uArtTerrainTint.value.copy(terrainTint)
+    }
+    if (material?.isMeshStandardMaterial) {
+      material.roughness = terrainSurface.roughness
+    }
+  }, [terrainSurface.roughness, terrainTint])
+
+  useEffect(() => {
     const material = materialRef.current
     if (material) material.needsUpdate = true
   }, [dirtMap, dirtNormalMap, grassMap, grassNormalMap, surfaceMask])
@@ -242,7 +268,7 @@ function NaturalTerrainMaterial({
       color="#ffffff"
       emissive="#328f22"
       emissiveIntensity={0.05}
-      roughness={0.88}
+      roughness={terrainSurface.roughness}
       onBeforeCompile={handleBeforeCompile}
     />
   )

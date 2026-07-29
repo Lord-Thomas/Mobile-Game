@@ -52,6 +52,8 @@ import { downloadBlob, generateThumbnailBlob } from './tools/thumbnails/generate
 import { TITLE_IDS, TITLES, getTitleDefinition, getTitleRarity } from './gameProgress/titles'
 import { LOCAL_ACHIEVEMENTS, getLocalAchievement, evaluateMetricAchievements } from './gameProgress/achievements'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
+import ArtDirectionRuntime from './artDirection/ArtDirectionRuntime'
+import { useArtDirectionValues } from './artDirection/artDirectionStore'
 import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
@@ -2331,7 +2333,6 @@ function HouseOpeningReveals({ walls }) {
   )
 }
 
-const BASE_SCENE_BACKGROUND = new Color(OUTDOOR_DAY_ATMOSPHERE.background)
 const BASE_SCENE_FOG = new Color(OUTDOOR_DAY_ATMOSPHERE.fog)
 const GRAVEYARD_ATMOSPHERE = BIOME_VISUALS.graveyard.atmosphere
 const GRAVEYARD_SCENE_BACKGROUND = new Color(GRAVEYARD_ATMOSPHERE.background)
@@ -2343,9 +2344,18 @@ function SceneAtmosphere({
   biomeAreas = MAP_BIOME_AREAS,
 }) {
   const { gl, scene } = useThree()
+  const artDirection = useArtDirectionValues()
   const isOutside = currentZone === ZONES.outside
-  const backgroundColor = OUTDOOR_DAY_ATMOSPHERE.background
+  const backgroundColor = artDirection.fog.backgroundColor
   const backgroundRef = useRef()
+  const artBackground = useMemo(
+    () => new Color(artDirection.fog.backgroundColor),
+    [artDirection.fog.backgroundColor],
+  )
+  const artFog = useMemo(
+    () => new Color(artDirection.fog.color),
+    [artDirection.fog.color],
+  )
   const atmosphereFog = useMemo(
     () => new FogExp2(BASE_SCENE_FOG, OUTDOOR_DAY_ATMOSPHERE.fogDensity),
     [],
@@ -2375,16 +2385,16 @@ function SceneAtmosphere({
     const fogInfluence = influence
 
     if (backgroundRef.current) {
-      backgroundRef.current.copy(BASE_SCENE_BACKGROUND).lerp(GRAVEYARD_SCENE_BACKGROUND, fogInfluence)
+      backgroundRef.current.copy(artBackground).lerp(GRAVEYARD_SCENE_BACKGROUND, fogInfluence)
     }
 
-    atmosphereFog.color.copy(BASE_SCENE_FOG).lerp(GRAVEYARD_SCENE_FOG, fogInfluence)
+    atmosphereFog.color.copy(artFog).lerp(GRAVEYARD_SCENE_FOG, fogInfluence)
     atmosphereFog.density = MathUtils.lerp(
-      isOutside ? OUTDOOR_DAY_ATMOSPHERE.fogDensity : 0.0016,
+      isOutside ? artDirection.fog.density : 0.0016,
       GRAVEYARD_ATMOSPHERE.fogDensity,
       fogInfluence,
     )
-    const targetExposure = isOutside ? OUTDOOR_DAY_ATMOSPHERE.exposure : 1.1
+    const targetExposure = artDirection.grading.exposure
     gl.toneMappingExposure = MathUtils.lerp(
       gl.toneMappingExposure,
       targetExposure,
@@ -23243,6 +23253,7 @@ function App() {
         }}
         resize={{ debounce: 80 }}
       >
+        <ArtDirectionRuntime />
         <GameFrameSchedulerDriver />
         <MobSpatialIndexSystem
           mobGroupRef={mobGroupRef}

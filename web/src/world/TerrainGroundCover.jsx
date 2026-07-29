@@ -14,6 +14,10 @@ import {
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
 import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
+import {
+  getArtDirectionColorMultiplier,
+  useArtDirectionValues,
+} from '../artDirection/artDirectionStore'
 
 const dummy = new Object3D()
 const _cameraForward = new Vector3()
@@ -440,6 +444,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
     shader.uniforms.uGraveyardAreas = { value: biomeData.areas }
     shader.uniforms.uGraveyardGroundIntensities = { value: biomeData.groundIntensities }
     shader.uniforms.uGraveyardAreaCount = { value: biomeData.count }
+    shader.uniforms.uArtGrassRoughness = { value: 0.82 }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -470,6 +475,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
       uniform int uGraveyardAreaCount;
       attribute float instanceSpawnTime;
       varying vec3 vOutdoorGrassLight;
+      varying float vOutdoorGrassHighlight;
 
       float grassHash(vec2 value) {
         return fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123);
@@ -528,6 +534,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
         vec3(0.48, 0.62, 0.42),
         vec3(1.06, 1.12, 0.96)
       );
+      vOutdoorGrassHighlight = heightFactor * grassLightVariation;
 
       float travel = dot(grassOrigin.xz, uWindDirection.xz) * uWindScale;
       float cross = dot(grassOrigin.xz, vec2(-uWindDirection.z, uWindDirection.x)) * 0.06;
@@ -635,7 +642,9 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
       '#include <common>',
       `
       #include <common>
+      uniform float uArtGrassRoughness;
       varying vec3 vOutdoorGrassLight;
+      varying float vOutdoorGrassHighlight;
       `,
     )
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -643,6 +652,11 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
       `
       #include <map_fragment>
       diffuseColor.rgb *= vOutdoorGrassLight;
+      float artGrassSheen = pow(
+        clamp(vOutdoorGrassHighlight, 0.0, 1.0),
+        mix(10.0, 2.0, uArtGrassRoughness)
+      ) * (1.0 - uArtGrassRoughness) * 0.22;
+      diffuseColor.rgb += vec3(artGrassSheen);
       `,
     )
 
@@ -658,6 +672,8 @@ function TerrainGroundCover({
   biomeAreas = MAP_BIOME_AREAS,
   reducedDensity = false,
 }) {
+  const artDirection = useArtDirectionValues()
+  const grassSurface = artDirection.surfaces.grass
   const maxQuadrantInstances = reducedDensity ? 50_000 : MAX_QUADRANT_INSTANCES
   const maxGlobalGrassInstances = reducedDensity ? 12_000 : MAX_GLOBAL_GRASS_INSTANCES_PER_REGION
   const localGrassGridStep = reducedDensity ? 0.3 : GRASS_GRID_STEP
@@ -809,6 +825,17 @@ function TerrainGroundCover({
     return mat
   }, [grassTexture])
   useEffect(() => () => globalGrassMaterial.dispose(), [globalGrassMaterial])
+
+  useEffect(() => {
+    const [r, g, b] = getArtDirectionColorMultiplier('grass', grassSurface.color)
+    grassMaterial.color.setRGB(r, g, b)
+    globalGrassMaterial.color.setRGB(r, g, b)
+    ;[shaderRef.current, globalShaderRef.current].forEach((shader) => {
+      if (shader?.uniforms.uArtGrassRoughness) {
+        shader.uniforms.uArtGrassRoughness.value = grassSurface.roughness
+      }
+    })
+  }, [globalGrassMaterial, grassMaterial, grassSurface.color, grassSurface.roughness])
 
   // Initialize mesh counts to 0 on mount to avoid showing uninitialized instances
   useLayoutEffect(() => {

@@ -2,8 +2,11 @@ import { Suspense, useMemo } from 'react'
 import NaturalTerrainMaterial from './NaturalTerrainMaterial'
 import TerrainTextureDiagnosticMaterial from './TerrainTextureDiagnosticMaterial'
 import { getCachedVisualGeometry } from './terrain/terrainGeometry'
+import { useArtDirectionValues } from '../artDirection/artDirectionStore'
 
 function OutdoorGround({ biomeAreas, renderMode = 'full' }) {
+  const artDirection = useArtDirectionValues()
+  const terrainSurface = artDirection.surfaces.terrain
   const terrain = useMemo(() => getCachedVisualGeometry(), [])
   const simple = renderMode === 'simple'
   const receivesShadows = (
@@ -15,7 +18,7 @@ function OutdoorGround({ biomeAreas, renderMode = 'full' }) {
   return (
     <group userData={{ debugCategory: 'terrain' }}>
       <mesh geometry={terrain.geometry} receiveShadow={receivesShadows}>
-        {simple && <meshBasicMaterial color="#6f9f42" toneMapped={false} />}
+        {simple && <meshBasicMaterial color={terrainSurface.color} toneMapped={false} />}
         {renderMode === 'texture' && (
           <Suspense fallback={<NaturalTerrainMaterial biomeAreas={biomeAreas} />}>
             <TerrainTextureDiagnosticMaterial />
@@ -23,10 +26,10 @@ function OutdoorGround({ biomeAreas, renderMode = 'full' }) {
         )}
         {renderMode === 'standard' && (
           <meshStandardMaterial
-            color="#6f9f42"
+            color={terrainSurface.color}
             emissive="#3c7010"
             emissiveIntensity={0.07}
-            roughness={0.88}
+            roughness={terrainSurface.roughness}
           />
         )}
         {renderMode === 'lambert' && (

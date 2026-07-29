@@ -286,13 +286,17 @@ function stylizeLeafColors(tree, config, animated = false) {
       '#include <common>',
       `#include <common>
       varying vec3 vOutdoorLeafLight;
+      varying float vOutdoorLeafHighlight;
       `,
     )
 
+    shader.uniforms.uArtLeafRoughness = { value: 0.72 }
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <common>',
       `#include <common>
+      uniform float uArtLeafRoughness;
       varying vec3 vOutdoorLeafLight;
+      varying float vOutdoorLeafHighlight;
       `,
     )
 
@@ -304,6 +308,11 @@ function stylizeLeafColors(tree, config, animated = false) {
         diffuseColor.a *= sampledDiffuseColor.a;
       #endif
       diffuseColor.rgb *= vOutdoorLeafLight;
+      float artLeafSheen = pow(
+        clamp(vOutdoorLeafHighlight, 0.0, 1.0),
+        mix(12.0, 2.0, uArtLeafRoughness)
+      ) * (1.0 - uArtLeafRoughness) * 0.28;
+      diffuseColor.rgb += vec3(artLeafSheen);
       `,
     )
 
@@ -320,6 +329,7 @@ function stylizeLeafColors(tree, config, animated = false) {
         normalize(vec3(${leafSunDirectionGlsl}))
       ), 0.0);
       float outdoorLeafSkyFacing = outdoorLeafNormal.y * 0.5 + 0.5;
+      vOutdoorLeafHighlight = outdoorLeafSunFacing;
       vec3 outdoorLeafAmbient = mix(
         vec3(${leafGroundColorGlsl}),
         vec3(${leafSkyColorGlsl}),
@@ -335,6 +345,8 @@ function stylizeLeafColors(tree, config, animated = false) {
       );
       `,
     )
+
+    stylizedMaterial.userData.shader = shader
 
     if (!animated) return
 
