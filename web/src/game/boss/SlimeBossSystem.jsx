@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { getTerrainHeight } from '../../world/terrain/terrainGeometry'
 import { getOutdoorWalkableHeight } from '../../world/mapObjectCollision'
 import { getOutdoorHouseRoofHeight } from '../../world/outdoorRoofCollision'
@@ -14,10 +15,13 @@ import { ATTACK_TYPE } from '../damageTypes'
 import { PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS } from '../constants'
 import ParticleEffect from '../../effects/ParticleEffect'
 import { useStoredParticlePreset } from '../../effects/storedParticlePresets'
+import { completeLoadTask, resetLoadTask } from '../../lib/loadTaskRegistry'
+
+export const SLIME_BOSS_PREPARE_TASK = 'slime-boss:prepare'
+resetLoadTask(SLIME_BOSS_PREPARE_TASK)
 
 const PREPARED_MINION_KINDS = ['green', 'blue', 'green', 'green', 'blue', 'green', 'blue', 'green']
 const PLAYER_CENTER_TO_FOOT = PLAYER_CAPSULE_HALF_HEIGHT + PLAYER_CAPSULE_RADIUS
-const SHOCKWAVE_SEGMENT_COUNT = 48
 const SURFACE_VISUAL_SEARCH_HEIGHT = 2.4
 const PROJECTILE_IMPACT_FLASH_MS = 520
 
@@ -34,7 +38,7 @@ function getBossGroundSurface(x, z, referenceFootY) {
 }
 
 function clonePreparedBossAsset(scene) {
-  const cloned = scene.clone(true)
+  const cloned = cloneSkeleton(scene)
   cloned.traverse((child) => {
     if (child.isMesh || child.isSkinnedMesh) child.frustumCulled = false
   })
@@ -42,24 +46,21 @@ function clonePreparedBossAsset(scene) {
 }
 
 function BossPhasePrewarm({
-  greenScene,
-  blueScene,
   shockwavePreset,
   fireballPreset,
   groundZonePreset,
 }) {
-  const warmupGreen = useMemo(() => clonePreparedBossAsset(greenScene), [greenScene])
-  const warmupBlue = useMemo(() => clonePreparedBossAsset(blueScene), [blueScene])
-
   return (
     <group
       visible={false}
       position={[0, -500, 0]}
       scale={0.001}
-      userData={{ shaderWarmupWhenHidden: true, debugCategory: 'warmup' }}
+      userData={{
+        shaderWarmupWhenHidden: true,
+        shaderWarmupScope: 'boot',
+        debugCategory: 'warmup',
+      }}
     >
-      <primitive object={warmupGreen} />
-      <primitive object={warmupBlue} position={[2, 0, 0]} />
       <mesh position={[4, 0, 0]} rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false}>
         <circleGeometry args={[SLIME_BOSS.projectile.poolRadius, 40]} />
         <meshBasicMaterial color="#ff372f" transparent opacity={0.28} depthWrite={false} />
@@ -109,16 +110,11 @@ function AltarProximity({ placements, playerPositionRef, enabled }) {
 }
 
 function GroundShockwave({ attack, origin, timeOffsetRef, preset }) {
-  const coreRef = useRef(null)
-  const glowRef = useRef(null)
   const impactRingRef = useRef(null)
   const impactFlashRef = useRef(null)
-  const dummy = useMemo(() => new THREE.Object3D(), [])
-  const lastRadiusRef = useRef(-1)
   const ring = preset.groundRings?.[0]
   const vfxPreset = useMemo(() => ({
     ...preset,
-    groundRings: [],
     groundZones: [],
     light: { ...preset.light, enabled: false },
   }), [preset])
@@ -132,41 +128,6 @@ function GroundShockwave({ attack, origin, timeOffsetRef, preset }) {
 
   useFrame(() => {
     const now = Date.now() + (timeOffsetRef?.current ?? 0)
-    const radius = getShockwaveRadius(attack, now)
-    const core = coreRef.current
-    const glow = glowRef.current
-    const visible = radius > 0
-
-    if (core) core.visible = visible
-    if (glow) glow.visible = visible
-    if (visible && Math.abs(radius - lastRadiusRef.current) > 0.12) {
-      const arcLength = Math.max(0.08, (Math.PI * 2 * radius) / SHOCKWAVE_SEGMENT_COUNT * 1.16)
-      for (let index = 0; index < SHOCKWAVE_SEGMENT_COUNT; index += 1) {
-        const angle = (index / SHOCKWAVE_SEGMENT_COUNT) * Math.PI * 2
-        const x = origin[0] + Math.cos(angle) * radius
-        const z = origin[2] + Math.sin(angle) * radius
-        const surfaceY = getBossGroundSurface(x, z)
-        dummy.position.set(x, surfaceY + 0.075, z)
-        dummy.rotation.set(-Math.PI / 2, 0, angle + Math.PI / 2)
-        const coreWidth = Math.max(0.08, (ring?.thickness ?? 0.42) * ringScale * 0.3)
-        const glowWidth = Math.max(0.2, (ring?.thickness ?? 0.42) * ringScale * 1.08)
-        dummy.scale.set(arcLength, coreWidth, 1)
-        dummy.updateMatrix()
-        core?.setMatrixAt(index, dummy.matrix)
-        dummy.scale.set(arcLength * 1.08, glowWidth, 1)
-        dummy.updateMatrix()
-        glow?.setMatrixAt(index, dummy.matrix)
-      }
-      if (core) core.instanceMatrix.needsUpdate = true
-      if (glow) glow.instanceMatrix.needsUpdate = true
-      lastRadiusRef.current = radius
-    }
-
-    const fade = visible ? 1 - radius / SLIME_BOSS.shockwave.maxRadius : 0
-    const presetOpacity = ring?.opacity ?? 0.9
-    const presetIntensity = Math.min(1.5, (ring?.intensity ?? 3) / 3)
-    if (core?.material) core.material.opacity = visible ? presetOpacity * presetIntensity * (0.72 + fade * 0.22) : 0
-    if (glow?.material) glow.material.opacity = visible ? presetOpacity * presetIntensity * (0.2 + fade * 0.28) : 0
 
     const impactAge = attack?.kind === 'shockwave' ? now - attack.jumpEndsAt : Infinity
     const impactVisible = impactAge >= 0 && impactAge < PROJECTILE_IMPACT_FLASH_MS
@@ -200,30 +161,6 @@ function GroundShockwave({ attack, origin, timeOffsetRef, preset }) {
           timeSource={vfxTimeSource}
         />
       </group>
-      <instancedMesh ref={glowRef} args={[null, null, SHOCKWAVE_SEGMENT_COUNT]} visible={false} frustumCulled={false}>
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial
-          color={ring?.colorMid ?? '#ff3a20'}
-          transparent
-          opacity={0}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          side={THREE.DoubleSide}
-          toneMapped={false}
-        />
-      </instancedMesh>
-      <instancedMesh ref={coreRef} args={[null, null, SHOCKWAVE_SEGMENT_COUNT]} visible={false} frustumCulled={false}>
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial
-          color={ring?.colorHot ?? '#ffd7a8'}
-          transparent
-          opacity={0}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          side={THREE.DoubleSide}
-          toneMapped={false}
-        />
-      </instancedMesh>
       <mesh ref={impactFlashRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[1, 48]} />
         <meshBasicMaterial
@@ -511,6 +448,8 @@ function BossHazards({
 
 const BossMinion = memo(function BossMinion({
   minion,
+  slotIndex,
+  slotKind,
   playerPositionRef,
   onDamagePlayer,
   onBossHit,
@@ -519,18 +458,19 @@ const BossMinion = memo(function BossMinion({
   timeOffsetRef,
   preparedScene = null,
 }) {
-  const url = minion.kind === 'blue' ? SLIME_BOSS.summons.blueModelUrl : SLIME_BOSS.summons.greenModelUrl
+  const url = slotKind === 'blue' ? SLIME_BOSS.summons.blueModelUrl : SLIME_BOSS.summons.greenModelUrl
   const { scene } = useGLTF(url)
-  const cloned = useMemo(() => preparedScene ?? scene.clone(true), [preparedScene, scene])
+  const cloned = useMemo(() => preparedScene ?? cloneSkeleton(scene), [preparedScene, scene])
   const groupRef = useRef(null)
   const summonRingRef = useRef(null)
   const summonGlowRef = useRef(null)
   const lastDamageAtRef = useRef(0)
   const hitRef = useRef(onBossHit)
   const swordRef = useRef(swordEquipped)
+  const minionIdRef = useRef(null)
   const targetRef = useRef({
-    id: minion.id,
-    position: { x: minion.position[0], y: minion.position[1], z: minion.position[2] },
+    id: `boss-minion-slot-${slotIndex}`,
+    position: { x: 0, y: -500, z: 0 },
     radius: SLIME_BOSS.summons.radius,
     height: 1.1,
     disabled: false,
@@ -543,7 +483,7 @@ const BossMinion = memo(function BossMinion({
       })
       hitRef.current?.({
         ...hit,
-        targetId: minion.id,
+        targetId: minionIdRef.current,
         damage,
         weaponId: swordRef.current ? 'cheat_sword' : null,
       })
@@ -557,16 +497,23 @@ const BossMinion = memo(function BossMinion({
   }, [onBossHit, swordEquipped])
 
   useEffect(() => {
-    if (!registerCombatTarget) return undefined
-    return registerCombatTarget(minion.id, targetRef.current)
-  }, [minion.id, registerCombatTarget])
+    const minionId = minion?.id ?? null
+    minionIdRef.current = minionId
+    if (!registerCombatTarget || !minionId) return undefined
+    return registerCombatTarget(minionId, targetRef.current)
+  }, [minion?.id, registerCombatTarget, slotIndex])
 
   useFrame(() => {
     const group = groupRef.current
-    const live = useBossStore.getState().minions.find((entry) => entry.id === minion.id)
-    if (!group || !live) return
+    if (!group) return
+    const currentId = minionIdRef.current
+    const live = currentId
+      ? useBossStore.getState().minions.find((entry) => entry.id === currentId)
+      : null
+    group.visible = Boolean(live)
+    if (!live) return
     group.position.x = THREE.MathUtils.damp(group.position.x, live.position[0], 9, 1 / 60)
-    group.position.y = live.position[1] + 0.45 + Math.sin(Date.now() / 180 + minion.spawnedPhase) * 0.08
+    group.position.y = live.position[1] + 0.45 + Math.sin(Date.now() / 180 + live.spawnedPhase) * 0.08
     group.position.z = THREE.MathUtils.damp(group.position.z, live.position[2], 9, 1 / 60)
     targetRef.current.position.x = live.position[0]
     targetRef.current.position.y = live.position[1]
@@ -594,19 +541,29 @@ const BossMinion = memo(function BossMinion({
       lastDamageAtRef.current = now
       onDamagePlayer?.({
         damage: SLIME_BOSS.summons.damage,
-        sourceId: minion.id,
+        sourceId: live.id,
         attackType: ATTACK_TYPE.DODGEABLE,
       })
     }
   })
 
   return (
-    <group ref={groupRef} position={minion.position} scale={0.55}>
+    <group
+      ref={groupRef}
+      position={minion?.position ?? [0, -500, 0]}
+      scale={0.55}
+      visible={Boolean(minion)}
+      userData={{
+        shaderWarmupWhenHidden: true,
+        shaderWarmupScope: 'boot',
+        debugCategory: 'warmup',
+      }}
+    >
       <primitive object={cloned} />
       <mesh ref={summonGlowRef} position={[0, -0.7, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
         <circleGeometry args={[1, 40]} />
         <meshBasicMaterial
-          color={minion.kind === 'blue' ? '#38b8ff' : '#6bff75'}
+          color={slotKind === 'blue' ? '#38b8ff' : '#6bff75'}
           transparent
           opacity={0}
           blending={THREE.AdditiveBlending}
@@ -642,14 +599,12 @@ function BossModel({
   swordEquipped,
   movementSpeedMultiplierRef,
   timeOffsetRef,
-  preparedMinionScenes,
 }) {
   const gltf = useGLTF(SLIME_BOSS.modelUrl)
   const groupRef = useRef(null)
   const deathTimeRef = useRef(0)
   const lastSimulationAtRef = useRef(0)
   const spawn = useBossStore((state) => state.spawn)
-  const minions = useBossStore((state) => state.minions)
   const phase = useBossStore((state) => state.phase)
 
   const swordRef = useRef(swordEquipped)
@@ -673,7 +628,7 @@ function BossModel({
   })
 
   const { scene, baseScale, footOffset, visualRadius } = useMemo(() => {
-    const cloned = gltf.scene.clone(true)
+    const cloned = cloneSkeleton(gltf.scene)
     cloned.traverse((child) => {
       if (child.isMesh) {
         child.castShadow = true
@@ -785,19 +740,6 @@ function BossModel({
         movementSpeedMultiplierRef={movementSpeedMultiplierRef}
         timeOffsetRef={timeOffsetRef}
       />
-      {minions.map((minion, index) => (
-        <BossMinion
-          key={minion.id}
-          minion={minion}
-          playerPositionRef={playerPositionRef}
-          onDamagePlayer={onDamagePlayer}
-          onBossHit={onBossHit}
-          registerCombatTarget={registerCombatTarget}
-          swordEquipped={swordEquipped}
-          timeOffsetRef={timeOffsetRef}
-          preparedScene={preparedMinionScenes[index] ?? null}
-        />
-      ))}
     </>
   )
 }
@@ -818,6 +760,7 @@ export default function SlimeBossSystem({
   enabled = true,
 }) {
   const active = useBossStore((state) => state.active)
+  const minions = useBossStore((state) => state.minions)
   const shockwavePreset = useStoredParticlePreset('slime_shockwave_fire')
   const fireballPreset = useStoredParticlePreset('fireball_projectile')
   const groundZonePreset = useStoredParticlePreset('slime_projectile_zone')
@@ -826,6 +769,9 @@ export default function SlimeBossSystem({
   const preparedMinionScenes = useMemo(() => PREPARED_MINION_KINDS.map((kind) => (
     clonePreparedBossAsset(kind === 'blue' ? blueGltf.scene : greenGltf.scene)
   )), [blueGltf.scene, greenGltf.scene])
+  useLayoutEffect(() => {
+    completeLoadTask(SLIME_BOSS_PREPARE_TASK)
+  }, [preparedMinionScenes])
   useEffect(() => () => {
     if (movementSpeedMultiplierRef) movementSpeedMultiplierRef.current = 1
   }, [movementSpeedMultiplierRef])
@@ -833,12 +779,28 @@ export default function SlimeBossSystem({
   return (
     <>
       <BossPhasePrewarm
-        greenScene={greenGltf.scene}
-        blueScene={blueGltf.scene}
         shockwavePreset={shockwavePreset}
         fireballPreset={fireballPreset}
         groundZonePreset={groundZonePreset}
       />
+      {preparedMinionScenes.map((preparedScene, index) => {
+        const minion = minions.find((entry) => entry.slot === index) ?? null
+        return (
+          <BossMinion
+            key={`boss-minion-slot-${index}`}
+            minion={minion}
+            slotIndex={index}
+            slotKind={PREPARED_MINION_KINDS[index]}
+            playerPositionRef={playerPositionRef}
+            onDamagePlayer={onDamagePlayer}
+            onBossHit={onBossHit}
+            registerCombatTarget={registerCombatTarget}
+            swordEquipped={swordEquipped}
+            timeOffsetRef={timeOffsetRef}
+            preparedScene={preparedScene}
+          />
+        )
+      })}
       <AltarProximity placements={placements} playerPositionRef={playerPositionRef} enabled={enabled} />
       {active && (
         <BossModel
@@ -853,7 +815,6 @@ export default function SlimeBossSystem({
           swordEquipped={swordEquipped}
           movementSpeedMultiplierRef={movementSpeedMultiplierRef}
           timeOffsetRef={timeOffsetRef}
-          preparedMinionScenes={preparedMinionScenes}
         />
       )}
     </>

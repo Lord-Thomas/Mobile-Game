@@ -37,6 +37,15 @@ describe('bossSimulation', () => {
     state = stepBoss(state, { now: 2000, dt: 0.1, players: [player] })
     expect(state.minions.length).toBeGreaterThan(phase2Count)
     expect(state.summonedPhases).toEqual([2, 3])
+    expect(state.minions.map((minion) => minion.slot)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+
+    for (let index = 0; index < 80; index += 1) {
+      state = stepBoss(state, { now: 2100 + index * 100, dt: 0.1, players: [player] })
+    }
+    const occupied = new Set(state.minions.map((minion) => (
+      `${minion.position[0].toFixed(2)}:${minion.position[2].toFixed(2)}`
+    )))
+    expect(occupied.size).toBe(state.minions.length)
   })
 
   it('permet de blesser puis éliminer un slime invoqué', () => {

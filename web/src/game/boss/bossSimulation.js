@@ -145,10 +145,16 @@ function spawnPhaseMinions(state, phase, now) {
   const count = SLIME_BOSS.summons.countByPhase[phase - 1] ?? 0
   if (!count || state.summonedPhases.includes(phase)) return state
   const minions = [...state.minions]
+  const slotStart = SLIME_BOSS.summons.phases
+    .filter((candidate) => candidate < phase)
+    .reduce((total, candidate) => (
+      total + (SLIME_BOSS.summons.countByPhase[candidate - 1] ?? 0)
+    ), 0)
   for (let index = 0; index < count; index += 1) {
     const [ox, oz] = deterministicOffset(state.attackSequence + phase * 11, index, 4.5)
     minions.push({
       id: `boss-minion-${phase}-${index}`,
+      slot: slotStart + index,
       kind: index % 2 === 0 ? 'green' : 'blue',
       position: [state.position[0] + ox, state.position[1], state.position[2] + oz],
       spawnedPhase: phase,
@@ -238,6 +244,17 @@ function moveToward(position, target, speed, dt) {
   return [position[0] + (dx / length) * step, position[1], position[2] + (dz / length) * step]
 }
 
+function getMinionEngagementPosition(minion, targetPosition) {
+  const slot = Math.max(0, Math.floor(finite(minion?.slot, 0)))
+  const angle = slot * 2.399963
+  const radius = 0.92 + (slot % 2) * 0.26
+  return [
+    targetPosition[0] + Math.sin(angle) * radius,
+    targetPosition[1],
+    targetPosition[2] + Math.cos(angle) * radius,
+  ]
+}
+
 export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {}) {
   if (!state?.active) return state ?? createInactiveBossState()
   if (state.state === 'dying') {
@@ -283,11 +300,12 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
     const minions = next.minions.map((minion) => {
       const target = closestPlayer(minion.position, availablePlayers)
       if (!target) return minion
+      const engagementPosition = getMinionEngagementPosition(minion, target.position)
       return {
         ...minion,
         position: moveToward(
           minion.position,
-          target.position,
+          engagementPosition,
           SLIME_BOSS.summons.speed,
           Math.min(Math.max(dt, 0), 0.25),
         ),
@@ -345,11 +363,12 @@ export function sanitizeBossSnapshot(value) {
     position: safePosition(value.position, value.spawn),
     hazards: Array.isArray(value.hazards) ? value.hazards.slice(0, 12) : [],
     minions: Array.isArray(value.minions)
-      ? value.minions.slice(0, 12).map((minion) => {
+      ? value.minions.slice(0, 12).map((minion, index) => {
         const kind = minion?.kind === 'blue' ? 'blue' : 'green'
         const maxHp = SLIME_BOSS.summons.maxHpByKind[kind]
         return {
           id: typeof minion?.id === 'string' ? minion.id.slice(0, 100) : `boss-minion-${kind}`,
+          slot: Math.max(0, Math.min(11, Math.floor(finite(minion?.slot, index)))),
           kind,
           position: safePosition(minion?.position, value.spawn),
           spawnedPhase: minion?.spawnedPhase === 3 ? 3 : 2,

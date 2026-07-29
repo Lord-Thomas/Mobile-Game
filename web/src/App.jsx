@@ -66,7 +66,7 @@ import { collidesWithOutdoorHouseRoof, getOutdoorHouseRoofHeight, syncPlayerHous
 import { collisionReady } from './world/mapObjectCollisionData'
 import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_MONSTER_SPAWNERS, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, SUMMONING_ALTAR_OBJECT_ID } from './world/mapObjects'
 import QuestNpcInteraction from './world/npc/QuestNpcInteraction'
-import SlimeBossSystem from './game/boss/SlimeBossSystem'
+import SlimeBossSystem, { SLIME_BOSS_PREPARE_TASK } from './game/boss/SlimeBossSystem'
 import BossHud from './game/boss/BossHud'
 import BossRewardWatcher from './game/boss/BossRewardWatcher'
 import { createBossNetworkSnapshot, useBossStore } from './game/boss/bossStore'
@@ -5646,10 +5646,16 @@ function WingsSpeedTrail({ wingsSpellRef }) {
 const ANGEL_WINGS_MODEL_URL = '/models/props/angel-wings.glb'
 const ANGEL_WINGS_SPAN = 1.9 // envergure cible (unités monde)
 
-function revealHiddenShaderWarmupObjects(root) {
+function revealHiddenShaderWarmupObjects(root, { excludeScopes = [] } = {}) {
   const hiddenObjects = []
+  const excluded = new Set(excludeScopes)
   root.traverse((object) => {
     if (!object.userData?.shaderWarmupWhenHidden || object.visible) return
+    let current = object
+    while (current) {
+      if (excluded.has(current.userData?.shaderWarmupScope)) return
+      current = current.parent
+    }
     hiddenObjects.push(object)
     object.visible = true
   })
@@ -7428,7 +7434,9 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
       programs: gl.info?.programs?.length ?? null,
     })
     const originalMask = cam.layers.mask
-    const restoreHiddenWarmupObjects = revealHiddenShaderWarmupObjects(scene)
+    const restoreHiddenWarmupObjects = revealHiddenShaderWarmupObjects(scene, {
+      excludeScopes: ['boot'],
+    })
     let failed = false
     try {
       // Deux couches (extérieure + défaut), comme compileAndRender du gate : on
@@ -17650,6 +17658,9 @@ const STABLE_INITIAL_ASSET_PRELOADS = [
     .map((mount) => () => useGLTF.preload(mount.modelUrl)),
   () => useGLTF.preload(MAGIC_BOOK_MODEL_URL),
   () => useGLTF.preload(MAGIC_SKULL_MODEL_URL),
+  () => useGLTF.preload(SLIME_BOSS.modelUrl),
+  () => useGLTF.preload(SLIME_BOSS.summons.greenModelUrl),
+  () => useGLTF.preload(SLIME_BOSS.summons.blueModelUrl),
 ]
 
 let stableInitialAssetPreloadPromise = null
@@ -17913,7 +17924,7 @@ function ShaderWarmupGate({
         phase: 'Préparation des joueurs et des ennemis...',
       })
       const scenePreparation = await waitForLoadTasks(
-        [INITIAL_PLACEABLES_LOAD_TASK],
+        [INITIAL_PLACEABLES_LOAD_TASK, SLIME_BOSS_PREPARE_TASK],
         INITIAL_SCENE_PREPARATION_MAX_WAIT_MS,
       )
       if (!scenePreparation.ready) {
