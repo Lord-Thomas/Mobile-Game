@@ -1,4 +1,7 @@
 import { useGameStore } from '../stores/useGameStore'
+import { getTerrainHeight } from '../world/terrain/terrainGeometry'
+import { useBossStore } from '../game/boss/bossStore'
+import { getBossSpawnForAltar } from '../game/boss/bossSimulation'
 
 // Invites d'interaction du bas d'écran (porte, apprentissage du crâne, stations
 // ballon/déco/perso, TV, s'asseoir/se relever).
@@ -34,6 +37,9 @@ export default function InteractionPrompts({
   onRequestSit,
   onRequestStandUp,
   onTalk,
+  bossPlacements = [],
+  bossAuthority = true,
+  onRequestBossSummon,
   contextWindowOpen = false,
 }) {
   const nearOutdoorDoor = useGameStore((s) => s.near.outdoorDoor ?? false)
@@ -45,6 +51,8 @@ export default function InteractionPrompts({
   const nearYouTubeFrame = useGameStore((s) => s.near.youtubeFrame ?? null)
   const nearSeat = useGameStore((s) => s.near.seat ?? null)
   const nearbyQuestNpcId = useGameStore((s) => s.near.questNpcId ?? null)
+  const bossActive = useBossStore((s) => s.active)
+  const nearAltarId = useBossStore((s) => s.nearAltarId)
 
   const menuSkin = useGameStore((s) => s.menus.skin ?? false)
   const menuEnvironment = useGameStore((s) => s.menus.environment ?? false)
@@ -54,6 +62,19 @@ export default function InteractionPrompts({
   const noChoiceMenu = !menuSkin && !menuEnvironment && !menuCustomizationChoice && !menuCharacter && !contextWindowOpen
 
   if (!showCaptureUi || !modePlay || !noChoiceMenu) return null
+
+  const summonBoss = () => {
+    const altar = bossPlacements.find((placement) => placement.id === nearAltarId)
+    if (!altar) return
+    if (!bossAuthority) {
+      onRequestBossSummon?.({ type: 'summon', altarId: altar.id })
+      return
+    }
+    useBossStore.getState().summon({
+      altarId: altar.id,
+      spawn: getBossSpawnForAltar(altar, getTerrainHeight),
+    })
+  }
 
   // Une seule action contextuelle peut occuper ce slot. L'ordre encode la
   // priorité lorsque plusieurs volumes de proximité se chevauchent.
@@ -70,6 +91,8 @@ export default function InteractionPrompts({
               onClick: onLearnSkull,
               disabled: isLearningMagicSkull,
             }
+        : isOutsideZone && nearAltarId && !bossActive
+            ? { key: 'summon-boss', label: 'Invoquer le Boss', className: 'custom-open-btn', onClick: summonBoss }
           : nearOutdoorDoor
             ? { key: 'door', label: isOutsideZone ? 'Entrer' : 'Sortir', className: 'outdoor-open-btn', onClick: onOutdoorToggle }
             : nearSeat && !seatedPhase

@@ -1,12 +1,9 @@
-import { useGameStore } from '../../stores/useGameStore'
-import { getTerrainHeight } from '../../world/terrain/terrainGeometry'
 import { useBossStore } from './bossStore'
 import { SLIME_BOSS } from './bossConfig'
-import { getBossSpawnForAltar } from './bossSimulation'
 
-// HUD du boss (hors Canvas) : grande barre de vie en haut quand le boss est actif,
-// et bouton "Invoquer" en bas quand le joueur est à portée d'un autel libre.
-// S'abonne directement aux stores (aucun re-render d'App).
+// HUD du boss (hors Canvas) : grande barre de vie en haut quand le boss est actif.
+// L'invocation passe par InteractionPrompts afin qu'une seule action contextuelle
+// puisse occuper le bas de l'écran et que les sorts ne la recouvrent jamais.
 
 const barShellStyle = {
   position: 'absolute',
@@ -33,30 +30,14 @@ const barTrackStyle = {
   overflow: 'hidden',
 }
 
-export default function BossHud({ placements = [], authority = true, onRequestSummon }) {
-  const mode = useGameStore((s) => s.view.mode)
+export default function BossHud() {
   const active = useBossStore((s) => s.active)
   const state = useBossStore((s) => s.state)
   const hp = useBossStore((s) => s.hp)
   const maxHp = useBossStore((s) => s.maxHp)
   const phase = useBossStore((s) => s.phase)
-  const nearAltarId = useBossStore((s) => s.nearAltarId)
 
   const fillPct = maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0
-  const showSummon = mode === 'play' && !active && nearAltarId
-
-  const onSummon = () => {
-    const altar = placements.find((placement) => placement.id === nearAltarId)
-    if (!altar) return
-    if (!authority) {
-      onRequestSummon?.({ type: 'summon', altarId: altar.id })
-      return
-    }
-    useBossStore.getState().summon({
-      altarId: altar.id,
-      spawn: getBossSpawnForAltar(altar, getTerrainHeight),
-    })
-  }
 
   return (
     <>
@@ -81,13 +62,6 @@ export default function BossHud({ placements = [], authority = true, onRequestSu
           </div>
         </div>
       )}
-
-      {showSummon && (
-        <button className="skin-open-btn custom-open-btn" type="button" onClick={onSummon}>
-          Invoquer le Boss
-        </button>
-      )}
-
     </>
   )
 }

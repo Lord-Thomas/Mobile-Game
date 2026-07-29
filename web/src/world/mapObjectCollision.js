@@ -18,9 +18,16 @@ const WALKABLE_TRIANGLE_TOLERANCE = 0.045
 const WALKABLE_SOLID_CLEARANCE = 0.2
 const LOW_SOLID_STEP_CLEARANCE_BY_OBJECT_ID = {
   skeleton_tower: 0.42,
+  // Les contremarches très détaillées de l'autel ne doivent pas accrocher la
+  // capsule lorsque la surface de la marche est atteignable.
+  summoning_altar: 0.38,
 }
 const WALKABLE_SOLID_IGNORE_LOCAL_RADIUS_BY_OBJECT_ID = {
   skeleton_tower: 2.18,
+  // L'autel normalisé mesure environ 4,84 unités de large. Dans cette emprise,
+  // une paroi est ignorée uniquement si une surface marchable est au niveau des
+  // pieds ; ses côtés hauts restent donc solides.
+  summoning_altar: 2.5,
 }
 const PLAYER_STANDING_HEIGHT = 1.72
 const PLAYER_KNEE_HEIGHT = 0.18

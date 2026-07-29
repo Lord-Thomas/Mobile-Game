@@ -73,9 +73,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "forest_edge_ash_01",
     "objectId": "tree_ashMedium",
     "position": [
-      -36,
-      1.125540785078742,
-      -18.5
+      -36.25,
+      0.8861403659891421,
+      -16.75
     ],
     "rotationY": 3.2,
     "scale": 2.25
@@ -733,9 +733,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "village_quest_npc_mqwh9fmj",
     "objectId": "village_quest_npc",
     "position": [
-      -10.25,
+      -10.75,
       0.018000000000000002,
-      -0.5
+      -0.25
     ],
     "rotationY": 1.5707963267948966,
     "scale": 1
@@ -986,11 +986,11 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "summoning_altar_mrw3cz84",
     "objectId": "summoning_altar",
     "position": [
-      28.5,
-      0.14695032563494964,
-      11.5
+      -118,
+      -0.30361411224566937,
+      92
     ],
-    "rotationY": 0,
+    "rotationY": 2.48840734641021,
     "scale": 1
   }
 ]
@@ -1145,9 +1145,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "mushroom",
     "heightOffset": 0,
     "position": [
-      -25.5,
-      2.3949350779971113,
-      -45.5
+      -21.75,
+      2.672918781267304,
+      -46
     ],
     "radius": 31,
     "populationMax": 10,
@@ -1253,9 +1253,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "cute_slime",
     "heightOffset": 0,
     "position": [
-      -105.5,
-      -0.3318291986628279,
-      80.75
+      -120,
+      -0.185632327306467,
+      28
     ],
     "radius": 76,
     "populationMax": 14,
@@ -1301,9 +1301,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "blue_slime",
     "heightOffset": 0,
     "position": [
-      -119,
-      -0.1855790278352481,
-      28.25
+      -120.75,
+      -0.19087786251952998,
+      28.5
     ],
     "radius": 59,
     "populationMax": 5,

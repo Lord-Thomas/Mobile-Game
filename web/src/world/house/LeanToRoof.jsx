@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, RepeatWrapping, SRGBColorSpace } from 'three'
 
-const PIGNON_UV_REPEAT = 0.18  // same scale as exterior wall tiling
+const PIGNON_UV_REPEAT_X = 3.4 / 12
+const PIGNON_UV_REPEAT_Y = 1.9 / 5
 
 function createGeometry(positions, uvs, indices) {
   const geometry = new BufferGeometry()
@@ -29,8 +30,6 @@ function LeanToRoof({
   // ─── Pignon (gable end) geometry ──────────────────────────────────────────
   // Two trapezoidal prisms, one at each gable end, with UV coords for texturing.
   const gableGeometry = useMemo(() => {
-    const R = PIGNON_UV_REPEAT
-
     const x0 = -width * 0.5 - wallThickness * 0.5
     const x1 =  width * 0.5 + wallThickness * 0.5
     const z0 = -depth * 0.5 - wallThickness * 0.5
@@ -51,11 +50,11 @@ function LeanToRoof({
     }
 
     // UV projection: use the axis that runs along the pignon face width
-    // south/north attachment → pignons face ±X → width runs along Z → u = z*R
-    // west/east  attachment → pignons face ±Z → width runs along X → u = x*R
+    // south/north attachment → pignons face ±X → width runs along Z
+    // west/east  attachment → pignons face ±Z → width runs along X
     const uvFn = (attachSide === 'south' || attachSide === 'north')
-      ? ([x, y, z]) => [z * R, y * R]
-      : ([x, y, z]) => [x * R, y * R]
+      ? (point) => [point[2] * PIGNON_UV_REPEAT_X, point[1] * PIGNON_UV_REPEAT_Y]
+      : (point) => [point[0] * PIGNON_UV_REPEAT_X, point[1] * PIGNON_UV_REPEAT_Y]
 
     const positions = []
     const uvs = []

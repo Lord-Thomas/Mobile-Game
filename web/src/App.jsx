@@ -84,7 +84,7 @@ import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biome
 import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
 import { buildInteriorWallColliderBoxes, resolveInteriorWallCollision, syncInteriorWallColliders } from './game/interiorCollision'
 import { getRoomBounds, houseLayout, mainRoom, outsideDoorOpening, secondRoom } from './world/house/houseLayout'
-import { HOUSE_STRUCTURE_GRID_SIZE, HOUSE_DOOR_COST, HOUSE_FLOOR_COST_PER_CELL, HOUSE_WALL_COST_PER_UNIT, HOUSE_WINDOW_COST, snapHouseCoordinate, getHousePlanValue, removeHouseSpace, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
+import { DEFAULT_HOUSE_EXTERIOR_COLOR, HOUSE_STRUCTURE_GRID_SIZE, HOUSE_DOOR_COST, HOUSE_FLOOR_COST_PER_CELL, HOUSE_WALL_COST_PER_UNIT, HOUSE_WINDOW_COST, snapHouseCoordinate, getHousePlanValue, removeHouseSpace, addHouseOpeningToWall, addInteriorWallToHousePlan, addRoomToHousePlan, createDefaultHousePlan, moveHouseInteriorWall, moveHouseOpening, moveHouseWallJoint, normalizeHousePlan, removeHouseOpening, removeHouseWall, resizeHouseExteriorWall, resizeHouseWallEnd, setHouseEntranceDoor, setHouseFloorStyleForCells, setHouseOpeningSpan, setHouseOpeningVertical, setHouseWallSideStyle, splitHouseWallSegment, addHouseRoomRect } from './world/house/housePlan'
 import { deriveHouseLayout, getHouseEntranceTransform } from './world/house/deriveHouseLayout'
 import { createFloorRectsGeometryData, decomposeCellsIntoRects } from './world/house/floorGeometry'
 import {
@@ -720,7 +720,7 @@ const WALL_REPEAT_X_PER_UNIT = 3.4 / 12
 const WALL_REPEAT_Y_PER_UNIT = 1.9 / 5
 const DEFAULT_CEILING_TEXTURE = '/textures/environment/walls/mur-paint.png'
 const EXTERIOR_WALL_TEXTURE = '/textures/environment/walls/mur-paint.png'
-const EXTERIOR_WALL_COLOR = '#f3ead6'
+const EXTERIOR_WALL_COLOR = DEFAULT_HOUSE_EXTERIOR_COLOR
 
 const ballSkins = [
   { id: 'classic', name: 'Classique', price: 0, texture: '/models/ball/textures/ballon-classique.png', defaultUnlocked: true },
@@ -1941,7 +1941,7 @@ function HouseInterior({ floorTexturePath, wallTexturePath, ceilingTexturePath, 
               wallThickness={layout.wallThickness ?? houseLayout.wallThickness}
               color="#8b4c3f"
               gableColor={EXTERIOR_WALL_COLOR}
-              gableTexture={exteriorWallTexture}
+              gableTexture={exteriorOnly ? null : exteriorWallTexture}
             />
           </group>
         ))}
@@ -6533,6 +6533,7 @@ function PlayerAvatar({
 
 function MagicBookMesh() {
   const { scene } = useGLTF(MAGIC_BOOK_MODEL_URL)
+  const { gl } = useThree()
   const bookScene = useMemo(() => {
     const next = scene.clone(true)
     next.traverse((child) => {
@@ -6543,6 +6544,22 @@ function MagicBookMesh() {
     })
     return next
   }, [scene])
+  useEffect(() => {
+    // Le préchargement GLTF ne transfère pas encore les textures au GPU.
+    // On paie ce coût sous l'écran de chargement, pas au premier équipement.
+    const textures = new Set()
+    bookScene.traverse((child) => {
+      if (!child.isMesh) return
+      const materials = Array.isArray(child.material) ? child.material : [child.material]
+      materials.forEach((material) => {
+        if (!material) return
+        Object.values(material).forEach((value) => {
+          if (value?.isTexture) textures.add(value)
+        })
+      })
+    })
+    textures.forEach((texture) => gl.initTexture(texture))
+  }, [bookScene, gl])
   return <primitive object={bookScene} scale={0.35} />
 }
 
@@ -7152,7 +7169,7 @@ function FireballProjectileSlot({ projectile }) {
   )
 }
 
-function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, chargeAimYawRef, chargeProgressRef, chargeStartTimeRef, chargePosRef, setChargeProgress, onCancel, onLaunch }) {
+function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, chargeAimYawRef, chargeProgressRef, chargeStartTimeRef, chargePosRef, onCancel, onLaunch }) {
   const groupRef = useRef(null)
   const launchedRef = useRef(false)
   const phase = useMemo(() => Math.random() * Math.PI * 2, [])
@@ -7198,9 +7215,6 @@ function ChargingFireball({ active, playerPositionRef, touchRef, chargeYawRef, c
     diff = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, diff)) // ±45°
     const yaw = center + diff
     chargeAimYawRef.current = yaw
-
-    // Mettre à jour la barre à chaque frame avec l'horloge du renderer.
-    setChargeProgress(progress)
 
     // Positionner la boule dans le cône devant le joueur, plus basse
     g.position.set(pos.x - Math.sin(yaw) * 0.85, pos.y + 0.3, pos.z - Math.cos(yaw) * 0.85)
@@ -8411,17 +8425,41 @@ function ControlsOverlay({
         </div>
       )}
 
-      {!uiHidden && showJumpAction && (
+      {!uiHidden && showJumpAction && !mountFlying && (
         <button
-          className={`action-btn${mountFlying ? ' action-btn-ascend' : ''}`}
+          className="action-btn"
           type="button"
           onPointerDown={onJumpDown}
           onPointerUp={onJumpUp}
           onPointerCancel={onJumpUp}
-          aria-label={mountFlying ? 'Monter' : 'Sauter'}
+          aria-label="Sauter"
         >
-          <span className="action-symbol">{mountFlying ? '\u25b2' : '\u2191'}</span>
+          <span className="action-symbol">{'\u2191'}</span>
         </button>
+      )}
+      {!uiHidden && mountFlying && (
+        <div className="mount-flight-controls" role="group" aria-label="Altitude de la monture">
+          <button
+            className="action-btn action-btn-ascend"
+            type="button"
+            onPointerDown={onJumpDown}
+            onPointerUp={onJumpUp}
+            onPointerCancel={onJumpUp}
+            aria-label="Monter"
+          >
+            <span className="action-symbol">{'\u25b2'}</span>
+          </button>
+          <button
+            className="action-btn action-btn-descend"
+            type="button"
+            onPointerDown={onDescendDown}
+            onPointerUp={onDescendUp}
+            onPointerCancel={onDescendUp}
+            aria-label="Descendre"
+          >
+            <span className="action-symbol">{'\u25bc'}</span>
+          </button>
+        </div>
       )}
       {!uiHidden && showDodgeAction && (
         <button
@@ -8452,18 +8490,6 @@ function ControlsOverlay({
           }}
         >
           <span aria-hidden="true">{selectedMount.icon}</span>
-        </button>
-      )}
-      {!uiHidden && mountFlying && (
-        <button
-          className="action-btn action-btn-descend"
-          type="button"
-          onPointerDown={onDescendDown}
-          onPointerUp={onDescendUp}
-          onPointerCancel={onDescendUp}
-          aria-label="Descendre"
-        >
-          <span className="action-symbol">{'\u25bc'}</span>
         </button>
       )}
     </div>
@@ -8570,6 +8596,30 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose, material
           })}
         </div>
       </div>
+    </div>
+  )
+}
+
+function FireballChargeBar({ progressRef }) {
+  const fillRef = useRef(null)
+  const labelRef = useRef(null)
+
+  useEffect(() => {
+    let frameId = 0
+    const update = () => {
+      const progress = MathUtils.clamp(progressRef.current ?? 0, 0, 1)
+      if (fillRef.current) fillRef.current.style.transform = `scaleX(${progress})`
+      if (labelRef.current) labelRef.current.textContent = progress >= 1 ? '✨ Prêt !' : '✨ Charge...'
+      frameId = window.requestAnimationFrame(update)
+    }
+    update()
+    return () => window.cancelAnimationFrame(frameId)
+  }, [progressRef])
+
+  return (
+    <div className="charge-bar-wrap">
+      <div ref={fillRef} className="charge-bar-fill" />
+      <span ref={labelRef} className="charge-bar-label">✨ Charge...</span>
     </div>
   )
 }
@@ -9085,6 +9135,15 @@ function GameMenuPanel({
       )}
       {open && (
         <div className="account-sync-panel">
+          <button
+            className="account-sync-close"
+            type="button"
+            onClick={onToggle}
+            aria-label="Fermer le menu"
+            title="Fermer"
+          >
+            ×
+          </button>
           <div className="main-menu-tabs">
             {SOCIAL_MENU_TABS.map((tab) => (
               <button
@@ -19287,7 +19346,6 @@ function App() {
   const [isCharging, setIsCharging] = useState(false)
   const magicSkullLearnTimerRef = useRef(null)
   const chargeProgressRef = useRef(0)
-  const [chargeProgress, setChargeProgress] = useState(0)
   const chargeStartTimeRef = useRef(0)
   const chargePosRef = useRef({ x: 0, z: 0 })
   const chargeYawRef = useRef(0)    // centre du cône = direction du corps joueur
@@ -22082,7 +22140,6 @@ function App() {
     setIsCharging(true)
     chargeStartTimeRef.current = 0
     chargeProgressRef.current = 0
-    setChargeProgress(0)
     const pos = playerPositionRef.current
     chargePosRef.current = { x: pos.x, z: pos.z }
     chargeYawRef.current = playerBodyYawRef.current + Math.PI // +π car conventions opposées entre body yaw et direction fireball
@@ -22092,7 +22149,6 @@ function App() {
     isChargingRef.current = false
     setIsCharging(false)
     chargeProgressRef.current = 0
-    setChargeProgress(0)
     if (projectilesRef.current.length >= MAX_ACTIVE_FIREBALLS) return
     const now = Date.now()
     fireballCooldownRef.current = now
@@ -22133,7 +22189,6 @@ function App() {
     isChargingRef.current = false
     setIsCharging(false)
     chargeProgressRef.current = 0
-    setChargeProgress(0)
   }, [])
 
   // Route l'action de sort selon l'arme équipée : charge de boule de feu
@@ -23078,7 +23133,7 @@ function App() {
     const ratio = visibleOutdoorEnemyCount / outdoorEnemyEntryTargetCount
     updateLoadingExperience({
       percent: Math.round(78 + ratio * 16),
-      phase: `PrÃ©paration des crÃ©atures (${visibleOutdoorEnemyCount}/${outdoorEnemyEntryTargetCount})...`,
+      phase: `Préparation des créatures (${visibleOutdoorEnemyCount}/${outdoorEnemyEntryTargetCount})...`,
     })
   }, [
     monsterSpawnSlots.length,
@@ -23586,7 +23641,6 @@ function App() {
             chargeProgressRef={chargeProgressRef}
             chargeStartTimeRef={chargeStartTimeRef}
             chargePosRef={chargePosRef}
-            setChargeProgress={setChargeProgress}
             onCancel={cancelCharge}
             onLaunch={launchFromCharge}
           />
@@ -23830,10 +23884,7 @@ function App() {
         />
       )}
       {showGameplayUi && isCharging && (
-        <div className="charge-bar-wrap">
-          <div className="charge-bar-fill" style={{ width: `${chargeProgress * 100}%` }} />
-          <span className="charge-bar-label">✨ {chargeProgress >= 1 ? 'Prêt !' : 'Charge...'}</span>
-        </div>
+        <FireballChargeBar progressRef={chargeProgressRef} />
       )}
       {showGameplayUi && isLearningMagicSkull && (
         <div className="charge-bar-wrap">
@@ -24009,13 +24060,12 @@ function App() {
         onRequestSit={requestSit}
         onRequestStandUp={requestStandUp}
         onTalk={() => setQuest('dialogOpen',true)}
+        bossPlacements={SUMMONING_ALTAR_PLACEMENTS}
+        bossAuthority={!isGuestVisit}
+        onRequestBossSummon={({ altarId }) => sendBossSummonRequest(multiplayerChannelRef.current, altarId)}
         contextWindowOpen={questDialogOpen || questJournalOpen || vendorOpen || companionMenuOpen}
       />
-      <BossHud
-        placements={SUMMONING_ALTAR_PLACEMENTS}
-        authority={!isGuestVisit}
-        onRequestSummon={({ altarId }) => sendBossSummonRequest(multiplayerChannelRef.current, altarId)}
-      />
+      <BossHud />
       <BossRewardWatcher
         onDefeated={() => setEquipment('ownedCheatSword', true)}
         alreadyOwned={ownedCheatSword}

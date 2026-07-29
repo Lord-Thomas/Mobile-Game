@@ -1,4 +1,3 @@
-import { useTexture } from '@react-three/drei'
 import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Matrix4 } from 'three'
 import { useEffect, useMemo } from 'react'
 import { getWallColliderTransform, getWallPointAt, splitWallIntoSolidRects } from './house/wallUtils'
@@ -6,8 +5,6 @@ import GableRoof from './house/GableRoof'
 import LeanToRoof from './house/LeanToRoof'
 import { createNeighborFloorplan } from './house/neighborFloorplan'
 import { getTerrainHeight } from './terrain/terrainGeometry'
-
-const EXTERIOR_WALL_TEXTURE = '/textures/environment/walls/mur-paint.png'
 
 function getDoorData(walls) {
   const wall = walls.find((nextWall) => nextWall.openings.length)
@@ -265,7 +262,6 @@ function MergedHouseShell({ floorplan, trim, primaryGroup }) {
 }
 
 function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, doorWall, floorplan: providedFloorplan = null }) {
-  const exteriorTexture = useTexture(EXTERIOR_WALL_TEXTURE)
   const terrainY = getTerrainHeight(position[0], position[2])
   const floorplan = useMemo(
     () => providedFloorplan ?? createNeighborFloorplan({ parts, size, doorWall, color, trim }),
@@ -297,7 +293,6 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
                 wallThickness={floorplan.wallThickness}
                 color={trim}
                 gableColor={color}
-                gableTexture={exteriorTexture}
               />
             ) : (
               <GableRoof
@@ -311,7 +306,6 @@ function NeighborHouse({ position, color, trim, rotationY = 0, parts, size, door
                 wallThickness={floorplan.wallThickness}
                 color={trim}
                 gableColor={color}
-                gableTexture={exteriorTexture}
               />
             )}
           </group>

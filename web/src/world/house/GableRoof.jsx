@@ -1,8 +1,10 @@
 import { useEffect, useMemo } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, RepeatWrapping, SRGBColorSpace } from 'three'
 
-// Texture repeat scale — matches exterior wall repeat so gable tiles identically
-const GABLE_UV_REPEAT = 0.18
+// Même densité UV que WallBlockMaterial dans App : le pignon prolonge le mur
+// sans changement visible de taille de texture sous la toiture.
+const GABLE_UV_REPEAT_X = 3.4 / 12
+const GABLE_UV_REPEAT_Y = 1.9 / 5
 
 function createRoofShellGeometry({ width, depth, wallTopY, pitch, overhangX, overhangZ, thickness, ridgeAxis }) {
   const halfRoofWidth = width * 0.5 + overhangX
@@ -136,7 +138,7 @@ function createRoofShellGeometry({ width, depth, wallTopY, pitch, overhangX, ove
 // |                         |    ← vertical strip (extension du mur)
 // (-wr, baseY)   (wr, baseY)     ← base at wall top
 //
-// UV coordinates use world-space planar projection (px * R, py * R) so the
+// UV coordinates use world-space planar projection so the
 // texture tiles identically to the exterior wall material.
 function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overhangX, overhangZ, wallThickness, ridgeAxis, showStart, showEnd }) {
   const hw = width * 0.5 + wallThickness * 0.5   // halfWallWidth
@@ -150,7 +152,8 @@ function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overha
   // Shoulder: height where the inner roof slope intersects the wall face
   const eaveY = wallTopY + ridgeRise * (halfRoofRun - halfWallRun) / halfRoofRun
 
-  const R = GABLE_UV_REPEAT
+  const repeatX = GABLE_UV_REPEAT_X
+  const repeatY = GABLE_UV_REPEAT_Y
   const p = []
   const uvs = []
 
@@ -174,7 +177,7 @@ function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overha
     // mk: local coords (px=lateral, py=height, d=depth) → [worldX, worldY, worldZ, u, v]
     function mk(px, py, d) {
       const [wx, wy, wz] = isZ ? [px, py, d] : [d, py, px]
-      return [wx, wy, wz, px * R, py * R]
+      return [wx, wy, wz, px * repeatX, py * repeatY]
     }
 
     const A0 = mk(-wr, baseY,  d0)
@@ -210,13 +213,11 @@ function createGableGeometry({ width, depth, wallTopY, gableBaseY, pitch, overha
   // and the sloped shoulder of the gable. Fills the strip from baseY to eaveY.
   function addSideWallInfill(x0, x1, z0, z1) {
     // UV: along-wall direction for u, height for v
-    const uFn = ridgeAxis === 'z'
-      ? (wx, wz) => wz * R
-      : (wx, wz) => wx * R
-    const lo0 = [x0, baseY, z0, uFn(x0, z0), baseY * R]
-    const lo1 = [x1, baseY, z1, uFn(x1, z1), baseY * R]
-    const hi0 = [x0, eaveY, z0, uFn(x0, z0), eaveY * R]
-    const hi1 = [x1, eaveY, z1, uFn(x1, z1), eaveY * R]
+    const uFn = (wx, wz) => (ridgeAxis === 'z' ? wz : wx) * repeatX
+    const lo0 = [x0, baseY, z0, uFn(x0, z0), baseY * repeatY]
+    const lo1 = [x1, baseY, z1, uFn(x1, z1), baseY * repeatY]
+    const hi0 = [x0, eaveY, z0, uFn(x0, z0), eaveY * repeatY]
+    const hi1 = [x1, eaveY, z1, uFn(x1, z1), eaveY * repeatY]
     quad(lo0, lo1, hi0, hi1)
   }
 
@@ -278,7 +279,7 @@ function GableRoof({
     const tex = gableTexture.clone()
     tex.wrapS = RepeatWrapping
     tex.wrapT = RepeatWrapping
-    tex.repeat.set(1, 1)   // UVs already encode world-space repeat via GABLE_UV_REPEAT
+    tex.repeat.set(1, 1)   // UVs already encode the world-space repeat
     tex.colorSpace = SRGBColorSpace
     tex.needsUpdate = true
     return tex
