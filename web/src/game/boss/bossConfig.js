@@ -15,7 +15,8 @@ export const SLIME_BOSS = {
   arenaRadius: 18,
   resetDistance: 28,
   resetAfterMs: 12_000,
-  chaseSpeed: [1.15, 1.4, 1.7],
+  noDamageResetMs: 60_000,
+  chaseSpeed: [2.45, 2.9, 3.35],
   attackRange: 8.5,
 
   // Attaque « bond écrasant + onde de choc ». Séparation volontaire (cf. brief) :
@@ -69,7 +70,8 @@ export const SLIME_BOSS = {
   // (poing / épée) le touche via le système existant (arc + combo). L'épée « ultra
   // cheat » inflige des dégâts massifs (bonus anti-slime intégré au montant élevé).
   melee: {
-    hitRadius: 2.2, // rayon de la cible de combat (le boss est gros)
+    hitRadius: 2.85, // rayon minimal, complété au runtime à partir du gabarit visible
+    hitPadding: 0.3,
   },
 }
 

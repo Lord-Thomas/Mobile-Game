@@ -79,6 +79,49 @@ describe('bossSimulation', () => {
     expect(state.resetReason).toBe('all-dead')
   })
 
+  it('désinvoque le boss après une minute complète sans dégâts reçus', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 100 })
+    state = stepBoss(state, {
+      now: 100 + SLIME_BOSS.noDamageResetMs - 1,
+      dt: 0.1,
+      players: [player],
+    })
+    expect(state.active).toBe(true)
+
+    state = stepBoss(state, {
+      now: 100 + SLIME_BOSS.noDamageResetMs,
+      dt: 0.1,
+      players: [player],
+    })
+    expect(state.active).toBe(false)
+    expect(state.resetReason).toBe('no-damage')
+  })
+
+  it('repousse le délai de désinvocation lorsque le boss reçoit un coup', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    state = damageBoss(state, 10, { now: 50_000 })
+    state = stepBoss(state, {
+      now: 60_001,
+      dt: 0.1,
+      players: [player],
+    })
+
+    expect(state.active).toBe(true)
+    expect(state.lastDamagedAt).toBe(50_000)
+  })
+
+  it('se rapproche du joueur avec une vitesse adaptée à son gabarit', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    state = stepBoss(state, {
+      now: 1700,
+      dt: 0.1,
+      players: [{ ...player, position: [0, 0.9, 12] }],
+    })
+
+    expect(state.position[2]).toBeGreaterThan(0.2)
+    expect(SLIME_BOSS.melee.hitRadius).toBeGreaterThan(SLIME_BOSS.targetHeight * 0.5)
+  })
+
   it('passe par dying puis reset après la mort', () => {
     let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
     state = damageBoss(state, SLIME_BOSS.maxHp, { now: 100 })

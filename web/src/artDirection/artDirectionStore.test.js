@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   ART_DIRECTION_STORAGE_KEY,
   DEFAULT_ART_DIRECTION_VALUES,
+  getEffectiveArtDirectionValues,
   normalizeArtDirectionValues,
   parseArtDirectionDocument,
   useArtDirectionStore,
@@ -14,6 +15,7 @@ describe('artDirectionStore', () => {
     }
     useArtDirectionStore.setState({
       comparisonView: 'active',
+      runtimeValues: null,
     })
   })
 
@@ -51,5 +53,19 @@ describe('artDirectionStore', () => {
 
   it('rejette un document sans preset', () => {
     expect(() => parseArtDirectionDocument({ version: 1 })).toThrow(/aucun preset/i)
+  })
+
+  it('applique une ambiance temporaire sans remplacer le preset sélectionné', () => {
+    const selectedPresetId = useArtDirectionStore.getState().activePresetId
+    const runtimeValues = normalizeArtDirectionValues({
+      grading: { exposure: 0.7 },
+    })
+
+    useArtDirectionStore.getState().setRuntimeValues(runtimeValues)
+    expect(getEffectiveArtDirectionValues().grading.exposure).toBe(0.7)
+    expect(useArtDirectionStore.getState().activePresetId).toBe(selectedPresetId)
+
+    useArtDirectionStore.getState().setRuntimeValues(null)
+    expect(useArtDirectionStore.getState().activePresetId).toBe(selectedPresetId)
   })
 })

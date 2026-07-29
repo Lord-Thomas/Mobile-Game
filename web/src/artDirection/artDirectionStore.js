@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export const ART_DIRECTION_STORAGE_KEY = 'lord-thomas-art-direction-v1'
 export const ART_DIRECTION_DOCUMENT_VERSION = 1
+export const BOSS_SLIME_PRESET_ID = 'boss-slime-red'
 
 export const ART_DIRECTION_BASE_COLORS = Object.freeze({
   terrain: '#4f8d2e',
@@ -57,6 +58,47 @@ export const DEFAULT_ART_DIRECTION_VALUES = Object.freeze({
 })
 
 const FACTORY_PRESET_ID = 'factory-daylight'
+
+export const BOSS_SLIME_RED_VALUES = Object.freeze({
+  ...DEFAULT_ART_DIRECTION_VALUES,
+  lighting: Object.freeze({
+    ...DEFAULT_ART_DIRECTION_VALUES.lighting,
+    sunAzimuth: -18,
+    sunElevation: 34,
+    sunColor: '#ff725e',
+    sunIntensity: 3.8,
+    hemisphereIntensity: 1.15,
+    skyLightColor: '#8f4051',
+    groundLightColor: '#431c28',
+  }),
+  sky: Object.freeze({
+    ...DEFAULT_ART_DIRECTION_VALUES.sky,
+    horizon: '#8c3a49',
+    zenith: '#24172f',
+    cloudBase: '#d78383',
+    cloudWarm: '#ff6759',
+    cloudShade: '#51213b',
+    brightness: 0.74,
+    cloudCoverage: 0.18,
+  }),
+  fog: Object.freeze({
+    backgroundColor: '#421a2b',
+    color: '#6d2938',
+    density: 0.002,
+  }),
+  surfaces: Object.freeze({
+    terrain: Object.freeze({ color: '#654126', roughness: 0.9 }),
+    grass: Object.freeze({ color: '#79502d', roughness: 0.84 }),
+    leaves: Object.freeze({ color: '#6f4431', roughness: 0.75 }),
+    trunks: Object.freeze({ color: '#c58d82', roughness: 0.88 }),
+  }),
+  grading: Object.freeze({
+    exposure: 0.94,
+    contrast: 1.12,
+    saturation: 0.92,
+    temperature: 0.38,
+  }),
+})
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value))
@@ -148,12 +190,33 @@ function createFactoryPreset() {
   }
 }
 
+function createBossSlimePreset() {
+  const values = normalizeArtDirectionValues(BOSS_SLIME_RED_VALUES)
+  return {
+    id: BOSS_SLIME_PRESET_ID,
+    name: 'Boss Slime rouge',
+    builtin: true,
+    values,
+    baselineValues: clone(values),
+  }
+}
+
+function ensureBuiltinPresets(presets) {
+  const next = [...presets]
+  if (!next.some((preset) => preset.id === FACTORY_PRESET_ID)) next.unshift(createFactoryPreset())
+  if (!next.some((preset) => preset.id === BOSS_SLIME_PRESET_ID)) next.push(createBossSlimePreset())
+  return next
+}
+
 function normalizePreset(input, index = 0) {
   const values = normalizeArtDirectionValues(input?.values)
   return {
     id: String(input?.id || `art-preset-${Date.now().toString(36)}-${index}`),
     name: String(input?.name || `Preset ${index + 1}`).trim().slice(0, 80) || `Preset ${index + 1}`,
-    builtin: input?.id === FACTORY_PRESET_ID && input?.builtin === true,
+    builtin: (
+      input?.id === FACTORY_PRESET_ID ||
+      input?.id === BOSS_SLIME_PRESET_ID
+    ) && input?.builtin === true,
     values,
     baselineValues: normalizeArtDirectionValues(input?.baselineValues ?? values),
   }
@@ -178,7 +241,7 @@ function loadPersistedState() {
     const raw = window.localStorage.getItem(ART_DIRECTION_STORAGE_KEY)
     if (!raw) return null
     const document = JSON.parse(raw)
-    const presets = parseArtDirectionDocument(document)
+    const presets = ensureBuiltinPresets(parseArtDirectionDocument(document))
     const activePresetId = presets.some((preset) => preset.id === document.activePresetId)
       ? document.activePresetId
       : presets[0].id
@@ -215,12 +278,18 @@ function replaceAtPath(source, path, value) {
 
 const persistedState = loadPersistedState()
 const initialPreset = createFactoryPreset()
+const initialBossPreset = createBossSlimePreset()
 
 export const useArtDirectionStore = create((set, get) => ({
-  presets: persistedState?.presets ?? [initialPreset],
+  presets: persistedState?.presets ?? [initialPreset, initialBossPreset],
   activePresetId: persistedState?.activePresetId ?? initialPreset.id,
   comparisonPresetId: persistedState?.comparisonPresetId ?? initialPreset.id,
   comparisonView: 'active',
+  runtimeValues: null,
+
+  setRuntimeValues: (values) => set({
+    runtimeValues: values ? normalizeArtDirectionValues(values) : null,
+  }),
 
   selectPreset: (presetId) => set((state) => (
     state.presets.some((preset) => preset.id === presetId)
@@ -335,6 +404,11 @@ export const useArtDirectionStore = create((set, get) => ({
 }))
 
 export function getEffectiveArtDirectionValues(state = useArtDirectionStore.getState()) {
+  if (state.runtimeValues) return state.runtimeValues
+  return getSelectedArtDirectionValues(state)
+}
+
+export function getSelectedArtDirectionValues(state = useArtDirectionStore.getState()) {
   const requestedId = state.comparisonView === 'comparison'
     ? state.comparisonPresetId
     : state.activePresetId
@@ -380,8 +454,16 @@ export function serializeArtDirectionDocument() {
   }, null, 2)
 }
 
-useArtDirectionStore.subscribe((state) => {
+useArtDirectionStore.subscribe((state, previousState) => {
   if (typeof window === 'undefined') return
+  if (
+    previousState &&
+    state.presets === previousState.presets &&
+    state.activePresetId === previousState.activePresetId &&
+    state.comparisonPresetId === previousState.comparisonPresetId
+  ) {
+    return
+  }
   try {
     window.localStorage.setItem(ART_DIRECTION_STORAGE_KEY, JSON.stringify({
       version: ART_DIRECTION_DOCUMENT_VERSION,

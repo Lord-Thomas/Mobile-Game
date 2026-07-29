@@ -48,6 +48,7 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
   const bossPosition = useBossStore((state) => state.position)
   const shockRingRef = useRef(null)
   const fallingRefs = useRef(new Map())
+  const poolMaterialRefs = useRef(new Map())
   const damageTimesRef = useRef(new Map())
   const shockImpactRef = useRef(null)
   const shockHitRef = useRef(null)
@@ -101,6 +102,8 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
     }
 
     for (const hazard of hazards) {
+      const poolMaterial = poolMaterialRefs.current.get(hazard.id)
+      if (poolMaterial) poolMaterial.opacity = now < hazard.impactAt ? 0.28 : 0.48
       const falling = fallingRefs.current.get(hazard.id)
       if (falling) {
         const progress = Math.max(0, Math.min(1, (now - hazard.telegraphAt) / Math.max(1, hazard.impactAt - hazard.telegraphAt)))
@@ -160,7 +163,16 @@ function BossHazards({ playerPositionRef, onDamagePlayer, movementSpeedMultiplie
         <group key={hazard.id}>
           <mesh position={[hazard.position[0], hazard.position[1] + 0.045, hazard.position[2]]} rotation={[-Math.PI / 2, 0, 0]}>
             <circleGeometry args={[hazard.radius, 40]} />
-            <meshBasicMaterial color="#ff372f" transparent opacity={Date.now() < hazard.impactAt ? 0.28 : 0.48} depthWrite={false} />
+            <meshBasicMaterial
+              ref={(node) => {
+                if (node) poolMaterialRefs.current.set(hazard.id, node)
+                else poolMaterialRefs.current.delete(hazard.id)
+              }}
+              color="#ff372f"
+              transparent
+              opacity={0.28}
+              depthWrite={false}
+            />
           </mesh>
           <mesh
             ref={(node) => {
@@ -193,34 +205,34 @@ const BossMinion = memo(function BossMinion({
   const groupRef = useRef(null)
   const lastDamageAtRef = useRef(0)
   const hitRef = useRef(onBossHit)
-  hitRef.current = onBossHit
   const swordRef = useRef(swordEquipped)
-  swordRef.current = swordEquipped
-  const targetRef = useRef(null)
-  if (!targetRef.current) {
-    targetRef.current = {
-      id: minion.id,
-      position: { x: minion.position[0], y: minion.position[1], z: minion.position[2] },
-      radius: SLIME_BOSS.summons.radius,
-      height: 1.1,
-      disabled: false,
-      takeDamage: (hit) => {
-        const damage = getMeleeHitDamage({
-          weaponId: swordRef.current ? 'cheat_sword' : null,
-          fallbackDamage: hit.damage,
-          targetTags: ['slime'],
-          charged: Boolean(hit.charged),
-        })
-        hitRef.current?.({
-          ...hit,
-          targetId: minion.id,
-          damage,
-          weaponId: swordRef.current ? 'cheat_sword' : null,
-        })
-        return true
-      },
-    }
-  }
+  const targetRef = useRef({
+    id: minion.id,
+    position: { x: minion.position[0], y: minion.position[1], z: minion.position[2] },
+    radius: SLIME_BOSS.summons.radius,
+    height: 1.1,
+    disabled: false,
+    takeDamage: (hit) => {
+      const damage = getMeleeHitDamage({
+        weaponId: swordRef.current ? 'cheat_sword' : null,
+        fallbackDamage: hit.damage,
+        targetTags: ['slime'],
+        charged: Boolean(hit.charged),
+      })
+      hitRef.current?.({
+        ...hit,
+        targetId: minion.id,
+        damage,
+        weaponId: swordRef.current ? 'cheat_sword' : null,
+      })
+      return true
+    },
+  })
+
+  useEffect(() => {
+    hitRef.current = onBossHit
+    swordRef.current = swordEquipped
+  }, [onBossHit, swordEquipped])
 
   useEffect(() => {
     if (!registerCombatTarget) return undefined
@@ -279,31 +291,26 @@ function BossModel({
   const phase = useBossStore((state) => state.phase)
 
   const swordRef = useRef(swordEquipped)
-  swordRef.current = swordEquipped
   const hitRef = useRef(onBossHit)
-  hitRef.current = onBossHit
-  const targetRef = useRef(null)
-  if (!targetRef.current) {
-    targetRef.current = {
-      id: SLIME_BOSS.id,
-      position: { x: 0, y: 0, z: 0 },
-      radius: SLIME_BOSS.melee.hitRadius,
-      height: SLIME_BOSS.targetHeight,
-      disabled: false,
-      takeDamage: (hit) => {
-        const damage = getMeleeHitDamage({
-          weaponId: swordRef.current ? 'cheat_sword' : null,
-          fallbackDamage: hit.damage,
-          targetTags: ['slime'],
-          charged: Boolean(hit.charged),
-        })
-        hitRef.current?.({ ...hit, damage, weaponId: swordRef.current ? 'cheat_sword' : null })
-        return true
-      },
-    }
-  }
+  const targetRef = useRef({
+    id: SLIME_BOSS.id,
+    position: { x: 0, y: 0, z: 0 },
+    radius: SLIME_BOSS.melee.hitRadius,
+    height: SLIME_BOSS.targetHeight,
+    disabled: false,
+    takeDamage: (hit) => {
+      const damage = getMeleeHitDamage({
+        weaponId: swordRef.current ? 'cheat_sword' : null,
+        fallbackDamage: hit.damage,
+        targetTags: ['slime'],
+        charged: Boolean(hit.charged),
+      })
+      hitRef.current?.({ ...hit, damage, weaponId: swordRef.current ? 'cheat_sword' : null })
+      return true
+    },
+  })
 
-  const { scene, baseScale, footOffset } = useMemo(() => {
+  const { scene, baseScale, footOffset, visualRadius } = useMemo(() => {
     const cloned = gltf.scene.clone(true)
     cloned.traverse((child) => {
       if (child.isMesh) {
@@ -314,8 +321,25 @@ function BossModel({
     const box = new THREE.Box3().setFromObject(cloned)
     const size = box.getSize(new THREE.Vector3())
     const scale = SLIME_BOSS.targetHeight / (size.y || 1)
-    return { scene: cloned, baseScale: scale, footOffset: -box.min.y * scale }
+    return {
+      scene: cloned,
+      baseScale: scale,
+      footOffset: -box.min.y * scale,
+      visualRadius: Math.max(size.x, size.z) * scale * 0.5,
+    }
   }, [gltf])
+
+  useEffect(() => {
+    swordRef.current = swordEquipped
+    hitRef.current = onBossHit
+  }, [onBossHit, swordEquipped])
+
+  useEffect(() => {
+    targetRef.current.radius = Math.max(
+      SLIME_BOSS.melee.hitRadius,
+      visualRadius + SLIME_BOSS.melee.hitPadding,
+    )
+  }, [visualRadius])
 
   useEffect(() => {
     if (!registerCombatTarget || !spawn) return undefined
@@ -348,10 +372,22 @@ function BossModel({
     const boss = useBossStore.getState()
     if (!group || !boss.position) return
     const jumpOffset = getBossJumpOffset(boss.attack, now)
-    const bob = Math.sin(now / 500) * 0.12
+    const moveDx = boss.position[0] - group.position.x
+    const moveDz = boss.position[2] - group.position.z
+    const moving = Math.hypot(moveDx, moveDz) > 0.025
+    const moveCycle = Math.abs(Math.sin(now / 155))
+    const bob = moving ? moveCycle * 0.22 : Math.sin(now / 500) * 0.09
     group.position.x = THREE.MathUtils.damp(group.position.x, boss.position[0], 8, dt)
     group.position.y = boss.position[1] + footOffset + bob + jumpOffset
     group.position.z = THREE.MathUtils.damp(group.position.z, boss.position[2], 8, dt)
+    if (moving) {
+      const targetYaw = Math.atan2(moveDx, moveDz)
+      const yawDelta = Math.atan2(
+        Math.sin(targetYaw - group.rotation.y),
+        Math.cos(targetYaw - group.rotation.y),
+      )
+      group.rotation.y += yawDelta * (1 - Math.exp(-dt * 8))
+    }
     targetRef.current.position.x = boss.position[0]
     targetRef.current.position.y = boss.position[1]
     targetRef.current.position.z = boss.position[2]
@@ -364,7 +400,12 @@ function BossModel({
     } else {
       deathTimeRef.current = 0
       const pulse = boss.phase === 3 ? 1 + Math.sin(now / 90) * 0.025 : 1
-      group.scale.setScalar(baseScale * pulse)
+      const squash = moving ? (moveCycle - 0.5) * 0.045 : 0
+      group.scale.set(
+        baseScale * pulse * (1 + squash),
+        baseScale * pulse * (1 - squash * 1.35),
+        baseScale * pulse * (1 + squash),
+      )
     }
   })
 

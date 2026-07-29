@@ -62,6 +62,7 @@ export function createInactiveBossState(overrides = {}) {
     minions: [],
     summonedPhases: [],
     lastPlayerInArenaAt: 0,
+    lastDamagedAt: 0,
     dyingEndsAt: 0,
     victoryId: null,
     resetReason: overrides.resetReason ?? null,
@@ -82,6 +83,7 @@ export function summonBoss(state, { altarId, spawn, now = Date.now() }) {
     position: safeSpawn,
     nextAttackAt: now + 1600,
     lastPlayerInArenaAt: now,
+    lastDamagedAt: now,
   }
 }
 
@@ -100,6 +102,7 @@ export function damageBoss(state, amount, { now = Date.now() } = {}) {
       attack: null,
       hazards: [],
       minions: [],
+      lastDamagedAt: now,
       dyingEndsAt: now + 1200,
       victoryId: state.victoryId ?? `slime-boss-${now}`,
     }
@@ -109,6 +112,7 @@ export function damageBoss(state, amount, { now = Date.now() } = {}) {
     revision: state.revision + 1,
     hp,
     phase: hpToPhase(hp, state.maxHp),
+    lastDamagedAt: now,
   }
 }
 
@@ -235,6 +239,9 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
   if (state.state === 'dying') {
     return now >= state.dyingEndsAt ? resetBoss(state, 'defeated') : state
   }
+  if (now - finite(state.lastDamagedAt, now) >= SLIME_BOSS.noDamageResetMs) {
+    return resetBoss(state, 'no-damage')
+  }
 
   const knownPlayers = (Array.isArray(players) ? players : []).filter((player) => player && Array.isArray(player.position))
   const availablePlayers = activePlayers(knownPlayers)
@@ -266,7 +273,7 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
     const position = moveToward(
       next.position,
       closest.position,
-      SLIME_BOSS.chaseSpeed[next.phase - 1] ?? 1.15,
+      SLIME_BOSS.chaseSpeed[next.phase - 1] ?? SLIME_BOSS.chaseSpeed[0],
       Math.min(Math.max(dt, 0), 0.25),
       SLIME_BOSS.arenaRadius,
       next.spawn,
@@ -362,6 +369,7 @@ export function sanitizeBossSnapshot(value) {
       })
       : [],
     summonedPhases: Array.isArray(value.summonedPhases) ? value.summonedPhases.filter((phase) => phase === 2 || phase === 3) : [],
+    lastDamagedAt: finite(value.lastDamagedAt, Date.now()),
   }
 }
 
