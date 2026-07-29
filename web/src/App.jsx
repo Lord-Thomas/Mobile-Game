@@ -13,6 +13,7 @@ import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS,
 import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
+import { getFallDamage } from './game/fallDamage'
 import { OUTDOOR_PLAYER_COLLISION_HEIGHT, overlapsOutdoorColliderHeight } from './game/outdoorObstacleCollision'
 import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
 import { WORLD_LOADING_TIPS, advanceLoadingExperience, createLoadingExperience } from './game/loadingExperience'
@@ -4129,6 +4130,7 @@ function Player({
   dragonRide = null,
   wingsUiRef = null,
   onWingsParticleBurst = null,
+  onFallDamage = null,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -4172,6 +4174,7 @@ function Player({
   const velocityYRef = useRef(0)
   const onGroundRef = useRef(true)
   const wasOnGroundRef = useRef(true)
+  const fallStartYRef = useRef(null)
   // Sort d'ailes « Envol Céleste » : état simulé à 60 Hz, jamais dans un useState.
   const wingsSpellRef = useRef(createWingsState())
   const wingsEndEffectEmittedRef = useRef(true)
@@ -4232,6 +4235,7 @@ function Player({
     velocityYRef.current = 0
     onGroundRef.current = true
     wasOnGroundRef.current = true
+    fallStartYRef.current = null
     Object.assign(wingsSpellRef.current, createWingsState())
     wingsEndEffectEmittedRef.current = true
     playerBodyRef.current?.setNextKinematicTranslation({ x, y, z })
@@ -4500,6 +4504,8 @@ function Player({
       filteredInputRef.current.y = 0
       velocityYRef.current = 0
       onGroundRef.current = true
+      wasOnGroundRef.current = true
+      fallStartYRef.current = null
 
       playerPosRef.current.x = riderX
       playerPosRef.current.y = riderY
@@ -4508,6 +4514,7 @@ function Player({
       playerPositionRef.current.y = riderY
       playerPositionRef.current.z = riderZ
       playerBodyRef.current.setNextKinematicTranslation({ x: riderX, y: riderY, z: riderZ })
+      if (visualRef.current) visualRef.current.rotation.y = yaw
       if (playerBodyYawRef) playerBodyYawRef.current = yaw
 
       setPlayerMotion((current) => (current === 'mountedIdle' ? current : 'mountedIdle'))
@@ -5113,6 +5120,7 @@ function Player({
 
     if (isSteppingOffLedge) {
       onGroundRef.current = false
+      fallStartYRef.current = currentPlayerY
       velocityYRef.current = Math.min(velocityYRef.current, PLAYER_LEDGE_FALL_INITIAL_VELOCITY)
       jumpStartUntilRef.current = 0
       landingPreparedRef.current = false
@@ -5133,6 +5141,7 @@ function Player({
       jumpLandUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_LAND_DURATION
     }
 
+    const landingVelocity = velocityYRef.current
     if (nextY <= floorY) {
       nextY = floorY
       velocityYRef.current = 0
@@ -5140,6 +5149,12 @@ function Player({
     }
 
     if (!wasOnGroundRef.current && onGroundRef.current) {
+      const fallDistance = fallStartYRef.current === null
+        ? 0
+        : Math.max(0, fallStartYRef.current - floorY)
+      const fallDamage = landingVelocity < 0 ? getFallDamage(fallDistance) : 0
+      if (fallDamage > 0) onFallDamage?.(fallDamage)
+      fallStartYRef.current = null
       if (!landingPreparedRef.current) {
         jumpLandUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_LAND_DURATION
       }
@@ -22278,10 +22293,25 @@ function App() {
   const toggleMount = (mountId) => {
     if (mode !== 'play') return
     if (!ownedMounts.includes(mountId)) return
-    // Already mounted: a click on the active mount dismisses it; a click on a
-    // different mount swaps to it (only when landed).
+    // Désinvoquer la monture active est toujours autorisé, même en plein vol.
+    // Le joueur conserve sa position et son orientation ; la gravité normale
+    // reprend à la frame suivante.
     if (mountedMountId) {
       const pos = dragonRidePositionRef.current
+      if (mountId === mountedMountId) {
+        playerBodyYawRef.current = dragonRideYawRef.current
+        addWingsParticleBurst({
+          kind: 'end',
+          source: `mount_${mountedMountId}`,
+          position: [pos.x, pos.y + 0.55, pos.z],
+          layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
+          followTarget: false,
+        })
+        setMountedMountId(null)
+        return
+      }
+
+      // Le remplacement par une autre monture reste réservé au sol.
       const groundY = currentZone === ZONES.outside ? getTerrainHeight(pos.x, pos.z) : 0
       if (pos.y - groundY > 0.15) return
       addWingsParticleBurst({
@@ -22291,15 +22321,6 @@ function App() {
         layer: currentZone === ZONES.outside ? OUTDOOR_LIGHT_LAYER : 0,
         followTarget: false,
       })
-      if (mountId === mountedMountId) {
-        setMountedMountId(null)
-        setSpawnRequest({
-          zone: currentZone,
-          position: [pos.x, groundY + PLAYER_HEIGHT, pos.z],
-          token: Date.now(),
-        })
-        return
-      }
     }
 
     const config = getMountConfig(mountId)
@@ -23697,6 +23718,11 @@ function App() {
               playerCombatActionsRef={playerCombatActionsRef}
               wingsUiRef={wingsUiRef}
               onWingsParticleBurst={addWingsParticleBurst}
+              onFallDamage={(damage) => handlePlayerHit({
+                damage,
+                sourceId: 'fall',
+                attackType: ATTACK_TYPE.PERSISTENT_AREA,
+              })}
               onSpawnConsumed={consumeSpawnRequest}
               dragonRide={{
                 active: dragonMounted,
@@ -23835,8 +23861,8 @@ function App() {
           uiHidden={!showCaptureUi}
           showDodgeAction={currentZone === ZONES.outside}
           mountFlying={dragonMounted && activeMountConfig?.canFly === true}
-          selectedMount={selectedMountConfig}
-          mountActive={mountedMountId === selectedMountId}
+          selectedMount={activeMountConfig ?? selectedMountConfig}
+          mountActive={mountedMountId !== null}
           onToggleMount={toggleMount}
           onTap={catActive && (isAdminMode || isVerticalFrameMode) ? (clientX, clientY) => { catTapCallbackRef.current?.(clientX, clientY) } : undefined}
         />

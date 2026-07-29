@@ -22,8 +22,11 @@ export default function BossHud() {
   const maxHp = useBossStore((s) => s.maxHp)
   const phase = useBossStore((s) => s.phase)
   const [announcementVisible, setAnnouncementVisible] = useState(false)
+  const [victoryVisible, setVictoryVisible] = useState(false)
   const previousActiveRef = useRef(false)
+  const previousStateRef = useRef(state)
   const announcementTimeoutRef = useRef(0)
+  const victoryTimeoutRef = useRef(0)
 
   useEffect(() => {
     const wasActive = previousActiveRef.current
@@ -36,7 +39,21 @@ export default function BossHud() {
     return undefined
   }, [active])
 
-  useEffect(() => () => window.clearTimeout(announcementTimeoutRef.current), [])
+  useEffect(() => {
+    const previousState = previousStateRef.current
+    previousStateRef.current = state
+    if (state !== 'dying' || previousState === 'dying') return undefined
+
+    window.clearTimeout(victoryTimeoutRef.current)
+    setVictoryVisible(true)
+    victoryTimeoutRef.current = window.setTimeout(() => setVictoryVisible(false), 3200)
+    return undefined
+  }, [state])
+
+  useEffect(() => () => {
+    window.clearTimeout(announcementTimeoutRef.current)
+    window.clearTimeout(victoryTimeoutRef.current)
+  }, [])
 
   const fillPct = maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0
 
@@ -46,6 +63,11 @@ export default function BossHud() {
       {announcementVisible && (
         <div className="boss-summon-announcement" role="status" aria-live="assertive">
           <span>Roi Slime invoqué</span>
+        </div>
+      )}
+      {victoryVisible && (
+        <div className="boss-summon-announcement boss-summon-announcement--victory" role="status" aria-live="assertive">
+          <span>Roi Slime vaincu !</span>
         </div>
       )}
       {active && (

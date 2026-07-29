@@ -1161,6 +1161,18 @@ canvas {
   background: linear-gradient(90deg, transparent, rgba(61, 4, 16, 0.76) 18%, rgba(61, 4, 16, 0.76) 82%, transparent);
 }
 
+.boss-summon-announcement--victory {
+  color: #fff5c7;
+  text-shadow:
+    0 2px 4px rgba(28, 18, 0, 0.92),
+    0 0 20px rgba(255, 202, 62, 0.88);
+}
+
+.boss-summon-announcement--victory span {
+  border-color: rgba(255, 216, 92, 0.78);
+  background: linear-gradient(90deg, transparent, rgba(72, 48, 4, 0.78) 18%, rgba(72, 48, 4, 0.78) 82%, transparent);
+}
+
 @keyframes boss-summon-message {
   0% {
     opacity: 0;
