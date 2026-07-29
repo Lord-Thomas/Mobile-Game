@@ -1541,6 +1541,29 @@ function useWingsSpellUi(wingsUiRef) {
   return ui
 }
 
+function SmoothCooldownRadial({ remainingMs, totalMs }) {
+  const initial = useRef(null)
+  if (initial.current === null) {
+    const safeTotal = Math.max(1, totalMs ?? 1)
+    const safeRemaining = Math.max(0, remainingMs ?? 0)
+    initial.current = {
+      angle: Math.min(360, (safeRemaining / safeTotal) * 360),
+      duration: safeRemaining,
+    }
+  }
+
+  return (
+    <span
+      className="combat-action-cooldown-radial combat-action-cooldown-radial--smooth"
+      aria-hidden="true"
+      style={{
+        '--cooldown-start-angle': `${initial.current.angle}deg`,
+        '--cooldown-duration': `${initial.current.duration}ms`,
+      }}
+    />
+  )
+}
+
 function CombatActionDock({
   touchRef,
   canKick,
@@ -1652,7 +1675,13 @@ function CombatActionDock({
           }}
         >
           <img className="combat-action-img" src={spellUi?.icon ?? SPELL_ICON_FIREBALL} alt="" aria-hidden="true" draggable="false" />
-          {(spellUi?.cooldownAngle ?? 0) > 0 && <span className="combat-action-cooldown-radial" aria-hidden="true" />}
+          {(spellUi?.cooldownAngle ?? 0) > 0 && (
+            <SmoothCooldownRadial
+              key={spellUi?.cooldownKey ?? 'spell-cooldown'}
+              remainingMs={spellUi?.cooldownRemainingMs}
+              totalMs={spellUi?.cooldownTotalMs}
+            />
+          )}
           {(spellUi?.cooldownSeconds ?? 0) > 0 && (
             <span className="combat-action-cooldown-count" aria-hidden="true">
               {spellUi.cooldownSeconds}
@@ -3146,6 +3175,7 @@ function getMountedRiderWorldPosition(
 
 function MountedMount({
   config,
+  active = false,
   positionRef,
   yawRef,
   animStateRef,
@@ -3197,6 +3227,11 @@ function MountedMount({
   const handAnchorWorld = useMemo(() => new Vector3(), [])
   const handBoneRef = useRef(null)
   const widthMeasureFramesRef = useRef(0)
+
+  useEffect(() => {
+    if (!groupRef.current || revealPendingRef.current) return
+    groupRef.current.visible = active
+  }, [active])
 
   const playAction = useCallback((name, { fallback = null, loop = true, pingpong = false, timeScale = 1, fade = 0.35 } = {}) => {
     const action = actions[name] ?? (fallback ? actions[fallback] : null)
@@ -3338,6 +3373,10 @@ function MountedMount({
 
   useFrame((_, delta) => {
     if (!groupRef.current) return
+    if (!active) {
+      groupRef.current.visible = false
+      return
+    }
     const pos = positionRef.current
     groupRef.current.position.set(pos.x, pos.y, pos.z)
     groupRef.current.rotation.y = yawRef.current + config.modelYawOffset
@@ -3609,7 +3648,7 @@ function MountedMount({
         mixer.update(1 / 30)
       }
       dragon.updateMatrixWorld(true)
-      groupRef.current.visible = true
+      groupRef.current.visible = active
       revealPendingRef.current = false
     }
 
@@ -17516,7 +17555,9 @@ const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload('/models/player/anim/sitting-idle.glb'),
   () => useGLTF.preload('/models/player/anim/stand-up.glb'),
   () => useGLTF.preload('/models/ball/ballon.glb'),
-  () => useGLTF.preload('/models/dragon.glb'),
+  ...Object.values(MOUNT_CONFIGS)
+    .filter((mount) => mount.modelUrl)
+    .map((mount) => () => useGLTF.preload(mount.modelUrl)),
   () => useGLTF.preload(MAGIC_BOOK_MODEL_URL),
   () => useGLTF.preload(MAGIC_SKULL_MODEL_URL),
 ]
@@ -21258,7 +21299,8 @@ function App() {
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
-  const showCaptureUi = shaderWarmupComplete && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
+  const loadingUiActive = !shaderWarmupComplete || zoneFadeActive
+  const showCaptureUi = !loadingUiActive && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
   const showGameplayUi = showCaptureUi && mode === 'play'
   const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || companionMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen || Boolean(youtubeFrameEditor)
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
@@ -22115,6 +22157,9 @@ function App() {
         disabled: remainingMs > 0,
         cooldownAngle: Math.ceil(cooldownRatio * 360),
         cooldownSeconds: Math.ceil(remainingMs / 1000),
+        cooldownKey: summonCooldownUntil,
+        cooldownRemainingMs: remainingMs,
+        cooldownTotalMs: totalMs,
       }
     }
     if (equippedWeapon === 'magic_book') {
@@ -22126,6 +22171,9 @@ function App() {
         disabled: remainingMs > 0 || isCharging,
         cooldownAngle: Math.ceil(cooldownRatio * 360),
         cooldownSeconds: Math.ceil(remainingMs / 1000),
+        cooldownKey: fireballCooldownRef.current,
+        cooldownRemainingMs: remainingMs,
+        cooldownTotalMs: FIREBALL_COOLDOWN_MS,
       }
     }
     return null
@@ -23270,10 +23318,11 @@ function App() {
                 />
               </Suspense>
             )}
-            {activeMountConfig && (
+            {(activeMountConfig ?? selectedMountConfig) && (
               <MountedMount
-                key={activeMountConfig.id}
-                config={activeMountConfig}
+                key={(activeMountConfig ?? selectedMountConfig).id}
+                config={activeMountConfig ?? selectedMountConfig}
+                active={mountedMountId !== null}
                 positionRef={dragonRidePositionRef}
                 yawRef={dragonRideYawRef}
                 animStateRef={dragonRideAnimStateRef}
@@ -23690,10 +23739,10 @@ function App() {
       </Canvas>
       </div>
       <WorldLoadingOverlay
-        active={!shaderWarmupComplete || zoneFadeActive}
+        active={loadingUiActive}
         experience={loadingExperience}
       />
-      {mode === 'play' && isDebugMode && (
+      {!loadingUiActive && mode === 'play' && isDebugMode && (
         <RenderStatsOverlay
           stats={renderStats}
           toggles={debugToggles}
@@ -23704,10 +23753,10 @@ function App() {
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
         />
       )}
-      {mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
-      <GpuWarning visible={mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
+      {!loadingUiActive && mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
+      <GpuWarning visible={!loadingUiActive && mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
-      {mode === 'play' && (
+      {!loadingUiActive && mode === 'play' && (
         <ControlsOverlay
           touchRef={touchRef}
           controlSettings={controlSettings}

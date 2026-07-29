@@ -4735,6 +4735,31 @@ html[data-orientation='landscape'] .charge-bar-wrap {
   pointer-events: none;
 }
 
+@property --smooth-cooldown-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.combat-action-cooldown-radial--smooth {
+  --smooth-cooldown-angle: var(--cooldown-start-angle);
+  background: conic-gradient(
+    from -90deg,
+    rgba(0, 0, 0, 0.72) 0deg var(--smooth-cooldown-angle),
+    rgba(0, 0, 0, 0.04) var(--smooth-cooldown-angle) 360deg
+  );
+  animation: combat-action-cooldown-sweep var(--cooldown-duration) linear forwards;
+}
+
+@keyframes combat-action-cooldown-sweep {
+  from {
+    --smooth-cooldown-angle: var(--cooldown-start-angle);
+  }
+  to {
+    --smooth-cooldown-angle: 0deg;
+  }
+}
+
 .combat-action-cooldown-count {
   position: absolute;
   inset: 0;
