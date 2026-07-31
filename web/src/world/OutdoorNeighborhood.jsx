@@ -303,11 +303,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   })
 
   return (
-    <group
-      ref={groupRef}
-      visible={runtimeActive}
-      userData={{ debugCategory: 'outdoor' }}
-    >
+    <group ref={groupRef} userData={{ debugCategory: 'outdoor' }}>
       <OutdoorLighting
         active={lightingActive}
         showSky={showSky}
@@ -328,7 +324,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
           onReady={onMapObjectsPreloaded}
         />
       )}
-      <group visible={runtimeActive}>
+      <group>
         {showMapObjects && (
           <MapObjectPlaceables
             objects={DECOR_MAP_OBJECT_PLACEMENTS}

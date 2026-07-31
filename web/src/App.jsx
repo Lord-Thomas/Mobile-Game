@@ -7457,7 +7457,7 @@ function RuntimeWarmupRig() {
 // transitionToZone) ne se lève donc pas pendant qu'une famille compile encore.
 // Compilés une fois, les programmes restent en cache GPU pour la session — d'où les
 // verrous `pass1Ref`/`pass2Ref` qui ne se réarment jamais.
-function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
+function OutdoorShaderPrewarm({ stage, isOutside, readyRef, onReady }) {
   const { gl, scene, camera } = useThree()
   const pass1Ref = useRef(false)
   const pass2Ref = useRef(false)
@@ -7550,6 +7550,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
           .then(() => compileWith(camera, 2))
           .finally(() => {
             if (readyRef) readyRef.current = true
+            onReady?.()
             perfDiagnostics.event('outdoor:shader-prewarm-ready')
           })
       })
@@ -7558,7 +7559,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef }) {
       window.cancelAnimationFrame(raf1)
       window.cancelAnimationFrame(raf2)
     }
-  }, [pass2Active, camera, compileWith, readyRef])
+  }, [pass2Active, camera, compileWith, onReady, readyRef])
 
   return null
 }
@@ -19417,6 +19418,7 @@ function App() {
   // (plafonné par OUTDOOR_EXIT_FADE_MAX_HOLD_MS). Jamais remis à false : une fois
   // les programmes en cache GPU, les sorties suivantes n'attendent plus.
   const outdoorPrewarmReadyRef = useRef(false)
+  const [outdoorPrewarmReady, setOutdoorPrewarmReady] = useState(PERF_NO_OUTDOOR_PREWARM)
   const outdoorZoneReadyRef = useRef(false)
   const outdoorReadinessSnapshotRef = useRef('')
   const [spawnRequest, setSpawnRequest] = useState(null)
@@ -19759,6 +19761,7 @@ function App() {
   const outdoorBackgroundPrepared = outdoorContentStage >= 5
     && outdoorMapAssetsReady
     && (monsterSpawnSlots.length === 0 || outdoorEnemiesMounted)
+    && (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReady)
 
   useEffect(() => {
     if (
@@ -23384,6 +23387,11 @@ function App() {
     setOutdoorEnemiesMounted(true)
   }, [])
 
+  const completeOutdoorPrewarm = useCallback(() => {
+    outdoorPrewarmReadyRef.current = true
+    setOutdoorPrewarmReady(true)
+  }, [])
+
   useEffect(() => {
     if (!zoneFadeActive || !outdoorEntryPreparing || monsterSpawnSlots.length === 0) return
     if (outdoorEnemyEntryTargetCount <= 0) return
@@ -23522,6 +23530,7 @@ function App() {
             stage={outdoorContentMounted ? outdoorContentStage : 0}
             isOutside={outdoorRuntimeContentActive && outdoorVisualsReady}
             readyRef={outdoorPrewarmReadyRef}
+            onReady={completeOutdoorPrewarm}
           />
         )}
         {(TRANSITION_DIAG_ENABLED || perfDiagnosticsActive) && (
@@ -23829,24 +23838,22 @@ function App() {
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
           {outdoorEnemiesMountedInScene && outdoorEnemyAssetsReady && (
             <Defer level={2}>
-            <group visible={outdoorRuntimeContentActive}>
-              <ProgressiveOutdoorEnemyLayer
-                enabled={outdoorEnemiesReady}
-                assetsReady={outdoorEnemyAssetsReady}
-                retainMounted={outdoorTransitionPrimed}
-                slots={monsterSpawnSlots}
-                transitionPreparing={outdoorEntryPreparing}
-                playerPositionRef={playerPositionRef}
-                registerCombatTarget={registerCombatTarget}
-                onDefeated={handleSmallEnemyDefeated}
-                onHitPlayer={handlePlayerHit}
-                mobGroupRef={mobGroupRef}
-                mobSpatialIndexRef={mobSpatialIndexRef}
-                allyTargetsRef={allyTargetsRef}
-                onProgress={handleOutdoorEnemyMountProgress}
-                onReady={handleOutdoorEnemiesMounted}
-              />
-            </group>
+            <ProgressiveOutdoorEnemyLayer
+              enabled={outdoorEnemiesReady}
+              assetsReady={outdoorEnemyAssetsReady}
+              retainMounted={outdoorTransitionPrimed}
+              slots={monsterSpawnSlots}
+              transitionPreparing={outdoorEntryPreparing}
+              playerPositionRef={playerPositionRef}
+              registerCombatTarget={registerCombatTarget}
+              onDefeated={handleSmallEnemyDefeated}
+              onHitPlayer={handlePlayerHit}
+              mobGroupRef={mobGroupRef}
+              mobSpatialIndexRef={mobSpatialIndexRef}
+              allyTargetsRef={allyTargetsRef}
+              onProgress={handleOutdoorEnemyMountProgress}
+              onReady={handleOutdoorEnemiesMounted}
+            />
             </Defer>
           )}
           <FireballManager
