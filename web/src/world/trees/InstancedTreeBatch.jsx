@@ -477,6 +477,48 @@ function TreeWindUpdater() {
   return null
 }
 
+function TreeArtDirectionUpdater({ treeAssets }) {
+  const artDirection = useArtDirectionValues()
+  const leafSurface = artDirection.surfaces.leaves
+  const trunkSurface = artDirection.surfaces.trunks
+
+  useEffect(() => {
+    const leafMultiplier = getArtDirectionColorMultiplier('leaves', leafSurface.color)
+    const trunkMultiplier = getArtDirectionColorMultiplier('trunks', trunkSurface.color)
+    const updateMaterial = (material) => {
+      if (!material) return
+      const isLeaves = material.name === 'stylized-leaves'
+      const [r, g, b] = isLeaves ? leafMultiplier : trunkMultiplier
+      material.color?.setRGB(r, g, b)
+      if (isLeaves) {
+        const shader = material.userData?.shader
+        if (shader?.uniforms.uArtLeafRoughness) {
+          shader.uniforms.uArtLeafRoughness.value = leafSurface.roughness
+        }
+      } else if ('roughness' in material) {
+        material.roughness = trunkSurface.roughness
+      }
+    }
+
+    treeAssets.forEach((assetsByLod) => {
+      assetsByLod.forEach(({ parts }) => {
+        parts.forEach((part) => {
+          updateMaterial(part.material)
+          updateMaterial(part.occlusionMaterial)
+        })
+      })
+    })
+  }, [
+    leafSurface.color,
+    leafSurface.roughness,
+    treeAssets,
+    trunkSurface.color,
+    trunkSurface.roughness,
+  ])
+
+  return null
+}
+
 function InstancedTreeBatch({
   trees,
   animated = true,
@@ -484,9 +526,6 @@ function InstancedTreeBatch({
   forceSimplified = false,
   castShadows = true,
 }) {
-  const artDirection = useArtDirectionValues()
-  const leafSurface = artDirection.surfaces.leaves
-  const trunkSurface = artDirection.surfaces.trunks
   const groups = useMemo(() => {
     const next = new Map()
     trees.forEach((tree) => {
@@ -547,43 +586,10 @@ function InstancedTreeBatch({
     })
   }, [treeAssets])
 
-  useEffect(() => {
-    const leafMultiplier = getArtDirectionColorMultiplier('leaves', leafSurface.color)
-    const trunkMultiplier = getArtDirectionColorMultiplier('trunks', trunkSurface.color)
-    const updateMaterial = (material) => {
-      if (!material) return
-      const isLeaves = material.name === 'stylized-leaves'
-      const [r, g, b] = isLeaves ? leafMultiplier : trunkMultiplier
-      material.color?.setRGB(r, g, b)
-      if (isLeaves) {
-        const shader = material.userData?.shader
-        if (shader?.uniforms.uArtLeafRoughness) {
-          shader.uniforms.uArtLeafRoughness.value = leafSurface.roughness
-        }
-      } else if ('roughness' in material) {
-        material.roughness = trunkSurface.roughness
-      }
-    }
-
-    treeAssets.forEach((assetsByLod) => {
-      assetsByLod.forEach(({ parts }) => {
-        parts.forEach((part) => {
-          updateMaterial(part.material)
-          updateMaterial(part.occlusionMaterial)
-        })
-      })
-    })
-  }, [
-    leafSurface.color,
-    leafSurface.roughness,
-    treeAssets,
-    trunkSurface.color,
-    trunkSurface.roughness,
-  ])
-
   return (
     <group userData={{ debugCategory: 'trees' }}>
       {animated && <TreeWindUpdater />}
+      <TreeArtDirectionUpdater treeAssets={treeAssets} />
       {groups.map(({ key, variantId, placements }) => (
         <TreeLodVariant
           key={key}

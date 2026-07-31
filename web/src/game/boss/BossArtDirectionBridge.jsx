@@ -13,7 +13,10 @@ import {
 import { useBossStore } from './bossStore'
 
 const TRANSITION_DURATION_MS = 1800
-const UPDATE_INTERVAL_MS = 32
+// Material uniforms do not need a 30 Hz React/store publication rate. Keeping
+// the transition at 20 Hz remains visually fluid while leaving more main-thread
+// time for the summon frame and mobile rendering.
+const UPDATE_INTERVAL_MS = 50
 
 export default function BossArtDirectionBridge() {
   const combatAtmosphereActive = useBossStore((state) => state.active && state.state !== 'dying')

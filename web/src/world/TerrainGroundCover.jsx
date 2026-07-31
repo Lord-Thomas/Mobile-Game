@@ -664,6 +664,28 @@ function buildGrassHandleBeforeCompile(onShaderReady, globalLayer = false, getBi
   }
 }
 
+function GrassArtDirectionUpdater({
+  grassMaterial,
+  globalGrassMaterial,
+  shaderRef,
+  globalShaderRef,
+}) {
+  const grassSurface = useArtDirectionValues().surfaces.grass
+
+  useEffect(() => {
+    const [r, g, b] = getArtDirectionColorMultiplier('grass', grassSurface.color)
+    grassMaterial.color.setRGB(r, g, b)
+    globalGrassMaterial.color.setRGB(r, g, b)
+    ;[shaderRef.current, globalShaderRef.current].forEach((shader) => {
+      if (shader?.uniforms.uArtGrassRoughness) {
+        shader.uniforms.uArtGrassRoughness.value = grassSurface.roughness
+      }
+    })
+  }, [globalGrassMaterial, grassMaterial, grassSurface.color, grassSurface.roughness, globalShaderRef, shaderRef])
+
+  return null
+}
+
 function TerrainGroundCover({
   playerPositionRef,
   ballRef,
@@ -672,8 +694,6 @@ function TerrainGroundCover({
   biomeAreas = MAP_BIOME_AREAS,
   reducedDensity = false,
 }) {
-  const artDirection = useArtDirectionValues()
-  const grassSurface = artDirection.surfaces.grass
   const maxQuadrantInstances = reducedDensity ? 50_000 : MAX_QUADRANT_INSTANCES
   const maxGlobalGrassInstances = reducedDensity ? 12_000 : MAX_GLOBAL_GRASS_INSTANCES_PER_REGION
   const localGrassGridStep = reducedDensity ? 0.3 : GRASS_GRID_STEP
@@ -825,17 +845,6 @@ function TerrainGroundCover({
     return mat
   }, [grassTexture])
   useEffect(() => () => globalGrassMaterial.dispose(), [globalGrassMaterial])
-
-  useEffect(() => {
-    const [r, g, b] = getArtDirectionColorMultiplier('grass', grassSurface.color)
-    grassMaterial.color.setRGB(r, g, b)
-    globalGrassMaterial.color.setRGB(r, g, b)
-    ;[shaderRef.current, globalShaderRef.current].forEach((shader) => {
-      if (shader?.uniforms.uArtGrassRoughness) {
-        shader.uniforms.uArtGrassRoughness.value = grassSurface.roughness
-      }
-    })
-  }, [globalGrassMaterial, grassMaterial, grassSurface.color, grassSurface.roughness])
 
   // Initialize mesh counts to 0 on mount to avoid showing uninitialized instances
   useLayoutEffect(() => {
@@ -1334,6 +1343,12 @@ function TerrainGroundCover({
 
   return (
     <group visible={active} userData={{ debugCategory: 'grass' }}>
+      <GrassArtDirectionUpdater
+        grassMaterial={grassMaterial}
+        globalGrassMaterial={globalGrassMaterial}
+        shaderRef={shaderRef}
+        globalShaderRef={globalShaderRef}
+      />
       {QUADRANTS.map((quadrant, qi) => (
         <instancedMesh
           key={quadrant.id}

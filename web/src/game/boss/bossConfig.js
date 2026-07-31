@@ -31,7 +31,7 @@ export const SLIME_BOSS = {
     maxRadius: 10, // rayon max de l’onde
     band: 1.7, // épaisseur du front qui inflige les dégâts
     damage: 18,
-    dodgeHeight: 0.9, // le joueur doit être à cette hauteur (sauter) pour esquiver
+    dodgeHeight: 0.32, // fenêtre confortable autour de l'apogée du saut
   },
 
   // Multiplicateur de vitesse d'attaque par phase (1 → 3). Le boss devient plus agressif.
@@ -51,7 +51,14 @@ export const SLIME_BOSS = {
   summons: {
     phases: [2, 3],
     countByPhase: [0, 3, 5],
-    radius: 0.75,
+    radius: 0.48,
+    targetHeight: 1.2,
+    modelTargetHeight: 0.77,
+    // Reprend les sizeScale des spawners réellement présents sur la carte.
+    sizeScaleByKind: {
+      green: 0.6,
+      blue: 0.95,
+    },
     speed: 1.55,
     damage: 7,
     attackCooldownMs: 1250,

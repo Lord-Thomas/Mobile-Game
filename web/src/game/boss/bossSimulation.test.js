@@ -16,6 +16,11 @@ describe('bossSimulation', () => {
     expect(SLIME_BOSS.maxHp).toBe(1000)
   })
 
+  it('reprend la taille des slimes vert et bleu réellement présents sur la carte', () => {
+    expect(SLIME_BOSS.summons.sizeScaleByKind.green).toBe(0.6)
+    expect(SLIME_BOSS.summons.sizeScaleByKind.blue).toBe(0.95)
+  })
+
   it('refuse une double invocation et démarre avec tous ses PV', () => {
     const first = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 100 })
     const second = summonBoss(first, { altarId: 'b', spawn: [4, 0, 4], now: 200 })
@@ -46,6 +51,24 @@ describe('bossSimulation', () => {
       `${minion.position[0].toFixed(2)}:${minion.position[2].toFixed(2)}`
     )))
     expect(occupied.size).toBe(state.minions.length)
+    state.minions.forEach((minion) => {
+      const distanceToBoss = Math.hypot(
+        minion.position[0] - state.position[0],
+        minion.position[2] - state.position[2],
+      )
+      expect(distanceToBoss).toBeGreaterThanOrEqual(
+        SLIME_BOSS.melee.hitRadius + SLIME_BOSS.summons.radius - 0.001,
+      )
+    })
+    for (let left = 0; left < state.minions.length; left += 1) {
+      for (let right = left + 1; right < state.minions.length; right += 1) {
+        const distance = Math.hypot(
+          state.minions[left].position[0] - state.minions[right].position[0],
+          state.minions[left].position[2] - state.minions[right].position[2],
+        )
+        expect(distance).toBeGreaterThanOrEqual(SLIME_BOSS.summons.radius * 2 - 0.01)
+      }
+    }
   })
 
   it('permet de blesser puis éliminer un slime invoqué', () => {
@@ -65,6 +88,19 @@ describe('bossSimulation', () => {
     expect(state.attack?.kind).toBe('shockwave')
     const middle = (state.attack.jumpEndsAt + state.attack.activeEndsAt) / 2
     expect(getShockwaveRadius(state.attack, middle)).toBeCloseTo(SLIME_BOSS.shockwave.maxRadius / 2, 3)
+  })
+
+  it('attribue des emplacements stables aux projectiles pour reutiliser le pool VFX', () => {
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    state = damageBoss(state, SLIME_BOSS.maxHp * 0.45, { now: 10 })
+    state = stepBoss(state, { now: 1700, dt: 0.1, players: [player] })
+
+    expect(state.attack?.kind).toBe('projectiles')
+    expect(state.hazards).toHaveLength(SLIME_BOSS.projectile.countByPhase[1])
+    expect(state.hazards.map((hazard) => hazard.slot)).toEqual([0, 1, 2])
+
+    const unchanged = stepBoss(state, { now: 1800, dt: 0.1, players: [player] })
+    expect(unchanged.hazards.map((hazard) => hazard.slot)).toEqual([0, 1, 2])
   })
 
   it('sépare l’impact esquivable du bond et l’onde à sauter', () => {
@@ -155,6 +191,30 @@ describe('bossSimulation', () => {
 
     expect(state.position[2]).toBeGreaterThan(0.2)
     expect(SLIME_BOSS.melee.hitRadius).toBeGreaterThan(SLIME_BOSS.targetHeight * 0.5)
+  })
+
+  it('recalcule la hauteur du boss et de ses invocations depuis la topologie du sol', () => {
+    const getGroundHeight = (x, z) => 1.5 + x * 0.08 + z * 0.04
+    let state = summonBoss(createInactiveBossState(), { altarId: 'a', spawn: [0, 0, 0], now: 0 })
+    state = damageBoss(state, SLIME_BOSS.maxHp * 0.45, { now: 10 })
+    state = stepBoss(state, {
+      now: 1700,
+      dt: 0.1,
+      players: [{ ...player, position: [0, 2, 12] }],
+      getGroundHeight,
+    })
+
+    expect(state.position[1]).toBeCloseTo(
+      getGroundHeight(state.position[0], state.position[2]),
+      5,
+    )
+    expect(state.minions.length).toBeGreaterThan(0)
+    state.minions.forEach((minion) => {
+      expect(minion.position[1]).toBeCloseTo(
+        getGroundHeight(minion.position[0], minion.position[2]),
+        5,
+      )
+    })
   })
 
   it('passe par dying puis reset après la mort', () => {

@@ -207,11 +207,16 @@ function startAttack(state, now, players) {
   const count = cfg.countByPhase[state.phase - 1] ?? 3
   const target = closestPlayer(state.position, players)?.position ?? state.position
   const hazards = []
+  const occupiedSlots = new Set(state.hazards.map((hazard) => hazard.slot).filter(Number.isFinite))
   for (let index = 0; index < count; index += 1) {
     const [ox, oz] = deterministicOffset(sequence, index, 5.2)
     const impactAt = now + cfg.telegraphMs + index * 110
+    let slot = 0
+    while (occupiedSlots.has(slot)) slot += 1
+    occupiedSlots.add(slot)
     hazards.push({
       id: `pool-${sequence}-${index}`,
+      slot,
       position: [target[0] + ox, state.spawn[1], target[2] + oz],
       radius: cfg.poolRadius,
       telegraphAt: now,
@@ -244,6 +249,13 @@ function moveToward(position, target, speed, dt) {
   return [position[0] + (dx / length) * step, position[1], position[2] + (dz / length) * step]
 }
 
+function followGround(position, getGroundHeight) {
+  if (typeof getGroundHeight !== 'function') return position
+  const groundY = getGroundHeight(position[0], position[2], position[1])
+  if (!Number.isFinite(groundY) || Math.abs(groundY - position[1]) < EPSILON) return position
+  return [position[0], groundY, position[2]]
+}
+
 function getMinionEngagementPosition(minion, targetPosition) {
   const slot = Math.max(0, Math.floor(finite(minion?.slot, 0)))
   const angle = slot * 2.399963
@@ -255,7 +267,89 @@ function getMinionEngagementPosition(minion, targetPosition) {
   ]
 }
 
-export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {}) {
+function pushPositionOutside(position, obstacle, minimumDistance, fallbackSeed = 0) {
+  let dx = position[0] - obstacle[0]
+  let dz = position[2] - obstacle[2]
+  let distance = Math.hypot(dx, dz)
+  if (distance >= minimumDistance) return position
+  if (distance < EPSILON) {
+    const angle = fallbackSeed * 2.399963 + 0.73
+    dx = Math.sin(angle)
+    dz = Math.cos(angle)
+    distance = 1
+  }
+  const scale = minimumDistance / distance
+  return [
+    obstacle[0] + dx * scale,
+    position[1],
+    obstacle[2] + dz * scale,
+  ]
+}
+
+function separateBossEnemies(bossPosition, minions) {
+  if (!minions.length) return minions
+  const bossRadius = SLIME_BOSS.melee.hitRadius
+  const minionRadius = SLIME_BOSS.summons.radius
+  const positions = minions.map((minion) => [...minion.position])
+
+  // Plusieurs contacts simultanés (boss + huit slimes) demandent quelques passes
+  // supplémentaires pour converger sans laisser de léger chevauchement visuel.
+  for (let pass = 0; pass < 12; pass += 1) {
+    for (let index = 0; index < positions.length; index += 1) {
+      positions[index] = pushPositionOutside(
+        positions[index],
+        bossPosition,
+        bossRadius + minionRadius,
+        minions[index].slot ?? index,
+      )
+    }
+    for (let left = 0; left < positions.length; left += 1) {
+      for (let right = left + 1; right < positions.length; right += 1) {
+        const dx = positions[right][0] - positions[left][0]
+        const dz = positions[right][2] - positions[left][2]
+        let distance = Math.hypot(dx, dz)
+        const minimumDistance = minionRadius * 2
+        if (distance >= minimumDistance) continue
+        let directionX = dx
+        let directionZ = dz
+        if (distance < EPSILON) {
+          const angle = ((minions[right].slot ?? right) + 1) * 2.399963
+          directionX = Math.sin(angle)
+          directionZ = Math.cos(angle)
+          distance = 1
+        }
+        const correction = (minimumDistance - distance) * 0.5
+        const normalX = directionX / distance
+        const normalZ = directionZ / distance
+        positions[left][0] -= normalX * correction
+        positions[left][2] -= normalZ * correction
+        positions[right][0] += normalX * correction
+        positions[right][2] += normalZ * correction
+      }
+    }
+  }
+
+  for (let index = 0; index < positions.length; index += 1) {
+    positions[index] = pushPositionOutside(
+      positions[index],
+      bossPosition,
+      bossRadius + minionRadius,
+      minions[index].slot ?? index,
+    )
+  }
+
+  return minions.map((minion, index) => ({
+    ...minion,
+    position: positions[index],
+  }))
+}
+
+export function stepBoss(state, {
+  now = Date.now(),
+  dt = 0,
+  players = [],
+  getGroundHeight = null,
+} = {}) {
   if (!state?.active) return state ?? createInactiveBossState()
   if (state.state === 'dying') {
     return now >= state.dyingEndsAt ? resetBoss(state, 'defeated') : state
@@ -272,7 +366,12 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
   let next = state
 
   if (next.state === 'appearing') {
-    if (now < next.nextAttackAt) return next
+    if (now < next.nextAttackAt) {
+      const position = followGround(next.position, getGroundHeight)
+      return position === next.position
+        ? next
+        : { ...next, revision: next.revision + 1, position }
+    }
     next = { ...next, revision: next.revision + 1, state: 'active' }
   }
 
@@ -296,8 +395,13 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
     }
   }
 
+  const groundedBossPosition = followGround(next.position, getGroundHeight)
+  if (groundedBossPosition !== next.position) {
+    next = { ...next, revision: next.revision + 1, position: groundedBossPosition }
+  }
+
   if (next.minions.length && availablePlayers.length) {
-    const minions = next.minions.map((minion) => {
+    const movedMinions = next.minions.map((minion) => {
       const target = closestPlayer(minion.position, availablePlayers)
       if (!target) return minion
       const engagementPosition = getMinionEngagementPosition(minion, target.position)
@@ -310,6 +414,10 @@ export function stepBoss(state, { now = Date.now(), dt = 0, players = [] } = {})
           Math.min(Math.max(dt, 0), 0.25),
         ),
       }
+    })
+    const minions = separateBossEnemies(next.position, movedMinions).map((minion) => {
+      const position = followGround(minion.position, getGroundHeight)
+      return position === minion.position ? minion : { ...minion, position }
     })
     next = { ...next, revision: next.revision + 1, minions }
   }
@@ -361,7 +469,12 @@ export function sanitizeBossSnapshot(value) {
     phase: Math.max(1, Math.min(3, Math.floor(finite(value.phase, 1)))),
     spawn: safePosition(value.spawn),
     position: safePosition(value.position, value.spawn),
-    hazards: Array.isArray(value.hazards) ? value.hazards.slice(0, 12) : [],
+    hazards: Array.isArray(value.hazards)
+      ? value.hazards.slice(0, 12).map((hazard, index) => ({
+        ...hazard,
+        slot: Math.max(0, Math.min(11, Math.floor(finite(hazard?.slot, index)))),
+      }))
+      : [],
     minions: Array.isArray(value.minions)
       ? value.minions.slice(0, 12).map((minion, index) => {
         const kind = minion?.kind === 'blue' ? 'blue' : 'green'

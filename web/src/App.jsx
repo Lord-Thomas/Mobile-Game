@@ -453,6 +453,9 @@ registerGeneratedMobConfigs()
 
 const MOB_SEPARATION_DISTANCE = 0.95 // distance min entre deux monstres
 const MOB_SEPARATION_STRENGTH = 4.0  // force de répulsion mutuelle
+const MOB_DEFAULT_SEPARATION_RADIUS = MOB_SEPARATION_DISTANCE * 0.5
+const MOB_MAX_SEPARATION_RADIUS = SLIME_BOSS.melee.hitRadius
+const MOB_SEPARATION_QUERY_RADIUS = MOB_DEFAULT_SEPARATION_RADIUS + MOB_MAX_SEPARATION_RADIUS
 
 // ── Aggro / table de menace ──────────────────────────────────────────────────────
 // Chaque ennemi mémorise la menace générée par ceux qui le frappent (joueur +
@@ -11464,6 +11467,7 @@ function canMobSeePlayer(enemyPosition, enemyYaw, playerPosition, visibilityRang
 function RuntimeParticleEffect({
   preset,
   playing = true,
+  warmup = false,
   loop = false,
   forceOneShot = false,
   playbackId = 0,
@@ -11492,6 +11496,7 @@ function RuntimeParticleEffect({
       <ParticleEffect
         preset={preset}
         playing={playing}
+        warmup={warmup}
         loop={loop}
         forceOneShot={forceOneShot}
         playbackId={playbackId}
@@ -11536,37 +11541,74 @@ function PlayerHealingAura({ active, playerPositionRef, layer }) {
   )
 }
 
+const SUMMON_PARTICLE_POOL_SIZE = 4
+const SUMMON_PARTICLE_POOL_SLOTS = Array.from(
+  { length: SUMMON_PARTICLE_POOL_SIZE },
+  (_, index) => index,
+)
+
+function getSummonParticleBurstForSlot(bursts, kind, slot) {
+  for (let index = bursts.length - 1; index >= 0; index -= 1) {
+    const burst = bursts[index]
+    if (
+      burst.kind === kind
+      && burst.playbackId % SUMMON_PARTICLE_POOL_SIZE === slot
+    ) {
+      return burst
+    }
+  }
+  return null
+}
+
 function SummonSpellParticleBursts({ bursts, onComplete, layer, followTargetRef = null }) {
   const startPreset = useStoredParticlePreset(SUMMON_START_PARTICLE_NAME)
   const endPreset = useStoredParticlePreset(SUMMON_END_PARTICLE_NAME)
 
   return (
     <>
-      {bursts.map((burst) => (
-        <SummonSpellParticleBurst
-          key={burst.id}
-          burst={burst}
-          preset={burst.kind === 'end' ? endPreset : startPreset}
-          layer={burst.layer === OUTDOOR_LIGHT_LAYER ? [0, OUTDOOR_LIGHT_LAYER] : (burst.layer ?? layer)}
-          followTargetRef={followTargetRef}
-          onComplete={onComplete}
-        />
+      {['start', 'end'].flatMap((kind) => (
+        SUMMON_PARTICLE_POOL_SLOTS.map((slot) => {
+          const burst = getSummonParticleBurstForSlot(bursts, kind, slot)
+          return (
+            <SummonSpellParticleBurst
+              key={`${kind}-particle-slot-${slot}`}
+              burst={burst}
+              preset={kind === 'end' ? endPreset : startPreset}
+              layer={
+                burst?.layer === OUTDOOR_LIGHT_LAYER
+                  ? [0, OUTDOOR_LIGHT_LAYER]
+                  : (burst?.layer ?? layer)
+              }
+              followTargetRef={followTargetRef}
+              onComplete={onComplete}
+              slot={slot}
+            />
+          )
+        })
       ))}
     </>
   )
 }
 
-function SummonSpellParticleBurst({ burst, preset, layer, followTargetRef, onComplete }) {
+function SummonSpellParticleBurst({
+  burst,
+  preset,
+  layer,
+  followTargetRef,
+  onComplete,
+  slot,
+}) {
   const groupRef = useRef(null)
 
   useEffect(() => {
+    if (!burst) return undefined
     const durationMs = Math.max(250, (preset?.duration ?? 1) * 1000 + 350)
     const timeout = window.setTimeout(() => onComplete?.(burst.id), durationMs)
     return () => window.clearTimeout(timeout)
-  }, [burst.id, onComplete, preset?.duration])
+  }, [burst, onComplete, preset?.duration])
 
   useFrame(() => {
-    if (!burst.followTarget || !groupRef.current || !followTargetRef?.current) return
+    if (!burst?.followTarget || !groupRef.current || !followTargetRef?.current) return
     const position = followTargetRef.current
     groupRef.current.position.set(
       position.x,
@@ -11578,12 +11620,13 @@ function SummonSpellParticleBurst({ burst, preset, layer, followTargetRef, onCom
   if (!preset) return null
 
   return (
-    <group ref={groupRef} position={burst.position}>
+    <group ref={groupRef} position={burst?.position ?? [0, -500, 0]}>
       <RuntimeParticleEffect
         preset={preset}
-        playing
+        playing={Boolean(burst)}
+        warmup
         forceOneShot
-        playbackId={burst.playbackId}
+        playbackId={burst?.playbackId ?? `summon-particle-warmup-${slot}`}
         layer={layer}
       />
     </group>
@@ -12311,6 +12354,10 @@ function SmallMushroomEnemy({
     const mob = {
       getPosition: () => currentPositionRef.current,
       triggerAggro,
+      separationRadius: Math.max(
+        MOB_DEFAULT_SEPARATION_RADIUS,
+        cfg.targetRadius ?? MOB_DEFAULT_SEPARATION_RADIUS,
+      ),
     }
     mob.spatialValue = {
       id: enemyId,
@@ -12676,7 +12723,7 @@ function SmallMushroomEnemy({
             nearbyMobsScratchRef.current,
             enemyPosition.x,
             enemyPosition.z,
-            MOB_SEPARATION_DISTANCE,
+            MOB_SEPARATION_QUERY_RADIUS,
           )
         : [...mobGroupRef.current].map(([id, mob]) => ({
             id,
@@ -12689,10 +12736,21 @@ function SmallMushroomEnemy({
         const dx = enemyPosition.x - op.x
         const dz = enemyPosition.z - op.z
         const d = Math.hypot(dx, dz)
-        if (d > 0.0001 && d < MOB_SEPARATION_DISTANCE) {
-          const f = (MOB_SEPARATION_DISTANCE - d) / MOB_SEPARATION_DISTANCE
-          pushX += (dx / d) * f
-          pushZ += (dz / d) * f
+        const minimumDistance = (currentMob?.separationRadius ?? MOB_DEFAULT_SEPARATION_RADIUS)
+          + (mob?.separationRadius ?? MOB_DEFAULT_SEPARATION_RADIUS)
+        if (d > 0.0001 && d < minimumDistance) {
+          const normalX = dx / d
+          const normalZ = dz / d
+          if (mob?.immovableForSeparation) {
+            const penetration = minimumDistance - d
+            enemyPosition.x += normalX * penetration
+            enemyPosition.z += normalZ * penetration
+            separatedThisFrame = true
+          } else {
+            const f = (minimumDistance - d) / minimumDistance
+            pushX += normalX * f
+            pushZ += normalZ * f
+          }
         } else if (d <= 0.0001) {
           pushX += Math.random() - 0.5
           pushZ += Math.random() - 0.5
@@ -17653,6 +17711,11 @@ const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload('/models/player/anim/sitting-idle.glb'),
   () => useGLTF.preload('/models/player/anim/stand-up.glb'),
   () => useGLTF.preload('/models/ball/ballon.glb'),
+  () => useGLTF.preload(ANGEL_WINGS_MODEL_URL),
+  () => useLoader.preload(GLTFLoader, SKELETON_ENEMY_MODEL_GLB_URL),
+  () => useTexture.preload(SKELETON_ENEMY_TEXTURE_URL),
+  () => useLoader.preload(GLTFLoader, MUSHROOM_ENEMY_MODEL_GLB_URL),
+  () => useGLTF.preload('/models/cat.glb'),
   ...Object.values(MOUNT_CONFIGS)
     .filter((mount) => mount.modelUrl)
     .map((mount) => () => useGLTF.preload(mount.modelUrl)),
@@ -17674,41 +17737,7 @@ function startStableInitialAssetPreloads() {
   return stableInitialAssetPreloadPromise
 }
 
-// Assets EXTÉRIEURS lourds qui, sans préchargement, ne se chargent qu'au franchissement
-// de la porte (le diag `?transitiondiag` les montre finir à ~7,3–7,7 s, en plein pic de
-// transition) : surtout les squelettes/champignons FBX (parse + skinning coûteux). On
-// les précharge en `requestIdleCallback` APRÈS la chute de l'overlay, pendant que le
-// joueur explore l'intérieur → leur coût réseau + parse sort du pic « sortie dehors ».
-// Ce sont des preloads de cache loader (drei) : AUCUN montage, donc aucun changement
-// visuel ni de scène. Le montage/skinning GPU reste fait au passage (cf. note perf),
-// mais sur des données déjà parsées en mémoire.
-const OUTDOOR_IDLE_PRELOADS = [
-  () => useLoader.preload(GLTFLoader, SKELETON_ENEMY_MODEL_GLB_URL),
-  () => useTexture.preload(SKELETON_ENEMY_TEXTURE_URL),
-  () => useLoader.preload(GLTFLoader, MUSHROOM_ENEMY_MODEL_GLB_URL),
-  () => useGLTF.preload('/models/cat.glb'),
-]
-
-let outdoorIdlePreloadStarted = false
 const enemyAssetPreloadPromises = new Map()
-
-// Lance les préchargements extérieurs au prochain temps mort du navigateur (repli
-// setTimeout si requestIdleCallback indisponible). Idempotent.
-function startOutdoorIdlePreloads() {
-  if (outdoorIdlePreloadStarted || typeof window === 'undefined') return
-  outdoorIdlePreloadStarted = true
-  const run = () => {
-    OUTDOOR_IDLE_PRELOADS.forEach((preload) => {
-      // Sérialisé sur des microtâches pour ne pas empiler tous les parse en une frame.
-      Promise.resolve().then(preload).catch(() => { /* preload best-effort */ })
-    })
-  }
-  if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(run, { timeout: 4000 })
-  } else {
-    window.setTimeout(run, 1200)
-  }
-}
 
 function preloadEnemyAssetOnce(key, preload) {
   if (!key) return Promise.resolve()
@@ -18001,8 +18030,10 @@ function ShaderWarmupGate({
           percent: 99,
           phase: 'Stabilisation de la première image...',
         })
-        await waitFrame()
-        await waitFrame()
+        // Give React/CSS enough frames to mount the HUD behind the loading veil.
+        // Removing the veil is then a cheap visibility change instead of a large
+        // first-gameplay-frame commit.
+        for (let frame = 0; frame < 4; frame += 1) await waitFrame()
       }
 
       if (!cancelled) {
@@ -19214,7 +19245,7 @@ function App() {
   const playerVelocityRef = useRef({ x: 0, z: 0 })
   const combatTargetsRef = useRef(new Map())
   const mobGroupRef = useRef(new Map())
-  const mobSpatialIndexRef = useRef(new SpatialHash2D(MOB_SEPARATION_DISTANCE * 2))
+  const mobSpatialIndexRef = useRef(new SpatialHash2D(MOB_SEPARATION_QUERY_RADIUS))
   // Cibles que les ennemis peuvent prendre pour cible via l'aggro : le joueur
   // ('player') et les squelettes invoqués. Sert aussi à router les dégâts.
   const allyTargetsRef = useRef(new Map())
@@ -21400,7 +21431,12 @@ function App() {
   const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
   const loadingUiActive = !shaderWarmupComplete || zoneFadeActive
-  const showCaptureUi = !loadingUiActive && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
+  const preloadGameplayUi = !shaderWarmupComplete
+    && !zoneFadeActive
+    && loadingExperience.kind === 'initial'
+    && loadingExperience.percent >= 99
+  const showCaptureUi = (!loadingUiActive || preloadGameplayUi)
+    && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
   const showGameplayUi = showCaptureUi && mode === 'play'
   const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || companionMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen || Boolean(youtubeFrameEditor)
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
@@ -23198,7 +23234,6 @@ function App() {
     window.requestAnimationFrame(() => setShaderWarmupComplete(true))
     // L'overlay est tombé : on profite du temps mort pour précharger les assets
     // extérieurs lourds avant que le joueur n'atteigne la porte (cf. note perf).
-    startOutdoorIdlePreloads()
   }, [updateLoadingExperience])
 
   const consumeSpawnRequest = useCallback((token) => {
@@ -23801,6 +23836,7 @@ function App() {
             timeOffsetRef={hostTimeOffsetRef}
             authority={!isGuestVisit}
             enabled={currentZone === ZONES.outside && mode === 'play'}
+            mobGroupRef={mobGroupRef}
           />
           <LootDrops
             drops={lootDrops}
@@ -23865,7 +23901,7 @@ function App() {
       {!loadingUiActive && mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
       <GpuWarning visible={!loadingUiActive && mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
-      {!loadingUiActive && mode === 'play' && (
+      {showGameplayUi && (
         <ControlsOverlay
           touchRef={touchRef}
           controlSettings={controlSettings}

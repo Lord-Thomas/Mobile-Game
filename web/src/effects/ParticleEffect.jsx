@@ -144,6 +144,22 @@ function randomUnitVector(rng, target) {
 const tmpDir = new Vector3()
 const tmpRandom = new Vector3()
 const tmpBase = new Vector3()
+const maxPointSizeByRenderer = new WeakMap()
+
+function getRendererMaxPointSize(renderer) {
+  const cached = maxPointSizeByRenderer.get(renderer)
+  if (cached) return cached
+  let maxPointSize = 320
+  try {
+    const ctx = renderer.getContext()
+    const range = ctx.getParameter(ctx.ALIASED_POINT_SIZE_RANGE)
+    if (range?.[1]) maxPointSize = Math.min(320, range[1])
+  } catch {
+    // La valeur prudente par défaut convient si le contexte n'est pas encore disponible.
+  }
+  maxPointSizeByRenderer.set(renderer, maxPointSize)
+  return maxPointSize
+}
 
 function buildGeometry(emitter, seed) {
   const rng = mulberry32(seed)
@@ -370,6 +386,9 @@ export default function ParticleEffect({
   }, [])
 
   useFrame((state) => {
+    if (maxPointSizeRef.current === 0 && (playing || warmup)) {
+      maxPointSizeRef.current = getRendererMaxPointSize(state.gl)
+    }
     if (!playing) return
     if (startRef.current === null) startRef.current = state.clock.elapsedTime
     const clockTime = state.clock.elapsedTime - startRef.current
@@ -387,16 +406,6 @@ export default function ParticleEffect({
     }
     const pixelScale = (state.size.height * state.viewport.dpr)
       / (2 * Math.tan((state.camera.fov * Math.PI) / 360))
-
-    if (maxPointSizeRef.current === 0) {
-      try {
-        const ctx = state.gl.getContext()
-        const range = ctx.getParameter(ctx.ALIASED_POINT_SIZE_RANGE)
-        maxPointSizeRef.current = range && range[1] ? Math.min(320, range[1]) : 320
-      } catch {
-        maxPointSizeRef.current = 320
-      }
-    }
 
     for (const material of materialsRef.current) {
       // eslint-disable-next-line react-hooks/immutability -- per-frame uniform writes are the standard r3f pattern

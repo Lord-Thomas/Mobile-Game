@@ -6,7 +6,7 @@ const base = {
   playerCenterToFoot: 0.42,
   mountFootY: null,
   surfaceY: 0,
-  dodgeHeight: 0.9,
+  dodgeHeight: 0.32,
 }
 
 describe('isGroundWaveContact', () => {
@@ -29,6 +29,10 @@ describe('isGroundWaveContact', () => {
   })
 
   it('laisse un saut ou une monture volante passer au-dessus de l’onde', () => {
+    expect(isGroundWaveContact({
+      ...base,
+      playerCenterY: 0.82,
+    })).toBe(false)
     expect(isGroundWaveContact({
       ...base,
       playerCenterY: 1.5,
