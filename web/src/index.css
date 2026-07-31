@@ -144,6 +144,15 @@ canvas {
   pointer-events: none;
 }
 
+.game-loading-overlay--compact {
+  padding: 0;
+  background: #03143b;
+}
+
+.game-loading-overlay--compact::before {
+  background: radial-gradient(circle at 50% 50%, #0b3880 0%, #03143b 68%);
+}
+
 .game-loading-panel {
   position: relative;
   z-index: 1;

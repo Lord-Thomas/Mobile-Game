@@ -33,6 +33,15 @@ const progress = {
   roomLightOn: false,
   lightColor: '#ff0000',
   lightIntensity: 1.5,
+  lastLocation: {
+    zone: 'outside',
+    position: [12, 3.5, -8],
+    rotationY: 1.2,
+    cameraYaw: 0.8,
+    cameraPitch: 0.25,
+    cameraDistance: 9,
+    savedAt: 123456,
+  },
 }
 
 describe('progressService', () => {
@@ -47,6 +56,8 @@ describe('progressService', () => {
     expect(restored.roomLightOn).toBe(false)
     expect(restored.lightColor).toBe('#ff0000')
     expect(restored.lightIntensity).toBe(1.5)
+    expect(row.world_settings.lastLocation).toEqual(progress.lastLocation)
+    expect(restored.lastLocation).toEqual(progress.lastLocation)
   })
 
   it('retombe sur des valeurs par defaut quand la maison est absente', () => {

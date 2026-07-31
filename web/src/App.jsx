@@ -14,6 +14,7 @@ import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchT
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { getFallDamage } from './game/fallDamage'
+import { createSavedPlayerLocation, normalizeSavedPlayerLocation } from './game/playerLocation'
 import { OUTDOOR_PLAYER_COLLISION_HEIGHT, overlapsOutdoorColliderHeight } from './game/outdoorObstacleCollision'
 import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
 import { WORLD_LOADING_TIPS, advanceLoadingExperience, createLoadingExperience } from './game/loadingExperience'
@@ -4247,28 +4248,44 @@ function Player({
     cameraLookRef.current.y = y + 0.55
     cameraLookRef.current.z = z
 
-    if (spawnRequest.zone === ZONES.outside) {
-      const touch = touchRef.current
-      const cameraSettings = CAMERA_SETTINGS.outside
-      const cameraDistance = cameraSettings.distance
-      const cameraPitch = MathUtils.clamp(touch.cameraPitch ?? -0.22, -0.8, 0.35)
-      const cameraYaw = -Math.PI / 2
-      const horizontalDistance = cameraDistance * Math.cos(cameraPitch)
-      const targetCamera = clampCameraInPlayableVolume(
-        x + Math.sin(cameraYaw) * horizontalDistance,
-        y + cameraSettings.height + Math.sin(cameraPitch) * cameraDistance,
-        z + Math.cos(cameraYaw) * horizontalDistance,
-        ZONES.outside,
-      )
+    const restoredYaw = Number.isFinite(spawnRequest.rotationY)
+      ? spawnRequest.rotationY
+      : visualRef.current?.rotation.y ?? 0
+    if (visualRef.current) visualRef.current.rotation.y = restoredYaw
+    if (playerBodyYawRef) playerBodyYawRef.current = restoredYaw
 
-      touch.cameraYaw = cameraYaw
-      touch.cameraPitch = cameraPitch
-      touch.cameraDistance = cameraDistance
-      camera.position.set(targetCamera.x, targetCamera.y, targetCamera.z)
-      camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
-    }
+    const touch = touchRef.current
+    const cameraSettings = CAMERA_SETTINGS[spawnRequest.zone] ?? CAMERA_SETTINGS.interior
+    const cameraDistance = MathUtils.clamp(
+      Number.isFinite(spawnRequest.cameraDistance)
+        ? spawnRequest.cameraDistance
+        : cameraSettings.distance,
+      CAMERA_MIN_DISTANCE,
+      CAMERA_MAX_DISTANCE,
+    )
+    const cameraPitch = MathUtils.clamp(
+      Number.isFinite(spawnRequest.cameraPitch) ? spawnRequest.cameraPitch : touch.cameraPitch ?? -0.22,
+      PLAYER_CAMERA_PITCH_MIN,
+      PLAYER_CAMERA_PITCH_MAX,
+    )
+    const cameraYaw = Number.isFinite(spawnRequest.cameraYaw)
+      ? spawnRequest.cameraYaw
+      : spawnRequest.zone === ZONES.outside ? -Math.PI / 2 : touch.cameraYaw ?? 0
+    const horizontalDistance = cameraDistance * Math.cos(cameraPitch)
+    const targetCamera = clampCameraInPlayableVolume(
+      x + Math.sin(cameraYaw) * horizontalDistance,
+      y + cameraSettings.height + Math.sin(cameraPitch) * cameraDistance,
+      z + Math.cos(cameraYaw) * horizontalDistance,
+      spawnRequest.zone,
+    )
+
+    touch.cameraYaw = cameraYaw
+    touch.cameraPitch = cameraPitch
+    touch.cameraDistance = cameraDistance
+    camera.position.set(targetCamera.x, targetCamera.y, targetCamera.z)
+    camera.lookAt(cameraLookRef.current.x, cameraLookRef.current.y, cameraLookRef.current.z)
     onSpawnConsumed?.(spawnRequest.token)
-  }, [camera, onSpawnConsumed, spawnRequest, playerPositionRef, touchRef])
+  }, [camera, onSpawnConsumed, playerBodyYawRef, spawnRequest, playerPositionRef, touchRef])
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -12978,6 +12995,7 @@ function isOutdoorEnemySpawnSafelyOffscreen(camera, spawnPosition) {
 function ProgressiveOutdoorEnemyLayer({
   enabled,
   assetsReady,
+  retainMounted = false,
   slots,
   transitionPreparing,
   playerPositionRef,
@@ -13055,7 +13073,7 @@ function ProgressiveOutdoorEnemyLayer({
 
     return selected.sort((left, right) => left.entryDistance - right.entryDistance)
   }, [prioritizedSlots])
-  const targetCount = enabled && assetsReady ? entrySlots.length : 0
+  const targetCount = (enabled || retainMounted) && assetsReady ? entrySlots.length : 0
   const { count, complete } = useProgressiveMountCount({
     enabled: true,
     total: targetCount,
@@ -13069,10 +13087,10 @@ function ProgressiveOutdoorEnemyLayer({
   const [streamedSlotIds, setStreamedSlotIds] = useState([])
 
   useEffect(() => {
-    if (enabled && assetsReady) return
+    if ((enabled || retainMounted) && assetsReady) return
     streamedSlotIdsRef.current = new Set()
     setStreamedSlotIds([])
-  }, [assetsReady, enabled])
+  }, [assetsReady, enabled, retainMounted])
 
   useEffect(() => {
     if (
@@ -13175,7 +13193,7 @@ function ProgressiveOutdoorEnemyLayer({
     onProgress?.(count, targetCount, complete)
   }, [complete, count, onProgress, targetCount])
 
-  if (!enabled || orderedSlots.length === 0) return null
+  if (orderedSlots.length === 0) return null
   return (
     <Profiler id="MushroomEnemies" onRender={recordRenderProfile}>
       <Suspense fallback={null}>
@@ -13185,7 +13203,7 @@ function ProgressiveOutdoorEnemyLayer({
             enemyId={slot.id}
             spawnIndex={index}
             spawnPositionOverride={slot.spawnPosition}
-            active
+            active={enabled}
             playerPositionRef={playerPositionRef}
             registerCombatTarget={stableRegisterCombatTarget}
             onDefeated={stableOnDefeated}
@@ -17805,7 +17823,7 @@ function waitForPromiseWithTimeout(promise, timeoutMs) {
   })
 }
 
-function WorldLoadingOverlay({ active, experience }) {
+function WorldLoadingOverlay({ active, experience, compact = false }) {
   const [tipIndex, setTipIndex] = useState(0)
 
   useEffect(() => {
@@ -17817,6 +17835,16 @@ function WorldLoadingOverlay({ active, experience }) {
   }, [active, experience.kind])
 
   if (!active) return null
+
+  if (compact) {
+    return (
+      <div
+        className="game-loading-overlay game-loading-overlay--compact"
+        role="status"
+        aria-label={experience.phase}
+      />
+    )
+  }
 
   const title = experience.kind === 'transition'
     ? 'Voyage en cours'
@@ -18921,6 +18949,7 @@ function App() {
   }, [])
   const progressScope = isAdminMode ? 'admin' : 'player'
   const progressStorageKey = isAdminMode ? `${SKIN_STORAGE_KEY}:admin` : SKIN_STORAGE_KEY
+  const playerLocationStorageKey = `${progressStorageKey}:last-location`
   const verticalFrameSize = useVerticalFrameSize(isAdminMode || isVerticalFrameMode)
   const [performanceSettings, setPerformanceSettings] = useState(loadPerformanceSettings)
   const [controlSettings, setControlSettings] = useState(loadControlSettings)
@@ -19363,8 +19392,12 @@ function App() {
   const mode = useGameStore((s) => s.view.mode)
   const currentZone = useGameStore((s) => s.view.zone)
   const [zoneFadeActive, setZoneFadeActive] = useState(false)
-  const [outdoorEntryPreparing, setOutdoorEntryPreparing] = useState(false)
-  const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
+  const [compactZoneTransition, setCompactZoneTransition] = useState(false)
+  // Prepare the complete outdoor runtime behind the first loading screen. It
+  // stays mounted but dormant afterwards, so door travel never pays the mount
+  // and shader cost during gameplay.
+  const [outdoorEntryPreparing, setOutdoorEntryPreparing] = useState(true)
+  const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(true)
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
   const [outdoorRuntimeRevealStage, setOutdoorRuntimeRevealStage] = useState(0)
   const [outdoorEnemyAssetsReady, setOutdoorEnemyAssetsReady] = useState(false)
@@ -19503,6 +19536,7 @@ function App() {
   const skipNextCloudSaveRef = useRef(false)
   const authUserRef = useRef(null)
   const latestProgressRef = useRef(null)
+  const playerLocationRestoredRef = useRef(false)
   const personalProgressRef = useRef(null)
   const [personalProgressVersion, setPersonalProgressVersion] = useState(0)
   const [worldDataReady, setWorldDataReady] = useState(() => !isSupabaseConfigured)
@@ -19695,10 +19729,12 @@ function App() {
 
   useEffect(() => {
     if (!enemiesRevealReady || monsterSpawnSlots.length === 0) {
-      setOutdoorEnemyAssetsReady(false)
-      setOutdoorEnemiesMounted(false)
-      setVisibleOutdoorEnemyCount(0)
-      setOutdoorEnemyEntryTargetCount(0)
+      if (!outdoorTransitionPrimed) {
+        setOutdoorEnemyAssetsReady(false)
+        setOutdoorEnemiesMounted(false)
+        setVisibleOutdoorEnemyCount(0)
+        setOutdoorEnemyEntryTargetCount(0)
+      }
       return undefined
     }
 
@@ -19717,6 +19753,27 @@ function App() {
   }, [
     enemiesRevealReady,
     monsterSpawnSlots,
+    outdoorTransitionPrimed,
+  ])
+
+  const outdoorBackgroundPrepared = outdoorContentStage >= 5
+    && outdoorMapAssetsReady
+    && (monsterSpawnSlots.length === 0 || outdoorEnemiesMounted)
+
+  useEffect(() => {
+    if (
+      shaderWarmupComplete
+      && outdoorBackgroundPrepared
+      && currentZone !== ZONES.outside
+      && !zoneFadeActive
+    ) {
+      setOutdoorEntryPreparing(false)
+    }
+  }, [
+    currentZone,
+    outdoorBackgroundPrepared,
+    shaderWarmupComplete,
+    zoneFadeActive,
   ])
 
   useEffect(() => {
@@ -19903,6 +19960,15 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isAdminMode, isVerticalFrameMode])
 
+  const createCurrentPlayerLocation = () => createSavedPlayerLocation({
+    zone: currentZone,
+    position: playerPositionRef.current,
+    rotationY: playerBodyYawRef.current,
+    cameraYaw: touchRef.current.cameraYaw,
+    cameraPitch: touchRef.current.cameraPitch,
+    cameraDistance: touchRef.current.cameraDistance,
+  })
+
   const createCurrentProgressSnapshot = () => ({
     displayName,
     coins,
@@ -19936,6 +20002,7 @@ function App() {
     friends,
     quests: questProgress,
     materials,
+    lastLocation: createCurrentPlayerLocation(),
   })
 
   const createWorldSyncSnapshot = () => ({
@@ -20005,6 +20072,7 @@ function App() {
       friends,
       quests: questProgress,
       materials,
+      lastLocation: createCurrentPlayerLocation(),
       roomLightOn: savedWorld.roomLightOn ?? roomLightOn,
       lightColor: savedWorld.lightColor ?? lightColor,
       lightIntensity: savedWorld.lightIntensity ?? lightIntensity,
@@ -20076,7 +20144,13 @@ function App() {
     setPlayerHp(PLAYER_MAX_HP)
   }
 
-  const applyProgressSnapshot = (parsed, { includeCoins = true, includeIdentity = includeCoins, includeInventory = includeCoins, includeWorld = true } = {}) => {
+  const applyProgressSnapshot = (parsed, {
+    includeCoins = true,
+    includeIdentity = includeCoins,
+    includeInventory = includeCoins,
+    includeWorld = true,
+    includeLocation = includeInventory,
+  } = {}) => {
     if (!parsed) return
     if (includeIdentity && typeof parsed.displayName === 'string') setAccount('displayName',parsed.displayName)
     if (includeCoins && typeof parsed.coins === 'number') {
@@ -20230,6 +20304,44 @@ function App() {
     if (includeIdentity && Array.isArray(parsed.friends)) {
       setAccount('friends',(current) => mergeSocialFriends(current, parsed.friends))
     }
+    if (includeLocation && !playerLocationRestoredRef.current && parsed.lastLocation) {
+      const location = normalizeSavedPlayerLocation(parsed.lastLocation, {
+        limitsByZone: PLAY_AREA_LIMITS,
+        fallbackSpawns: PLAYER_SPAWNS,
+      })
+      if (location) {
+        let [x, y, z] = location.position
+        if (location.zone === ZONES.outside) {
+          const referenceFootY = y - PLAYER_HEIGHT
+          const surfaceY = Math.max(
+            getTerrainHeight(x, z),
+            getOutdoorWalkableHeight(x, z, referenceFootY),
+            getOutdoorHouseRoofHeight(x, z, referenceFootY) ?? -Infinity,
+          )
+          y = surfaceY + PLAYER_HEIGHT
+        } else {
+          const preferred = { x, z }
+          if (!isInsideHouseFloor(activeHouseLayout, preferred)) {
+            const fallback = PLAYER_SPAWNS.interior
+            x = fallback[0]
+            z = fallback[2]
+          }
+          y = PLAYER_HEIGHT
+        }
+        playerLocationRestoredRef.current = true
+        setView('zone', location.zone)
+        playerBodyYawRef.current = location.rotationY
+        setSpawnRequest({
+          zone: location.zone,
+          position: [x, y, z],
+          rotationY: location.rotationY,
+          cameraYaw: location.cameraYaw,
+          cameraPitch: location.cameraPitch,
+          cameraDistance: location.cameraDistance,
+          token: Date.now(),
+        })
+      }
+    }
   }
 
   // Remember the active session so a reload can rejoin it (auto-cleared when the
@@ -20348,7 +20460,7 @@ function App() {
     try {
       const snapshot = isGuestVisit
         ? createPersonalProgressSnapshot()
-        : latestProgressRef.current ?? createCurrentProgressSnapshot()
+        : createCurrentProgressSnapshot()
       await savePlayerProgress(snapshot, { scope: progressScope })
       if (isGuestVisit) rememberPersonalProgress(snapshot)
       setAccount('cloudSaveState','synced')
@@ -20428,10 +20540,18 @@ function App() {
     try {
       const raw = localStorage.getItem(progressStorageKey)
       if (!raw) return
+      const parsed = JSON.parse(raw)
+      const rawLocation = localStorage.getItem(playerLocationStorageKey)
+      if (rawLocation) {
+        const localLocation = JSON.parse(rawLocation)
+        if ((localLocation?.savedAt ?? 0) >= (parsed.lastLocation?.savedAt ?? 0)) {
+          parsed.lastLocation = localLocation
+        }
+      }
       // Don't let our own house overwrite the host's while rejoining a visit.
-      applyProgressSnapshot(JSON.parse(raw), { includeWorld: !hasSavedGuestSession(authUserRef.current?.id) })
+      applyProgressSnapshot(parsed, { includeWorld: !hasSavedGuestSession(authUserRef.current?.id) })
     } catch {}
-  }, [progressStorageKey])
+  }, [playerLocationStorageKey, progressStorageKey])
 
   useEffect(() => {
     const snapshot = isGuestVisit ? createPersonalProgressSnapshot() : createCurrentProgressSnapshot()
@@ -20442,6 +20562,20 @@ function App() {
       JSON.stringify(snapshot),
     )
   }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+
+  useEffect(() => {
+    const persistLocation = () => {
+      const location = createCurrentPlayerLocation()
+      if (!location) return
+      try {
+        localStorage.setItem(playerLocationStorageKey, JSON.stringify(location))
+      } catch {
+        // Private browsing/quota errors must never interrupt gameplay.
+      }
+    }
+    const intervalId = window.setInterval(persistLocation, 2000)
+    return () => window.clearInterval(intervalId)
+  }, [currentZone, playerLocationStorageKey])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -20904,13 +21038,30 @@ function App() {
   }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
 
   useEffect(() => {
+    const persistFreshSnapshot = () => {
+      const snapshot = isGuestVisit ? createPersonalProgressSnapshot() : createCurrentProgressSnapshot()
+      latestProgressRef.current = snapshot
+      try {
+        localStorage.setItem(progressStorageKey, JSON.stringify(snapshot))
+        if (snapshot.lastLocation) {
+          localStorage.setItem(playerLocationStorageKey, JSON.stringify(snapshot.lastLocation))
+        }
+      } catch {
+        // The cloud save below remains available if localStorage is unavailable.
+      }
+      return snapshot
+    }
     const saveBeforeLeaving = () => {
       if (mode !== 'customize' && document.visibilityState === 'hidden') {
+        persistFreshSnapshot()
         saveCurrentProgressToCloud()
       }
     }
     const saveOnPageHide = () => {
-      if (mode !== 'customize') saveCurrentProgressToCloud()
+      if (mode !== 'customize') {
+        persistFreshSnapshot()
+        saveCurrentProgressToCloud()
+      }
     }
 
     document.addEventListener('visibilitychange', saveBeforeLeaving)
@@ -20919,7 +21070,7 @@ function App() {
       document.removeEventListener('visibilitychange', saveBeforeLeaving)
       window.removeEventListener('pagehide', saveOnPageHide)
     }
-  }, [mode, progressScope])
+  }, [currentZone, mode, playerLocationStorageKey, progressScope, progressStorageKey])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -21446,8 +21597,12 @@ function App() {
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
-  const loadingUiActive = !shaderWarmupComplete || zoneFadeActive
-  const preloadGameplayUi = !shaderWarmupComplete
+  const initialPreparationSettled = currentZone === ZONES.outside || !outdoorEntryPreparing
+  const initialWorldReady = shaderWarmupComplete
+    && outdoorBackgroundPrepared
+    && initialPreparationSettled
+  const loadingUiActive = !initialWorldReady || zoneFadeActive
+  const preloadGameplayUi = !initialWorldReady
     && !zoneFadeActive
     && loadingExperience.kind === 'initial'
     && loadingExperience.percent >= 99
@@ -22515,6 +22670,8 @@ function App() {
   const transitionToZone = (nextZone) => {
     if (zoneFadeActive || currentZone === nextZone) return
     const goingOutside = nextZone === ZONES.outside
+    const cachedTransition = outdoorBackgroundPrepared
+    setCompactZoneTransition(cachedTransition)
     perfDiagnostics.event('transition:start', {
       from: currentZone,
       to: nextZone,
@@ -22529,10 +22686,10 @@ function App() {
     })
     if (!goingOutside) setOutdoorEntryPreparing(false)
     setZoneFadeActive(true)
-    const outdoorFadeSettleDelay = goingOutside ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS : 0
+    const outdoorFadeSettleDelay = goingOutside && !cachedTransition ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS : 40
     const zoneSwitchDelay = goingOutside
-      ? OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS + OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS
-      : 180
+      ? cachedTransition ? 90 : OUTDOOR_EXIT_FADE_SETTLE_DELAY_MS + OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS
+      : cachedTransition ? 90 : 180
     if (goingOutside) {
       window.setTimeout(() => {
         perfDiagnostics.event('transition:outdoor-prime', {
@@ -22615,7 +22772,10 @@ function App() {
             prewarmReady: true,
           })
           updateLoadingExperience({ percent: 100, phase: 'Maison prête !' })
-          window.requestAnimationFrame(() => setZoneFadeActive(false))
+          window.requestAnimationFrame(() => {
+            setZoneFadeActive(false)
+            setCompactZoneTransition(false)
+          })
           return
         }
         // Sortie : on ne lève le voile (= on ne rend la main) qu'une fois les
@@ -22634,6 +22794,7 @@ function App() {
           updateLoadingExperience({ percent: 100, phase: 'Extérieur prêt !' })
           window.requestAnimationFrame(() => {
             setZoneFadeActive(false)
+            setCompactZoneTransition(false)
             setOutdoorEntryPreparing(false)
           })
         }
@@ -22665,7 +22826,7 @@ function App() {
           window.setTimeout(pollPrewarm, 60)
         }
         pollPrewarm()
-      }, goingOutside ? OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS : 180)
+      }, cachedTransition ? 80 : goingOutside ? OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS : 180)
     }, zoneSwitchDelay)
   }
 
@@ -23306,12 +23467,9 @@ function App() {
   const outdoorStaticReady = outdoorContentMounted && outdoorContentStage >= 1
   const outdoorVegetationReady = outdoorContentMounted && outdoorContentStage >= 2
   const outdoorRuntimeContentActive = isOutsideZone || outdoorEntryPreparing
-  const outdoorObjectsReady = outdoorRuntimeContentActive
-    && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 1)
-    && outdoorContentStage >= 3
-  const outdoorGrassReady = outdoorRuntimeContentActive
-    && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 2)
-    && outdoorContentStage >= 4
+  const outdoorObjectsMounted = outdoorContentMounted && outdoorContentStage >= 3
+  const outdoorGrassMounted = outdoorContentMounted && outdoorContentStage >= 4
+  const outdoorEnemiesMountedInScene = outdoorContentMounted && outdoorContentStage >= 5
   const outdoorEnemiesReady = outdoorRuntimeContentActive
     && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 3)
     && outdoorContentStage >= 5
@@ -23580,13 +23738,13 @@ function App() {
             viewerOutside={isOutsideZone}
             playerPositionRef={playerPositionRef}
             ballRef={ballRef}
-            showGrass={outdoorGrassReady && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
+            showGrass={outdoorGrassMounted && performanceSettings.grass && (!isDebugMode || debugToggles.grass)}
             showTrees={outdoorVegetationReady && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
             showTerrain={terrainRenderMode !== 'off' && (!isDebugMode || debugToggles.terrain)}
             terrainRenderMode={terrainRenderMode}
             showRoad={outdoorStaticReady}
             showNeighborHouses={outdoorStaticReady}
-            showMapObjects={outdoorObjectsReady}
+            showMapObjects={outdoorObjectsMounted}
             preloadMapObjects={shaderWarmupComplete}
             onMapObjectsPreloaded={handleOutdoorMapAssetsReady}
             showBiomeEffects={outdoorVegetationReady}
@@ -23598,6 +23756,7 @@ function App() {
             }
             showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
             debugStats={isDebugMode}
+            runtimeActive={outdoorRuntimeContentActive}
           />
         </group>
         </Suspense>
@@ -23668,23 +23827,26 @@ function App() {
             />
           </Suspense>
           <BallRespawnGuard ballRef={ballRef} goalObject={goalObject} onOutOfBounds={handleOutOfBoundsRespawn} />
-          {outdoorEnemiesReady && (
+          {outdoorEnemiesMountedInScene && outdoorEnemyAssetsReady && (
             <Defer level={2}>
-            <ProgressiveOutdoorEnemyLayer
-              enabled={outdoorEnemiesReady}
-              assetsReady={outdoorEnemyAssetsReady}
-              slots={monsterSpawnSlots}
-              transitionPreparing={outdoorEntryPreparing}
-              playerPositionRef={playerPositionRef}
-              registerCombatTarget={registerCombatTarget}
-              onDefeated={handleSmallEnemyDefeated}
-              onHitPlayer={handlePlayerHit}
-              mobGroupRef={mobGroupRef}
-              mobSpatialIndexRef={mobSpatialIndexRef}
-              allyTargetsRef={allyTargetsRef}
-              onProgress={handleOutdoorEnemyMountProgress}
-              onReady={handleOutdoorEnemiesMounted}
-            />
+            <group visible={outdoorRuntimeContentActive}>
+              <ProgressiveOutdoorEnemyLayer
+                enabled={outdoorEnemiesReady}
+                assetsReady={outdoorEnemyAssetsReady}
+                retainMounted={outdoorTransitionPrimed}
+                slots={monsterSpawnSlots}
+                transitionPreparing={outdoorEntryPreparing}
+                playerPositionRef={playerPositionRef}
+                registerCombatTarget={registerCombatTarget}
+                onDefeated={handleSmallEnemyDefeated}
+                onHitPlayer={handlePlayerHit}
+                mobGroupRef={mobGroupRef}
+                mobSpatialIndexRef={mobSpatialIndexRef}
+                allyTargetsRef={allyTargetsRef}
+                onProgress={handleOutdoorEnemyMountProgress}
+                onReady={handleOutdoorEnemiesMounted}
+              />
+            </group>
             </Defer>
           )}
           <FireballManager
@@ -23902,6 +24064,7 @@ function App() {
       <WorldLoadingOverlay
         active={loadingUiActive}
         experience={loadingExperience}
+        compact={zoneFadeActive && compactZoneTransition}
       />
       {!loadingUiActive && mode === 'play' && isDebugMode && (
         <RenderStatsOverlay

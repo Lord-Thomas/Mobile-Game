@@ -290,6 +290,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   viewerOutside = true,
   showPlayerPlot = false,
   debugStats = false,
+  runtimeActive = viewerOutside,
   reducedGrassDensity = false,
   biomeAreas,
 }) {
@@ -302,7 +303,11 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   })
 
   return (
-    <group ref={groupRef} userData={{ debugCategory: 'outdoor' }}>
+    <group
+      ref={groupRef}
+      visible={runtimeActive}
+      userData={{ debugCategory: 'outdoor' }}
+    >
       <OutdoorLighting
         active={lightingActive}
         showSky={showSky}
@@ -323,15 +328,17 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
           onReady={onMapObjectsPreloaded}
         />
       )}
-      {showMapObjects && (
-        <MapObjectPlaceables
-          objects={DECOR_MAP_OBJECT_PLACEMENTS}
-          batchStaticTrees
-          showTrees={showTrees}
-        />
-      )}
-      {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
-      {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
+      <group visible={runtimeActive}>
+        {showMapObjects && (
+          <MapObjectPlaceables
+            objects={DECOR_MAP_OBJECT_PLACEMENTS}
+            batchStaticTrees
+            showTrees={showTrees}
+          />
+        )}
+        {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
+        {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
+      </group>
       {showTrees && (
         <InstancedTreeBatch
           trees={DISTANT_TREES}
@@ -344,7 +351,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
         <TerrainGroundCover
           playerPositionRef={playerPositionRef}
           ballRef={ballRef}
-          active={lightingActive}
+          active={lightingActive && runtimeActive}
           debugStats={debugStats}
           reducedDensity={reducedGrassDensity}
           biomeAreas={biomeAreas}
