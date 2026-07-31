@@ -3,6 +3,14 @@ import { useEffect, useRef, useState } from 'react'
 const DEFAULT_STUTTER_THRESHOLD_MS = 34
 const DEFAULT_FREEZE_THRESHOLD_MS = 80
 
+export function getProgressiveMountStartingCount(currentCount, total, initialCount) {
+  const normalizedTotal = Math.max(0, Math.floor(total))
+  const clampedCount = Math.min(Math.max(0, currentCount), normalizedTotal)
+  return clampedCount === 0 && normalizedTotal > 0
+    ? Math.min(normalizedTotal, Math.max(1, Math.floor(initialCount)))
+    : clampedCount
+}
+
 /**
  * Adds React children over several committed frames. A heavy child can therefore
  * block at most its own frame instead of being multiplied by the collection size.
@@ -38,9 +46,14 @@ export function useProgressiveMountCount({
       return undefined
     }
 
-    countRef.current = Math.min(countRef.current, normalizedTotal)
-    if (countRef.current === 0 && normalizedTotal > 0) {
-      countRef.current = Math.min(normalizedTotal, Math.max(1, initialCount))
+    const startingCount = getProgressiveMountStartingCount(
+      countRef.current,
+      normalizedTotal,
+      initialCount,
+    )
+    if (startingCount !== countRef.current) {
+      countRef.current = startingCount
+      setCount(startingCount)
     }
     let cancelled = false
     let rafId = 0
