@@ -19,7 +19,9 @@ export const PLAYER_KICK_FOOT_CONTACT_RADIUS = 0.28
 
 export const PLAYER_PUNCH_DURATION = 0.82
 export const PLAYER_PUNCH_CONTACT_DELAY = 0.28
-export const PLAYER_PUNCH_CONTACT_WINDOW = 0.14
+// A contact is sampled throughout this window rather than on a single frame.
+// It tolerates animation/network jitter without allowing attacks behind the player.
+export const PLAYER_PUNCH_CONTACT_WINDOW = 0.24
 export const PLAYER_PUNCH_DAMAGE = 10
 export const PLAYER_PUNCH_COMBO_STEP = 5    // +dégâts par coup enchaîné
 export const PLAYER_PUNCH_DAMAGE_MAX = 30   // plafond des dégâts de combo

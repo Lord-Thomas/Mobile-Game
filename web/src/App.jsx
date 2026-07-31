@@ -10,7 +10,7 @@ import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
-import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchContact } from './game/combatGeometry'
+import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchTargetAtContact } from './game/combatGeometry'
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { getFallDamage } from './game/fallDamage'
@@ -4882,11 +4882,14 @@ function Player({
     }
 
     const playerYaw = visualRef.current.rotation.y
+    const meleeWeapon = MELEE_WEAPONS[equippedWeapon] ?? null
     const punchTarget = getNearestPunchTarget({
       targets: combatTargetsRef?.current,
       playerX: nextX,
       playerZ: nextZ,
       yaw: playerYaw,
+      rangeBonus: meleeWeapon?.rangeBonus ?? 0,
+      lateralBonus: meleeWeapon?.lateralBonus ?? 0,
     })
     let kickInArc = false
     const ball = ballRef.current
@@ -4980,15 +4983,16 @@ function Player({
         }
       }
       punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
-      pendingPunchRef.current = punchTarget
-        ? {
-            targetId: punchTarget.target.id,
-            contactAt,
-            expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
-            charged,
-            fired: false,
-          }
-        : null
+      // Always open a contact window. The enemy can enter the arc during the
+      // animation, so acquiring a target only on the button-down frame loses
+      // otherwise valid hits.
+      pendingPunchRef.current = {
+        preferredTargetId: punchTarget?.target.id ?? null,
+        contactAt,
+        expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
+        charged,
+        fired: false,
+      }
     } else if (wantsKick && kickInArc && onGroundRef.current) {
       const contactAt = state.clock.elapsedTime + PLAYER_KICK_CONTACT_DELAY
       kickUntilRef.current = state.clock.elapsedTime + PLAYER_KICK_DURATION
@@ -5010,7 +5014,7 @@ function Player({
         }
         punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
         pendingPunchRef.current = {
-          targetId: punchTarget.target.id,
+          preferredTargetId: punchTarget.target.id,
           contactAt,
           expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
           fired: false,
@@ -5050,12 +5054,20 @@ function Player({
       }
     }
 
+    const bufferPunchUntilCurrentAttackEnds =
+      !isEmoting &&
+      !isDodging &&
+      isAttackLocked &&
+      (touch.punchQueued || key.punchQueued)
+
     key.actionQueued = false
     touch.actionQueued = false
-    touch.punchQueued = false
-    touch.punchChargeMs = 0
+    if (!bufferPunchUntilCurrentAttackEnds) {
+      touch.punchQueued = false
+      touch.punchChargeMs = 0
+      key.punchQueued = false
+    }
     touch.kickQueued = false
-    key.punchQueued = false
     key.kickQueued = false
     touch.emoteQueued = null
 
@@ -5200,18 +5212,20 @@ function Player({
 
     const pendingPunch = pendingPunchRef.current
     if (pendingPunch && !pendingPunch.fired && state.clock.elapsedTime >= pendingPunch.contactAt) {
-      const target = combatTargetsRef?.current?.get(pendingPunch.targetId)
-      if (target && !target.disabled && state.clock.elapsedTime <= pendingPunch.expiresAt) {
-        const contact = getPunchContact({
+      if (state.clock.elapsedTime <= pendingPunch.expiresAt) {
+        const weapon = MELEE_WEAPONS[equippedWeapon] ?? null
+        const hit = getPunchTargetAtContact({
+          targets: combatTargetsRef?.current,
+          preferredTargetId: pendingPunch.preferredTargetId,
           playerX: nextX,
           playerZ: nextZ,
           yaw: visualRef.current.rotation.y,
-          targetX: target.position.x,
-          targetZ: target.position.z,
-          targetRadius: target.radius,
+          rangeBonus: weapon?.rangeBonus ?? 0,
+          lateralBonus: weapon?.lateralBonus ?? 0,
         })
 
-        if (contact.isInPunchArc) {
+        if (hit) {
+          const { target, contact } = hit
           // Combo : si on enchaîne dans la fenêtre, les dégâts montent
           // (10 → 15 → 20 → 25 → 30). Sinon le combo repart de zéro.
           const nowSec = state.clock.elapsedTime
@@ -5234,10 +5248,12 @@ function Player({
               target.position.z,
             ],
           })
+          pendingPunch.fired = true
+          pendingPunchRef.current = null
         }
+      } else {
+        pendingPunchRef.current = null
       }
-      pendingPunch.fired = true
-      pendingPunchRef.current = null
     } else if (pendingPunch && state.clock.elapsedTime > pendingPunch.expiresAt) {
       pendingPunchRef.current = null
     }
@@ -8536,7 +8552,7 @@ function ControlsOverlay({
 const BAG_ITEM_DEFS = [
   { id: 'magic_book', icon: '📖', name: 'Livre Magique', desc: 'Lance des boules de feu' },
   { id: 'magic_skull', icon: '💀', name: 'Crâne Nécromancien', desc: 'Invoque 3 squelettes alliés' },
-  { id: 'cheat_sword', icon: '🗡️', name: 'Épée Ultra Cheat', desc: 'Arme rare du Boss Slime' },
+  { id: 'cheat_sword', icon: '🗡️', name: 'Épée du Roi Slime', desc: 'Arme rare obtenue sur le Roi Slime' },
 ]
 
 const BAG_GRID_SIZE = 12

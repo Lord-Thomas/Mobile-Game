@@ -593,7 +593,7 @@ export const BUILTIN_PARTICLE_PRESETS = [
   },
   {
     id: 'cheat_sword_aura',
-    name: 'Aura épée ultra cheat',
+    name: 'Aura de l’Épée du Roi Slime',
     category: 'trail',
     duration: 1.6,
     loop: true,

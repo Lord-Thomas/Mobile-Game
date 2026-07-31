@@ -1,9 +1,12 @@
 export const MELEE_WEAPONS = Object.freeze({
   cheat_sword: Object.freeze({
     id: 'cheat_sword',
-    baseDamage: 200,
-    targetMultipliers: Object.freeze({ slime: 1.5 }),
-    chargedMultiplier: 2.25,
+    name: 'Épée du Roi Slime',
+    baseDamage: 25,
+    targetMultipliers: Object.freeze({ slime: 1.2 }),
+    chargedMultiplier: 1.8,
+    rangeBonus: 0.32,
+    lateralBonus: 0.12,
     chargeThresholdMs: 700,
     maxChargeMs: 1500,
     chargedCooldownMs: 950,

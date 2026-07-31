@@ -41,9 +41,12 @@ export default function BossRewardWatcher({ onDefeated, alreadyOwned = false, pr
           // Hors connexion, la sauvegarde locale normale reste la source de vérité.
           if (result.ok || result.reason === 'not_authenticated') onDefeated?.()
         })
-      if (!alreadyOwned) setShowToast(true)
+      const toastFrame = !alreadyOwned
+        ? window.requestAnimationFrame(() => setShowToast(true))
+        : 0
       const id = window.setTimeout(() => setShowToast(false), 4500)
       return () => {
+        if (toastFrame) window.cancelAnimationFrame(toastFrame)
         window.clearTimeout(id)
       }
     }
@@ -52,5 +55,5 @@ export default function BossRewardWatcher({ onDefeated, alreadyOwned = false, pr
   }, [state, onDefeated, alreadyOwned, progressScope])
 
   if (!showToast) return null
-  return <div style={toastStyle}>🗡️ Épée Ultra Cheat obtenue !</div>
+  return <div style={toastStyle}>🗡️ Épée du Roi Slime obtenue !</div>
 }

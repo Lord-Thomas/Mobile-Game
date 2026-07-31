@@ -1359,7 +1359,7 @@ export const MAP_MONSTER_SPAWNERS = [
     "minDistance": 5,
     "maxHp": 120,
     "rewardCoins": 90,
-    "attackDamage": 50,
+    "attackDamage": 20,
     "sizeScale": 2.05,
     "lootTable": [
       {
@@ -1393,4 +1393,3 @@ export const MAP_MONSTER_SPAWNERS = [
     ]
   }
 ]
-

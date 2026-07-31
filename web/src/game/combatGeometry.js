@@ -71,7 +71,16 @@ export function getKickContact({ playerX, playerZ, yaw, ballX, ballZ }) {
   }
 }
 
-export function getPunchContact({ playerX, playerZ, yaw, targetX, targetZ, targetRadius = 0.45 }) {
+export function getPunchContact({
+  playerX,
+  playerZ,
+  yaw,
+  targetX,
+  targetZ,
+  targetRadius = 0.45,
+  rangeBonus = 0,
+  lateralBonus = 0,
+}) {
   const forwardX = Math.sin(yaw)
   const forwardZ = Math.cos(yaw)
   const rightX = Math.cos(yaw)
@@ -88,12 +97,19 @@ export function getPunchContact({ playerX, playerZ, yaw, targetX, targetZ, targe
     lateralDistance,
     isInPunchArc:
       forwardDistance > PLAYER_PUNCH_FRONT_MIN &&
-      forwardDistance < PLAYER_PUNCH_RANGE + targetRadius &&
-      Math.abs(lateralDistance) < PLAYER_PUNCH_LATERAL_RANGE + targetRadius,
+      forwardDistance < PLAYER_PUNCH_RANGE + targetRadius + rangeBonus &&
+      Math.abs(lateralDistance) < PLAYER_PUNCH_LATERAL_RANGE + targetRadius + lateralBonus,
   }
 }
 
-export function getNearestPunchTarget({ targets, playerX, playerZ, yaw }) {
+export function getNearestPunchTarget({
+  targets,
+  playerX,
+  playerZ,
+  yaw,
+  rangeBonus = 0,
+  lateralBonus = 0,
+}) {
   let nearest = null
   let nearestDistance = Infinity
 
@@ -109,6 +125,8 @@ export function getNearestPunchTarget({ targets, playerX, playerZ, yaw }) {
       targetX: position.x,
       targetZ: position.z,
       targetRadius: target.radius,
+      rangeBonus,
+      lateralBonus,
     })
 
     if (!contact.isInPunchArc || contact.forwardDistance >= nearestDistance) return
@@ -117,4 +135,38 @@ export function getNearestPunchTarget({ targets, playerX, playerZ, yaw }) {
   })
 
   return nearest
+}
+
+export function getPunchTargetAtContact({
+  targets,
+  preferredTargetId = null,
+  playerX,
+  playerZ,
+  yaw,
+  rangeBonus = 0,
+  lateralBonus = 0,
+}) {
+  const preferred = preferredTargetId ? targets?.get?.(preferredTargetId) : null
+  if (preferred && !preferred.disabled && preferred.position) {
+    const contact = getPunchContact({
+      playerX,
+      playerZ,
+      yaw,
+      targetX: preferred.position.x,
+      targetZ: preferred.position.z,
+      targetRadius: preferred.radius,
+      rangeBonus,
+      lateralBonus,
+    })
+    if (contact.isInPunchArc) return { target: preferred, contact }
+  }
+
+  return getNearestPunchTarget({
+    targets,
+    playerX,
+    playerZ,
+    yaw,
+    rangeBonus,
+    lateralBonus,
+  })
 }

@@ -3,12 +3,12 @@ import { getMeleeHitDamage, getMeleeWeaponDefinition } from './meleeWeapons'
 
 describe('meleeWeapons', () => {
   it('applique le bonus anti-slime et la charge de l’épée', () => {
-    expect(getMeleeHitDamage({ weaponId: 'cheat_sword', targetTags: ['slime'] })).toBe(300)
+    expect(getMeleeHitDamage({ weaponId: 'cheat_sword', targetTags: ['slime'] })).toBe(30)
     expect(getMeleeHitDamage({
       weaponId: 'cheat_sword',
       targetTags: ['slime'],
       charged: true,
-    })).toBe(675)
+    })).toBe(54)
   })
 
   it('conserve les dégâts de repli sans arme de mêlée', () => {
