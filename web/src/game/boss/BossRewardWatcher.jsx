@@ -27,7 +27,7 @@ const toastStyle = {
   zIndex: 41,
 }
 
-export default function BossRewardWatcher({ onDefeated, alreadyOwned = false, progressScope = 'player' }) {
+export default function BossRewardWatcher({ onDefeated, onSwordUnlocked, alreadyOwned = false, progressScope = 'player' }) {
   const state = useBossStore((s) => s.state)
   const grantedRef = useRef(false)
   const [showToast, setShowToast] = useState(false)
@@ -35,24 +35,31 @@ export default function BossRewardWatcher({ onDefeated, alreadyOwned = false, pr
   useEffect(() => {
     if (state === 'dying' && !grantedRef.current) {
       grantedRef.current = true
+      const boss = useBossStore.getState()
+      onDefeated?.({
+        altarId: boss.altarId,
+        position: Array.isArray(boss.position) ? [...boss.position] : null,
+        victoryId: boss.victoryId,
+      })
       Promise.resolve(claimBossSlimeReward({ scope: progressScope }))
         .catch(() => ({ ok: false, reason: 'save_failed' }))
         .then((result) => {
           // Hors connexion, la sauvegarde locale normale reste la source de vérité.
-          if (result.ok || result.reason === 'not_authenticated') onDefeated?.()
+          if (result.ok || result.reason === 'not_authenticated') {
+            onSwordUnlocked?.()
+            if (!alreadyOwned) setShowToast(true)
+          }
         })
-      const toastFrame = !alreadyOwned
-        ? window.requestAnimationFrame(() => setShowToast(true))
-        : 0
-      const id = window.setTimeout(() => setShowToast(false), 4500)
-      return () => {
-        if (toastFrame) window.cancelAnimationFrame(toastFrame)
-        window.clearTimeout(id)
-      }
     }
     if (state === 'idle') grantedRef.current = false
     return undefined
-  }, [state, onDefeated, alreadyOwned, progressScope])
+  }, [state, onDefeated, onSwordUnlocked, alreadyOwned, progressScope])
+
+  useEffect(() => {
+    if (!showToast) return undefined
+    const id = window.setTimeout(() => setShowToast(false), 4500)
+    return () => window.clearTimeout(id)
+  }, [showToast])
 
   if (!showToast) return null
   return <div style={toastStyle}>🗡️ Épée du Roi Slime obtenue !</div>

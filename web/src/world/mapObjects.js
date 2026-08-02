@@ -2,6 +2,7 @@ import * as generatedMapObjects from './mapObjects.generated'
 import { GENERATED_ENEMY_DEFINITIONS } from '../enemies/enemyDefinitions.generated'
 import { ALL_ITEM_IDS } from '../items/itemDefinitions'
 import { LOOT_TABLES } from '../items/lootTable'
+import { normalizeBossRewards } from '../game/boss/bossRewards'
 import { MAP_OBJECT_DEFINITIONS } from './mapObjectLibrary'
 import { AUTHORED_TREES } from './outdoorData'
 import { getTerrainHeight } from './terrain/terrainGeometry'
@@ -357,7 +358,7 @@ export function normalizeMapObjectPlacement(placement, index = 0) {
   const objectId = resolveMapObjectId(placement?.objectId) ?? 'skeleton_tower'
   const catalogItem = getMapObjectCatalogItem(objectId)
 
-  return {
+  const normalized = {
     id: typeof placement?.id === 'string' && placement.id.trim()
       ? placement.id
       : `${objectId}_${index + 1}`,
@@ -366,6 +367,12 @@ export function normalizeMapObjectPlacement(placement, index = 0) {
     rotationY: asFiniteNumber(placement?.rotationY),
     scale: Math.max(0.2, asFiniteNumber(placement?.scale, catalogItem.defaultScale ?? 1)),
   }
+
+  if (objectId === SUMMONING_ALTAR_OBJECT_ID) {
+    Object.assign(normalized, normalizeBossRewards(placement))
+  }
+
+  return normalized
 }
 
 function createAuthoredTreeMapObjectPlacements() {

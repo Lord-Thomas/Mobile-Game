@@ -19,6 +19,7 @@ import {
   getMapObjectLibrary,
   normalizeMapObjectPlacement,
   normalizeMonsterSpawner,
+  SUMMONING_ALTAR_OBJECT_ID,
 } from '../world/mapObjects'
 import {
   BIOME_TYPES,
@@ -164,6 +165,10 @@ function toSavedPlacements(objects) {
       position: [x, y, z],
       rotationY: placement.rotationY,
       scale: placement.scale,
+      ...(placement.objectId === SUMMONING_ALTAR_OBJECT_ID ? {
+        rewardCoins: placement.rewardCoins,
+        lootTable: placement.lootTable,
+      } : {}),
     }
   })
 }
@@ -1188,6 +1193,28 @@ export function MapEditorPanel({
     patchSelectedSpawner({ lootTable: nextLootTable })
   }
 
+  const patchSelectedBossLoot = (itemId, chancePercent) => {
+    if (selected?.objectId !== SUMMONING_ALTAR_OBJECT_ID) return
+    const nextLootTable = ALL_ITEM_IDS.map((id) => {
+      const existing = selected.lootTable.find((entry) => entry.itemId === id)
+      return {
+        itemId: id,
+        chance: id === itemId ? chancePercent / 100 : existing?.chance ?? 0,
+        quantity: existing?.quantity ?? 1,
+      }
+    }).filter((entry) => entry.chance > 0)
+    patchSelected({ lootTable: nextLootTable })
+  }
+
+  const patchSelectedBossLootQuantity = (itemId, quantity) => {
+    if (selected?.objectId !== SUMMONING_ALTAR_OBJECT_ID) return
+    patchSelected({
+      lootTable: selected.lootTable.map((entry) => (
+        entry.itemId === itemId ? { ...entry, quantity } : entry
+      )),
+    })
+  }
+
   const patchSelectedBiome = (patch) => {
     if (!selectedBiome) return
     onBiomesChange(biomes.map((area) => (
@@ -2044,6 +2071,45 @@ export function MapEditorPanel({
               </div>
               <SliderField label="Echelle" value={selected.scale} min={0.35} max={2.5} step={0.05} onChange={(scale) => patchSelected({ scale })} />
             </div>
+            {selected.objectId === SUMMONING_ALTAR_OBJECT_ID && (
+              <div style={styles.subcard}>
+                <strong>Recompenses du boss</strong>
+                <NumberField
+                  label="Pieces"
+                  value={selected.rewardCoins}
+                  min={0}
+                  max={100000}
+                  step={1}
+                  onChange={(rewardCoins) => patchSelected({ rewardCoins })}
+                />
+                {lootItemOptions.map((option) => {
+                  const entry = selected.lootTable.find((item) => item.itemId === option.value)
+                  return (
+                    <div key={option.value} style={styles.subcard}>
+                      <NumberField
+                        label={`${option.label} %`}
+                        value={(entry?.chance ?? 0) * 100}
+                        min={0}
+                        max={100}
+                        step={0.1}
+                        onChange={(chancePercent) => patchSelectedBossLoot(option.value, chancePercent)}
+                      />
+                      {entry && (
+                        <NumberField
+                          label="Quantite"
+                          value={entry.quantity ?? 1}
+                          min={1}
+                          max={99}
+                          step={1}
+                          onChange={(quantity) => patchSelectedBossLootQuantity(option.value, quantity)}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+                <small>L'epee du Roi Slime reste une recompense unique separee.</small>
+              </div>
+            )}
             <div style={styles.actions}>
               {movingId === selected.id ? (
                 <>

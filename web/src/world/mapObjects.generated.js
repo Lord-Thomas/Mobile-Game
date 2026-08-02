@@ -991,7 +991,45 @@ export const MAP_OBJECT_PLACEMENTS = [
       92
     ],
     "rotationY": 2.48840734641021,
-    "scale": 1
+    "scale": 1,
+    "rewardCoins": 2500,
+    "lootTable": [
+      {
+        "itemId": "bone",
+        "chance": 1,
+        "quantity": 3
+      },
+      {
+        "itemId": "mushroom",
+        "chance": 1,
+        "quantity": 5
+      },
+      {
+        "itemId": "red_crystal",
+        "chance": 1,
+        "quantity": 2
+      },
+      {
+        "itemId": "blue_crystal",
+        "chance": 1,
+        "quantity": 1
+      },
+      {
+        "itemId": "blue_slime",
+        "chance": 0.025,
+        "quantity": 1
+      },
+      {
+        "itemId": "cute_slime",
+        "chance": 0.05,
+        "quantity": 1
+      },
+      {
+        "itemId": "red_slime",
+        "chance": 0.01,
+        "quantity": 1
+      }
+    ]
   }
 ]
 
@@ -1145,9 +1183,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "mushroom",
     "heightOffset": 0,
     "position": [
-      -21.75,
-      2.672918781267304,
-      -46
+      -9.5,
+      0.40999618125918413,
+      -20.75
     ],
     "radius": 31,
     "populationMax": 10,
@@ -1253,9 +1291,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "cute_slime",
     "heightOffset": 0,
     "position": [
-      -120,
-      -0.185632327306467,
-      28
+      -119,
+      -0.1925093811134672,
+      29.25
     ],
     "radius": 76,
     "populationMax": 14,
@@ -1393,3 +1431,4 @@ export const MAP_MONSTER_SPAWNERS = [
     ]
   }
 ]
+

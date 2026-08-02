@@ -55,7 +55,14 @@ import { TITLE_IDS, TITLES, getTitleDefinition, getTitleRarity } from './gamePro
 import { LOCAL_ACHIEVEMENTS, getLocalAchievement, evaluateMetricAchievements } from './gameProgress/achievements'
 import OutdoorNeighborhood from './world/OutdoorNeighborhood'
 import ArtDirectionRuntime from './artDirection/ArtDirectionRuntime'
-import { useArtDirectionValues } from './artDirection/artDirectionStore'
+import {
+  BOSS_SLIME_PRESET_ID,
+  BOSS_SLIME_RED_VALUES,
+  getSelectedArtDirectionValues,
+  useArtDirectionStore,
+  useArtDirectionValues,
+} from './artDirection/artDirectionStore'
+import { createBossSlimeRuntimeTarget } from './artDirection/artDirectionTransition'
 import OutdoorBounds from './world/OutdoorBounds'
 import MapObjectPhysicsColliders from './world/MapObjectPhysicsColliders'
 import { OUTDOOR_LIGHT_LAYER } from './world/lightingLayers'
@@ -4942,7 +4949,7 @@ function Player({
       state.clock.elapsedTime < swordAttackRef.current.chargedCooldownUntil
     const wantsPunch = !isEmoting && !isAttackLocked && !chargedSwordLocked && (touch.punchQueued || key.punchQueued)
     const wantsKick = !isEmoting && !isAttackLocked && (touch.kickQueued || key.kickQueued)
-    const wantsGenericAction = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
+    const wantsJump = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
     if (wantsEmote === 'wave' && onGroundRef.current) {
       waveUntilRef.current = state.clock.elapsedTime + PLAYER_WAVE_DURATION
       danceUntilRef.current = 0
@@ -5019,56 +5026,12 @@ function Player({
         fired: false,
         running: speed > 2.45,
       }
-    } else if (wantsGenericAction) {
-      if (punchTarget && onGroundRef.current) {
-        const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
-        if (equippedWeapon === 'cheat_sword') {
-          const swordAttack = swordAttackRef.current
-          if (state.clock.elapsedTime - swordAttack.lastAt > PUNCH_COMBO_WINDOW) swordAttack.step = 0
-          swordAttack.step = (swordAttack.step % 3) + 1
-          swordAttack.lastAt = state.clock.elapsedTime
-          swordAttack.motion = swordAttack.step === 1 ? 'punch' : `punch${swordAttack.step}`
-        }
-        punchUntilRef.current = state.clock.elapsedTime + PLAYER_PUNCH_DURATION
-        pendingPunchRef.current = {
-          preferredTargetId: punchTarget.target.id,
-          contactAt,
-          expiresAt: contactAt + PLAYER_PUNCH_CONTACT_WINDOW,
-          fired: false,
-        }
-      } else if (ball) {
-        const ballPos = ball.translation()
-        const kickContact = getKickContact({
-          playerX: nextX,
-          playerZ: nextZ,
-          yaw: playerYaw,
-          ballX: ballPos.x,
-          ballZ: ballPos.z,
-        })
-
-        if (kickContact.isInKickArc && onGroundRef.current) {
-          const contactAt = state.clock.elapsedTime + PLAYER_KICK_CONTACT_DELAY
-          kickUntilRef.current = state.clock.elapsedTime + PLAYER_KICK_DURATION
-          pendingKickRef.current = {
-            contactAt,
-            expiresAt: contactAt + PLAYER_KICK_CONTACT_WINDOW,
-            fired: false,
-            running: speed > 2.45,
-          }
-        } else if (onGroundRef.current) {
-          velocityYRef.current = 4.9
-          onGroundRef.current = false
-          jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
-          jumpLandUntilRef.current = 0
-          landingPreparedRef.current = false
-        }
-      } else if (onGroundRef.current) {
-        velocityYRef.current = 4.9
-        onGroundRef.current = false
-        jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
-        jumpLandUntilRef.current = 0
-        landingPreparedRef.current = false
-      }
+    } else if (wantsJump && onGroundRef.current) {
+      velocityYRef.current = 4.9
+      onGroundRef.current = false
+      jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
+      jumpLandUntilRef.current = 0
+      landingPreparedRef.current = false
     }
 
     const bufferPunchUntilCurrentAttackEnds =
@@ -6679,6 +6642,7 @@ function FloatingMagicBook({ active, handBoneRef, playerGroupRef }) {
 
 function MagicSkullMesh() {
   const { scene } = useGLTF(MAGIC_SKULL_MODEL_URL)
+  const { gl } = useThree()
   const skullScene = useMemo(() => {
     const next = scene.clone(true)
     next.traverse((child) => {
@@ -6696,6 +6660,20 @@ function MagicSkullMesh() {
     const target = 0.2
     return target / Math.max(size.x, size.y, size.z, 0.001)
   }, [skullScene])
+  useEffect(() => {
+    const textures = new Set()
+    skullScene.traverse((child) => {
+      if (!child.isMesh) return
+      const materials = Array.isArray(child.material) ? child.material : [child.material]
+      materials.forEach((material) => {
+        if (!material) return
+        Object.values(material).forEach((value) => {
+          if (value?.isTexture) textures.add(value)
+        })
+      })
+    })
+    textures.forEach((texture) => gl.initTexture(texture))
+  }, [gl, skullScene])
   return <primitive object={skullScene} scale={fitScale} />
 }
 
@@ -7383,6 +7361,7 @@ function RuntimeWarmupRig() {
     <group position={[0, -500, 0]} scale={0.001} frustumCulled={false} userData={{ debugCategory: 'warmup' }}>
       <Suspense fallback={null}>
         <MagicBookMesh />
+        <MagicSkullMesh />
       </Suspense>
       <MergedPlayerExteriorShell />
       <GableRoof
@@ -18052,6 +18031,24 @@ function ShaderWarmupGate({
           percent: 94,
           phase: 'Préparation des textures, de l’herbe et des effets...',
         })
+        if (PERF_SHADER_WARMUP) {
+          const artState = useArtDirectionStore.getState()
+          const normalValues = getSelectedArtDirectionValues(artState)
+          const bossPreset = artState.presets.find((preset) => preset.id === BOSS_SLIME_PRESET_ID)
+          useArtDirectionStore.getState().setRuntimeValues(createBossSlimeRuntimeTarget(
+            normalValues,
+            bossPreset?.values ?? BOSS_SLIME_RED_VALUES,
+          ))
+          try {
+            await waitFrame()
+            await waitFrame()
+            if (!cancelled) await compileScene(outsideCamera)
+          } finally {
+            useArtDirectionStore.getState().setRuntimeValues(null)
+          }
+          await waitFrame()
+          await waitFrame()
+        }
         await compileScene(camera)
         markLoad('warmup:runtime')
 
@@ -20559,11 +20556,30 @@ function App() {
   useEffect(() => {
     const snapshot = isGuestVisit ? createPersonalProgressSnapshot() : createCurrentProgressSnapshot()
     latestProgressRef.current = snapshot
-    if (!isGuestVisit) rememberPersonalProgress(snapshot)
-    localStorage.setItem(
-      progressStorageKey,
-      JSON.stringify(snapshot),
-    )
+    let idleId = 0
+    let timeoutId = 0
+    const persist = () => {
+      if (!isGuestVisit) rememberPersonalProgress(snapshot)
+      try {
+        localStorage.setItem(progressStorageKey, JSON.stringify(snapshot))
+      } catch {
+        // Une erreur de quota ne doit jamais interrompre une action de combat.
+      }
+    }
+
+    // Serialiser toute la maison et l'inventaire dans le gestionnaire du clic
+    // provoquait un long frame quand on equipait le livre/crane ou debloquait un
+    // haut fait. La sauvegarde reste garantie, mais s'effectue hors de la frame.
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(persist, { timeout: 1200 })
+    } else {
+      timeoutId = window.setTimeout(persist, 120)
+    }
+
+    return () => {
+      if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
   }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
@@ -21266,6 +21282,55 @@ function App() {
   }
 
   // --- Quêtes : accepter / terminer (logique pure dans src/quests/questState.js)
+  const handleBossDefeated = async ({ altarId, position, victoryId }) => {
+    const altar = SUMMONING_ALTAR_PLACEMENTS.find((placement) => placement.id === altarId)
+    const rewardCoins = altar?.rewardCoins ?? SLIME_BOSS.rewards.rewardCoins
+    const lootTable = altar?.lootTable ?? SLIME_BOSS.rewards.lootTable
+    const base = [position?.[0] ?? 0, position?.[1] ?? 0, position?.[2] ?? 0]
+    const popupPosition = [base[0], base[1] + 2.2, base[2]]
+
+    const rewarded = rewardCoins <= 0 || await applyCoinDelta(rewardCoins, {
+      share: false,
+      reason: 'slime_boss_defeat',
+      position: popupPosition,
+    })
+    if (!rewarded) return
+
+    const drops = rollLoot(SLIME_BOSS.id, Math.random, lootTable)
+    if (drops.length) {
+      const born = performance.now()
+      setLootDrops((previous) => {
+        const additions = drops.map((itemId, index) => ({
+          id: `boss-drop-${victoryId ?? Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+          itemId,
+          from: [
+            base[0] + (Math.random() - 0.5) * 1.8,
+            base[1] + 0.2,
+            base[2] + (Math.random() - 0.5) * 1.8,
+          ],
+          bornAt: born,
+        }))
+        const merged = [...previous, ...additions]
+        return merged.length > LOOT_DROP_MAX ? merged.slice(merged.length - LOOT_DROP_MAX) : merged
+      })
+    }
+
+    if (rewardCoins > 0) {
+      setScorePopups((previous) => [
+        ...previous,
+        {
+          id: `boss-coins-${victoryId ?? Date.now()}`,
+          value: rewardCoins,
+          x: popupPosition[0],
+          y: popupPosition[1],
+          z: popupPosition[2],
+          startAt: Date.now(),
+          duration: 900,
+        },
+      ])
+    }
+  }
+
   const acceptQuest = (questId) => {
     setQuest('progress',(prev) => startQuest(prev, questId))
   }
@@ -23869,8 +23934,7 @@ function App() {
           />
           {/* Pool de squelettes invoqués : monté dès le chargement du monde
               pour précharger modèle/animations/GPU et éviter tout freeze au sort. */}
-          {ownedMagicSkull && (
-            <Defer level={4}>
+          <Defer level={4}>
             <Profiler id="SummonSkeletonPool" onRender={recordRenderProfile}>
             {Array.from({ length: SUMMON_SKELETON_COUNT }, (_, index) => (
               <Suspense key={`summon_slot_${index}`} fallback={null}>
@@ -23894,8 +23958,7 @@ function App() {
               </Suspense>
             ))}
             </Profiler>
-            </Defer>
-          )}
+          </Defer>
           <PlayerHealingAura
             active={playerHealing}
             playerPositionRef={playerPositionRef}
@@ -24344,7 +24407,8 @@ function App() {
       />
       <BossHud />
       <BossRewardWatcher
-        onDefeated={() => setEquipment('ownedCheatSword', true)}
+        onDefeated={handleBossDefeated}
+        onSwordUnlocked={() => setEquipment('ownedCheatSword', true)}
         alreadyOwned={ownedCheatSword}
         progressScope={progressScope}
       />

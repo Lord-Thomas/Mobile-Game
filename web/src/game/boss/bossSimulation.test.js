@@ -16,6 +16,14 @@ describe('bossSimulation', () => {
     expect(SLIME_BOSS.maxHp).toBe(1000)
   })
 
+  it('utilise les dégâts réduits pour toutes les attaques du boss', () => {
+    expect(SLIME_BOSS.shockwave.impactDamage).toBe(16)
+    expect(SLIME_BOSS.shockwave.damage).toBe(12)
+    expect(SLIME_BOSS.projectile.impactDamage).toBe(10)
+    expect(SLIME_BOSS.projectile.poolDamage).toBe(3)
+    expect(SLIME_BOSS.summons.damage).toBe(5)
+  })
+
   it('reprend la taille des slimes vert et bleu réellement présents sur la carte', () => {
     expect(SLIME_BOSS.summons.sizeScaleByKind.green).toBe(0.6)
     expect(SLIME_BOSS.summons.sizeScaleByKind.blue).toBe(0.95)
@@ -42,7 +50,7 @@ describe('bossSimulation', () => {
     state = stepBoss(state, { now: 2000, dt: 0.1, players: [player] })
     expect(state.minions.length).toBeGreaterThan(phase2Count)
     expect(state.summonedPhases).toEqual([2, 3])
-    expect(state.minions.map((minion) => minion.slot)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(state.minions.map((minion) => minion.slot)).toEqual([0, 1, 2, 3, 4])
 
     for (let index = 0; index < 80; index += 1) {
       state = stepBoss(state, { now: 2100 + index * 100, dt: 0.1, players: [player] })

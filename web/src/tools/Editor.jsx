@@ -286,6 +286,7 @@ export default function Editor({ initialMode = 'tree' }) {
   const mapEditor = useMapEditorState()
   useTreeEditorStore()
   const [mode, setMode] = useState(MODES.some((entry) => entry.id === initialMode) ? initialMode : 'tree')
+  const [panelsVisible, setPanelsVisible] = useState(true)
 
   const pushBiomeUndoSnapshot = useCallback(() => {
     biomeUndoStackRef.current.push(mapEditor.biomes.map((area) => normalizeBiomeArea({
@@ -736,16 +737,23 @@ export default function Editor({ initialMode = 'tree' }) {
             {entry.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setPanelsVisible((visible) => !visible)}
+          style={modeButtonStyle}
+        >
+          {panelsVisible ? 'Masquer les panneaux' : 'Afficher les panneaux'}
+        </button>
       </div>
-      {mode === 'tree' && <TreeDevPanel />}
-      {mode === 'house' && <HouseDevPanel />}
-      {mode === 'particles' && <ParticleDevPanel />}
-      {mode === 'art' && ArtDirectionPanel && (
+      {panelsVisible && mode === 'tree' && <TreeDevPanel />}
+      {panelsVisible && mode === 'house' && <HouseDevPanel />}
+      {panelsVisible && mode === 'particles' && <ParticleDevPanel />}
+      {panelsVisible && mode === 'art' && ArtDirectionPanel && (
         <Suspense fallback={null}>
           <ArtDirectionPanel />
         </Suspense>
       )}
-      {mode === 'map' && (
+      {panelsVisible && mode === 'map' && (
         <MapEditorPanel
           objects={mapEditor.objects}
           spawners={mapEditor.spawners}

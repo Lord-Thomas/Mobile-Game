@@ -89,7 +89,7 @@ function SelectField({ label, value, options, onChange }) {
 }
 
 function Section({ title, children }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
 
   return (
     <section style={styles.section}>

@@ -44,6 +44,12 @@ describe('lootTable', () => {
     expect(rollLoot('skeleton', seededRng([0.7, 0.3]), table)).toEqual(['red_crystal'])
   })
 
+  it('peut retourner plusieurs exemplaires du meme objet', () => {
+    expect(rollLoot('slime_boss', seededRng([0.1]), [
+      { itemId: 'blue_slime', chance: 0.5, quantity: 3 },
+    ])).toEqual(['blue_slime', 'blue_slime', 'blue_slime'])
+  })
+
   it('drop rare des cristaux (4%)', () => {
     // 1er tirage = objet commun (raté), 2e tirage = cristal (réussi sous 0.04).
     expect(rollLoot('skeleton', seededRng([0.9, 0.02]))).toEqual(['blue_crystal'])

@@ -545,7 +545,7 @@ function saveThumbnailPlugin() {
 
               if (!objectId) throw new Error(`Unknown map object at index ${index}`)
 
-              return {
+              const normalizedPlacement = {
                 id,
                 objectId,
                 position: [
@@ -556,6 +556,28 @@ function saveThumbnailPlugin() {
                 rotationY: Number.isFinite(Number(placement.rotationY)) ? Number(placement.rotationY) : 0,
                 scale: Number.isFinite(Number(placement.scale)) ? Math.max(0.2, Number(placement.scale)) : 1,
               }
+
+              if (objectId === 'summoning_altar') {
+                const rawLootTable = Array.isArray(placement.lootTable) ? placement.lootTable : []
+                normalizedPlacement.rewardCoins = Number.isFinite(Number(placement.rewardCoins))
+                  ? Math.min(100000, Math.max(0, Math.round(Number(placement.rewardCoins))))
+                  : 250
+                normalizedPlacement.lootTable = rawLootTable
+                  .map((entry) => ({
+                    itemId: typeof entry?.itemId === 'string' && /^[a-zA-Z0-9_-]+$/.test(entry.itemId)
+                      ? entry.itemId
+                      : null,
+                    chance: Number.isFinite(Number(entry?.chance))
+                      ? Math.min(1, Math.max(0, Number(entry.chance)))
+                      : 0,
+                    quantity: Number.isFinite(Number(entry?.quantity))
+                      ? Math.min(99, Math.max(1, Math.round(Number(entry.quantity))))
+                      : 1,
+                  }))
+                  .filter((entry) => entry.itemId && entry.chance > 0)
+              }
+
+              return normalizedPlacement
             })
             const enemiesDir = join(process.cwd(), 'public', 'models', 'enemies')
             const itemsDir = join(process.cwd(), 'public', 'items')

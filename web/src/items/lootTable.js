@@ -35,7 +35,10 @@ export function rollLoot(mobType, rng = Math.random, overrideTable = null) {
   const drops = []
   for (const entry of table) {
     const chance = Number(entry?.chance)
-    if (entry?.itemId && Number.isFinite(chance) && rng() < chance) drops.push(entry.itemId)
+    if (entry?.itemId && Number.isFinite(chance) && rng() < chance) {
+      const quantity = Math.min(99, Math.max(1, Math.round(Number(entry.quantity) || 1)))
+      for (let index = 0; index < quantity; index += 1) drops.push(entry.itemId)
+    }
   }
   return drops
 }

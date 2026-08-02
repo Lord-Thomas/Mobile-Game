@@ -16,6 +16,17 @@ export const SLIME_BOSS = {
   chaseSpeed: [2.45, 2.9, 3.35],
   attackRange: 8.5,
 
+  // Recompenses repetables, surchargeables par chaque autel dans l'editeur de map.
+  // L'epee reste une recompense de progression unique geree separement.
+  rewards: {
+    rewardCoins: 250,
+    lootTable: [
+      { itemId: 'cute_slime', chance: 1, quantity: 1 },
+      { itemId: 'blue_slime', chance: 0.35, quantity: 1 },
+      { itemId: 'red_slime', chance: 0.1, quantity: 1 },
+    ],
+  },
+
   // Attaque « bond écrasant + onde de choc ». Séparation volontaire (cf. brief) :
   // ces durées pilotent la MACHINE À ÉTATS ; le rendu (bond, anneau) et la DÉTECTION
   // (bande de l'anneau + hauteur du joueur pour l'esquive) en découlent.
@@ -27,10 +38,10 @@ export const SLIME_BOSS = {
     idleGapMs: 1600, // pause avant l'attaque suivante
     jumpHeight: 3.4, // hauteur du bond (unités monde)
     impactRadius: 3.1,
-    impactDamage: 22,
+    impactDamage: 16,
     maxRadius: 10, // rayon max de l’onde
     band: 1.7, // épaisseur du front qui inflige les dégâts
-    damage: 18,
+    damage: 12,
     dodgeHeight: 0.32, // fenêtre confortable autour de l'apogée du saut
   },
 
@@ -41,8 +52,8 @@ export const SLIME_BOSS = {
     telegraphMs: 1050,
     poolDurationMs: 7200,
     poolTickMs: 850,
-    impactDamage: 14,
-    poolDamage: 5,
+    impactDamage: 10,
+    poolDamage: 3,
     poolRadius: 1.75,
     slowMultiplier: 0.58,
     countByPhase: [0, 3, 5],
@@ -50,7 +61,7 @@ export const SLIME_BOSS = {
 
   summons: {
     phases: [2, 3],
-    countByPhase: [0, 3, 5],
+    countByPhase: [0, 2, 3],
     radius: 0.48,
     targetHeight: 1.2,
     modelTargetHeight: 0.77,
@@ -60,7 +71,7 @@ export const SLIME_BOSS = {
       blue: 0.95,
     },
     speed: 1.55,
-    damage: 7,
+    damage: 5,
     attackCooldownMs: 1250,
     maxHpByKind: {
       green: 45,
