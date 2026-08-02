@@ -25,6 +25,8 @@ export const LOCAL_ACHIEVEMENTS = [
 
   // ── Exploration ───────────────────────────────────────────────────────────
   { id: 'first_fly', icon: '🐉', name: 'Tête en l’air', description: 'Voler pour la première fois.', category: 'Exploration' },
+  { id: 'defeat_slime_king', icon: '👑', name: 'Triompher du Roi Slime', description: 'Vaincre le Roi Slime.', metric: 'bossKills', goal: 1, category: 'Combat' },
+  { id: 'defeat_slime_king_5', icon: '👑', name: 'Triompher du Roi Slime 5 fois', description: 'Vaincre le Roi Slime cinq fois.', metric: 'bossKills', goal: 5, category: 'Combat' },
 ]
 
 const LOCAL_ACHIEVEMENTS_BY_ID = LOCAL_ACHIEVEMENTS.reduce((map, achievement) => {
@@ -37,8 +39,8 @@ export function getLocalAchievement(id) {
 }
 
 // Renvoie les ids débloqués à partir des métriques d'état courantes.
-export function evaluateMetricAchievements({ mobKills = 0, furniture = 0, coins = 0 } = {}) {
-  const values = { mobKills, furniture, coins }
+export function evaluateMetricAchievements({ mobKills = 0, bossKills = 0, furniture = 0, coins = 0 } = {}) {
+  const values = { mobKills, bossKills, furniture, coins }
   return LOCAL_ACHIEVEMENTS
     .filter((achievement) => achievement.metric && values[achievement.metric] >= achievement.goal)
     .map((achievement) => achievement.id)

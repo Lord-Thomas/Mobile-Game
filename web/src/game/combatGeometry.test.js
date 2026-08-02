@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getPunchTargetAtContact } from './combatGeometry'
+import { getMeleeAreaTargets, getPunchTargetAtContact } from './combatGeometry'
 
 function target(id, x, z, radius = 0.45) {
   return {
@@ -44,5 +44,15 @@ describe('combatGeometry', () => {
     })
 
     expect(hit?.target.id).toBe('front')
+  })
+  it('le coup tournoyant touche toutes les cibles autour du joueur dans son rayon', () => {
+    const targets = new Map([
+      ['front', target('front', 0, 2)],
+      ['back', target('back', 0, -2)],
+      ['outside', target('outside', 0, 4)],
+    ])
+
+    const hits = getMeleeAreaTargets({ targets, playerX: 0, playerZ: 0, radius: 3.2 })
+    expect(hits.map(({ target: hitTarget }) => hitTarget.id)).toEqual(['front', 'back'])
   })
 })

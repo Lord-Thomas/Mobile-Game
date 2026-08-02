@@ -10,7 +10,7 @@ import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
-import { collidesWithGoalFrame, getKickContact, getNearestPunchTarget, getPunchTargetAtContact } from './game/combatGeometry'
+import { collidesWithGoalFrame, getKickContact, getMeleeAreaTargets, getNearestPunchTarget, getPunchTargetAtContact } from './game/combatGeometry'
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { getFallDamage } from './game/fallDamage'
@@ -90,7 +90,7 @@ import ItemIcon from './ui/ItemIcon'
 import { FIRST_QUEST_ID, QUEST_NPC_OBJECT_ID, getQuestDefinition } from './quests/questDefinitions'
 import { completeQuest as completeQuestState, isReadyToComplete, normalizeQuestProgress, registerKill, startQuest } from './quests/questState'
 import { rollLoot } from './items/lootTable'
-import { addItems, getMaterialEntries, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
+import { addItems, canConsumeItems, consumeItems, getMaterialEntries, normalizeMaterials, sellAll, sellItem } from './items/materialsInventory'
 import { getItemDefinition, getSlimePetDefinitions } from './items/itemDefinitions'
 import { BIOME_VISUALS, MAP_BIOME_AREAS, getBiomeInfluence } from './world/biomeAreas'
 import { getTerrainHeight, syncPlayerHouseTerrainFootprint } from './world/terrain/terrainGeometry'
@@ -5248,18 +5248,28 @@ function Player({
     if (pendingPunch && !pendingPunch.fired && state.clock.elapsedTime >= pendingPunch.contactAt) {
       if (state.clock.elapsedTime <= pendingPunch.expiresAt) {
         const weapon = MELEE_WEAPONS[equippedWeapon] ?? null
-        const hit = getPunchTargetAtContact({
-          targets: combatTargetsRef?.current,
-          preferredTargetId: pendingPunch.preferredTargetId,
-          playerX: nextX,
-          playerZ: nextZ,
-          yaw: visualRef.current.rotation.y,
-          rangeBonus: weapon?.rangeBonus ?? 0,
-          lateralBonus: weapon?.lateralBonus ?? 0,
-        })
+        const areaHits = pendingPunch.charged && weapon?.chargedAreaRadius
+          ? getMeleeAreaTargets({
+              targets: combatTargetsRef?.current,
+              playerX: nextX,
+              playerZ: nextZ,
+              radius: weapon.chargedAreaRadius,
+            })
+          : null
+        const hit = areaHits
+          ? null
+          : getPunchTargetAtContact({
+              targets: combatTargetsRef?.current,
+              preferredTargetId: pendingPunch.preferredTargetId,
+              playerX: nextX,
+              playerZ: nextZ,
+              yaw: visualRef.current.rotation.y,
+              rangeBonus: weapon?.rangeBonus ?? 0,
+              lateralBonus: weapon?.lateralBonus ?? 0,
+            })
+        const targetsHit = areaHits ?? (hit ? [{ target: hit.target, contact: hit.contact }] : [])
 
-        if (hit) {
-          const { target, contact } = hit
+        if (targetsHit.length > 0) {
           // Combo : si on enchaîne dans la fenêtre, les dégâts montent
           // (10 → 15 → 20 → 25 → 30). Sinon le combo repart de zéro.
           const nowSec = state.clock.elapsedTime
@@ -5271,16 +5281,23 @@ function Player({
           )
           combo.count += 1
           combo.lastHitAt = nowSec
-          onCombatHit?.({
-            targetId: target.id,
-            damage: punchDamage,
-            charged: Boolean(pendingPunch.charged),
-            direction: { x: contact.forwardX, z: contact.forwardZ },
-            hitPoint: [
-              target.position.x,
-              (target.position.y ?? 0) + Math.min(target.height ?? 1.4, 1.25),
-              target.position.z,
-            ],
+          targetsHit.forEach(({ target, contact, dx = 0, dz = 0, distance = 0 }) => {
+            const direction = contact
+              ? { x: contact.forwardX, z: contact.forwardZ }
+              : distance > 0.001
+                ? { x: dx / distance, z: dz / distance }
+                : { x: Math.sin(visualRef.current.rotation.y), z: Math.cos(visualRef.current.rotation.y) }
+            onCombatHit?.({
+              targetId: target.id,
+              damage: punchDamage,
+              charged: Boolean(pendingPunch.charged),
+              direction,
+              hitPoint: [
+                target.position.x,
+                (target.position.y ?? 0) + Math.min(target.height ?? 1.4, 1.25),
+                target.position.z,
+              ],
+            })
           })
           pendingPunch.fired = true
           pendingPunchRef.current = null
@@ -19562,6 +19579,7 @@ function App() {
   const unlockedAchievements = useGameStore((s) => s.progress.unlockedAchievements)
   const unlockedAchievementsRef = useRef([])
   const mobKillCount = useGameStore((s) => s.progress.mobKillCount)
+  const bossKillCount = useGameStore((s) => s.progress.bossKillCount)
   // État des quêtes (sérialisable, persisté dans world_settings.quests). Toute la
   // logique est dans src/quests/questState.js — ici on ne stocke que le bag.
   const questProgress = useGameStore((s) => s.quests.progress)
@@ -19709,11 +19727,11 @@ function App() {
     const furnitureCount = editableObjects.filter(
       (object) => objectCatalog[object.objectId]?.category === 'furniture',
     ).length
-    const earned = evaluateMetricAchievements({ mobKills: mobKillCount, furniture: furnitureCount, coins })
+    const earned = evaluateMetricAchievements({ mobKills: mobKillCount, bossKills: bossKillCount, furniture: furnitureCount, coins })
     if (ownedMounts.length > 0) earned.push('own_mount')
     if (ownedMagicBook || ownedMagicSkull) earned.push('own_weapon')
     earned.forEach(unlockAchievement)
-  }, [mobKillCount, coins, editableObjects, ownedMounts, ownedMagicBook, ownedMagicSkull, unlockAchievement])
+  }, [mobKillCount, bossKillCount, coins, editableObjects, ownedMounts, ownedMagicBook, ownedMagicSkull, unlockAchievement])
 
   useEffect(() => {
     const shouldPrepareOutdoor = (
@@ -20056,6 +20074,7 @@ function App() {
     ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull', ownedCheatSword && 'cheat_sword'].filter(Boolean),
     unlockedAchievements,
     mobKillCount,
+    bossKillCount,
     ownedMounts,
     equippedWeapon,
     ownedTitleIds,
@@ -20126,6 +20145,7 @@ function App() {
       ownedWeapons: [ownedMagicBook && 'magic_book', ownedMagicSkull && 'magic_skull', ownedCheatSword && 'cheat_sword'].filter(Boolean),
       unlockedAchievements,
       mobKillCount,
+      bossKillCount,
       ownedMounts,
       equippedWeapon,
       ownedTitleIds,
@@ -20187,6 +20207,7 @@ function App() {
     unlockedAchievementsRef.current = []
     setProgress('unlockedAchievements',[])
     setProgress('mobKillCount',0)
+    setProgress('bossKillCount',0)
     setQuest('progress',{})
     setEconomy('materials',{})
     setLootDrops([])
@@ -20338,6 +20359,9 @@ function App() {
       setProgress('unlockedAchievements',parsedAchievements)
       if (typeof parsed.mobKillCount === 'number' && parsed.mobKillCount >= 0) {
         setProgress('mobKillCount',parsed.mobKillCount)
+      }
+      if (typeof parsed.bossKillCount === 'number' && parsed.bossKillCount >= 0) {
+        setProgress('bossKillCount',parsed.bossKillCount)
       }
       setQuest('progress',normalizeQuestProgress(parsed.quests))
       setEconomy('materials',normalizeMaterials(parsed.materials))
@@ -20642,7 +20666,7 @@ function App() {
       if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
       if (timeoutId) window.clearTimeout(timeoutId)
     }
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     const persistLocation = () => {
@@ -21116,7 +21140,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
+  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
 
   useEffect(() => {
     const persistFreshSnapshot = () => {
@@ -21351,6 +21375,11 @@ function App() {
     const base = [position?.[0] ?? 0, position?.[1] ?? 0, position?.[2] ?? 0]
     const popupPosition = [base[0], base[1] + 2.2, base[2]]
 
+    const currentBossKills = useGameStore.getState().progress.bossKillCount ?? 0
+    const nextBossKills = currentBossKills + 1
+    setProgress('bossKillCount',nextBossKills)
+    if (nextBossKills >= 5) unlockLocalTitle(TITLE_IDS.slimeKingSlayer)
+
     const rewarded = rewardCoins <= 0 || await applyCoinDelta(rewardCoins, {
       share: false,
       reason: 'slime_boss_defeat',
@@ -21428,6 +21457,14 @@ function App() {
 
   const handleSellItem = (itemId, quantity) => sellMaterialsForCoins(sellItem(materials, itemId, quantity))
   const handleSellAll = () => sellMaterialsForCoins(sellAll(materials))
+
+  const consumeBossOffering = () => {
+    const currentMaterials = useGameStore.getState().economy.materials
+    const result = consumeItems(currentMaterials, SLIME_BOSS.summonOffering)
+    if (!result.consumed) return false
+    setEconomy('materials',result.materials)
+    return true
+  }
 
   // Un objet au sol disparaît (durée de vie écoulée, jamais ramassé).
   const expireLootDrop = (dropId) => {
@@ -21599,9 +21636,10 @@ function App() {
   const equippedTitle = getTitleDefinition(equippedTitleId)
   const achievementProgress = useMemo(() => ({
     mobKills: mobKillCount,
+    bossKills: bossKillCount,
     coins,
     furniture: editableObjects.filter((object) => objectCatalog[object.objectId]?.category === 'furniture').length,
-  }), [mobKillCount, coins, editableObjects])
+  }), [mobKillCount, bossKillCount, coins, editableObjects])
   const showLocalNameplate = mode !== 'customize' &&
     (isMultiplayerSession || soloNameplateVisible) &&
     (authUser || displayName || equippedTitle)
@@ -24466,6 +24504,8 @@ function App() {
         onTalk={() => setQuest('dialogOpen',true)}
         bossPlacements={SUMMONING_ALTAR_PLACEMENTS}
         bossAuthority={!isGuestVisit}
+        bossOfferingAvailable={canConsumeItems(materials, SLIME_BOSS.summonOffering)}
+        onConsumeBossOffering={consumeBossOffering}
         onRequestBossSummon={({ altarId }) => sendBossSummonRequest(multiplayerChannelRef.current, altarId)}
         contextWindowOpen={questDialogOpen || questJournalOpen || vendorOpen || companionMenuOpen}
       />

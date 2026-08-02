@@ -9,7 +9,8 @@ export const MELEE_WEAPONS = Object.freeze({
     lateralBonus: 0.12,
     chargeThresholdMs: 700,
     maxChargeMs: 1500,
-    chargedCooldownMs: 950,
+    chargedCooldownMs: 5000,
+    chargedAreaRadius: 3.2,
   }),
 })
 

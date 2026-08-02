@@ -31,6 +31,33 @@ export function getItemCount(materials, itemId) {
   return normalizeMaterials(materials)[itemId] ?? 0
 }
 
+export function canConsumeItems(materials, costs = {}) {
+  const normalized = normalizeMaterials(materials)
+  return Object.entries(costs).every(([itemId, quantity]) => {
+    const required = Math.max(0, Math.floor(Number(quantity) || 0))
+    return required === 0 || (normalized[itemId] ?? 0) >= required
+  })
+}
+
+// Retire un ensemble d'objets en une seule opération. Si un seul élément
+// manque, l'inventaire reste intact afin d'éviter les offrandes partielles.
+export function consumeItems(materials, costs = {}) {
+  const normalized = normalizeMaterials(materials)
+  if (!canConsumeItems(normalized, costs)) {
+    return { materials: normalized, consumed: false }
+  }
+
+  const next = { ...normalized }
+  for (const [itemId, quantity] of Object.entries(costs)) {
+    const required = Math.max(0, Math.floor(Number(quantity) || 0))
+    if (required === 0) continue
+    const remaining = (next[itemId] ?? 0) - required
+    if (remaining > 0) next[itemId] = remaining
+    else delete next[itemId]
+  }
+  return { materials: next, consumed: true }
+}
+
 // Vend une quantité d'un objet. Renvoie { materials, sold, coins } : `sold` est la
 // quantité réellement vendue (plafonnée au stock), `coins` le gain total.
 export function sellItem(materials, itemId, quantity = 1) {

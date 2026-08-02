@@ -30,7 +30,7 @@ export function sendBossHitRequest(channel, { targetId = SLIME_BOSS.id, weaponId
 }
 
 export function createBossActionGuard() {
-  return { seen: new Set(), lastHitAtByPlayer: new Map() }
+  return { seen: new Set(), lastHitAtByPlayerTarget: new Map() }
 }
 
 export function handleHostBossAction({
@@ -66,9 +66,10 @@ export function handleHostBossAction({
   if (!targetPosition || distance2d(remotePlayerState.position, targetPosition) > targetRadius + 3.2) return false
 
   const playerId = String(action.userId ?? remotePlayerState.userId ?? 'remote')
-  const lastHitAt = guard.lastHitAtByPlayer.get(playerId) ?? 0
+  const rateLimitKey = `${playerId}:${targetId}`
+  const lastHitAt = guard.lastHitAtByPlayerTarget.get(rateLimitKey) ?? 0
   if (now - lastHitAt < 260) return false
-  guard.lastHitAtByPlayer.set(playerId, now)
+  guard.lastHitAtByPlayerTarget.set(rateLimitKey, now)
 
   const swordEquipped = remotePlayerState.equippedWeapon === 'cheat_sword'
   const damage = getMeleeHitDamage({

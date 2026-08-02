@@ -16,6 +16,11 @@ export const SLIME_BOSS = {
   chaseSpeed: [2.45, 2.9, 3.35],
   attackRange: 8.5,
 
+  summonOffering: Object.freeze({
+    blue_crystal: 1,
+    red_crystal: 1,
+  }),
+
   // Recompenses repetables, surchargeables par chaque autel dans l'editeur de map.
   // L'epee reste une recompense de progression unique geree separement.
   rewards: {

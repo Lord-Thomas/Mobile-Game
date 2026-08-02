@@ -15,4 +15,9 @@ describe('meleeWeapons', () => {
     expect(getMeleeHitDamage({ fallbackDamage: 15 })).toBe(15)
     expect(getMeleeWeaponDefinition('unknown')).toBeNull()
   })
+  it('configure le coup tournoyant comme une attaque de zone à délai de 5 secondes', () => {
+    const sword = getMeleeWeaponDefinition('cheat_sword')
+    expect(sword.chargedCooldownMs).toBe(5000)
+    expect(sword.chargedAreaRadius).toBeGreaterThan(0)
+  })
 })

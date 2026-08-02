@@ -3,6 +3,8 @@ import { rollLoot } from './lootTable'
 import { getSlimePetDefinitions } from './itemDefinitions'
 import {
   addItems,
+  canConsumeItems,
+  consumeItems,
   getItemCount,
   getMaterialEntries,
   normalizeMaterials,
@@ -104,6 +106,24 @@ describe('materialsInventory', () => {
     expect(entries).toEqual([
       { itemId: 'bone', def: expect.objectContaining({ id: 'bone' }), count: 2, unitPrice: 10, totalPrice: 20 },
     ])
+  })
+  it('consomme une offrande complète et supprime les piles vidées', () => {
+    const costs = { blue_crystal: 1, red_crystal: 1 }
+    const materials = { blue_crystal: 2, red_crystal: 1, bone: 3 }
+
+    expect(canConsumeItems(materials, costs)).toBe(true)
+    expect(consumeItems(materials, costs)).toEqual({
+      consumed: true,
+      materials: { blue_crystal: 1, bone: 3 },
+    })
+  })
+
+  it('ne retire rien lorsque l’offrande est incomplète', () => {
+    const materials = { blue_crystal: 2 }
+    const result = consumeItems(materials, { blue_crystal: 1, red_crystal: 1 })
+
+    expect(result.consumed).toBe(false)
+    expect(result.materials).toEqual(materials)
   })
 })
 

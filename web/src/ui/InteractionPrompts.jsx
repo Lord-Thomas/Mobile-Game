@@ -39,6 +39,8 @@ export default function InteractionPrompts({
   onTalk,
   bossPlacements = [],
   bossAuthority = true,
+  bossOfferingAvailable = false,
+  onConsumeBossOffering,
   onRequestBossSummon,
   contextWindowOpen = false,
 }) {
@@ -64,8 +66,10 @@ export default function InteractionPrompts({
   if (!showCaptureUi || !modePlay || !noChoiceMenu) return null
 
   const summonBoss = () => {
+    if (useBossStore.getState().active || !bossOfferingAvailable) return
     const altar = bossPlacements.find((placement) => placement.id === nearAltarId)
     if (!altar) return
+    if (!onConsumeBossOffering?.()) return
     if (!bossAuthority) {
       onRequestBossSummon?.({ type: 'summon', altarId: altar.id })
       return
@@ -92,7 +96,13 @@ export default function InteractionPrompts({
               disabled: isLearningMagicSkull,
             }
         : isOutsideZone && nearAltarId && !bossActive
-            ? { key: 'summon-boss', label: 'Invoquer le Boss', className: 'custom-open-btn', onClick: summonBoss }
+            ? {
+                key: 'summon-boss',
+                label: bossOfferingAvailable ? 'Invoquer (1 cristal bleu + 1 rouge)' : 'Offrande requise : 1 bleu + 1 rouge',
+                className: 'custom-open-btn',
+                onClick: summonBoss,
+                disabled: !bossOfferingAvailable,
+              }
           : nearOutdoorDoor
             ? { key: 'door', label: isOutsideZone ? 'Entrer' : 'Sortir', className: 'outdoor-open-btn', onClick: onOutdoorToggle }
             : nearSeat && !seatedPhase

@@ -80,6 +80,7 @@ function mergeProgressRow(existingRow, progress) {
     : (ownedSlimePets.includes(existing.activeSlimePetId) ? existing.activeSlimePetId : null)
   const unlockedAchievements = mergeUnique(existing.unlockedAchievements, progress.unlockedAchievements)
   const mobKillCount = Math.max(normalizeCount(existing.mobKillCount), normalizeCount(progress.mobKillCount))
+  const bossKillCount = Math.max(normalizeCount(existing.bossKillCount), normalizeCount(progress.bossKillCount))
   const friends = mergeFriends(existing.friends, progress.friends)
   const ownedMagicBook = Boolean(existing.ownedMagicBook || progress.ownedMagicBook || ownedWeapons.includes('magic_book'))
   const magicSkullDiscovered = Boolean(existing.magicSkullDiscovered || progress.magicSkullDiscovered || ownedWeapons.includes('magic_skull'))
@@ -109,6 +110,7 @@ function mergeProgressRow(existingRow, progress) {
     ownedTitleIds,
     unlockedAchievements,
     mobKillCount,
+    bossKillCount,
     friends,
     ownedCat: Boolean(existing.ownedCat || progress.ownedCat),
     ownedMagicBook,
@@ -245,6 +247,7 @@ export function toProgressRow(userId, progress, { includeCoins = false, scope = 
       equippedTitleId: progress.equippedTitleId ?? null,
       unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
       mobKillCount: normalizeCount(progress.mobKillCount),
+      bossKillCount: normalizeCount(progress.bossKillCount),
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
@@ -290,6 +293,7 @@ function toInitialProgressRow(userId, progress, { scope = DEFAULT_PROGRESS_SCOPE
       equippedTitleId: progress.equippedTitleId ?? null,
       unlockedAchievements: normalizeStringList(progress.unlockedAchievements),
       mobKillCount: normalizeCount(progress.mobKillCount),
+      bossKillCount: normalizeCount(progress.bossKillCount),
       equippedWeapon: progress.equippedWeapon ?? null,
       characterAppearance: progress.characterAppearance ?? null,
       friends: normalizeFriends(progress.friends),
@@ -338,6 +342,7 @@ export function fromProgressRow(row) {
     ownedTitleIds: normalizeStringList(row.world_settings?.ownedTitleIds),
     unlockedAchievements: normalizeStringList(row.world_settings?.unlockedAchievements),
     mobKillCount: normalizeCount(row.world_settings?.mobKillCount),
+    bossKillCount: normalizeCount(row.world_settings?.bossKillCount),
     equippedWeapon: typeof row.world_settings?.equippedWeapon === 'string' ? row.world_settings.equippedWeapon : null,
     equippedTitleId: row.equipped_title_id ?? row.world_settings?.equippedTitleId ?? null,
     editableObjects: Array.isArray(row.placed_decorations) ? row.placed_decorations : [],

@@ -278,6 +278,7 @@ export const useGameStore = create((set) => ({
   progress: {
     unlockedAchievements: [],
     mobKillCount: 0,
+    bossKillCount: 0,
     magicSkullDiscovered: ADMIN_INIT,
     achievementToast: null,
   },

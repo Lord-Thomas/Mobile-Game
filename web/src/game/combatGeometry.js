@@ -170,3 +170,17 @@ export function getPunchTargetAtContact({
     lateralBonus,
   })
 }
+
+export function getMeleeAreaTargets({ targets, playerX, playerZ, radius }) {
+  const hits = []
+  const safeRadius = Math.max(0, Number(radius) || 0)
+  targets?.forEach?.((target) => {
+    if (!target || target.disabled || !target.position) return
+    const dx = target.position.x - playerX
+    const dz = target.position.z - playerZ
+    const distance = Math.hypot(dx, dz)
+    if (distance > safeRadius + Math.max(0, Number(target.radius) || 0)) return
+    hits.push({ target, distance, dx, dz })
+  })
+  return hits.sort((left, right) => left.distance - right.distance)
+}
