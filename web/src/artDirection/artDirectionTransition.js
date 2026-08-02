@@ -45,6 +45,14 @@ export function interpolateArtDirectionValues(start, end, progress) {
 export function createBossSlimeRuntimeTarget(baseValues, bossValues) {
   return normalizeArtDirectionValues({
     ...bossValues,
+    lighting: {
+      ...bossValues.lighting,
+      // Rotating the sun during the summon invalidates the directional-light
+      // shadow projection while the boss is entering the scene. Keep the
+      // current direction and transition only colors/intensities.
+      sunAzimuth: baseValues.lighting.sunAzimuth,
+      sunElevation: baseValues.lighting.sunElevation,
+    },
     // Changer la résolution ou l'activation des ombres pendant le combat peut
     // forcer une réallocation GPU. Le preset rouge conserve donc ce bloc.
     shadows: baseValues.shadows,

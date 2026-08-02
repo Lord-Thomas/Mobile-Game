@@ -67,6 +67,7 @@ function OutdoorSun({
   const lightRef = useRef()
   const targetRef = useRef()
   const influenceRef = useRef(0)
+  const shadowMapSize = shadowSettings.mapSize
   const cameraForwardRef = useRef(new Vector3(0, 0, -1))
   const desiredCenterRef = useRef(new Vector3())
   const snappedCenterRef = useRef(new Vector3())
@@ -99,11 +100,14 @@ function OutdoorSun({
   useEffect(() => {
     const light = lightRef.current
     if (!light?.shadow) return
+    // Recreate the GPU shadow target only when its texture resolution changes.
+    // The sun direction changes `shadowBasis`, but does not require reallocating
+    // the shadow map (doing so during an art transition causes visible stalls).
     appliedCenterRef.current.set(Number.POSITIVE_INFINITY, 0, 0)
     light.shadow.map?.dispose()
     light.shadow.map = null
     light.shadow.needsUpdate = true
-  }, [shadowBasis, shadowSettings.mapSize])
+  }, [shadowMapSize])
 
   useFrame(({ camera }, delta) => {
     const light = lightRef.current

@@ -492,6 +492,8 @@ const MIN_CHARGE_RATIO = 0.2
 const SPELL_ICON_FIREBALL = '/ui/spell-fireball.png'
 const SPELL_ICON_NECROMANCER = '/ui/spell-necromancer.png'
 const SPELL_ICON_WINGS_BOOST = '/ui/spell-wings-boost.png'
+const SPELL_ICON_SWORD_NORMAL = '/ui/sort epée simple.png'
+const SPELL_ICON_SWORD_CHARGED = '/ui/Sort epée tourné.png'
 
 // ── Crâne nécromancien : invocation de squelettes alliés ─────────────────────
 const MAGIC_SKULL_PRICE = 1200
@@ -1507,15 +1509,33 @@ function constrainOutdoorCameraAgainstManualObstacles(focusX, originY, focusZ, t
 }
 
 function useCombatActionsAvailability(actionsRef) {
-  const [actions, setActions] = useState({ canKick: false, canPunch: false })
+  const [actions, setActions] = useState({
+    canKick: false,
+    canPunch: false,
+    canChargedSword: false,
+    chargedSwordCooldownRemainingMs: 0,
+  })
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      const next = actionsRef.current ?? { canKick: false, canPunch: false }
+      const next = actionsRef.current ?? {
+        canKick: false,
+        canPunch: false,
+        canChargedSword: false,
+        chargedSwordCooldownRemainingMs: 0,
+      }
       setActions((current) => (
-        current.canKick === next.canKick && current.canPunch === next.canPunch
+        current.canKick === next.canKick &&
+        current.canPunch === next.canPunch &&
+        current.canChargedSword === next.canChargedSword &&
+        current.chargedSwordCooldownRemainingMs === next.chargedSwordCooldownRemainingMs
           ? current
-          : { canKick: next.canKick, canPunch: next.canPunch }
+          : {
+              canKick: next.canKick,
+              canPunch: next.canPunch,
+              canChargedSword: next.canChargedSword,
+              chargedSwordCooldownRemainingMs: next.chargedSwordCooldownRemainingMs,
+            }
       ))
     }, 50)
     return () => window.clearInterval(interval)
@@ -1588,34 +1608,27 @@ function CombatActionDock({
   onSpellPress,
   wingsUiRef,
   swordEquipped = false,
+  canChargedSword = false,
+  chargedSwordCooldownRemainingMs = 0,
   controlSettings = DEFAULT_CONTROL_SETTINGS,
 }) {
   const wingsUi = useWingsSpellUi(wingsUiRef)
   const showWings = wingsUi.visible && !wingsUi.flying
   const showWingsBoost = wingsUi.visible && wingsUi.flying
-  const count = 1 + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
+  const count = 1 + (swordEquipped ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
+  const chargedSwordCooldownSeconds = Math.ceil(chargedSwordCooldownRemainingMs / 1000)
 
-  const queuePunch = () => {
+  const queueNormalAttack = () => {
+    triggerControlHaptic(controlSettings.vibration)
+    touchRef.current.punchChargeMs = 0
     touchRef.current.punchQueued = true
   }
 
-  const startPunchCharge = () => {
+  const queueChargedSwordAttack = () => {
+    if (!swordEquipped || !canChargedSword) return
     triggerControlHaptic(controlSettings.vibration)
-    if (!swordEquipped) {
-      queuePunch()
-      return
-    }
-    touchRef.current.punchHeldAt = performance.now()
-  }
-
-  const releasePunchCharge = () => {
-    if (!swordEquipped || !touchRef.current.punchHeldAt) return
-    touchRef.current.punchChargeMs = Math.min(
-      MELEE_WEAPONS.cheat_sword.maxChargeMs,
-      performance.now() - touchRef.current.punchHeldAt,
-    )
-    touchRef.current.punchHeldAt = 0
-    queuePunch()
+    touchRef.current.punchChargeMs = MELEE_WEAPONS.cheat_sword.maxChargeMs
+    touchRef.current.punchQueued = true
   }
 
   const queueKick = () => {
@@ -1639,27 +1652,47 @@ function CombatActionDock({
       style={getControlCssVariables(controlSettings)}
     >
       <button
-        className={`combat-action-btn combat-action-btn--punch${canPunch ? '' : ' is-unavailable'}`}
+        className={`combat-action-btn combat-action-btn--punch${swordEquipped ? ' combat-action-btn--image-spell combat-action-btn--sword-normal' : ''}${canPunch ? '' : ' is-unavailable'}`}
         type="button"
-        aria-label="Taper"
+        aria-label={swordEquipped ? "Coup normal de l'épée" : 'Taper'}
         disabled={!canPunch}
         onPointerDown={(event) => {
           event.preventDefault()
-          if (swordEquipped) event.currentTarget.classList.add('combat-action-btn--charging')
-          startPunchCharge()
-        }}
-        onPointerUp={(event) => {
-          event.currentTarget.classList.remove('combat-action-btn--charging')
-          releasePunchCharge()
-        }}
-        onPointerCancel={(event) => {
-          event.currentTarget.classList.remove('combat-action-btn--charging')
-          releasePunchCharge()
+          queueNormalAttack()
         }}
       >
-        <span className="combat-action-icon" aria-hidden="true">👊</span>
-        <span className="combat-action-label">{swordEquipped ? 'Maintenir' : 'Taper'}</span>
+        {swordEquipped ? (
+          <img className="combat-action-img" src={SPELL_ICON_SWORD_NORMAL} alt="" aria-hidden="true" draggable="false" />
+        ) : (
+          <span className="combat-action-icon" aria-hidden="true">👊</span>
+        )}
+        <span className="combat-action-label">Taper</span>
       </button>
+      {swordEquipped && (
+        <button
+          className={`combat-action-btn combat-action-btn--image-spell combat-action-btn--sword-charged${chargedSwordCooldownRemainingMs > 0 ? ' combat-action-btn--cooling' : ''}`}
+          type="button"
+          aria-label="Coup chargé de l'épée"
+          disabled={!canChargedSword}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            queueChargedSwordAttack()
+          }}
+        >
+          <img className="combat-action-img" src={SPELL_ICON_SWORD_CHARGED} alt="" aria-hidden="true" draggable="false" />
+          {chargedSwordCooldownRemainingMs > 0 && (
+            <SmoothCooldownRadial
+              remainingMs={chargedSwordCooldownRemainingMs}
+              totalMs={MELEE_WEAPONS.cheat_sword.chargedCooldownMs}
+            />
+          )}
+          {chargedSwordCooldownSeconds > 0 && (
+            <span className="combat-action-cooldown-count" aria-hidden="true">
+              {chargedSwordCooldownSeconds}
+            </span>
+          )}
+        </button>
+      )}
       {canKick && (
         <button
           className="combat-action-btn combat-action-btn--kick"
@@ -4932,8 +4965,18 @@ function Player({
       const inPlay = mode === 'play'
       // Le poing est une commande de combat permanente. La présence d'une
       // cible décide uniquement si le coup inflige des dégâts.
-      playerCombatActionsRef.current.canPunch = inPlay && !isDodging && Boolean(onGroundRef.current)
+      const canUseGroundAttack = inPlay && !isDodging && Boolean(onGroundRef.current)
+      const chargedSwordCooldownRemainingMs = equippedWeapon === 'cheat_sword'
+        ? Math.max(0, (swordAttackRef.current.chargedCooldownUntil - state.clock.elapsedTime) * 1000)
+        : 0
+      playerCombatActionsRef.current.canPunch = canUseGroundAttack
       playerCombatActionsRef.current.canKick = inPlay && !isDodging && Boolean(kickInArc && onGroundRef.current)
+      playerCombatActionsRef.current.canChargedSword = (
+        canUseGroundAttack &&
+        equippedWeapon === 'cheat_sword' &&
+        chargedSwordCooldownRemainingMs <= 0
+      )
+      playerCombatActionsRef.current.chargedSwordCooldownRemainingMs = Math.ceil(chargedSwordCooldownRemainingMs)
     }
 
     const wantsEmote = touch.emoteQueued
@@ -4949,7 +4992,9 @@ function Player({
       state.clock.elapsedTime < swordAttackRef.current.chargedCooldownUntil
     const wantsPunch = !isEmoting && !isAttackLocked && !chargedSwordLocked && (touch.punchQueued || key.punchQueued)
     const wantsKick = !isEmoting && !isAttackLocked && (touch.kickQueued || key.kickQueued)
-    const wantsJump = !isEmoting && !isAttackLocked && (key.actionQueued || touch.actionQueued)
+    // Le saut est prioritaire et peut interrompre une attaque. Ainsi, Espace ne
+    // peut jamais être consommé par une action de combat en attente.
+    const wantsJump = !isEmoting && (key.actionQueued || touch.actionQueued)
     if (wantsEmote === 'wave' && onGroundRef.current) {
       waveUntilRef.current = state.clock.elapsedTime + PLAYER_WAVE_DURATION
       danceUntilRef.current = 0
@@ -4992,6 +5037,21 @@ function Player({
       planarVelocityRef.current.z = 0
       filteredInputRef.current.x = 0
       filteredInputRef.current.y = 0
+    } else if (wantsJump && onGroundRef.current) {
+      punchUntilRef.current = 0
+      pendingPunchRef.current = null
+      kickUntilRef.current = 0
+      pendingKickRef.current = null
+      touch.punchQueued = false
+      touch.punchChargeMs = 0
+      key.punchQueued = false
+      touch.kickQueued = false
+      key.kickQueued = false
+      velocityYRef.current = 4.9
+      onGroundRef.current = false
+      jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
+      jumpLandUntilRef.current = 0
+      landingPreparedRef.current = false
     } else if (wantsPunch && onGroundRef.current) {
       const contactAt = state.clock.elapsedTime + PLAYER_PUNCH_CONTACT_DELAY
       const charged = wantsChargedSwordAttack
@@ -5026,12 +5086,6 @@ function Player({
         fired: false,
         running: speed > 2.45,
       }
-    } else if (wantsJump && onGroundRef.current) {
-      velocityYRef.current = 4.9
-      onGroundRef.current = false
-      jumpStartUntilRef.current = state.clock.elapsedTime + PLAYER_JUMP_START_DURATION
-      jumpLandUntilRef.current = 0
-      landingPreparedRef.current = false
     }
 
     const bufferPunchUntilCurrentAttackEnds =
@@ -19179,7 +19233,6 @@ function App() {
     actionQueued: false,
     punchQueued: false,
     kickQueued: false,
-    punchHeldAt: 0,
     punchChargeMs: 0,
     dodgeQueued: false,
     wingsQueued: false,
@@ -19188,9 +19241,19 @@ function App() {
     mountAscend: false,
     mountDescend: false,
   })
-  const playerCombatActionsRef = useRef({ canKick: false, canPunch: false })
+  const playerCombatActionsRef = useRef({
+    canKick: false,
+    canPunch: false,
+    canChargedSword: false,
+    chargedSwordCooldownRemainingMs: 0,
+  })
   const playerDodgeInvulnerableRef = useRef(false)
-  const { canKick, canPunch } = useCombatActionsAvailability(playerCombatActionsRef)
+  const {
+    canKick,
+    canPunch,
+    canChargedSword,
+    chargedSwordCooldownRemainingMs,
+  } = useCombatActionsAvailability(playerCombatActionsRef)
   // Sort d'ailes : instantané écrit par Player() dans useFrame, pollé par le dock.
   const wingsUiRef = useRef({ visible: false, canCast: false, flying: false, boostAvailable: false, cooldownRemaining: 0, energyRatio: 0 })
   const wingsParticleBurstIdRef = useRef(0)
@@ -19233,7 +19296,6 @@ function App() {
       touchRef.current.actionQueued = false
       touchRef.current.punchQueued = false
       touchRef.current.kickQueued = false
-      touchRef.current.punchHeldAt = 0
       touchRef.current.punchChargeMs = 0
       touchRef.current.dodgeQueued = false
       touchRef.current.emoteQueued = null
@@ -24242,6 +24304,8 @@ function App() {
           onSpellPress={handleSpellPress}
           wingsUiRef={wingsUiRef}
           swordEquipped={equippedWeapon === 'cheat_sword'}
+          canChargedSword={canChargedSword}
+          chargedSwordCooldownRemainingMs={chargedSwordCooldownRemainingMs}
           controlSettings={controlSettings}
         />
       )}
