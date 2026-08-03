@@ -1,0 +1,365 @@
+{
+  "version": 1,
+  "exportedAt": "2026-08-03T08:32:22.806Z",
+  "activePresetId": "art-preset-ms5y0nvb-cuj4qd",
+  "comparisonPresetId": "boss-slime-red",
+  "presets": [
+    {
+      "id": "factory-daylight",
+      "name": "Lumière du jour",
+      "builtin": true,
+      "values": {
+        "lighting": {
+          "sunAzimuth": 26.6,
+          "sunElevation": 51.3,
+          "sunColor": "#fff0b8",
+          "sunIntensity": 4.2,
+          "hemisphereIntensity": 1.75,
+          "skyLightColor": "#d5edff",
+          "groundLightColor": "#63a75b"
+        },
+        "shadows": {
+          "enabled": true,
+          "mapSize": 512,
+          "extent": 24,
+          "bias": -0.00025,
+          "normalBias": 0.022,
+          "radius": 1.35
+        },
+        "sky": {
+          "horizon": "#bfe8f9",
+          "zenith": "#79c6f2",
+          "cloudBase": "#fffef7",
+          "cloudWarm": "#fff2ce",
+          "cloudShade": "#c5d6ec",
+          "brightness": 1.1,
+          "cloudCoverage": 0.11
+        },
+        "fog": {
+          "backgroundColor": "#c0e8fa",
+          "color": "#d7eef5",
+          "density": 0.0011
+        },
+        "surfaces": {
+          "terrain": {
+            "color": "#4f8d2e",
+            "roughness": 0.88
+          },
+          "grass": {
+            "color": "#59bd36",
+            "roughness": 0.82
+          },
+          "leaves": {
+            "color": "#58b33a",
+            "roughness": 0.72
+          },
+          "trunks": {
+            "color": "#ffffff",
+            "roughness": 0.86
+          }
+        },
+        "grading": {
+          "exposure": 1.08,
+          "contrast": 1,
+          "saturation": 1,
+          "temperature": 0
+        }
+      },
+      "baselineValues": {
+        "lighting": {
+          "sunAzimuth": 26.6,
+          "sunElevation": 51.3,
+          "sunColor": "#fff0b8",
+          "sunIntensity": 4.2,
+          "hemisphereIntensity": 1.75,
+          "skyLightColor": "#d5edff",
+          "groundLightColor": "#63a75b"
+        },
+        "shadows": {
+          "enabled": true,
+          "mapSize": 512,
+          "extent": 24,
+          "bias": -0.00025,
+          "normalBias": 0.022,
+          "radius": 1.35
+        },
+        "sky": {
+          "horizon": "#bfe8f9",
+          "zenith": "#79c6f2",
+          "cloudBase": "#fffef7",
+          "cloudWarm": "#fff2ce",
+          "cloudShade": "#c5d6ec",
+          "brightness": 1.1,
+          "cloudCoverage": 0.11
+        },
+        "fog": {
+          "backgroundColor": "#c0e8fa",
+          "color": "#d7eef5",
+          "density": 0.0011
+        },
+        "surfaces": {
+          "terrain": {
+            "color": "#4f8d2e",
+            "roughness": 0.88
+          },
+          "grass": {
+            "color": "#59bd36",
+            "roughness": 0.82
+          },
+          "leaves": {
+            "color": "#58b33a",
+            "roughness": 0.72
+          },
+          "trunks": {
+            "color": "#ffffff",
+            "roughness": 0.86
+          }
+        },
+        "grading": {
+          "exposure": 1.08,
+          "contrast": 1,
+          "saturation": 1,
+          "temperature": 0
+        }
+      }
+    },
+    {
+      "id": "art-preset-ms5y0nvb-cuj4qd",
+      "name": "Lumière du jour",
+      "builtin": false,
+      "values": {
+        "lighting": {
+          "sunAzimuth": -149,
+          "sunElevation": 41,
+          "sunColor": "#fff0b8",
+          "sunIntensity": 4.55,
+          "hemisphereIntensity": 1.2,
+          "skyLightColor": "#fbe7bc",
+          "groundLightColor": "#ffffff"
+        },
+        "shadows": {
+          "enabled": true,
+          "mapSize": 512,
+          "extent": 24,
+          "bias": -0.00025,
+          "normalBias": 0.022,
+          "radius": 1.35
+        },
+        "sky": {
+          "horizon": "#bfe8f9",
+          "zenith": "#79c6f2",
+          "cloudBase": "#fffef7",
+          "cloudWarm": "#fff2ce",
+          "cloudShade": "#c5d6ec",
+          "brightness": 1.17,
+          "cloudCoverage": 0.1
+        },
+        "fog": {
+          "backgroundColor": "#c0e8fa",
+          "color": "#d7eef5",
+          "density": 0.0021
+        },
+        "surfaces": {
+          "terrain": {
+            "color": "#7ad548",
+            "roughness": 1
+          },
+          "grass": {
+            "color": "#59bd36",
+            "roughness": 0.82
+          },
+          "leaves": {
+            "color": "#59bd36",
+            "roughness": 0.49
+          },
+          "trunks": {
+            "color": "#ffffff",
+            "roughness": 1
+          }
+        },
+        "grading": {
+          "exposure": 0.87,
+          "contrast": 1.18,
+          "saturation": 0.93,
+          "temperature": 0.42
+        }
+      },
+      "baselineValues": {
+        "lighting": {
+          "sunAzimuth": 26.6,
+          "sunElevation": 51.3,
+          "sunColor": "#fff0b8",
+          "sunIntensity": 4.2,
+          "hemisphereIntensity": 1.75,
+          "skyLightColor": "#d5edff",
+          "groundLightColor": "#63a75b"
+        },
+        "shadows": {
+          "enabled": true,
+          "mapSize": 512,
+          "extent": 24,
+          "bias": -0.00025,
+          "normalBias": 0.022,
+          "radius": 1.35
+        },
+        "sky": {
+          "horizon": "#bfe8f9",
+          "zenith": "#79c6f2",
+          "cloudBase": "#fffef7",
+          "cloudWarm": "#fff2ce",
+          "cloudShade": "#c5d6ec",
+          "brightness": 1.1,
+          "cloudCoverage": 0.11
+        },
+        "fog": {
+          "backgroundColor": "#c0e8fa",
+          "color": "#d7eef5",
+          "density": 0.0011
+        },
+        "surfaces": {
+          "terrain": {
+            "color": "#4f8d2e",
+            "roughness": 0.88
+          },
+          "grass": {
+            "color": "#59bd36",
+            "roughness": 0.82
+          },
+          "leaves": {
+            "color": "#58b33a",
+            "roughness": 0.72
+          },
+          "trunks": {
+            "color": "#ffffff",
+            "roughness": 0.86
+          }
+        },
+        "grading": {
+          "exposure": 1.08,
+          "contrast": 1,
+          "saturation": 1,
+          "temperature": 0
+        }
+      }
+    },
+    {
+      "id": "boss-slime-red",
+      "name": "Boss Slime rouge",
+      "builtin": true,
+      "values": {
+        "lighting": {
+          "sunAzimuth": -18,
+          "sunElevation": 34,
+          "sunColor": "#ff725e",
+          "sunIntensity": 3.55,
+          "hemisphereIntensity": 1.1,
+          "skyLightColor": "#fe1044",
+          "groundLightColor": "#ff004c"
+        },
+        "shadows": {
+          "enabled": true,
+          "mapSize": 512,
+          "extent": 24,
+          "bias": -0.00025,
+          "normalBias": 0.022,
+          "radius": 1.35
+        },
+        "sky": {
+          "horizon": "#f72222",
+          "zenith": "#ff5252",
+          "cloudBase": "#720303",
+          "cloudWarm": "#390804",
+          "cloudShade": "#140000",
+          "brightness": 0.79,
+          "cloudCoverage": 0.15
+        },
+        "fog": {
+          "backgroundColor": "#421a2b",
+          "color": "#6d2938",
+          "density": 0.002
+        },
+        "surfaces": {
+          "terrain": {
+            "color": "#654126",
+            "roughness": 0.9
+          },
+          "grass": {
+            "color": "#631603",
+            "roughness": 0.84
+          },
+          "leaves": {
+            "color": "#611d00",
+            "roughness": 0.75
+          },
+          "trunks": {
+            "color": "#c58d82",
+            "roughness": 0.88
+          }
+        },
+        "grading": {
+          "exposure": 0.94,
+          "contrast": 1.12,
+          "saturation": 0.92,
+          "temperature": 0.38
+        }
+      },
+      "baselineValues": {
+        "lighting": {
+          "sunAzimuth": -18,
+          "sunElevation": 34,
+          "sunColor": "#ff725e",
+          "sunIntensity": 3.8,
+          "hemisphereIntensity": 1.15,
+          "skyLightColor": "#8f4051",
+          "groundLightColor": "#431c28"
+        },
+        "shadows": {
+          "enabled": true,
+          "mapSize": 512,
+          "extent": 24,
+          "bias": -0.00025,
+          "normalBias": 0.022,
+          "radius": 1.35
+        },
+        "sky": {
+          "horizon": "#8c3a49",
+          "zenith": "#24172f",
+          "cloudBase": "#d78383",
+          "cloudWarm": "#ff6759",
+          "cloudShade": "#51213b",
+          "brightness": 0.74,
+          "cloudCoverage": 0.18
+        },
+        "fog": {
+          "backgroundColor": "#421a2b",
+          "color": "#6d2938",
+          "density": 0.002
+        },
+        "surfaces": {
+          "terrain": {
+            "color": "#654126",
+            "roughness": 0.9
+          },
+          "grass": {
+            "color": "#79502d",
+            "roughness": 0.84
+          },
+          "leaves": {
+            "color": "#6f4431",
+            "roughness": 0.75
+          },
+          "trunks": {
+            "color": "#c58d82",
+            "roughness": 0.88
+          }
+        },
+        "grading": {
+          "exposure": 0.94,
+          "contrast": 1.12,
+          "saturation": 0.92,
+          "temperature": 0.38
+        }
+      }
+    }
+  ]
+}

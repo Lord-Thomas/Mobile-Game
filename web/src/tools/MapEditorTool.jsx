@@ -225,6 +225,7 @@ function toSavedPaths(paths) {
       type: normalized.type,
       center: normalized.center,
       width: normalized.width,
+      hardness: normalized.hardness,
     }
   })
 }
@@ -439,6 +440,8 @@ function PathBrushPreview({ brush, point }) {
   const y = getTerrainHeight(x, z, true)
   const color = brush.mode === 'erase' ? '#ff9c82' : PATH_TYPES[brush.type]?.color ?? '#6f5d44'
   const radius = brush.width * 0.5
+  const feather = MathUtils.lerp(0.45, 0.025, MathUtils.clamp(brush.hardness ?? 0.55, 0, 1))
+  const solidRadius = radius * (1 - feather)
 
   return (
     <group position={[x, y + 0.16, z]} userData={{ debugCategory: 'path-brush-preview' }}>
@@ -449,6 +452,10 @@ function PathBrushPreview({ brush, point }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} renderOrder={25}>
         <ringGeometry args={[Math.max(0.06, radius - 0.12), radius, 48]} />
         <meshBasicMaterial color={color} transparent opacity={0.92} depthWrite={false} depthTest={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.018, 0]} renderOrder={26}>
+        <ringGeometry args={[Math.max(0.01, solidRadius - 0.025), solidRadius, 48]} />
+        <meshBasicMaterial color={color} transparent opacity={0.5} depthWrite={false} depthTest={false} />
       </mesh>
     </group>
   )
@@ -571,6 +578,7 @@ function MapEditorCamera({ active, focusRef }) {
 }
 
 export function MapEditorScene({
+  active = true,
   objects,
   spawners = [],
   biomes = [],
@@ -627,7 +635,7 @@ export function MapEditorScene({
   const pathPaintingRef = useRef(false)
   const lastPathPointRef = useRef(null)
   const [brushPreviewPoint, setBrushPreviewPoint] = useState(null)
-  const isTopView = cameraView === 'top'
+  const isTopView = active && cameraView === 'top'
   const editorBrushActive = Boolean(biomeBrush?.active || terrainBrush?.active || pathBrush?.active)
 
   const paintPathAtPoint = (point, force = false) => {
@@ -635,11 +643,29 @@ export function MapEditorScene({
     const [x, z] = clampMapPosition(point.x, point.z)
     const last = lastPathPointRef.current
     const spacing = Math.max(0.35, pathBrush.width * 0.3)
-    if (!force && last && Math.hypot(x - last[0], z - last[1]) < spacing) return
-
-    lastPathPointRef.current = [x, z]
     setBrushPreviewPoint([x, z])
-    onPaintPath?.([x, z], pathBrush)
+
+    if (force || !last) {
+      lastPathPointRef.current = [x, z]
+      onPaintPath?.([x, z], pathBrush)
+      return
+    }
+
+    const dx = x - last[0]
+    const dz = z - last[1]
+    const distance = Math.hypot(dx, dz)
+    if (distance < spacing) return
+
+    // Fill the whole segment between pointer events. Fast mouse movements and
+    // low-frequency touch events therefore still produce one continuous paint
+    // stroke instead of a row of disconnected round stamps.
+    const stepCount = Math.min(64, Math.floor(distance / spacing))
+    for (let step = 1; step <= stepCount; step += 1) {
+      const ratio = (step * spacing) / distance
+      const sample = [last[0] + dx * ratio, last[1] + dz * ratio]
+      onPaintPath?.(sample, pathBrush)
+      lastPathPointRef.current = sample
+    }
   }
 
   const paintTerrainAtPoint = (point, force = false) => {
@@ -778,6 +804,7 @@ export function MapEditorScene({
   }
 
   useFrame(() => {
+    if (!active) return
     if (!placementFocusRef) return
     const cam = cameraRef.current
     if (!cam) return
@@ -880,7 +907,7 @@ export function MapEditorScene({
   }
 
   return (
-    <group>
+    <group visible={active}>
       <MapEditorCamera active={isTopView} focusRef={focusRef} />
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
@@ -1052,7 +1079,7 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
-      <PaintedPaths paths={paths} terrainVersion={terrainVersion} />
+      <PaintedPaths paths={paths} terrainVersion={terrainVersion} preloadHeightField />
       {biomeBrush?.active ? (
         <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
       ) : terrainBrush?.active ? (
@@ -1114,7 +1141,6 @@ export function MapEditorPanel({
   onTerrainBrushChange,
   pathBrush,
   onPathBrushChange,
-  onClearPaths,
   placementFocusRef,
   spawnersLocked = false,
   biomesLocked = false,
@@ -1657,9 +1683,15 @@ export function MapEditorPanel({
               step={0.5}
               onChange={(width) => patchPathBrush({ width })}
             />
-            <button type="button" style={styles.dangerButton} onClick={() => onClearPaths?.()} disabled={!paths.length}>
-              Effacer toute la peinture
-            </button>
+            <SliderField
+              label="Dureté des bords"
+              value={pathBrush.hardness ?? 0.55}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(hardness) => patchPathBrush({ hardness })}
+            />
+            <span style={styles.subtitle}>0 : très fondu · 1 : bord net</span>
           </div>
         )}
       </Section>

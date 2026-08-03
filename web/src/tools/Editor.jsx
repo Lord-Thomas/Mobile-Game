@@ -222,6 +222,7 @@ function useMapEditorState() {
     active: false,
     type: 'dirt',
     width: 3,
+    hardness: 0.55,
     mode: 'paint',
   })
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
@@ -600,15 +601,11 @@ export default function Editor({ initialMode = 'tree' }) {
         type: brush.type,
         center: [x, z],
         width: MathUtils.clamp(brush.width, 0.5, 24),
+        hardness: MathUtils.clamp(brush.hardness ?? 0.55, 0, 1),
       }, current.length)
       return [...current, stamp]
     })
   }
-
-  const clearPaths = useCallback(() => {
-    pushPathUndoSnapshot()
-    mapEditor.setPaths([])
-  }, [mapEditor, pushPathUndoSnapshot])
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
@@ -628,15 +625,18 @@ export default function Editor({ initialMode = 'tree' }) {
             lightingActive={true}
             playerPositionRef={noPlayerRef}
             showAuthoredTrees={false}
-            showMapObjects={mode !== 'map'}
+            showRoad={false}
+            showMapObjects={false}
             biomeAreas={mapEditor.biomes}
           />
           <EditorStage>
-            {mode === 'tree' && <TreeDevScene />}
+            <group visible={mode === 'tree'}>
+              <TreeDevScene />
+            </group>
             {mode === 'house' && <HouseDevScene />}
             {mode === 'particles' && <ParticleDevScene />}
-            {mode === 'map' && (
-              <MapEditorScene
+            <MapEditorScene
+                active={mode === 'map'}
                 objects={mapEditor.objects}
                 spawners={mapEditor.spawners}
                 biomes={mapEditor.biomes}
@@ -687,7 +687,6 @@ export default function Editor({ initialMode = 'tree' }) {
                   setTerrainVersion((v) => v + 1)
                 }}
               />
-            )}
           </EditorStage>
         </Suspense>
         <EditorCameraLayers />
@@ -745,7 +744,11 @@ export default function Editor({ initialMode = 'tree' }) {
           {panelsVisible ? 'Masquer les panneaux' : 'Afficher les panneaux'}
         </button>
       </div>
-      {panelsVisible && mode === 'tree' && <TreeDevPanel />}
+      {panelsVisible && (
+        <div style={{ display: mode === 'tree' ? 'contents' : 'none' }}>
+          <TreeDevPanel />
+        </div>
+      )}
       {panelsVisible && mode === 'house' && <HouseDevPanel />}
       {panelsVisible && mode === 'particles' && <ParticleDevPanel />}
       {panelsVisible && mode === 'art' && ArtDirectionPanel && (
@@ -753,8 +756,9 @@ export default function Editor({ initialMode = 'tree' }) {
           <ArtDirectionPanel />
         </Suspense>
       )}
-      {panelsVisible && mode === 'map' && (
-        <MapEditorPanel
+      {panelsVisible && (
+        <div style={{ display: mode === 'map' ? 'contents' : 'none' }}>
+          <MapEditorPanel
           objects={mapEditor.objects}
           spawners={mapEditor.spawners}
           biomes={mapEditor.biomes}
@@ -786,13 +790,13 @@ export default function Editor({ initialMode = 'tree' }) {
           onTerrainBrushChange={mapEditor.setTerrainBrush}
           pathBrush={mapEditor.pathBrush}
           onPathBrushChange={mapEditor.setPathBrush}
-          onClearPaths={clearPaths}
           placementFocusRef={mapPlacementFocusRef}
           spawnersLocked={mapEditor.spawnersLocked}
           biomesLocked={mapEditor.biomesLocked}
           onSpawnersLockedChange={mapEditor.setSpawnersLocked}
           onBiomesLockedChange={mapEditor.setBiomesLocked}
-        />
+          />
+        </div>
       )}
     </div>
   )
@@ -824,6 +828,6 @@ const activeModeButtonStyle = {
   ...modeButtonStyle,
   color: '#0e1814',
   background: '#9fe0bc',
-  borderColor: '#9fe0bc',
+  border: '1px solid #9fe0bc',
   fontWeight: 700,
 }

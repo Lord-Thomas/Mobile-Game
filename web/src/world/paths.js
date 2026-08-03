@@ -1,5 +1,7 @@
 import { MAP_PATHS as generatedPaths } from './paths.generated'
 
+export const DEFAULT_PATH_HARDNESS = 0.55
+
 // Painted paths are stored as a flat list of round "stamps" (like biome paint),
 // each at a world position with a width. Overlapping stamps along a drag form a
 // continuous path. They render as terrain-following decals (see PaintedPaths).
@@ -12,6 +14,7 @@ export const PATH_TYPES = {
     map: '/textures/outdoor/grass-patchy-basecolor-512.jpg',
     normalMap: '/textures/outdoor/grass-patchy-normal.png',
     roughnessMap: '/textures/outdoor/grass-patchy-roughness.jpg',
+    textureScale: 0.155,
     terrainGrade: {
       target: [0.055, 0.37, 0.035],
       luminanceScale: 2.8,
@@ -28,6 +31,7 @@ export const PATH_TYPES = {
     map: '/textures/outdoor/dirt-ground-basecolor-512.jpg',
     normalMap: '/textures/outdoor/dirt-ground-normal.jpg',
     roughnessMap: '/textures/outdoor/dirt-ground-roughness.jpg',
+    textureScale: 0.18,
     terrainGrade: {
       target: [0.49, 0.23, 0.04],
       luminanceScale: 2.5,
@@ -44,6 +48,7 @@ export const PATH_TYPES = {
     map: '/textures/outdoor/asphalt-clean-basecolor-512.jpg',
     normalMap: '/textures/outdoor/asphalt-clean-normal.jpg',
     roughnessMap: '/textures/outdoor/dirt-path-roughness.jpg',
+    textureScale: 0.2,
   },
   sand: {
     id: 'sand',
@@ -53,6 +58,7 @@ export const PATH_TYPES = {
     map: '/textures/outdoor/dirt-path-basecolor.jpg',
     normalMap: '/textures/outdoor/dirt-path-normal.png',
     roughnessMap: '/textures/outdoor/dirt-path-roughness.jpg',
+    textureScale: 0.2,
   },
   gravel: {
     id: 'gravel',
@@ -62,6 +68,7 @@ export const PATH_TYPES = {
     map: '/textures/outdoor/asphalt-clean-basecolor-512.jpg',
     normalMap: '/textures/outdoor/asphalt-clean-normal.jpg',
     roughnessMap: '/textures/outdoor/dirt-path-roughness.jpg',
+    textureScale: 0.2,
   },
 }
 
@@ -87,6 +94,7 @@ export function normalizePathStamp(stamp, index = 0) {
     type,
     center,
     width: clampNumber(asFiniteNumber(stamp?.width, 3), 0.5, 24),
+    hardness: clampNumber(asFiniteNumber(stamp?.hardness, DEFAULT_PATH_HARDNESS), 0, 1),
   }
 }
 

@@ -23907,7 +23907,7 @@ function App() {
             showTrees={outdoorVegetationReady && performanceSettings.trees && (!isDebugMode || debugToggles.trees)}
             showTerrain={terrainRenderMode !== 'off' && (!isDebugMode || debugToggles.terrain)}
             terrainRenderMode={terrainRenderMode}
-            showRoad={outdoorStaticReady}
+            showRoad={false}
             showNeighborHouses={outdoorStaticReady}
             showMapObjects={outdoorObjectsMounted}
             preloadMapObjects={shaderWarmupComplete}

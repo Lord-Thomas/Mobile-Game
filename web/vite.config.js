@@ -503,7 +503,7 @@ function saveThumbnailPlugin() {
             const spawners = Array.isArray(payload.spawners) ? payload.spawners : []
             const biomes = Array.isArray(payload.biomes) ? payload.biomes : []
             const paths = Array.isArray(payload.paths) ? payload.paths : []
-            const allowedPathTypes = new Set(['dirt', 'stone', 'sand', 'gravel'])
+            const allowedPathTypes = new Set(['grass', 'dirt', 'stone', 'sand', 'gravel'])
             const sanitizedPaths = paths.map((stamp, index) => {
               const type = allowedPathTypes.has(stamp.type) ? stamp.type : 'dirt'
               const center = Array.isArray(stamp.center) ? stamp.center : [0, 0]
@@ -520,6 +520,9 @@ function saveThumbnailPlugin() {
                 width: Number.isFinite(Number(stamp.width))
                   ? Math.min(24, Math.max(0.5, Number(stamp.width)))
                   : 3,
+                hardness: Number.isFinite(Number(stamp.hardness))
+                  ? Math.min(1, Math.max(0, Number(stamp.hardness)))
+                  : 0.55,
               }
             })
             const terrainModifications = payload.terrainModifications && typeof payload.terrainModifications === 'object'
