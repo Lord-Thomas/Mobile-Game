@@ -787,7 +787,6 @@ export default function Editor({ initialMode = 'tree' }) {
           pathBrush={mapEditor.pathBrush}
           onPathBrushChange={mapEditor.setPathBrush}
           onClearPaths={clearPaths}
-          pathCount={mapEditor.paths.length}
           placementFocusRef={mapPlacementFocusRef}
           spawnersLocked={mapEditor.spawnersLocked}
           biomesLocked={mapEditor.biomesLocked}

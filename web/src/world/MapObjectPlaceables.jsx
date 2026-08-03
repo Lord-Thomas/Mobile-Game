@@ -578,10 +578,8 @@ export default function MapObjectPlaceables({
           placement={placement}
           selected={selectedId === placement.id}
           onRegister={registerRef}
-          // Press = select + start dragging, just like the in-game
-          // EditableObject. Crucially no pointer capture and no move/up
-          // handler here, so pointer-move events fall through to the ground
-          // plane which makes the object follow the cursor.
+          // Selection is always immediate. The editor decides whether the
+          // same gesture is an explicitly requested quick drag (Shift).
           onPointerDown={onSelect ? (event) => {
             // Left button only: right/middle stay free for the camera.
             if (event.button !== 0) return

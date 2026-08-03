@@ -1183,9 +1183,9 @@ export const MAP_MONSTER_SPAWNERS = [
     "monsterType": "mushroom",
     "heightOffset": 0,
     "position": [
-      -9.5,
-      0.40999618125918413,
-      -20.75
+      -24.25,
+      2.9508864927696137,
+      -44.25
     ],
     "radius": 31,
     "populationMax": 10,
@@ -1256,8 +1256,8 @@ export const MAP_MONSTER_SPAWNERS = [
     "heightOffset": 0,
     "position": [
       31.25,
-      5.500992963244312,
-      -49.25
+      7.368752563680091,
+      -45.25
     ],
     "radius": 25,
     "populationMax": 8,

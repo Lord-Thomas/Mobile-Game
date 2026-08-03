@@ -4,10 +4,51 @@ import { MAP_PATHS as generatedPaths } from './paths.generated'
 // each at a world position with a width. Overlapping stamps along a drag form a
 // continuous path. They render as terrain-following decals (see PaintedPaths).
 export const PATH_TYPES = {
-  dirt: { id: 'dirt', name: 'Terre', color: '#6f5d44' },
-  stone: { id: 'stone', name: 'Pierre', color: '#8b8881' },
-  sand: { id: 'sand', name: 'Sable', color: '#c2a878' },
-  gravel: { id: 'gravel', name: 'Gravier', color: '#9a948a' },
+  grass: {
+    id: 'grass',
+    name: 'Herbe',
+    color: '#789758',
+    tint: '#ffffff',
+    map: '/textures/outdoor/grass-patchy-basecolor-512.jpg',
+    normalMap: '/textures/outdoor/grass-patchy-normal.png',
+    roughnessMap: '/textures/outdoor/grass-patchy-roughness.jpg',
+  },
+  dirt: {
+    id: 'dirt',
+    name: 'Terre',
+    color: '#6f5d44',
+    tint: '#ffffff',
+    map: '/textures/outdoor/dirt-ground-basecolor-512.jpg',
+    normalMap: '/textures/outdoor/dirt-ground-normal.jpg',
+    roughnessMap: '/textures/outdoor/dirt-ground-roughness.jpg',
+  },
+  stone: {
+    id: 'stone',
+    name: 'Pierre',
+    color: '#8b8881',
+    tint: '#aaa9a3',
+    map: '/textures/outdoor/asphalt-clean-basecolor-512.jpg',
+    normalMap: '/textures/outdoor/asphalt-clean-normal.jpg',
+    roughnessMap: '/textures/outdoor/dirt-path-roughness.jpg',
+  },
+  sand: {
+    id: 'sand',
+    name: 'Sable',
+    color: '#c2a878',
+    tint: '#d8bd83',
+    map: '/textures/outdoor/dirt-path-basecolor.jpg',
+    normalMap: '/textures/outdoor/dirt-path-normal.png',
+    roughnessMap: '/textures/outdoor/dirt-path-roughness.jpg',
+  },
+  gravel: {
+    id: 'gravel',
+    name: 'Gravier',
+    color: '#9a948a',
+    tint: '#bbb7ae',
+    map: '/textures/outdoor/asphalt-clean-basecolor-512.jpg',
+    normalMap: '/textures/outdoor/asphalt-clean-normal.jpg',
+    roughnessMap: '/textures/outdoor/dirt-path-roughness.jpg',
+  },
 }
 
 export const PATH_TYPE_IDS = Object.keys(PATH_TYPES)

@@ -703,6 +703,10 @@ export function MapEditorScene({
   }
 
   const handleStartObjectDrag = (id, event) => {
+    // Selection and movement are deliberately separate. A plain click only
+    // selects the placement; holding Shift opts into the legacy quick drag.
+    // This prevents tiny pointer movements from moving props accidentally.
+    if (!event?.shiftKey) return
     // If a previous drag never committed (pointer released over the label/HTML
     // overlay, so the floor never received pointerup), commit it now before
     // starting a new drag — otherwise its pending position leaks onto this one.
@@ -835,7 +839,7 @@ export function MapEditorScene({
     if (event.button !== 0) return
     event.stopPropagation()
     onSelectSpawner?.(id)
-    if (spawnersLocked) return
+    if (spawnersLocked || !event.shiftKey) return
     spawnerDragRef.current = id
     event.target?.setPointerCapture?.(event.pointerId)
   }
@@ -857,7 +861,7 @@ export function MapEditorScene({
     if (event.button !== 0) return
     event.stopPropagation()
     onSelectBiome?.(id)
-    if (biomesLocked) return
+    if (biomesLocked || !event.shiftKey) return
     biomeDragRef.current = id
     event.target?.setPointerCapture?.(event.pointerId)
   }
@@ -1111,7 +1115,6 @@ export function MapEditorPanel({
   pathBrush,
   onPathBrushChange,
   onClearPaths,
-  pathCount = 0,
   placementFocusRef,
   spawnersLocked = false,
   biomesLocked = false,
@@ -1614,7 +1617,7 @@ export function MapEditorPanel({
         )}
       </Section>
 
-      <Section title="Chemins">
+      <Section title="Peinture du sol">
         {pathBrush && (
           <div style={styles.subcard}>
             <div style={styles.actions}>
@@ -1626,9 +1629,13 @@ export function MapEditorPanel({
                 {pathBrush.active ? 'Pinceau actif' : 'Activer'}
               </button>
             </div>
-            <span style={styles.subtitle}>{pathBrush.active ? 'Glisse sur le sol pour tracer.' : `${pathCount} segment(s) de chemin.`}</span>
+            <span style={styles.subtitle}>
+              {pathBrush.active
+                ? 'Maintiens et glisse sur le sol pour peindre la texture.'
+                : 'Active le pinceau pour peindre directement sur la map.'}
+            </span>
             <SelectField
-              label="Matiere"
+              label="Texture"
               value={pathBrush.type}
               options={PATH_TYPE_IDS.map((id) => ({ value: id, label: PATH_TYPES[id].name }))}
               onChange={(type) => patchPathBrush({ type })}
@@ -1643,15 +1650,15 @@ export function MapEditorPanel({
               onChange={(mode) => patchPathBrush({ mode })}
             />
             <SliderField
-              label="Largeur"
+              label="Taille du pinceau"
               value={pathBrush.width}
               min={0.5}
               max={16}
               step={0.5}
               onChange={(width) => patchPathBrush({ width })}
             />
-            <button type="button" style={styles.dangerButton} onClick={() => onClearPaths?.()} disabled={!pathCount}>
-              Effacer tous les chemins ({pathCount})
+            <button type="button" style={styles.dangerButton} onClick={() => onClearPaths?.()} disabled={!paths.length}>
+              Effacer toute la peinture
             </button>
           </div>
         )}
@@ -1886,6 +1893,7 @@ export function MapEditorPanel({
           <>
             <div style={styles.subcard}>
               <strong>{MONSTER_SPAWNER_TYPES[selectedSpawner.monsterType]?.name ?? selectedSpawner.monsterType}</strong>
+              <span style={styles.subtitle}>Maj + glisser le marqueur pour le déplacer sans risque de clic accidentel.</span>
               <SelectField
                 label="Monstre"
                 value={selectedSpawner.monsterType}
@@ -2146,12 +2154,12 @@ export function MapEditorPanel({
           </button>
         </div>
         <CheckboxField
-          label="Verrouiller spawners"
+          label="Bloquer le déplacement des spawners"
           checked={spawnersLocked}
           onChange={onSpawnersLockedChange}
         />
         <CheckboxField
-          label="Verrouiller zones"
+          label="Bloquer le déplacement des zones"
           checked={biomesLocked}
           onChange={onBiomesLockedChange}
         />
@@ -2161,7 +2169,7 @@ export function MapEditorPanel({
         {saving ? 'Sauvegarde...' : 'Sauvegarder la map'}
       </button>
       {message && <p style={styles.message}>{message}</p>}
-      <p style={styles.footer}>{movingId ? 'Clique ou glisse sur le sol, puis valide ou annule le deplacement.' : 'Glisse un objet pour le deplacer. Glisse le sol vide pour bouger la camera, molette pour zoomer.'}</p>
+      <p style={styles.footer}>{movingId ? 'Clique ou glisse sur le sol, puis valide ou annule le deplacement.' : 'Clique pour sélectionner. Maj + glisser déplace rapidement. Glisse le sol vide pour bouger la caméra, molette pour zoomer.'}</p>
     </aside>
   )
 }
