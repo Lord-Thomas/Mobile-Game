@@ -12,6 +12,13 @@ export const PATH_TYPES = {
     map: '/textures/outdoor/grass-patchy-basecolor-512.jpg',
     normalMap: '/textures/outdoor/grass-patchy-normal.png',
     roughnessMap: '/textures/outdoor/grass-patchy-roughness.jpg',
+    terrainGrade: {
+      target: [0.055, 0.37, 0.035],
+      luminanceScale: 2.8,
+      luminanceBias: 0.10,
+      luminanceMax: 0.84,
+      amount: 0.90,
+    },
   },
   dirt: {
     id: 'dirt',
@@ -21,6 +28,13 @@ export const PATH_TYPES = {
     map: '/textures/outdoor/dirt-ground-basecolor-512.jpg',
     normalMap: '/textures/outdoor/dirt-ground-normal.jpg',
     roughnessMap: '/textures/outdoor/dirt-ground-roughness.jpg',
+    terrainGrade: {
+      target: [0.49, 0.23, 0.04],
+      luminanceScale: 2.5,
+      luminanceBias: 0.08,
+      luminanceMax: 0.90,
+      amount: 0.50,
+    },
   },
   stone: {
     id: 'stone',

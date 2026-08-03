@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import {
+  Color,
   DataTexture,
   LinearFilter,
   Object3D,
@@ -9,9 +10,14 @@ import {
   SRGBColorSpace,
   UnsignedByteType,
   Vector2,
+  Vector3,
 } from 'three'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 import { PATH_TYPES } from './paths'
+import {
+  getArtDirectionColorMultiplier,
+  useArtDirectionValues,
+} from '../artDirection/artDirectionStore'
 
 // Painting remains a compact list of brush samples in the saved map, but it is
 // rendered as one instanced textured layer per material. The GPU cost therefore
@@ -21,6 +27,14 @@ const PATH_Y_OFFSET = 0.055
 const ALPHA_MAP_SIZE = 64
 const dummy = new Object3D()
 const PATH_NORMAL_SCALE = new Vector2(0.55, 0.55)
+const TERRAIN_NORMAL_SCALE = new Vector2(0.34, 0.34)
+const NO_TERRAIN_GRADE = Object.freeze({
+  target: [1, 1, 1],
+  luminanceScale: 1,
+  luminanceBias: 0,
+  luminanceMax: 1,
+  amount: 0,
+})
 
 function createFeatheredAlphaMap() {
   const data = new Uint8Array(ALPHA_MAP_SIZE * ALPHA_MAP_SIZE * 4)
@@ -64,8 +78,12 @@ function stampRotation(stamp) {
   return (seed - Math.floor(seed)) * Math.PI * 2
 }
 
-function PathLayer({ stamps, definition, terrainVersion = 0 }) {
+function PathLayer({ stamps, definition, terrainSurface, terrainTint, terrainVersion = 0 }) {
   const meshRef = useRef()
+  const materialRef = useRef()
+  const terrainTintRef = useRef(terrainTint)
+  const grade = definition.terrainGrade ?? NO_TERRAIN_GRADE
+  const gradeTarget = useMemo(() => new Vector3(...grade.target), [grade])
   const [sourceMap, sourceNormalMap, sourceRoughnessMap] = useTexture([
     definition.map,
     definition.normalMap,
@@ -76,12 +94,67 @@ function PathLayer({ stamps, definition, terrainVersion = 0 }) {
   const roughnessMap = useMemo(() => cloneSurfaceTexture(sourceRoughnessMap), [sourceRoughnessMap])
   const alphaMap = useMemo(() => createFeatheredAlphaMap(), [])
 
+  const handleBeforeCompile = useMemo(() => function handleBeforeCompile(shader) {
+    shader.uniforms.uPaintGradeTarget = { value: gradeTarget.clone() }
+    shader.uniforms.uPaintLuminanceScale = { value: grade.luminanceScale }
+    shader.uniforms.uPaintLuminanceBias = { value: grade.luminanceBias }
+    shader.uniforms.uPaintLuminanceMax = { value: grade.luminanceMax }
+    shader.uniforms.uPaintGradeAmount = { value: grade.amount }
+    shader.uniforms.uPaintTerrainTint = { value: terrainTintRef.current.clone() }
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `
+      #include <common>
+      uniform vec3 uPaintGradeTarget;
+      uniform float uPaintLuminanceScale;
+      uniform float uPaintLuminanceBias;
+      uniform float uPaintLuminanceMax;
+      uniform float uPaintGradeAmount;
+      uniform vec3 uPaintTerrainTint;
+      `,
+    )
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `
+      #include <map_fragment>
+      float paintLuminance = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+      vec3 paintGraded = mix(
+        diffuseColor.rgb,
+        uPaintGradeTarget * clamp(
+          paintLuminance * uPaintLuminanceScale + uPaintLuminanceBias,
+          0.0,
+          uPaintLuminanceMax
+        ),
+        uPaintGradeAmount
+      );
+      diffuseColor.rgb = paintGraded * uPaintTerrainTint;
+      `,
+    )
+
+    const material = materialRef.current ?? this
+    if (material) material.userData.shader = shader
+  }, [grade, gradeTarget])
+
   useEffect(() => () => {
     map.dispose()
     normalMap.dispose()
     roughnessMap.dispose()
     alphaMap.dispose()
   }, [alphaMap, map, normalMap, roughnessMap])
+
+  useEffect(() => {
+    terrainTintRef.current.copy(terrainTint)
+    const material = materialRef.current
+    const shader = material?.userData?.shader
+    if (shader?.uniforms.uPaintTerrainTint) {
+      shader.uniforms.uPaintTerrainTint.value.copy(terrainTint)
+    }
+    if (definition.terrainGrade && material?.isMeshStandardMaterial) {
+      material.roughness = terrainSurface.roughness
+    }
+  }, [definition.terrainGrade, terrainSurface.roughness, terrainTint])
 
   useLayoutEffect(() => {
     const mesh = meshRef.current
@@ -111,13 +184,16 @@ function PathLayer({ stamps, definition, terrainVersion = 0 }) {
     >
       <circleGeometry args={[0.5, 32]} />
       <meshStandardMaterial
+        ref={materialRef}
         map={map}
         normalMap={normalMap}
-        normalScale={PATH_NORMAL_SCALE}
-        roughnessMap={roughnessMap}
+        normalScale={definition.terrainGrade ? TERRAIN_NORMAL_SCALE : PATH_NORMAL_SCALE}
+        roughnessMap={definition.terrainGrade ? null : roughnessMap}
         alphaMap={alphaMap}
         color={definition.tint ?? '#ffffff'}
-        roughness={1}
+        emissive={definition.terrainGrade ? '#328f22' : '#000000'}
+        emissiveIntensity={definition.terrainGrade ? 0.05 : 0}
+        roughness={definition.terrainGrade ? terrainSurface.roughness : 1}
         metalness={0}
         transparent
         alphaTest={0.025}
@@ -125,12 +201,19 @@ function PathLayer({ stamps, definition, terrainVersion = 0 }) {
         polygonOffset
         polygonOffsetFactor={-2}
         polygonOffsetUnits={-2}
+        onBeforeCompile={handleBeforeCompile}
       />
     </instancedMesh>
   )
 }
 
 export default function PaintedPaths({ paths = [], terrainVersion = 0 }) {
+  const artDirection = useArtDirectionValues()
+  const terrainSurface = artDirection.surfaces.terrain
+  const terrainTint = useMemo(() => {
+    const [r, g, b] = getArtDirectionColorMultiplier('terrain', terrainSurface.color)
+    return new Color().setRGB(r, g, b)
+  }, [terrainSurface.color])
   const byType = useMemo(() => {
     const groups = {}
     for (const stamp of paths) {
@@ -148,6 +231,8 @@ export default function PaintedPaths({ paths = [], terrainVersion = 0 }) {
           key={type}
           stamps={stamps}
           definition={PATH_TYPES[type]}
+          terrainSurface={terrainSurface}
+          terrainTint={terrainTint}
           terrainVersion={terrainVersion}
         />
       ))}
