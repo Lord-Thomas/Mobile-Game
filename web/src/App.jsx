@@ -21651,11 +21651,14 @@ function App() {
   const activeWallSkin = availableWallSkins.find((skin) => skin.id === activeWallSkinId) || wallSkins[0]
   const activeCeilingTexturePath = applyWallToCeiling ? activeWallSkin.texture : DEFAULT_CEILING_TEXTURE
   const activeHouseLayout = useMemo(() => deriveHouseLayout(housePlan), [housePlan])
+  // L'empreinte de construction doit exister avant que les enfants créent la
+  // géométrie/collision du terrain. La map de base reste ainsi naturelle dans
+  // l'éditeur, tandis que chaque plan de maison terrasse sa forme exacte en jeu.
+  syncPlayerHouseTerrainFootprint(activeHouseLayout.footprintRects)
   const houseEntrance = useMemo(() => getHouseEntranceTransform(activeHouseLayout), [activeHouseLayout])
   useEffect(() => {
     syncInteriorPlayAreaLimits(activeHouseLayout.bounds)
     syncHouseEntranceRuntime(houseEntrance)
-    syncPlayerHouseTerrainFootprint(activeHouseLayout.footprintRects)
     syncInteriorWallColliders(buildInteriorWallColliderBoxes(activeHouseLayout))
     syncPlayerHouseOutdoorColliders(activeHouseLayout)
     syncPlayerHouseOutdoorRoofs(activeHouseLayout)

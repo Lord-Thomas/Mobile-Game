@@ -74,6 +74,7 @@ export const PATH_TYPES = {
 }
 
 export const PATH_TYPE_IDS = Object.keys(PATH_TYPES)
+const PATH_SURFACE_GRID_SIZE = 8
 
 function asFiniteNumber(value, fallback = 0) {
   const number = Number(value)
@@ -82,6 +83,11 @@ function asFiniteNumber(value, fallback = 0) {
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value))
+}
+
+function smoothstep(edge0, edge1, value) {
+  const t = clampNumber((value - edge0) / Math.max(0.0001, edge1 - edge0), 0, 1)
+  return t * t * (3 - 2 * t)
 }
 
 export function normalizePathStamp(stamp, index = 0) {
@@ -101,3 +107,55 @@ export function normalizePathStamp(stamp, index = 0) {
 }
 
 export const MAP_PATHS = generatedPaths.map(normalizePathStamp)
+
+function getPathSurfaceCellKey(x, z) {
+  return `${Math.floor(x / PATH_SURFACE_GRID_SIZE)}:${Math.floor(z / PATH_SURFACE_GRID_SIZE)}`
+}
+
+export function getPathStampOpacityAt(stamp, x, z) {
+  const radius = Math.max(0.25, stamp.width * 0.5)
+  const normalizedDistance = Math.hypot(x - stamp.center[0], z - stamp.center[1]) / radius
+  if (normalizedDistance >= 1) return 0
+  const feather = 0.45 + (0.025 - 0.45) * clampNumber(stamp.hardness, 0, 1)
+  const edgeOpacity = 1 - smoothstep(1 - feather, 1, normalizedDistance)
+  return edgeOpacity * clampNumber(stamp.opacity, 0, 1)
+}
+
+// Index spatial léger : l'herbe interroge plusieurs milliers de positions, sans
+// reparcourir les centaines de coups de pinceau pour chacune d'elles.
+export function createPaintedSurfaceSampler(paths = []) {
+  const buckets = new Map()
+  paths.forEach((sourceStamp, index) => {
+    const stamp = normalizePathStamp(sourceStamp, index)
+    const radius = stamp.width * 0.5
+    const minCellX = Math.floor((stamp.center[0] - radius) / PATH_SURFACE_GRID_SIZE)
+    const maxCellX = Math.floor((stamp.center[0] + radius) / PATH_SURFACE_GRID_SIZE)
+    const minCellZ = Math.floor((stamp.center[1] - radius) / PATH_SURFACE_GRID_SIZE)
+    const maxCellZ = Math.floor((stamp.center[1] + radius) / PATH_SURFACE_GRID_SIZE)
+    for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+      for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+        const key = `${cellX}:${cellZ}`
+        if (!buckets.has(key)) buckets.set(key, [])
+        buckets.get(key).push(stamp)
+      }
+    }
+  })
+
+  return {
+    sampleGrassWeights(x, z) {
+      const stamps = buckets.get(getPathSurfaceCellKey(x, z)) ?? []
+      let naturalWeight = 1
+      let grassWeight = 0
+      for (const stamp of stamps) {
+        const alpha = getPathStampOpacityAt(stamp, x, z)
+        if (alpha <= 0) continue
+        naturalWeight *= 1 - alpha
+        grassWeight *= 1 - alpha
+        if (stamp.type === 'grass') grassWeight += alpha
+      }
+      return { naturalWeight, grassWeight }
+    },
+  }
+}
+
+export const MAP_PATH_SURFACE_SAMPLER = createPaintedSurfaceSampler(MAP_PATHS)

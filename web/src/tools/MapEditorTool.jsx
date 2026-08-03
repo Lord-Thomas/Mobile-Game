@@ -643,7 +643,7 @@ export function MapEditorScene({
     if (!pathBrush?.active || !point) return
     const [x, z] = clampMapPosition(point.x, point.z)
     const last = lastPathPointRef.current
-    const spacing = Math.max(0.35, pathBrush.width * 0.3)
+    const spacing = Math.max(0.2, pathBrush.width * 0.22)
     setBrushPreviewPoint([x, z])
 
     if (force || !last) {
@@ -660,9 +660,9 @@ export function MapEditorScene({
     // Fill the whole segment between pointer events. Fast mouse movements and
     // low-frequency touch events therefore still produce one continuous paint
     // stroke instead of a row of disconnected round stamps.
-    const stepCount = Math.min(64, Math.floor(distance / spacing))
+    const stepCount = Math.min(192, Math.ceil(distance / spacing))
     for (let step = 1; step <= stepCount; step += 1) {
-      const ratio = (step * spacing) / distance
+      const ratio = step / stepCount
       const sample = [last[0] + dx * ratio, last[1] + dz * ratio]
       onPaintPath?.(sample, pathBrush)
       lastPathPointRef.current = sample
@@ -912,7 +912,7 @@ export function MapEditorScene({
       <MapEditorCamera active={isTopView} focusRef={focusRef} />
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0.06, 0]}
+        position={[0, editorBrushActive && isTopView ? 100 : 0.06, 0]}
         onPointerDown={(event) => {
           // Object presses stopPropagation before reaching the floor, so a press
           // here is on empty ground: clear the selection and (top view) begin a
@@ -1078,7 +1078,11 @@ export function MapEditorScene({
         }}
       >
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
-        <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
+        <meshBasicMaterial
+          transparent
+          opacity={editorBrushActive && isTopView ? 0 : 0.015}
+          depthWrite={false}
+        />
       </mesh>
       <Suspense fallback={null}>
         <PaintedPaths paths={paths} terrainVersion={terrainVersion} preloadHeightField />

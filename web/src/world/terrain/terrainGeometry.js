@@ -1,7 +1,7 @@
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { getRoomBounds, houseLayout } from '../house/houseLayout'
 import { localHousePointToWorld } from '../house/houseTransforms'
-import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, PLAYER_PLOT_SIZE, ROAD_WIDTH } from '../outdoorData'
+import { getNeighborHouseParts, NEIGHBOR_HOUSES, OUTDOOR_WORLD_SIZE, ROAD_WIDTH } from '../outdoorData'
 import { roadLayout } from '../roads/roadLayout'
 import { createRoadCurve } from '../roads/roadGeometry'
 
@@ -96,7 +96,6 @@ const terrainSettings = {
   flatten: {
     roadFlatMargin: 0.8,
     roadTransition: 3.6,
-    plotTransition: 5,
     pathTransition: 1.8,
   },
   border: {
@@ -106,7 +105,6 @@ const terrainSettings = {
 }
 
 const ROAD_HEIGHT = -0.035
-const PLAYER_PLOT_HEIGHT = 0.018
 const PATH_HEIGHT = 0.012
 const HOUSE_CUT_HEIGHT = -0.16
 
@@ -241,13 +239,9 @@ function getNeighborPathMask() {
   return 0
 }
 
-// Empreinte de la maison du joueur pour la découpe du terrain. Initialisée sur
-// le layout legacy, puis synchronisée sur le housePlan via
-// syncPlayerHouseTerrainFootprint (extensions comprises).
-let playerHouseFootprintRects = houseLayout.rooms.map((room) => {
-  const bounds = getRoomBounds(room)
-  return { minX: bounds.minX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: bounds.maxZ }
-})
+// La map naturelle ne contient aucune empreinte de maison. C'est uniquement la
+// construction active qui fournit ses rectangles et terrasse le sol sous elle.
+let playerHouseFootprintRects = []
 
 function getFootprintSignature(rects) {
   return rects.map((rect) => `${rect.minX},${rect.minZ},${rect.maxX},${rect.maxZ}`).sort().join(';')
@@ -265,7 +259,7 @@ function getFootprintBounds(rects) {
 // Aligne la découpe du terrain sur l'empreinte du plan et rafraîchit la
 // géométrie visuelle localement (ancienne + nouvelle zone, marge de fondu).
 export function syncPlayerHouseTerrainFootprint(rects) {
-  if (!Array.isArray(rects) || !rects.length) return
+  if (!Array.isArray(rects)) return
   if (getFootprintSignature(rects) === getFootprintSignature(playerHouseFootprintRects)) return
 
   const previousBounds = getFootprintBounds(playerHouseFootprintRects)
@@ -348,9 +342,6 @@ export function getTerrainHeight(x, z, ignoreModifications = false) {
   const innerRoadMask = softBandMask(roadDistance, ROAD_WIDTH * 0.5 - 0.08, ROAD_WIDTH * 0.5 + 0.45)
   height = mix(height, 0.018, shoulderMask * (1 - innerRoadMask) * 0.55)
   height = mix(height, ROAD_HEIGHT, roadMask)
-
-  const playerPlotMask = softRectMask(x, z, [0, 0, 0], [PLAYER_PLOT_SIZE, PLAYER_PLOT_SIZE], 0, terrainSettings.flatten.plotTransition)
-  height = mix(height, PLAYER_PLOT_HEIGHT, playerPlotMask)
 
   const playerPathMask = getPlayerPathMask(x, z)
   height = mix(height, PATH_HEIGHT, playerPathMask)

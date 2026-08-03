@@ -13,6 +13,7 @@ import {
 } from './biomeAreas'
 import { canPlaceObject, getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
+import { MAP_PATH_SURFACE_SAMPLER } from './paths'
 import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 import {
   getArtDirectionColorMultiplier,
@@ -35,6 +36,7 @@ const GRASS_AREA_MIN = -TERRAIN_HALF_SIZE
 const GRASS_AREA_MAX = TERRAIN_HALF_SIZE
 const GRASS_GRID_STEP = 0.22
 const GRASS_DENSITY_MULTIPLIER = 7.5
+const PAINTED_GRASS_DENSITY = 0.18
 const GRASS_CHUNK_SIZE = 6
 const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 1
 const GRASS_ACTIVE_CHUNK_RADIUS = 3
@@ -270,7 +272,11 @@ function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP) {
     const livingCoverMultiplier = Math.pow(1 - graveyardInfluence, 3.5)
     const gameplayDensity = Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9)
     const visualDensity = getVisualGrassDensity(x, z) * livingCoverMultiplier
-    const density = Math.min(1, Math.max(gameplayDensity, visualDensity) * GRASS_DENSITY_MULTIPLIER)
+    const { naturalWeight, grassWeight } = MAP_PATH_SURFACE_SAMPLER.sampleGrassWeights(x, z)
+    const density = Math.min(1, (
+      Math.max(gameplayDensity, visualDensity) * naturalWeight
+      + PAINTED_GRASS_DENSITY * grassWeight * livingCoverMultiplier
+    ) * GRASS_DENSITY_MULTIPLIER)
     if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
   }
 }
