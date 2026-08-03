@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PATH_HARDNESS, normalizePathStamp } from './paths'
+import { DEFAULT_PATH_HARDNESS, DEFAULT_PATH_OPACITY, normalizePathStamp } from './paths'
 
 describe('normalizePathStamp', () => {
   it('preserves grass paint and its brush hardness', () => {
@@ -16,5 +16,15 @@ describe('normalizePathStamp', () => {
   it('clamps brush hardness to its supported range', () => {
     expect(normalizePathStamp({ hardness: -2 }).hardness).toBe(0)
     expect(normalizePathStamp({ hardness: 3 }).hardness).toBe(1)
+  })
+
+  it('preserves opacity and keeps older maps fully opaque', () => {
+    expect(normalizePathStamp({ opacity: 0.25 }).opacity).toBe(0.25)
+    expect(normalizePathStamp({ type: 'dirt' }).opacity).toBe(DEFAULT_PATH_OPACITY)
+  })
+
+  it('clamps opacity to its supported range', () => {
+    expect(normalizePathStamp({ opacity: -2 }).opacity).toBe(0)
+    expect(normalizePathStamp({ opacity: 3 }).opacity).toBe(1)
   })
 })

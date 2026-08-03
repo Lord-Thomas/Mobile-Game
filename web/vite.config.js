@@ -523,6 +523,9 @@ function saveThumbnailPlugin() {
                 hardness: Number.isFinite(Number(stamp.hardness))
                   ? Math.min(1, Math.max(0, Number(stamp.hardness)))
                   : 0.55,
+                opacity: Number.isFinite(Number(stamp.opacity))
+                  ? Math.min(1, Math.max(0, Number(stamp.opacity)))
+                  : 1,
               }
             })
             const terrainModifications = payload.terrainModifications && typeof payload.terrainModifications === 'object'

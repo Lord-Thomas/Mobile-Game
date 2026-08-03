@@ -16,7 +16,7 @@ import {
 } from 'three'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 import { OUTDOOR_HALF_SIZE } from './outdoorData'
-import { DEFAULT_PATH_HARDNESS, PATH_TYPES } from './paths'
+import { DEFAULT_PATH_HARDNESS, DEFAULT_PATH_OPACITY, PATH_TYPES } from './paths'
 import {
   getArtDirectionColorMultiplier,
   useArtDirectionValues,
@@ -33,6 +33,9 @@ const PATH_ANGULAR_SEGMENTS = 32
 const HEIGHT_FIELD_SIZE = 256
 const HEIGHT_FIELD_WORLD_SIZE = OUTDOOR_HALF_SIZE * 2
 const dummy = new Object3D()
+const PATH_TEXTURE_URLS = [...new Set(
+  Object.values(PATH_TYPES).flatMap(({ map, normalMap, roughnessMap }) => [map, normalMap, roughnessMap]),
+)]
 const PATH_NORMAL_SCALE = new Vector2(0.55, 0.55)
 const TERRAIN_NORMAL_SCALE = new Vector2(0.34, 0.34)
 const NO_TERRAIN_GRADE = Object.freeze({
@@ -143,12 +146,19 @@ function cloneSurfaceTexture(source, { color = false } = {}) {
   return texture
 }
 
+function PathTexturePreloader() {
+  useTexture(PATH_TEXTURE_URLS)
+  return null
+}
+
 function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTint }) {
   const meshRef = useRef()
   const materialRef = useRef()
   const hardnessAttributeRef = useRef()
+  const opacityAttributeRef = useRef()
   const paintOrderAttributeRef = useRef()
   const hardnessValues = useMemo(() => new Float32Array(PATH_CAPACITY), [])
+  const opacityValues = useMemo(() => new Float32Array(PATH_CAPACITY), [])
   const paintOrderValues = useMemo(() => new Float32Array(PATH_CAPACITY), [])
   const geometry = useMemo(() => createPathDiskGeometry(), [])
   const terrainTintRef = useRef(terrainTint)
@@ -183,12 +193,14 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       `
       #include <common>
       attribute float instanceHardness;
+      attribute float instanceOpacity;
       attribute float instancePaintOrder;
       uniform sampler2D uPaintHeightMap;
       uniform vec2 uPaintHeightRange;
       uniform float uPaintHeightMapSize;
       uniform float uPaintWorldHalfSize;
       varying float vPaintHardness;
+      varying float vPaintOpacity;
       varying vec3 vPaintWorldPosition;
 
       float decodePaintHeight(vec4 sampleValue) {
@@ -223,6 +235,7 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       `
       #include <begin_vertex>
       vPaintHardness = instanceHardness;
+      vPaintOpacity = instanceOpacity;
       `,
     )
     shader.vertexShader = shader.vertexShader.replace(
@@ -271,6 +284,7 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       uniform vec3 uPaintTerrainTint;
       uniform float uPaintTextureScale;
       varying float vPaintHardness;
+      varying float vPaintOpacity;
       varying vec3 vPaintWorldPosition;
       `,
     )
@@ -297,7 +311,8 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       diffuseColor.rgb = paintGraded * uPaintTerrainTint;
       float paintRadius = length(vMapUv - vec2(0.5)) * 2.0;
       float paintFeather = mix(0.45, 0.025, clamp(vPaintHardness, 0.0, 1.0));
-      diffuseColor.a *= 1.0 - smoothstep(1.0 - paintFeather, 1.0, paintRadius);
+      float paintEdgeAlpha = 1.0 - smoothstep(1.0 - paintFeather, 1.0, paintRadius);
+      diffuseColor.a *= paintEdgeAlpha * clamp(vPaintOpacity, 0.0, 1.0);
       `,
     )
     shader.fragmentShader = shader.fragmentShader
@@ -336,8 +351,9 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
   useLayoutEffect(() => {
     const mesh = meshRef.current
     const hardnessAttribute = hardnessAttributeRef.current
+    const opacityAttribute = opacityAttributeRef.current
     const paintOrderAttribute = paintOrderAttributeRef.current
-    if (!mesh || !hardnessAttribute || !paintOrderAttribute) return
+    if (!mesh || !hardnessAttribute || !opacityAttribute || !paintOrderAttribute) return
     const count = Math.min(stamps.length, PATH_CAPACITY)
 
     for (let i = 0; i < count; i += 1) {
@@ -349,12 +365,14 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
       hardnessAttribute.setX(i, stamp.hardness ?? DEFAULT_PATH_HARDNESS)
+      opacityAttribute.setX(i, stamp.opacity ?? DEFAULT_PATH_OPACITY)
       paintOrderAttribute.setX(i, stamp.paintOrder ?? 0)
     }
 
     mesh.count = count
     mesh.instanceMatrix.needsUpdate = true
     hardnessAttribute.needsUpdate = true
+    opacityAttribute.needsUpdate = true
     paintOrderAttribute.needsUpdate = true
   }, [stamps])
 
@@ -365,11 +383,17 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       frustumCulled={false}
       receiveShadow
       geometry={geometry}
+      renderOrder={Math.ceil((stamps.at(-1)?.paintOrder ?? 0) * 100000)}
     >
       <instancedBufferAttribute
         ref={hardnessAttributeRef}
         attach="geometry-attributes-instanceHardness"
         args={[hardnessValues, 1]}
+      />
+      <instancedBufferAttribute
+        ref={opacityAttributeRef}
+        attach="geometry-attributes-instanceOpacity"
+        args={[opacityValues, 1]}
       />
       <instancedBufferAttribute
         ref={paintOrderAttributeRef}
@@ -399,7 +423,7 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
   )
 }
 
-function PaintedPathLayers({ paths, terrainVersion }) {
+function PaintedPathLayers({ paths, terrainVersion, preloadTextures = false }) {
   const artDirection = useArtDirectionValues()
   const terrainSurface = artDirection.surfaces.terrain
   const terrainTint = useMemo(() => {
@@ -423,6 +447,7 @@ function PaintedPathLayers({ paths, terrainVersion }) {
 
   return (
     <group userData={{ debugCategory: 'paths' }}>
+      {preloadTextures && <PathTexturePreloader />}
       {Object.entries(byType).map(([type, stamps]) => (
         <PathLayer
           key={`${type}-${terrainVersion}`}
@@ -445,5 +470,11 @@ export default function PaintedPaths({
   // The game pays no height-field cost on maps without painted surfaces. The
   // editor opts into preloading so the first brush stroke never creates a hitch.
   if (!preloadHeightField && paths.length === 0) return null
-  return <PaintedPathLayers paths={paths} terrainVersion={terrainVersion} />
+  return (
+    <PaintedPathLayers
+      paths={paths}
+      terrainVersion={terrainVersion}
+      preloadTextures={preloadHeightField}
+    />
+  )
 }

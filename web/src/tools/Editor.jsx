@@ -223,6 +223,7 @@ function useMapEditorState() {
     type: 'dirt',
     width: 3,
     hardness: 0.55,
+    opacity: 1,
     mode: 'paint',
   })
   const [selectedId, setSelectedId] = useState(objects[0]?.id ?? null)
@@ -602,6 +603,7 @@ export default function Editor({ initialMode = 'tree' }) {
         center: [x, z],
         width: MathUtils.clamp(brush.width, 0.5, 24),
         hardness: MathUtils.clamp(brush.hardness ?? 0.55, 0, 1),
+        opacity: MathUtils.clamp(brush.opacity ?? 1, 0, 1),
       }, current.length)
       return [...current, stamp]
     })

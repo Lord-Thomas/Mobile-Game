@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera } from '@react-three/drei'
 import { BufferGeometry, Float32BufferAttribute, MathUtils, Plane, Raycaster, Vector2, Vector3 } from 'three'
@@ -226,6 +226,7 @@ function toSavedPaths(paths) {
       center: normalized.center,
       width: normalized.width,
       hardness: normalized.hardness,
+      opacity: normalized.opacity,
     }
   })
 }
@@ -1079,7 +1080,9 @@ export function MapEditorScene({
         <planeGeometry args={[OUTDOOR_HALF_SIZE * 2, OUTDOOR_HALF_SIZE * 2]} />
         <meshBasicMaterial transparent opacity={0.015} depthWrite={false} />
       </mesh>
-      <PaintedPaths paths={paths} terrainVersion={terrainVersion} preloadHeightField />
+      <Suspense fallback={null}>
+        <PaintedPaths paths={paths} terrainVersion={terrainVersion} preloadHeightField />
+      </Suspense>
       {biomeBrush?.active ? (
         <BiomeBrushPreview brush={biomeBrush} point={brushPreviewPoint} />
       ) : terrainBrush?.active ? (
@@ -1692,6 +1695,15 @@ export function MapEditorPanel({
               onChange={(hardness) => patchPathBrush({ hardness })}
             />
             <span style={styles.subtitle}>0 : très fondu · 1 : bord net</span>
+            <SliderField
+              label="Opacité"
+              value={pathBrush.opacity ?? 1}
+              min={0.05}
+              max={1}
+              step={0.05}
+              onChange={(opacity) => patchPathBrush({ opacity })}
+            />
+            <span style={styles.subtitle}>Faible pour ajouter de légères taches de matière.</span>
           </div>
         )}
       </Section>

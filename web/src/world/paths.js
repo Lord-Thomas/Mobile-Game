@@ -1,6 +1,7 @@
 import { MAP_PATHS as generatedPaths } from './paths.generated'
 
 export const DEFAULT_PATH_HARDNESS = 0.55
+export const DEFAULT_PATH_OPACITY = 1
 
 // Painted paths are stored as a flat list of round "stamps" (like biome paint),
 // each at a world position with a width. Overlapping stamps along a drag form a
@@ -95,6 +96,7 @@ export function normalizePathStamp(stamp, index = 0) {
     center,
     width: clampNumber(asFiniteNumber(stamp?.width, 3), 0.5, 24),
     hardness: clampNumber(asFiniteNumber(stamp?.hardness, DEFAULT_PATH_HARDNESS), 0, 1),
+    opacity: clampNumber(asFiniteNumber(stamp?.opacity, DEFAULT_PATH_OPACITY), 0, 1),
   }
 }
 
