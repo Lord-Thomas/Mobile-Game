@@ -1,13 +1,12 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Html } from '@react-three/drei'
 import { getMapObjectCatalogItem } from '../mapObjects'
 import { getTerrainHeight } from '../terrain/terrainGeometry'
 import { FIRST_QUEST_ID } from '../../quests/questDefinitions'
 import { getNpcMarker } from '../../quests/questState'
+import { WorldQuestMarkerSprite } from '../../ui/WorldHudSprite'
 
 const MARKER_GLYPH = { available: '!', in_progress: '…', ready: '?' }
-const MARKER_CLASS = { available: 'is-available', in_progress: 'is-active', ready: 'is-ready' }
 
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
@@ -39,9 +38,9 @@ function QuestNpcMarker({ placement, questProgress }) {
 
   return (
     <group position={[x, y, z]}>
-      <Html position={[0, getMarkerHeight(placement), 0]} center distanceFactor={9} occlude={false}>
-        <div className={`quest-marker ${MARKER_CLASS[marker] ?? ''}`}>{MARKER_GLYPH[marker] ?? ''}</div>
-      </Html>
+      <group position={[0, getMarkerHeight(placement), 0]}>
+        <WorldQuestMarkerSprite marker={marker} glyph={MARKER_GLYPH[marker] ?? ''} />
+      </group>
     </group>
   )
 }

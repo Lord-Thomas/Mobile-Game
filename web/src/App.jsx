@@ -87,6 +87,7 @@ import QuestJournal from './ui/QuestJournal'
 import QuestTracker from './ui/QuestTracker'
 import VendorPanel from './ui/VendorPanel'
 import ItemIcon from './ui/ItemIcon'
+import { WorldHealthBarSprite } from './ui/WorldHudSprite'
 import { FIRST_QUEST_ID, QUEST_NPC_OBJECT_ID, getQuestDefinition } from './quests/questDefinitions'
 import { completeQuest as completeQuestState, isReadyToComplete, normalizeQuestProgress, registerKill, startQuest } from './quests/questState'
 import { rollLoot } from './items/lootTable'
@@ -12913,7 +12914,6 @@ function SmallMushroomEnemy({
   targetRef.current.disabled = passive || !active || defeated
   targetRef.current.takeDamage = takeDamage
 
-  const hpRatio = MathUtils.clamp(hp / cfg.maxHp, 0, 1)
   const bodyHeight = cfg.targetHeight ?? 1.2
   const hudHeight = cfg.hudHeight ?? 1.55
 
@@ -12957,14 +12957,9 @@ function SmallMushroomEnemy({
             </mesh>
           )}
           {hudVisible && !isEvading && (
-            <Html position={[0, hudHeight, 0]} center transform sprite distanceFactor={3.8}>
-              <div className="training-dummy-hud enemy-hud">
-                <div className="training-dummy-bar enemy-hp-bar">
-                  <span style={{ width: `${hpRatio * 100}%` }} />
-                  <div className="training-dummy-hp">{hp} / {cfg.maxHp}</div>
-                </div>
-              </div>
-            </Html>
+            <group position={[0, hudHeight, 0]}>
+              <WorldHealthBarSprite hp={hp} maxHp={cfg.maxHp} />
+            </group>
           )}
         </>
       )}
@@ -13644,7 +13639,6 @@ function SummonedSkeleton({
     return () => { positions?.delete(index) }
   }, [groupPositionsRef, index])
 
-  const hpRatio = MathUtils.clamp(hp / SUMMON_SKELETON_MAX_HP, 0, 1)
   const isActive = isActiveVisual
 
   return (
@@ -13659,14 +13653,11 @@ function SummonedSkeleton({
             <meshBasicMaterial color="#7cc4ff" transparent opacity={isActive ? 0.4 : 0} depthWrite={false} />
           </mesh>
           <pointLight color="#6da8ff" intensity={isActive ? 0.7 : 0} distance={2.2} position={[0, 0.6, 0]} />
-          <Html position={[0, cfg.hudHeight ?? 1.1, 0]} center transform sprite distanceFactor={3.8}>
-            <div className="training-dummy-hud enemy-hud" style={{ display: isActive ? undefined : 'none' }}>
-              <div className="training-dummy-bar enemy-hp-bar" style={{ '--hp-color': '#5aa9ff' }}>
-                <span style={{ width: `${hpRatio * 100}%`, background: '#5aa9ff' }} />
-                <div className="training-dummy-hp">{hp} / {SUMMON_SKELETON_MAX_HP}</div>
-              </div>
-            </div>
-          </Html>
+          {isActive && (
+            <group position={[0, cfg.hudHeight ?? 1.1, 0]}>
+              <WorldHealthBarSprite hp={hp} maxHp={SUMMON_SKELETON_MAX_HP} color="#5aa9ff" />
+            </group>
+          )}
       </group>
     </group>
   )
