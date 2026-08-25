@@ -3,6 +3,7 @@ import { GENERATED_ENEMY_DEFINITIONS } from '../enemies/enemyDefinitions.generat
 import { ALL_ITEM_IDS } from '../items/itemDefinitions'
 import { LOOT_TABLES } from '../items/lootTable'
 import { normalizeBossRewards } from '../game/boss/bossRewards'
+import { SLIME_BOSS } from '../game/boss/bossConfig'
 import { MAP_OBJECT_DEFINITIONS } from './mapObjectLibrary'
 import { AUTHORED_TREES } from './outdoorData'
 import { getTerrainHeight } from './terrain/terrainGeometry'
@@ -26,6 +27,7 @@ const WORLD_UNITS_PER_METER = PLAYER_REFERENCE_HEIGHT_WORLD_UNITS / PLAYER_REFER
 const MAGIC_SKULL_DISCOVERY_TOWER_Y_OFFSET = 0.14
 export const MAGIC_SKULL_DISCOVERY_OBJECT_ID = 'magic_skull_discovery'
 export const SUMMONING_ALTAR_OBJECT_ID = 'summoning_altar'
+export const PACIFIC_SLIME_BOSS_OBJECT_ID = 'pacific_slime_boss'
 const LOOT_ITEM_IDS = new Set(ALL_ITEM_IDS)
 
 const BASE_MAP_OBJECT_CATALOG = {
@@ -69,6 +71,22 @@ const BASE_MAP_OBJECT_CATALOG = {
     hitHeightMeters: 1.4,
     defaultScale: 1,
     thumbnailLabel: 'Autel',
+  },
+  // Version purement decorative du Roi Slime. Comme il s'agit d'un objet de map
+  // (et non d'un spawner ou du SlimeBossSystem), il ne s'enregistre jamais comme
+  // cible de combat et ne peut ni poursuivre ni blesser le joueur.
+  [PACIFIC_SLIME_BOSS_OBJECT_ID]: {
+    id: PACIFIC_SLIME_BOSS_OBJECT_ID,
+    name: 'Roi Slime (pacifique)',
+    modelUrl: SLIME_BOSS.modelUrl,
+    targetHeightMeters: SLIME_BOSS.targetHeight / WORLD_UNITS_PER_METER,
+    colliderRadius: 1.65,
+    selectionRadius: 2.15,
+    hitRadius: 2.35,
+    hitHeightMeters: SLIME_BOSS.targetHeight / WORLD_UNITS_PER_METER,
+    defaultScale: 1,
+    thumbnailLabel: 'Boss pacifique',
+    behavior: 'pacific',
   },
   // PNJ de quête : plaçable depuis l'éditeur de map comme n'importe quel objet.
   // Le modèle (FBX) est rendu par MapObjectPlaceables ; l'interaction (marqueur,

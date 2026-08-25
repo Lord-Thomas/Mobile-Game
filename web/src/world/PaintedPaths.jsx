@@ -14,8 +14,11 @@ import {
   Vector2,
   Vector3,
 } from 'three'
-import { getTerrainHeight } from './terrain/terrainGeometry'
-import { OUTDOOR_HALF_SIZE } from './outdoorData'
+import {
+  getTerrainHeight,
+  TERRAIN_HALF_SIZE,
+  TERRAIN_VISUAL_SEGMENTS,
+} from './terrain/terrainGeometry'
 import { DEFAULT_PATH_HARDNESS, DEFAULT_PATH_OPACITY, PATH_TYPES } from './paths'
 import {
   getArtDirectionColorMultiplier,
@@ -28,10 +31,12 @@ import {
 const PATH_CAPACITY = 8192
 const PATH_Y_OFFSET = 0.045
 const PATH_LAYER_SPAN = 0.035
-const PATH_RADIAL_SEGMENTS = 6
-const PATH_ANGULAR_SEGMENTS = 32
-const HEIGHT_FIELD_SIZE = 256
-const HEIGHT_FIELD_WORLD_SIZE = OUTDOOR_HALF_SIZE * 2
+const PATH_RADIAL_SEGMENTS = 10
+const PATH_ANGULAR_SEGMENTS = 40
+// Strictement la même grille que le terrain visuel : 256 cellules = 257
+// sommets, de -TERRAIN_HALF_SIZE à +TERRAIN_HALF_SIZE.
+const HEIGHT_FIELD_SIZE = TERRAIN_VISUAL_SEGMENTS + 1
+const HEIGHT_FIELD_WORLD_SIZE = TERRAIN_HALF_SIZE * 2
 const dummy = new Object3D()
 const PATH_TEXTURE_URLS = [...new Set(
   Object.values(PATH_TYPES).flatMap(({ map, normalMap, roughnessMap }) => [map, normalMap, roughnessMap]),
@@ -95,10 +100,10 @@ function createTerrainHeightField(terrainVersion = 0) {
   let maxHeight = -Infinity
 
   for (let zIndex = 0; zIndex < HEIGHT_FIELD_SIZE; zIndex += 1) {
-    const z = -OUTDOOR_HALF_SIZE + (zIndex / (HEIGHT_FIELD_SIZE - 1)) * HEIGHT_FIELD_WORLD_SIZE
+    const z = -TERRAIN_HALF_SIZE + (zIndex / (HEIGHT_FIELD_SIZE - 1)) * HEIGHT_FIELD_WORLD_SIZE
     for (let xIndex = 0; xIndex < HEIGHT_FIELD_SIZE; xIndex += 1) {
-      const x = -OUTDOOR_HALF_SIZE + (xIndex / (HEIGHT_FIELD_SIZE - 1)) * HEIGHT_FIELD_WORLD_SIZE
-      const height = getTerrainHeight(x, z, true)
+      const x = -TERRAIN_HALF_SIZE + (xIndex / (HEIGHT_FIELD_SIZE - 1)) * HEIGHT_FIELD_WORLD_SIZE
+      const height = getTerrainHeight(x, z)
       const index = zIndex * HEIGHT_FIELD_SIZE + xIndex
       heights[index] = height
       minHeight = Math.min(minHeight, height)
@@ -106,9 +111,8 @@ function createTerrainHeightField(terrainVersion = 0) {
     }
   }
 
-  // Two 8-bit channels encode a 16-bit normalized height. The shader performs
-  // bilinear interpolation after decoding, avoiding float-texture requirements
-  // on mobile while retaining sub-millimetric precision across the map range.
+  // Two 8-bit channels encode a 16-bit normalized height. The shader reproduit
+  // ensuite l'interpolation des triangles du terrain, sans texture float mobile.
   const paddedMin = minHeight - 0.25
   const paddedMax = maxHeight + 0.25
   const heightRange = Math.max(0.001, paddedMax - paddedMin)
@@ -186,7 +190,7 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       value: new Vector2(heightField.minHeight, heightField.maxHeight),
     }
     shader.uniforms.uPaintHeightMapSize = { value: HEIGHT_FIELD_SIZE }
-    shader.uniforms.uPaintWorldHalfSize = { value: OUTDOOR_HALF_SIZE }
+    shader.uniforms.uPaintWorldHalfSize = { value: TERRAIN_HALF_SIZE }
 
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
@@ -226,7 +230,16 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
         float h10 = decodePaintHeight(texture2D(uPaintHeightMap, uv10));
         float h01 = decodePaintHeight(texture2D(uPaintHeightMap, uv01));
         float h11 = decodePaintHeight(texture2D(uPaintHeightMap, uv11));
-        return mix(mix(h00, h10, fraction.x), mix(h01, h11, fraction.x), fraction.y);
+        // Reproduit exactement les deux triangles (a,c,b) et (b,c,d) utilisés
+        // par createTerrainGeometry, au lieu de lisser le quad en bilinéaire.
+        if (fraction.x + fraction.y <= 1.0) {
+          return h00
+            + (h10 - h00) * fraction.x
+            + (h01 - h00) * fraction.y;
+        }
+        return h11
+          + (h01 - h11) * (1.0 - fraction.x)
+          + (h10 - h11) * (1.0 - fraction.y);
       }
       `,
     )
@@ -312,7 +325,15 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
       float paintRadius = length(vMapUv - vec2(0.5)) * 2.0;
       float paintFeather = mix(0.45, 0.025, clamp(vPaintHardness, 0.0, 1.0));
       float paintEdgeAlpha = 1.0 - smoothstep(1.0 - paintFeather, 1.0, paintRadius);
-      diffuseColor.a *= paintEdgeAlpha * clamp(vPaintOpacity, 0.0, 1.0);
+      float paintCoverage = paintEdgeAlpha * clamp(vPaintOpacity, 0.0, 1.0);
+      vec2 paintCoverageCell = floor(vPaintWorldPosition.xz * 18.0);
+      float paintCoverageThreshold = fract(
+        sin(dot(paintCoverageCell, vec2(12.9898, 78.233))) * 43758.5453
+      );
+      // Couverture déterministe ancrée dans le monde : deux disques qui se
+      // chevauchent utilisent le même masque et ne cumulent plus leur opacité.
+      if (paintCoverage < 0.001 || paintCoverageThreshold > paintCoverage) discard;
+      diffuseColor.a = 1.0;
       `,
     )
     shader.fragmentShader = shader.fragmentShader
@@ -411,8 +432,6 @@ function PathLayer({ stamps, definition, heightField, terrainSurface, terrainTin
         emissiveIntensity={definition.terrainGrade ? 0.05 : 0}
         roughness={definition.terrainGrade ? terrainSurface.roughness : 1}
         metalness={0}
-        transparent
-        alphaTest={0.025}
         depthWrite
         polygonOffset
         polygonOffsetFactor={-2}

@@ -3,6 +3,7 @@ import {
   DEFAULT_PATH_HARDNESS,
   DEFAULT_PATH_OPACITY,
   createPaintedSurfaceSampler,
+  getPaintCoverageThresholdAt,
   normalizePathStamp,
 } from './paths'
 
@@ -33,30 +34,33 @@ describe('normalizePathStamp', () => {
     expect(normalizePathStamp({ opacity: 3 }).opacity).toBe(1)
   })
 
-  it('turns painted grass opacity into proportional growth weights', () => {
-    const sampler = createPaintedSurfaceSampler([{
-      type: 'grass',
-      center: [4, 5],
-      width: 4,
-      hardness: 1,
-      opacity: 0.35,
-    }])
+  it('does not accumulate opacity when identical stamps overlap', () => {
+    const threshold = getPaintCoverageThresholdAt(4, 5)
+    const opacityBelowThreshold = Math.max(0, threshold - 0.01)
+    const stamps = Array.from({ length: 8 }, () => ({
+      type: 'grass', center: [4, 5], width: 4, hardness: 1, opacity: opacityBelowThreshold,
+    }))
+    const sampler = createPaintedSurfaceSampler(stamps)
 
-    expect(sampler.sampleGrassWeights(4, 5)).toEqual({
-      naturalWeight: 0.65,
-      grassWeight: 0.35,
-    })
+    expect(sampler.sampleGrassWeights(4, 5)).toEqual({ naturalWeight: 1, grassWeight: 0 })
   })
 
   it('composes newer non-grass paint over existing grass', () => {
+    const threshold = getPaintCoverageThresholdAt(0, 0)
     const sampler = createPaintedSurfaceSampler([
       { type: 'grass', center: [0, 0], width: 4, hardness: 1, opacity: 1 },
-      { type: 'dirt', center: [0, 0], width: 4, hardness: 1, opacity: 0.6 },
+      {
+        type: 'dirt',
+        center: [0, 0],
+        width: 4,
+        hardness: 1,
+        opacity: Math.min(1, threshold + 0.01),
+      },
     ])
 
     const weights = sampler.sampleGrassWeights(0, 0)
     expect(weights.naturalWeight).toBe(0)
-    expect(weights.grassWeight).toBeCloseTo(0.4)
+    expect(weights.grassWeight).toBe(0)
   })
 
   it('leaves unpainted positions entirely natural', () => {

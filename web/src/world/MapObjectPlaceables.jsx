@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import { Html, useAnimations, useFBX, useGLTF } from '@react-three/drei'
 import { Box3, LoopRepeat, Matrix4, Mesh, Quaternion, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -6,7 +7,13 @@ import ParticleEffect from '../effects/ParticleEffect'
 import { NECRO_WEAPON_PARTICLE_NAME, useStoredParticlePreset } from '../effects/storedParticlePresets'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import ProceduralTree from './trees/ProceduralTree'
-import { MAGIC_SKULL_DISCOVERY_OBJECT_ID, MAP_OBJECT_CATALOG, MAP_OBJECT_PLACEMENTS, getMapObjectCatalogItem } from './mapObjects'
+import {
+  MAGIC_SKULL_DISCOVERY_OBJECT_ID,
+  MAP_OBJECT_CATALOG,
+  MAP_OBJECT_PLACEMENTS,
+  PACIFIC_SLIME_BOSS_OBJECT_ID,
+  getMapObjectCatalogItem,
+} from './mapObjects'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 import { getOrCreatePreparedAsset } from '../lib/assetPreparationCache'
 
@@ -146,6 +153,57 @@ function waitForIdleTurn() {
       window.setTimeout(resolve, 16)
     }
   })
+}
+
+function PacificSlimeBossMapModel({ catalogItem }) {
+  const gltf = useGLTF(catalogItem.modelUrl)
+  const groupRef = useRef()
+  const prepared = useMemo(() => getOrCreatePreparedAsset(
+    'map-object-pacific-slime-boss',
+    `${catalogItem.modelUrl}:${catalogItem.targetHeightMeters ?? 0}`,
+    () => {
+      const object = clone(gltf.scene)
+
+      object.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.castShadow = true
+          child.receiveShadow = true
+          child.frustumCulled = false
+        }
+      })
+
+      const transform = getModelFitTransform(object, catalogItem)
+      return {
+        template: object,
+        offset: transform.offsetArray,
+        scale: transform.scale,
+      }
+    },
+  ), [catalogItem, gltf.scene])
+  const model = useMemo(() => ({
+    ...prepared,
+    object: clone(prepared.template),
+  }), [prepared])
+
+  useFrame((state) => {
+    const group = groupRef.current
+    if (!group) return
+    const time = state.clock.elapsedTime
+    const breathe = Math.sin(time * 2.2) * 0.025
+    const bob = (Math.sin(time * 1.55) + 1) * 0.035
+    group.position.y = bob
+    group.scale.set(
+      model.scale * (1 + breathe),
+      model.scale * (1 - breathe * 1.25),
+      model.scale * (1 + breathe),
+    )
+  })
+
+  return (
+    <group ref={groupRef} scale={model.scale}>
+      <primitive object={model.object} position={model.offset} />
+    </group>
+  )
 }
 
 function preloadMapObjectAssets(objects = MAP_OBJECT_PLACEMENTS) {
@@ -388,6 +446,7 @@ function StaticGltfModelBatch({ objectId, placements }) {
 function MapObjectModel({ objectId }) {
   const catalogItem = getMapObjectCatalogItem(objectId)
   if (objectId === MAGIC_SKULL_DISCOVERY_OBJECT_ID) return <MagicSkullDiscoveryMapModel catalogItem={catalogItem} />
+  if (objectId === PACIFIC_SLIME_BOSS_OBJECT_ID) return <PacificSlimeBossMapModel catalogItem={catalogItem} />
   if (catalogItem?.type === 'tree') return <MapObjectTreeModel catalogItem={catalogItem} />
   if (getModelExtension(catalogItem?.modelUrl) === 'fbx') return <MapObjectFbxModel catalogItem={catalogItem} />
   return <MapObjectGltfModel catalogItem={catalogItem} />

@@ -438,7 +438,7 @@ function PathBrushPreview({ brush, point }) {
   if (!brush?.active || !point) return null
 
   const [x, z] = point
-  const y = getTerrainHeight(x, z, true)
+  const y = getTerrainHeight(x, z)
   const color = brush.mode === 'erase' ? '#ff9c82' : PATH_TYPES[brush.type]?.color ?? '#6f5d44'
   const radius = brush.width * 0.5
   const feather = MathUtils.lerp(0.45, 0.025, MathUtils.clamp(brush.hardness ?? 0.55, 0, 1))

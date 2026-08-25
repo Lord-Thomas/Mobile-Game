@@ -23,7 +23,7 @@ dist/
 *.svg
 *.ico
 
-# Archives et modèles 3D
+# Archives et modÃ¨les 3D
 *.zip
 *.glb
 *.gltf

@@ -121,6 +121,13 @@ export function getPathStampOpacityAt(stamp, x, z) {
   return edgeOpacity * clampNumber(stamp.opacity, 0, 1)
 }
 
+export function getPaintCoverageThresholdAt(x, z) {
+  const cellX = Math.floor(x * 18)
+  const cellZ = Math.floor(z * 18)
+  const value = Math.sin(cellX * 12.9898 + cellZ * 78.233) * 43758.5453
+  return value - Math.floor(value)
+}
+
 // Index spatial léger : l'herbe interroge plusieurs milliers de positions, sans
 // reparcourir les centaines de coups de pinceau pour chacune d'elles.
 export function createPaintedSurfaceSampler(paths = []) {
@@ -144,16 +151,16 @@ export function createPaintedSurfaceSampler(paths = []) {
   return {
     sampleGrassWeights(x, z) {
       const stamps = buckets.get(getPathSurfaceCellKey(x, z)) ?? []
-      let naturalWeight = 1
-      let grassWeight = 0
+      const coverageThreshold = getPaintCoverageThresholdAt(x, z)
+      let surfaceType = 'natural'
       for (const stamp of stamps) {
-        const alpha = getPathStampOpacityAt(stamp, x, z)
-        if (alpha <= 0) continue
-        naturalWeight *= 1 - alpha
-        grassWeight *= 1 - alpha
-        if (stamp.type === 'grass') grassWeight += alpha
+        const coverage = getPathStampOpacityAt(stamp, x, z)
+        if (coverage >= 0.001 && coverageThreshold <= coverage) surfaceType = stamp.type
       }
-      return { naturalWeight, grassWeight }
+      return {
+        naturalWeight: surfaceType === 'natural' ? 1 : 0,
+        grassWeight: surfaceType === 'grass' ? 1 : 0,
+      }
     },
   }
 }
