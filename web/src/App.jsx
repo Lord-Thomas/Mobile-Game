@@ -31,6 +31,7 @@ import { SpatialHash2D } from './game/runtime/spatialHash2D'
 import { useGameFrameTask } from './game/runtime/useGameFrameTask'
 import { useScheduledAnimations } from './game/runtime/useScheduledAnimations'
 import { MOB_ACTIVITY_TIERS, getMobActivityInterval, isMobVisuallyActive } from './game/mobs/mobActivity'
+import { MOB_STREAMING_BUDGETS, haveSameMobIds, resolveMobResidentIds } from './game/mobs/mobStreaming'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { getOrCreatePreparedAsset } from './lib/assetPreparationCache'
 import { completeLoadTask, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
@@ -12124,9 +12125,21 @@ function SmallMushroomEnemy({
       investigateTimerRef.current = 0
       lastSeenPosRef.current = null
       wanderTargetRef.current = null
-      stateRef.current = 'return'
+      leashTimerRef.current = 0
+      threatRef.current.clear()
+      evadingRef.current = false
+      currentPositionRef.current.x = spawnPosition[0]
+      currentPositionRef.current.y = spawnPosition[1]
+      currentPositionRef.current.z = spawnPosition[2]
+      hpRef.current = cfg.maxHp
+      setHp(cfg.maxHp)
+      setHudVisible(false)
+      setIsEvading(false)
+      requestedMotionRef.current = 'idle'
+      setMotion('idle')
+      stateRef.current = 'idle'
     }
-  }, [active, passive])
+  }, [active, cfg.maxHp, passive, spawnPosition])
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
@@ -12475,6 +12488,11 @@ function SmallMushroomEnemy({
       activityTierRef,
       activityIntervalRef,
       applyActivityTier,
+      canStreamOut: () => (
+        !defeatedRef.current
+        && !attackRef.current
+        && hpRef.current >= cfg.maxHp
+      ),
       separationRadius: Math.max(
         MOB_DEFAULT_SEPARATION_RADIUS,
         cfg.targetRadius ?? MOB_DEFAULT_SEPARATION_RADIUS,
@@ -12487,7 +12505,7 @@ function SmallMushroomEnemy({
     }
     mobGroupRef.current.set(enemyId, mob)
     return () => { mobGroupRef.current.delete(enemyId) }
-  }, [applyActivityTier, cfg.targetRadius, enemyId, mobGroupRef, passive, triggerAggro])
+  }, [applyActivityTier, cfg.maxHp, cfg.targetRadius, enemyId, mobGroupRef, passive, triggerAggro])
 
   useEffect(() => {
     if (active) return undefined
@@ -13044,44 +13062,10 @@ function SmallMushroomEnemy({
 const MemoizedSmallMushroomEnemy = memo(SmallMushroomEnemy)
 
 // La transition prépare la zone proche ainsi qu'un représentant de chaque type.
-// Les doublons lointains sont ensuite montés uniquement hors champ : ils entrent
-// naturellement dans la vue au lieu d'apparaître sous les yeux du joueur.
+// Ensuite, seuls les monstres appartenant à la zone d'intérêt d'un joueur restent
+// montés. Une marge entrée/sortie empêche les montages en boucle aux frontières.
 const OUTDOOR_ENEMY_ENTRY_SAFE_RADIUS = 90
-const OUTDOOR_ENEMY_STREAM_MIN_PLAYER_DISTANCE = 65
-const OUTDOOR_ENEMY_STREAM_VIEW_MARGIN = 1.3
-const OUTDOOR_ENEMY_STREAM_INTERVAL_MS = 100
-const OUTDOOR_ENEMY_STREAM_RETRY_MS = 260
-const outdoorEnemyStreamPoint = new Vector3()
-const outdoorEnemyStreamDirection = new Vector3()
-const outdoorEnemyStreamToSpawn = new Vector3()
-
-function isOutdoorEnemySpawnSafelyOffscreen(camera, spawnPosition) {
-  if (!camera || !spawnPosition) return false
-
-  outdoorEnemyStreamPoint.set(
-    spawnPosition[0] ?? 0,
-    (spawnPosition[1] ?? 0) + 1,
-    spawnPosition[2] ?? 0,
-  )
-  outdoorEnemyStreamToSpawn.copy(outdoorEnemyStreamPoint).sub(camera.position)
-  camera.getWorldDirection(outdoorEnemyStreamDirection)
-
-  const distance = outdoorEnemyStreamToSpawn.length()
-  if (
-    distance > 0.001
-    && outdoorEnemyStreamDirection.dot(outdoorEnemyStreamToSpawn) <= distance * 0.12
-  ) {
-    return true
-  }
-
-  outdoorEnemyStreamPoint.project(camera)
-  return (
-    outdoorEnemyStreamPoint.z < -1
-    || outdoorEnemyStreamPoint.z > 1
-    || Math.abs(outdoorEnemyStreamPoint.x) > OUTDOOR_ENEMY_STREAM_VIEW_MARGIN
-    || Math.abs(outdoorEnemyStreamPoint.y) > OUTDOOR_ENEMY_STREAM_VIEW_MARGIN
-  )
-}
+const OUTDOOR_ENEMY_RESIDENCY_REFRESH_INTERVAL = 0.25
 
 function ProgressiveOutdoorEnemyLayer({
   enabled,
@@ -13090,6 +13074,7 @@ function ProgressiveOutdoorEnemyLayer({
   slots,
   transitionPreparing,
   playerPositionRef,
+  remotePlayerStateRef,
   registerCombatTarget,
   onDefeated,
   onHitPlayer,
@@ -13122,7 +13107,6 @@ function ProgressiveOutdoorEnemyLayer({
     [],
   )
 
-  const camera = useThree((state) => state.camera)
   const prioritizedSlots = useMemo(() => {
     const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
     const originX = spawn[0] ?? 0
@@ -13178,100 +13162,67 @@ function ProgressiveOutdoorEnemyLayer({
   const [streamedSlotIds, setStreamedSlotIds] = useState([])
 
   useEffect(() => {
-    if ((enabled || retainMounted) && assetsReady) return
+    if (enabled && assetsReady) return
+    if (streamedSlotIdsRef.current.size === 0) return
     streamedSlotIdsRef.current = new Set()
     setStreamedSlotIds([])
-  }, [assetsReady, enabled, retainMounted])
+  }, [assetsReady, enabled])
 
-  useEffect(() => {
-    if (
-      !enabled
-      || !assetsReady
-      || transitionPreparing
-      || !complete
-      || prioritizedSlots.length <= entrySlots.length
-    ) {
-      return undefined
+  useGameFrameTask(() => {
+    if (!enabled || !assetsReady || transitionPreparing || !complete) return
+
+    const players = []
+    const localPosition = playerPositionRef.current
+    if (localPosition) players.push({ position: localPosition })
+    const remotePlayer = remotePlayerStateRef?.current
+    if (remotePlayer?.position && (!remotePlayer.zone || remotePlayer.zone === ZONES.outside)) {
+      players.push({ position: remotePlayer.position })
     }
 
-    const entryIds = new Set(entrySlots.map((entry) => entry.slot.id))
-    let cancelled = false
-    let timeoutId = 0
-    let idleId = 0
+    const requiredIds = new Set(entrySlots.slice(0, count).map((entry) => entry.slot.id))
+    const currentIds = new Set(requiredIds)
+    streamedSlotIdsRef.current.forEach((id) => currentIds.add(id))
+    const residentSlots = prioritizedSlots.map((entry) => ({
+      ...entry.slot,
+      spawnPosition: entry.spawnPosition,
+    }))
+    const nextResidentIds = resolveMobResidentIds({
+      slots: residentSlots,
+      currentIds,
+      requiredIds,
+      players,
+      canEvict: (id) => mobGroupRef.current.get(id)?.canStreamOut?.() !== false,
+      maxAdds: MOB_STREAMING_BUDGETS.mountsPerRefresh,
+      maxRemovals: MOB_STREAMING_BUDGETS.unmountsPerRefresh,
+    })
+    const nextStreamedIds = new Set(
+      [...nextResidentIds].filter((id) => !requiredIds.has(id)),
+    )
+    if (haveSameMobIds(streamedSlotIdsRef.current, nextStreamedIds)) return
 
-    const streamNext = () => {
-      if (cancelled) return
-      const player = playerPositionRef.current
-      const playerX = player?.x ?? PLAYER_SPAWNS.outside?.[0] ?? 0
-      const playerZ = player?.z ?? PLAYER_SPAWNS.outside?.[2] ?? 0
-      const candidates = prioritizedSlots
-        .filter((entry) => (
-          !entryIds.has(entry.slot.id)
-          && !streamedSlotIdsRef.current.has(entry.slot.id)
-        ))
-        .map((entry) => ({
-          ...entry,
-          playerDistance: Math.hypot(
-            (entry.spawnPosition[0] ?? 0) - playerX,
-            (entry.spawnPosition[2] ?? 0) - playerZ,
-          ),
-        }))
-        .sort((left, right) => left.playerDistance - right.playerDistance)
-
-      const next = candidates.find((entry) => (
-        entry.playerDistance >= OUTDOOR_ENEMY_STREAM_MIN_PLAYER_DISTANCE
-        && isOutdoorEnemySpawnSafelyOffscreen(camera, entry.spawnPosition)
-      ))
-
-      if (!next) {
-        if (candidates.length > 0) schedule(OUTDOOR_ENEMY_STREAM_RETRY_MS)
-        return
-      }
-
-      streamedSlotIdsRef.current.add(next.slot.id)
-      setStreamedSlotIds((current) => [...current, next.slot.id])
-      const mountedTotal = entrySlots.length + streamedSlotIdsRef.current.size
-      if (mountedTotal % 8 === 0 || mountedTotal === prioritizedSlots.length) {
-        perfDiagnostics.event('outdoor:enemy-background-stream', {
-          mounted: mountedTotal,
-          total: prioritizedSlots.length,
-        })
-      }
-      schedule(OUTDOOR_ENEMY_STREAM_INTERVAL_MS)
-    }
-
-    const schedule = (delayMs) => {
-      if (cancelled) return
-      timeoutId = window.setTimeout(() => {
-        if (cancelled) return
-        if (typeof window.requestIdleCallback === 'function') {
-          idleId = window.requestIdleCallback(streamNext, { timeout: 500 })
-        } else {
-          idleId = window.requestAnimationFrame(streamNext)
-        }
-      }, delayMs)
-    }
-
-    schedule(OUTDOOR_ENEMY_STREAM_INTERVAL_MS)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeoutId)
-      if (typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleId)
-      } else {
-        window.cancelAnimationFrame(idleId)
-      }
-    }
-  }, [
-    assetsReady,
-    camera,
-    complete,
-    enabled,
-    entrySlots,
-    playerPositionRef,
-    prioritizedSlots,
-    transitionPreparing,
-  ])
+    const previousIds = streamedSlotIdsRef.current
+    let streamedIn = 0
+    let streamedOut = 0
+    nextStreamedIds.forEach((id) => {
+      if (!previousIds.has(id)) streamedIn += 1
+    })
+    previousIds.forEach((id) => {
+      if (!nextStreamedIds.has(id)) streamedOut += 1
+    })
+    streamedSlotIdsRef.current = nextStreamedIds
+    setStreamedSlotIds([...nextStreamedIds])
+    perfDiagnostics.event('outdoor:enemy-residency', {
+      mounted: requiredIds.size + nextStreamedIds.size,
+      streamedIn,
+      streamedOut,
+      total: prioritizedSlots.length,
+    })
+  }, {
+    enabled: enabled && assetsReady,
+    label: 'outdoor-enemy-residency',
+    phase: FRAME_PHASES.PRE_SIMULATION,
+    interval: OUTDOOR_ENEMY_RESIDENCY_REFRESH_INTERVAL,
+  })
 
   const orderedSlots = useMemo(() => {
     if (count <= 0 && streamedSlotIds.length === 0) return []
@@ -24060,6 +24011,7 @@ function App() {
               slots={monsterSpawnSlots}
               transitionPreparing={outdoorEntryPreparing}
               playerPositionRef={playerPositionRef}
+              remotePlayerStateRef={remotePlayerStateRef}
               registerCombatTarget={registerCombatTarget}
               onDefeated={handleSmallEnemyDefeated}
               onHitPlayer={handlePlayerHit}
