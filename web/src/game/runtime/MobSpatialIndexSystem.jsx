@@ -39,6 +39,7 @@ export default function MobSpatialIndexSystem({ mobGroupRef, spatialIndexRef }) 
   }, {
     label: 'mob-spatial-index',
     phase: FRAME_PHASES.PRE_SIMULATION,
+    interval: 1 / 10,
   })
 
   return null

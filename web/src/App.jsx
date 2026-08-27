@@ -25,10 +25,12 @@ import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
 import GameFrameSchedulerDriver from './game/runtime/GameFrameSchedulerDriver'
 import { FRAME_PHASES } from './game/runtime/frameScheduler'
+import MobActivitySystem from './game/runtime/MobActivitySystem'
 import MobSpatialIndexSystem from './game/runtime/MobSpatialIndexSystem'
 import { SpatialHash2D } from './game/runtime/spatialHash2D'
 import { useGameFrameTask } from './game/runtime/useGameFrameTask'
 import { useScheduledAnimations } from './game/runtime/useScheduledAnimations'
+import { MOB_ACTIVITY_TIERS, getMobActivityInterval, isMobVisuallyActive } from './game/mobs/mobActivity'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { getOrCreatePreparedAsset } from './lib/assetPreparationCache'
 import { completeLoadTask, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
@@ -11902,7 +11904,17 @@ function slimeAttackPose(p) {
   return { jumpY, lungeZ, squash }
 }
 
-function SquashStretchModel({ object, offset, scale, renderOrder = 0, positionRef, hitSquashRef, attackRef }) {
+function SquashStretchModel({
+  object,
+  offset,
+  scale,
+  renderOrder = 0,
+  positionRef,
+  hitSquashRef,
+  attackRef,
+  enabled = true,
+  activityIntervalRef = null,
+}) {
   const offsetGroupRef = useRef()
   const innerRef = useRef()
   const squashRef = useRef(0)
@@ -11988,8 +12000,10 @@ function SquashStretchModel({ object, offset, scale, renderOrder = 0, positionRe
       hitSquashRef.current = Math.max(0, hitSquashRef.current - dt * 3.5)
     }
   }, {
+    enabled,
     label: 'enemy-procedural-animation',
     phase: FRAME_PHASES.POST_SIMULATION,
+    intervalRef: activityIntervalRef,
   })
 
   return (
@@ -12036,6 +12050,9 @@ function SmallMushroomEnemy({
   const walk = useMixamoGlbAnimation('/models/player/anim/walk.glb', animPositionScale)
   const punch = useMixamoGlbAnimation('/models/player/anim/punch.glb', animPositionScale)
   const groupRef = useRef()
+  const activityTierRef = useRef(MOB_ACTIVITY_TIERS.FULL)
+  const activityIntervalRef = useRef(getMobActivityInterval(MOB_ACTIVITY_TIERS.FULL))
+  const [activityTier, setActivityTier] = useState(MOB_ACTIVITY_TIERS.FULL)
   const [hp, setHp] = useState(cfg.maxHp)
   const [damageNumbers, setDamageNumbers] = useState([])
   const [hudVisible, setHudVisible] = useState(false)
@@ -12094,6 +12111,22 @@ function SmallMushroomEnemy({
     disabled: true,
     takeDamage: null,
   })
+
+  const applyActivityTier = useCallback((tier) => {
+    const visuallyActive = active && isMobVisuallyActive(tier)
+    setActivityTier(tier)
+    if (groupRef.current) groupRef.current.visible = visuallyActive
+    targetRef.current.disabled = passive || !visuallyActive || defeatedRef.current
+
+    if (tier === MOB_ACTIVITY_TIERS.DORMANT && !defeatedRef.current) {
+      attackRef.current = null
+      closeAlertTimerRef.current = 0
+      investigateTimerRef.current = 0
+      lastSeenPosRef.current = null
+      wanderTargetRef.current = null
+      stateRef.current = 'return'
+    }
+  }, [active, passive])
 
   const model = useMemo(() => {
     const source = clone(sourceModel)
@@ -12439,6 +12472,9 @@ function SmallMushroomEnemy({
     const mob = {
       getPosition: () => currentPositionRef.current,
       triggerAggro,
+      activityTierRef,
+      activityIntervalRef,
+      applyActivityTier,
       separationRadius: Math.max(
         MOB_DEFAULT_SEPARATION_RADIUS,
         cfg.targetRadius ?? MOB_DEFAULT_SEPARATION_RADIUS,
@@ -12451,7 +12487,7 @@ function SmallMushroomEnemy({
     }
     mobGroupRef.current.set(enemyId, mob)
     return () => { mobGroupRef.current.delete(enemyId) }
-  }, [enemyId, mobGroupRef, passive, triggerAggro])
+  }, [applyActivityTier, cfg.targetRadius, enemyId, mobGroupRef, passive, triggerAggro])
 
   useEffect(() => {
     if (active) return undefined
@@ -12901,8 +12937,10 @@ function SmallMushroomEnemy({
     }
 
   }, {
+    enabled: active,
     label: 'enemy-simulation',
     phase: FRAME_PHASES.SIMULATION,
+    intervalRef: activityIntervalRef,
   })
 
   targetRef.current.position.x = currentPositionRef.current.x
@@ -12911,14 +12949,19 @@ function SmallMushroomEnemy({
   targetRef.current.id = enemyId
   targetRef.current.radius = cfg.targetRadius ?? 0.48
   targetRef.current.height = cfg.targetHeight ?? 1.2
-  targetRef.current.disabled = passive || !active || defeated
+  targetRef.current.disabled = passive || !active || defeated || !isMobVisuallyActive(activityTier)
   targetRef.current.takeDamage = takeDamage
 
   const bodyHeight = cfg.targetHeight ?? 1.2
   const hudHeight = cfg.hudHeight ?? 1.55
 
   return (
-    <group ref={groupRef} position={active ? spawnPosition : [0, -500, 0]} rotation={[0, initialYawRef.current, 0]}>
+    <group
+      ref={groupRef}
+      position={active ? spawnPosition : [0, -500, 0]}
+      rotation={[0, initialYawRef.current, 0]}
+      visible={active && isMobVisuallyActive(activityTier)}
+    >
       {!defeated && (
         <>
           {cfg.squashStretch ? (
@@ -12930,6 +12973,8 @@ function SmallMushroomEnemy({
               positionRef={currentPositionRef}
               hitSquashRef={hitSquashRef}
               attackRef={attackRef}
+              enabled={active}
+              activityIntervalRef={activityIntervalRef}
             />
           ) : (
             <group scale={model.scale} renderOrder={isEvading ? 1 : 0}>
@@ -21768,8 +21813,13 @@ function App() {
     && !zoneFadeActive
     && loadingExperience.kind === 'initial'
     && loadingExperience.percent >= 99
-  const showCaptureUi = (!loadingUiActive || preloadGameplayUi)
+  const gameplayUiReady = !loadingUiActive || preloadGameplayUi
+  const showCaptureUi = gameplayUiReady
     && (!(isAdminMode || isVerticalFrameMode) || !captureUiHidden)
+  // ControlsOverlay owns the camera-pad pointer/wheel handlers as well as the
+  // visible HUD. Keep it mounted when capture UI is hidden so hiding the
+  // interface never removes orbit/zoom controls.
+  const showGameplayControls = gameplayUiReady && mode === 'play'
   const showGameplayUi = showCaptureUi && mode === 'play'
   const blocksBottomGameChat = isSkinMenuOpen || isEnvironmentMenuOpen || isCharacterMenuOpen || companionMenuOpen || isCustomizationChoiceOpen || isWeaponMenuOpen || isAccountOpen || isLightMenuOpen || Boolean(youtubeFrameEditor)
   const furnitureShopItems = shopObjectIds.map((objectId) => objectCatalog[objectId]).filter(Boolean)
@@ -23669,6 +23719,12 @@ function App() {
       >
         <ArtDirectionRuntime />
         <GameFrameSchedulerDriver />
+        <MobActivitySystem
+          enabled={outdoorEnemiesReady}
+          mobGroupRef={mobGroupRef}
+          localPlayerPositionRef={playerPositionRef}
+          remotePlayerStateRef={remotePlayerStateRef}
+        />
         <MobSpatialIndexSystem
           mobGroupRef={mobGroupRef}
           spatialIndexRef={mobSpatialIndexRef}
@@ -24244,7 +24300,7 @@ function App() {
       {!loadingUiActive && mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
       <GpuWarning visible={!loadingUiActive && mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
-      {showGameplayUi && (
+      {showGameplayControls && (
         <ControlsOverlay
           touchRef={touchRef}
           controlSettings={controlSettings}
