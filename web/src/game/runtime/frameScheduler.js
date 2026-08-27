@@ -4,13 +4,15 @@ export const FRAME_PHASES = Object.freeze({
   POST_SIMULATION: 100,
 })
 
-const RUNTIME_PERF_SAMPLE_LIMIT = 240
+// Couvre une mesure de 15 s même sur un écran à fréquence élevée.
+// Ces tableaux ne sont alimentés que lorsque les métriques runtime sont actives.
+const RUNTIME_PERF_SAMPLE_LIMIT = 4096
 
 function isRuntimePerfEnabled() {
   if (typeof window === 'undefined') return false
   try {
     const params = new URLSearchParams(window.location.search)
-    return params.has('runtimeperf') || params.get('perfdiag') === 'deep'
+    return params.has('runtimeperf') || params.get('perfdiag') === 'deep' || params.get('debug') === '1'
   } catch {
     return false
   }
@@ -20,12 +22,24 @@ function now() {
   return typeof performance !== 'undefined' ? performance.now() : Date.now()
 }
 
+function percentile(sortedSamples, ratio) {
+  if (sortedSamples.length === 0) return 0
+  const index = Math.min(sortedSamples.length - 1, Math.ceil(sortedSamples.length * ratio) - 1)
+  return sortedSamples[Math.max(0, index)]
+}
+
 function summarizeSamples(samples) {
-  if (samples.length === 0) return { averageMs: 0, maxMs: 0, samples: 0 }
+  if (samples.length === 0) {
+    return { averageMs: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, totalMs: 0, samples: 0 }
+  }
   const total = samples.reduce((sum, value) => sum + value, 0)
+  const sorted = samples.slice().sort((left, right) => left - right)
   return {
     averageMs: total / samples.length,
+    p95Ms: percentile(sorted, 0.95),
+    p99Ms: percentile(sorted, 0.99),
     maxMs: Math.max(...samples),
+    totalMs: total,
     samples: samples.length,
   }
 }

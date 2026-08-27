@@ -47,6 +47,11 @@ describe('FrameScheduler', () => {
     expect(snapshot.taskCount).toBe(1)
     expect(snapshot.frame.samples).toBe(1)
     expect(snapshot.tasks.simulation.samples).toBe(1)
+    expect(snapshot.tasks.simulation).toMatchObject({
+      p95Ms: expect.any(Number),
+      p99Ms: expect.any(Number),
+      totalMs: expect.any(Number),
+    })
   })
 
   it('quarantines a failing task and keeps the rest of the frame running', () => {

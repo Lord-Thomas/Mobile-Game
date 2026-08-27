@@ -24,7 +24,7 @@ import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, can
 import { getAngelWingsBounds } from './game/angelWingsBounds'
 import { useGameTexture } from './game/ktx2'
 import GameFrameSchedulerDriver from './game/runtime/GameFrameSchedulerDriver'
-import { FRAME_PHASES } from './game/runtime/frameScheduler'
+import { FRAME_PHASES, gameFrameScheduler } from './game/runtime/frameScheduler'
 import MobActivitySystem from './game/runtime/MobActivitySystem'
 import MobSpatialIndexSystem from './game/runtime/MobSpatialIndexSystem'
 import { SpatialHash2D } from './game/runtime/spatialHash2D'
@@ -36,6 +36,7 @@ import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskO
 import { getOrCreatePreparedAsset } from './lib/assetPreparationCache'
 import { completeLoadTask, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
+import { createPerformanceReport, getPerformanceReportFilename, serializePerformanceReport } from './lib/performanceReport'
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
 import { useProgressiveMountCount } from './lib/useProgressiveMountCount'
 import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
@@ -18271,6 +18272,7 @@ function PerfFrameProbe({
   }, [shaderWarmupComplete])
 
   useFrame((state, delta) => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
     const durationMs = delta * 1000
     const now = performance.now()
     const postLoad = shaderWarmupComplete
@@ -18323,6 +18325,8 @@ function RenderStatsProbe({
   const intervalFrameTimesRef = useRef([])
   const rollingSamplesRef = useRef([])
   const settleRemainingRef = useRef(0)
+  const benchmarkPendingRef = useRef(false)
+  const measurementStartedAtRef = useRef(null)
   const previousMeasurementEpochRef = useRef(measurementEpoch)
   const drawingBufferRef = useRef(new Vector2())
   const categoryElapsedRef = useRef(1)
@@ -18343,11 +18347,13 @@ function RenderStatsProbe({
     maxFrameTimeRef.current = 0
     intervalFrameTimesRef.current = []
     rollingSamplesRef.current = []
+    measurementStartedAtRef.current = null
+    benchmarkPendingRef.current = benchmarkRestarted
     settleRemainingRef.current = benchmarkRestarted ? RENDER_BENCHMARK_SETTLE_SECONDS : 0
   }, [measurementEpoch, resetKey])
 
   useFrame((_, delta) => {
-    if (!active) return
+    if (!active || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) return
 
     if (settleRemainingRef.current > 0) {
       settleRemainingRef.current = Math.max(0, settleRemainingRef.current - delta)
@@ -18355,7 +18361,17 @@ function RenderStatsProbe({
       framesRef.current = 0
       maxFrameTimeRef.current = 0
       intervalFrameTimesRef.current = []
+      if (settleRemainingRef.current === 0 && benchmarkPendingRef.current) {
+        measurementStartedAtRef.current = performance.now()
+        gameFrameScheduler.resetMetrics()
+        perfDiagnostics.mark('benchmark:start', { measurementEpoch })
+        benchmarkPendingRef.current = false
+      }
       return
+    }
+
+    if (!Number.isFinite(measurementStartedAtRef.current)) {
+      measurementStartedAtRef.current = performance.now()
     }
 
     const frameTimeMs = delta * 1000
@@ -18432,6 +18448,7 @@ function RenderStatsProbe({
       categoryElapsedRef.current = 0
     }
 
+    const measurementEndedAt = performance.now()
     const nextStats = {
       fps,
       stableFps,
@@ -18445,10 +18462,13 @@ function RenderStatsProbe({
       onePercentLowFps,
       fpsVariationPercent,
       measurementEpoch,
+      measurementStartedAt: measurementStartedAtRef.current,
+      measurementEndedAt,
       drawCalls: gl.info.render.calls,
       triangles: gl.info.render.triangles,
       textures: gl.info.memory.textures,
       geometries: gl.info.memory.geometries,
+      programs: Array.isArray(gl.info.programs) ? gl.info.programs.length : undefined,
       dpr: gl.getPixelRatio(),
       drawingBufferWidth: drawingBufferRef.current.x,
       drawingBufferHeight: drawingBufferRef.current.y,
@@ -18473,6 +18493,8 @@ function RenderStatsOverlay({
   toggles,
   terrainRenderMode,
   measurementEpoch,
+  rendererInfo,
+  quality,
   onStartBenchmark,
   onTerrainRenderModeChange,
   onToggle,
@@ -18494,20 +18516,44 @@ function RenderStatsOverlay({
       (stats?.stableWindowSeconds ?? 0) < RENDER_BENCHMARK_SECONDS
     ) return
 
-    const result = {
-      config: benchmarkConfig,
-      stableFps: stats.stableFps,
-      onePercentLowFps: stats.onePercentLowFps,
-      medianFrameTimeMs: stats.stableMedianFrameTimeMs,
-      p95FrameTimeMs: stats.stableP95FrameTimeMs,
-      variationPercent: stats.fpsVariationPercent,
-      drawCalls: stats.drawCalls,
-      triangles: stats.triangles,
-    }
+    const result = createPerformanceReport({
+      label: benchmarkConfig,
+      stats,
+      rendererInfo,
+      quality,
+      scheduler: gameFrameScheduler.snapshot(),
+      diagnostics: perfDiagnostics.export({
+        since: stats.measurementStartedAt,
+        until: stats.measurementEndedAt,
+      }),
+    })
     setBenchmarkResults((current) => [...current.slice(-1), result])
     setActiveBenchmarkEpoch(null)
     setExpanded(true)
-  }, [benchmarkCollecting, benchmarkConfig, stats])
+  }, [benchmarkCollecting, benchmarkConfig, quality, rendererInfo, stats])
+
+  useEffect(() => {
+    if (!stats || typeof window === 'undefined') return undefined
+    const api = {
+      snapshot: (label = 'Instantané manuel') => createPerformanceReport({
+        label,
+        stats,
+        rendererInfo,
+        quality,
+        scheduler: gameFrameScheduler.snapshot(),
+        diagnostics: perfDiagnostics.export({
+          since: stats.measurementStartedAt,
+          until: stats.measurementEndedAt,
+        }),
+      }),
+      latest: () => benchmarkResults.at(-1) ?? null,
+      history: () => benchmarkResults.slice(),
+    }
+    window.__gameProfiler = api
+    return () => {
+      if (window.__gameProfiler === api) delete window.__gameProfiler
+    }
+  }, [benchmarkResults, quality, rendererInfo, stats])
 
   if (!stats) return null
 
@@ -18533,6 +18579,25 @@ function RenderStatsOverlay({
     onStartBenchmark()
   }
 
+  const copyReport = async (report) => {
+    const serialized = serializePerformanceReport(report)
+    try {
+      await navigator.clipboard.writeText(serialized)
+    } catch {
+      console.log(serialized)
+    }
+  }
+
+  const downloadReport = (report) => {
+    const blob = new Blob([serializePerformanceReport(report)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = getPerformanceReportFilename(report)
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   const rows = [
     ['FPS', stats.fps.toFixed(1)],
     [
@@ -18550,6 +18615,7 @@ function RenderStatsOverlay({
     ['Triangles', stats.triangles.toLocaleString('fr-FR')],
     ['Textures', stats.textures.toLocaleString('fr-FR')],
     ['Geometries', stats.geometries.toLocaleString('fr-FR')],
+    ['Programmes', (stats.programs ?? 0).toLocaleString('fr-FR')],
     ['DPR', stats.dpr.toFixed(2)],
     ['Buffer', `${stats.drawingBufferWidth} x ${stats.drawingBufferHeight}`],
   ]
@@ -18597,9 +18663,9 @@ function RenderStatsOverlay({
     : 0
   const comparison = benchmarkResults.length >= 2
     ? {
-        fps: benchmarkResults.at(-1).stableFps - benchmarkResults.at(-2).stableFps,
+        fps: benchmarkResults.at(-1).frame.fps - benchmarkResults.at(-2).frame.fps,
         percent: (
-          (benchmarkResults.at(-1).stableFps / Math.max(0.001, benchmarkResults.at(-2).stableFps) - 1) *
+          (benchmarkResults.at(-1).frame.fps / Math.max(0.001, benchmarkResults.at(-2).frame.fps) - 1) *
           100
         ),
       }
@@ -18689,15 +18755,22 @@ function RenderStatsOverlay({
               Lancer une mesure
             </button>
             {benchmarkResults.map((result, index) => (
-              <div className="render-benchmark-result" key={`${result.config}-${index}`}>
+              <div className="render-benchmark-result" key={`${result.label}-${index}`}>
                 <strong>{index === benchmarkResults.length - 1 ? 'Dernier test' : 'Test précédent'}</strong>
-                <span>{result.config}</span>
+                <span>{result.label}</span>
                 <span>
-                  {result.stableFps.toFixed(1)} FPS · 1 % low {result.onePercentLowFps.toFixed(1)}
+                  {result.frame.fps.toFixed(1)} FPS · 1 % low {result.frame.onePercentLowFps.toFixed(1)}
                 </span>
                 <span>
-                  P95 {result.p95FrameTimeMs.toFixed(1)} ms · variation {result.variationPercent.toFixed(1)} %
+                  P95 {result.frame.p95Ms.toFixed(1)} ms · P99 {result.frame.p99Ms.toFixed(1)} ms
                 </span>
+                <span>
+                  {result.render.drawCalls.toLocaleString('fr-FR')} draws · {result.render.triangles.toLocaleString('fr-FR')} triangles
+                </span>
+                <div className="render-benchmark-actions">
+                  <button type="button" onClick={() => copyReport(result)}>Copier JSON</button>
+                  <button type="button" onClick={() => downloadReport(result)}>Télécharger</button>
+                </div>
               </div>
             ))}
             {comparison && (
@@ -24244,6 +24317,8 @@ function App() {
           toggles={debugToggles}
           terrainRenderMode={terrainRenderMode}
           measurementEpoch={renderBenchmarkEpoch}
+          rendererInfo={rendererInfo}
+          quality={mobileQualityContext}
           onStartBenchmark={() => setRenderBenchmarkEpoch((current) => current + 1)}
           onTerrainRenderModeChange={() => setTerrainRenderMode(getNextTerrainRenderMode)}
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}

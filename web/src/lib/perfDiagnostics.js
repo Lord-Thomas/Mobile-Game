@@ -1,4 +1,4 @@
-const PERF_DIAGNOSTICS_VERSION = 2
+const PERF_DIAGNOSTICS_VERSION = 3
 const DEFAULT_EVENT_LIMIT = 8000
 const FREEZE_BEFORE_MS = 2000
 const FREEZE_AFTER_MS = 1000
@@ -15,6 +15,9 @@ function getMode() {
   try {
     const params = new URLSearchParams(window.location.search)
     const value = params.get('perfdiag')
+    if (params.get('debug') === '1' && value == null) {
+      return { enabled: true, react: false, deep: false, value: 'debug' }
+    }
     if (value == null || value === '0' || value === 'false') {
       return { enabled: false, react: false, deep: false, value }
     }
@@ -36,6 +39,8 @@ const freezes = []
 const activeSpans = new Map()
 let nextSpanId = 1
 let nextFreezeId = 1
+let droppedEventCount = 0
+let droppedFreezeCount = 0
 
 function cloneData(value, depth = 0) {
   if (value == null || typeof value !== 'object') return value
@@ -58,7 +63,9 @@ function pushEntry(entry) {
   }
   events.push(next)
   if (events.length > DEFAULT_EVENT_LIMIT) {
-    events.splice(0, events.length - DEFAULT_EVENT_LIMIT)
+    const removedCount = events.length - DEFAULT_EVENT_LIMIT
+    events.splice(0, removedCount)
+    droppedEventCount += removedCount
   }
   return next
 }
@@ -274,7 +281,11 @@ function startFreezeCapture(freeze) {
     summary: '',
   }
   freezes.push(capture)
-  if (freezes.length > 80) freezes.splice(0, freezes.length - 80)
+  if (freezes.length > 80) {
+    const removedCount = freezes.length - 80
+    freezes.splice(0, removedCount)
+    droppedFreezeCount += removedCount
+  }
 
   if (typeof window !== 'undefined') {
     window.setTimeout(() => finalizeFreezeCapture(id), FREEZE_AFTER_MS)
@@ -375,14 +386,36 @@ function recordFrame(data = {}) {
   return entry
 }
 
-function exportData() {
+function exportData({ since = -Infinity, until = Infinity } = {}) {
+  const scopedSince = Number.isFinite(since) ? since : -Infinity
+  const scopedUntil = Number.isFinite(until) ? until : Infinity
+  const scopedEvents = events.filter((entry) => entry.t >= scopedSince && entry.t <= scopedUntil)
+  const scopedFreezes = freezes.filter((capture) => {
+    const freezeTime = capture.freeze?.t
+    return Number.isFinite(freezeTime) && freezeTime >= scopedSince && freezeTime <= scopedUntil
+  })
+  const oldestRetainedEventTime = events[0]?.t ?? null
+
   return {
     version: PERF_DIAGNOSTICS_VERSION,
     mode,
     generatedAt: new Date().toISOString(),
-    events: events.map((entry) => cloneData(entry)),
-    freezes: freezes.map((entry) => cloneData(entry)),
-    activeSpans: Array.from(activeSpans.values()).map((entry) => cloneData(entry)),
+    window: {
+      since: Number.isFinite(scopedSince) ? scopedSince : null,
+      until: Number.isFinite(scopedUntil) ? scopedUntil : null,
+    },
+    droppedEventCount,
+    droppedFreezeCount,
+    truncatedBeforeWindow: (
+      droppedEventCount > 0 &&
+      Number.isFinite(scopedSince) &&
+      (!Number.isFinite(oldestRetainedEventTime) || oldestRetainedEventTime > scopedSince)
+    ),
+    events: scopedEvents.map((entry) => cloneData(entry)),
+    freezes: scopedFreezes.map((entry) => cloneData(entry)),
+    activeSpans: Array.from(activeSpans.values())
+      .filter((entry) => entry.start <= scopedUntil)
+      .map((entry) => cloneData(entry)),
   }
 }
 
@@ -504,6 +537,8 @@ function clear() {
   activeSpans.clear()
   nextSpanId = 1
   nextFreezeId = 1
+  droppedEventCount = 0
+  droppedFreezeCount = 0
 }
 
 export function isPerfDiagnosticsEnabled() {
