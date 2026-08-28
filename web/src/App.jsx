@@ -1,4 +1,4 @@
-import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
+import { Canvas, addAfterEffect, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, PerspectiveCamera as DreiPerspectiveCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
 import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMixer, BackSide, Box3, BoxGeometry, BufferGeometry, CanvasTexture, Color, DefaultLoadingManager, DoubleSide, Euler, Float32BufferAttribute, FogExp2, FrontSide, KeepStencilOp, LinearFilter, Matrix4, LoopOnce, LoopPingPong, LoopRepeat, MathUtils, Mesh, MeshBasicMaterial, NotEqualStencilFunc, Object3D, OrthographicCamera as ThreeOrthographicCamera, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, Raycaster, RepeatWrapping, ReplaceStencilOp, RingGeometry, ShaderMaterial, Shape, SphereGeometry, SRGBColorSpace, Vector2, Vector3 } from 'three'
@@ -37,6 +37,8 @@ import { getOrCreatePreparedAsset } from './lib/assetPreparationCache'
 import { completeLoadTask, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
 import { createPerformanceReport, getPerformanceReportFilename, serializePerformanceReport } from './lib/performanceReport'
+import { WebGlGpuFrameTimer } from './lib/gpuFrameTimer'
+import { cloneRendererResourceWindow, createRendererResourceWindow, readRendererResourceCounts, recordRendererResourceCounts } from './lib/rendererResourceWindow'
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
 import { useProgressiveMountCount } from './lib/useProgressiveMountCount'
 import { Defer, startWorldStream, waitForRevealLevel } from './lib/worldStream'
@@ -18327,6 +18329,7 @@ function RenderStatsProbe({
   const settleRemainingRef = useRef(0)
   const benchmarkPendingRef = useRef(false)
   const measurementStartedAtRef = useRef(null)
+  const resourceWindowRef = useRef(null)
   const previousMeasurementEpochRef = useRef(measurementEpoch)
   const drawingBufferRef = useRef(new Vector2())
   const categoryElapsedRef = useRef(1)
@@ -18334,10 +18337,19 @@ function RenderStatsProbe({
     trianglesByCategory: {},
     drawCallsByCategory: {},
   })
+  const gpuTimer = useMemo(() => new WebGlGpuFrameTimer(gl.getContext()), [gl])
 
   useEffect(() => {
     onRendererInfo(getRendererInfo(gl))
   }, [gl, onRendererInfo])
+
+  useEffect(() => {
+    const unsubscribe = addAfterEffect(() => gpuTimer.endFrame())
+    return () => {
+      unsubscribe()
+      gpuTimer.dispose()
+    }
+  }, [gpuTimer])
 
   useEffect(() => {
     const benchmarkRestarted = previousMeasurementEpochRef.current !== measurementEpoch
@@ -18348,9 +18360,11 @@ function RenderStatsProbe({
     intervalFrameTimesRef.current = []
     rollingSamplesRef.current = []
     measurementStartedAtRef.current = null
+    resourceWindowRef.current = null
+    gpuTimer.reset()
     benchmarkPendingRef.current = benchmarkRestarted
     settleRemainingRef.current = benchmarkRestarted ? RENDER_BENCHMARK_SETTLE_SECONDS : 0
-  }, [measurementEpoch, resetKey])
+  }, [gpuTimer, measurementEpoch, resetKey])
 
   useFrame((_, delta) => {
     if (!active || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) return
@@ -18373,6 +18387,10 @@ function RenderStatsProbe({
     if (!Number.isFinite(measurementStartedAtRef.current)) {
       measurementStartedAtRef.current = performance.now()
     }
+    if (!resourceWindowRef.current) {
+      resourceWindowRef.current = createRendererResourceWindow(readRendererResourceCounts(gl))
+    }
+    gpuTimer.beginFrame()
 
     const frameTimeMs = delta * 1000
     elapsedRef.current += delta
@@ -18449,6 +18467,8 @@ function RenderStatsProbe({
     }
 
     const measurementEndedAt = performance.now()
+    const resourceCounts = readRendererResourceCounts(gl)
+    recordRendererResourceCounts(resourceWindowRef.current, resourceCounts)
     const nextStats = {
       fps,
       stableFps,
@@ -18466,9 +18486,11 @@ function RenderStatsProbe({
       measurementEndedAt,
       drawCalls: gl.info.render.calls,
       triangles: gl.info.render.triangles,
-      textures: gl.info.memory.textures,
-      geometries: gl.info.memory.geometries,
-      programs: Array.isArray(gl.info.programs) ? gl.info.programs.length : undefined,
+      textures: resourceCounts.textures,
+      geometries: resourceCounts.geometries,
+      programs: resourceCounts.programs,
+      gpu: gpuTimer.snapshot(),
+      resources: cloneRendererResourceWindow(resourceWindowRef.current),
       dpr: gl.getPixelRatio(),
       drawingBufferWidth: drawingBufferRef.current.x,
       drawingBufferHeight: drawingBufferRef.current.y,
@@ -18616,6 +18638,8 @@ function RenderStatsOverlay({
     ['Textures', stats.textures.toLocaleString('fr-FR')],
     ['Geometries', stats.geometries.toLocaleString('fr-FR')],
     ['Programmes', (stats.programs ?? 0).toLocaleString('fr-FR')],
+    ['GPU moyen', stats.gpu?.supported && Number.isFinite(stats.gpu.averageMs) ? `${stats.gpu.averageMs.toFixed(2)} ms` : 'indisponible'],
+    ['GPU P95', stats.gpu?.supported && Number.isFinite(stats.gpu.p95Ms) ? `${stats.gpu.p95Ms.toFixed(2)} ms` : 'indisponible'],
     ['DPR', stats.dpr.toFixed(2)],
     ['Buffer', `${stats.drawingBufferWidth} x ${stats.drawingBufferHeight}`],
   ]

@@ -1,4 +1,12 @@
-const PERFORMANCE_REPORT_VERSION = 2
+const PERFORMANCE_REPORT_VERSION = 4
+const HITCH_THRESHOLDS_MS = Object.freeze({
+  hitch: 25,
+  stutter: 40,
+  severeStutter: 60,
+})
+const HITCH_SIGNAL_WINDOW_MS = 250
+const MAX_REPORTED_HITCHES = 8
+const MAX_HITCH_SIGNALS = 6
 
 function finite(value, fallback = null) {
   return Number.isFinite(value) ? value : fallback
@@ -9,6 +17,106 @@ function cloneRecord(value) {
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [key, finite(entry, entry)]),
   )
+}
+
+function readDuration(value) {
+  const duration = Number(value?.durationMs ?? value?.duration ?? value?.data?.durationMs)
+  return Number.isFinite(duration) ? duration : null
+}
+
+function getHitchSeverity(durationMs) {
+  if (durationMs >= HITCH_THRESHOLDS_MS.severeStutter) return 'severe-stutter'
+  if (durationMs >= HITCH_THRESHOLDS_MS.stutter) return 'stutter'
+  return 'hitch'
+}
+
+function summarizeHitchContext(context) {
+  if (!context || typeof context !== 'object') return null
+  const summary = {
+    zone: context.zone ?? null,
+    phase: context.phase ?? null,
+    transition: context.transition ?? null,
+    transitionStep: context.transitionStep ?? null,
+  }
+  return Object.values(summary).some((value) => value != null) ? summary : null
+}
+
+function isUsefulHitchSignal(entry) {
+  if (!entry || entry.type === 'frame') return false
+  if (
+    entry.type === 'browser:long-task' ||
+    entry.type === 'react:commit' ||
+    entry.type === 'asset:start' ||
+    entry.type === 'asset:end' ||
+    entry.type === 'asset:error'
+  ) return true
+
+  const durationMs = readDuration(entry)
+  if (entry.type === 'span' && durationMs >= 4) return true
+  return /transition|stream|warmup|zone|load/i.test(`${entry.type ?? ''} ${entry.name ?? ''}`)
+}
+
+function summarizeHitchSignal(entry, hitchTime) {
+  const data = entry.data && typeof entry.data === 'object' ? entry.data : {}
+  const time = finite(entry.t)
+  return {
+    type: entry.type ?? null,
+    name: entry.name ?? null,
+    offsetMs: Number.isFinite(time) && Number.isFinite(hitchTime)
+      ? finite(time - hitchTime)
+      : null,
+    durationMs: readDuration(entry),
+    source: data.source ?? null,
+    phase: data.phase ?? null,
+    url: data.url ?? null,
+  }
+}
+
+function summarizeHitches(events = []) {
+  const frameEvents = events
+    .map((entry) => ({ entry, durationMs: readDuration(entry) }))
+    .filter(({ entry, durationMs }) => entry?.type === 'frame' && durationMs != null)
+  const hitches = frameEvents.filter(({ durationMs }) => durationMs >= HITCH_THRESHOLDS_MS.hitch)
+  const top = hitches
+    .slice()
+    .sort((left, right) => right.durationMs - left.durationMs || Number(left.entry.t ?? 0) - Number(right.entry.t ?? 0))
+    .slice(0, MAX_REPORTED_HITCHES)
+    .map(({ entry, durationMs }) => {
+      const hitchTime = finite(entry.t)
+      const nearbySignals = events
+        .filter((candidate) => {
+          if (!isUsefulHitchSignal(candidate)) return false
+          if (!Number.isFinite(hitchTime) || !Number.isFinite(candidate?.t)) return false
+          return Math.abs(candidate.t - hitchTime) <= HITCH_SIGNAL_WINDOW_MS
+        })
+        .sort((left, right) => {
+          const durationDelta = (readDuration(right) ?? 0) - (readDuration(left) ?? 0)
+          if (durationDelta !== 0) return durationDelta
+          return Math.abs(left.t - hitchTime) - Math.abs(right.t - hitchTime)
+        })
+        .slice(0, MAX_HITCH_SIGNALS)
+        .map((signal) => summarizeHitchSignal(signal, hitchTime))
+
+      return {
+        timeMs: hitchTime,
+        durationMs,
+        severity: getHitchSeverity(durationMs),
+        context: summarizeHitchContext(entry.context),
+        renderer: entry.renderer ?? null,
+        nearbySignals,
+      }
+    })
+
+  return {
+    thresholdsMs: { ...HITCH_THRESHOLDS_MS },
+    counts: {
+      atLeast25Ms: hitches.length,
+      atLeast40Ms: frameEvents.filter(({ durationMs }) => durationMs >= HITCH_THRESHOLDS_MS.stutter).length,
+      atLeast60Ms: frameEvents.filter(({ durationMs }) => durationMs >= HITCH_THRESHOLDS_MS.severeStutter).length,
+    },
+    worstMs: hitches.length > 0 ? Math.max(...hitches.map(({ durationMs }) => durationMs)) : null,
+    top,
+  }
 }
 
 function readEnvironment() {
@@ -36,10 +144,11 @@ function readEnvironment() {
 
 function summarizeDiagnostics(diagnostics) {
   if (!diagnostics) return null
+  const events = diagnostics.events ?? []
   return {
     mode: diagnostics.mode ?? null,
     window: diagnostics.window ?? null,
-    eventCount: diagnostics.events?.length ?? 0,
+    eventCount: events.length,
     freezeCount: diagnostics.freezes?.length ?? 0,
     droppedEventCount: finite(diagnostics.droppedEventCount, 0),
     droppedFreezeCount: finite(diagnostics.droppedFreezeCount, 0),
@@ -51,6 +160,7 @@ function summarizeDiagnostics(diagnostics) {
       phase: capture.freeze?.context?.phase ?? null,
       summary: capture.summary ?? null,
     })),
+    hitches: summarizeHitches(events),
   }
 }
 
@@ -111,6 +221,8 @@ export function createPerformanceReport({
       trianglesByCategory: cloneRecord(stats.trianglesByCategory),
       categoryCountsAreEstimates: true,
     },
+    gpu: stats.gpu ?? null,
+    resources: stats.resources ?? null,
     runtime: scheduler,
     diagnostics: summarizeDiagnostics(diagnostics),
   }

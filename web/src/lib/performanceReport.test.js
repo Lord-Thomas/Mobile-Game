@@ -33,6 +33,14 @@ describe('performanceReport', () => {
         drawingBufferHeight: 1080,
         drawCallsByCategory: { grass: 4 },
         trianglesByCategory: { grass: 180000 },
+        gpu: { supported: true, averageMs: 7.2, p95Ms: 11.8, samples: 850 },
+        resources: {
+          start: { textures: 80, geometries: 60, programs: 17 },
+          peak: { textures: 85, geometries: 63, programs: 19 },
+          end: { textures: 84, geometries: 61, programs: 18 },
+          delta: { textures: 4, geometries: 1, programs: 1 },
+          samples: 61,
+        },
       },
       scheduler: { enabled: true, frame: { averageMs: 1.2 } },
       diagnostics: {
@@ -41,12 +49,20 @@ describe('performanceReport', () => {
         droppedEventCount: 12,
         droppedFreezeCount: 1,
         truncatedBeforeWindow: false,
-        events: [{ type: 'frame' }],
+        events: [
+          { type: 'frame', t: 900, durationMs: 24 },
+          { type: 'frame', t: 1000, durationMs: 26, context: { zone: 'outdoor' } },
+          { type: 'frame', t: 1100, durationMs: 45, context: { phase: 'runtime' } },
+          { type: 'frame', t: 1200, durationMs: 70, renderer: { calls: 210 } },
+          { type: 'browser:long-task', t: 1210, data: { durationMs: 55, source: 'window' } },
+          { type: 'span', name: 'nearby-work', t: 1190, durationMs: 8 },
+        ],
         freezes: [{ freeze: { severity: 'freeze', durationMs: 120 } }],
       },
     })
 
     expect(report.frame.p99Ms).toBe(23.8)
+    expect(report.version).toBe(4)
     expect(report.measurement).toEqual({
       epoch: 3,
       startedAtMs: 1000,
@@ -54,10 +70,29 @@ describe('performanceReport', () => {
       durationMs: 15000,
     })
     expect(report.render.programs).toBe(18)
+    expect(report.gpu).toMatchObject({ supported: true, p95Ms: 11.8 })
+    expect(report.resources.delta).toEqual({ textures: 4, geometries: 1, programs: 1 })
     expect(report.runtime.frame.averageMs).toBe(1.2)
     expect(report.diagnostics.freezeCount).toBe(1)
     expect(report.diagnostics.window).toEqual({ since: 1000, until: 16000 })
     expect(report.diagnostics.droppedEventCount).toBe(12)
+    expect(report.diagnostics.hitches.counts).toEqual({
+      atLeast25Ms: 3,
+      atLeast40Ms: 2,
+      atLeast60Ms: 1,
+    })
+    expect(report.diagnostics.hitches.worstMs).toBe(70)
+    expect(report.diagnostics.hitches.top[0]).toMatchObject({
+      timeMs: 1200,
+      durationMs: 70,
+      severity: 'severe-stutter',
+      renderer: { calls: 210 },
+    })
+    expect(report.diagnostics.hitches.top[0].nearbySignals[0]).toMatchObject({
+      type: 'browser:long-task',
+      durationMs: 55,
+      source: 'window',
+    })
     expect(serializePerformanceReport(report)).toContain('Extérieur complet')
   })
 

@@ -11,6 +11,10 @@ Le projet possède déjà plusieurs couches de diagnostic complémentaires :
   des shaders.
 
 Le rapport de benchmark rassemble ces données dans un seul JSON versionné.
+Il classe aussi les hitches à partir de 25, 40 et 60 ms, conserve les huit plus
+coûteux et ajoute leurs signaux proches (long tasks, commits React, assets,
+transitions et spans significatifs). Cela rend visibles les micro-saccades qui
+restent sous le seuil historique de 100 ms utilisé pour les captures de freeze.
 
 ## Faire une mesure reproductible
 
@@ -53,7 +57,10 @@ comparer en priorité :
 - draw calls et triangles ;
 - textures, géométries et programmes ;
 - tâches CPU du scheduler ;
+- temps GPU moyen/P95/P99 lorsque l'extension WebGL2 est disponible ;
+- début, pic, fin et delta des ressources Three.js ;
 - freezes et long tasks corrélés.
+- hitches à 25/40/60 ms et leurs `nearbySignals`.
 
 La mémoire GPU exacte n'est pas exposée par Three.js. Les compteurs de textures,
 géométries et programmes servent donc à détecter les tendances et les fuites, pas

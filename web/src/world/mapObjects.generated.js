@@ -843,9 +843,9 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "tree_ashMedium_mr3gaear",
     "objectId": "tree_ashMedium",
     "position": [
-      -51.25,
-      9.761966871068546,
-      164
+      -50.25,
+      8.553458070383492,
+      158.5
     ],
     "rotationY": 0.9,
     "scale": 2.5
@@ -1035,11 +1035,11 @@ export const MAP_OBJECT_PLACEMENTS = [
     "id": "pacific_slime_boss_mt8ekgo8",
     "objectId": "pacific_slime_boss",
     "position": [
-      -53.75,
-      7.718040751025239,
-      171
+      -111.25,
+      -0.2386893840890648,
+      92
     ],
-    "rotationY": 2.21840734641021,
+    "rotationY": -2.89159265358979,
     "scale": 1
   }
 ]
