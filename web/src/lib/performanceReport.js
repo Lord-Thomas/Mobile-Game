@@ -1,10 +1,11 @@
-const PERFORMANCE_REPORT_VERSION = 4
+const PERFORMANCE_REPORT_VERSION = 5
 const HITCH_THRESHOLDS_MS = Object.freeze({
   hitch: 25,
   stutter: 40,
   severeStutter: 60,
 })
 const HITCH_SIGNAL_WINDOW_MS = 250
+const REACT_CORRELATION_WINDOW_MS = 16.7
 const MAX_REPORTED_HITCHES = 8
 const MAX_HITCH_SIGNALS = 6
 
@@ -62,6 +63,7 @@ function summarizeHitchSignal(entry, hitchTime) {
   return {
     type: entry.type ?? null,
     name: entry.name ?? null,
+    id: data.id ?? null,
     offsetMs: Number.isFinite(time) && Number.isFinite(hitchTime)
       ? finite(time - hitchTime)
       : null,
@@ -72,16 +74,88 @@ function summarizeHitchSignal(entry, hitchTime) {
   }
 }
 
+function getReactCommitsNear(reactCommitEvents, hitchTime) {
+  if (!Number.isFinite(hitchTime)) return []
+  const closestBySubtree = new Map()
+
+  reactCommitEvents.forEach((entry) => {
+    if (!Number.isFinite(entry?.t)) return
+    const offsetMs = entry.t - hitchTime
+    if (Math.abs(offsetMs) > REACT_CORRELATION_WINDOW_MS) return
+    const id = entry.data?.id
+    if (typeof id !== 'string' || id.length === 0) return
+
+    const current = closestBySubtree.get(id)
+    if (!current || Math.abs(offsetMs) < Math.abs(current.t - hitchTime)) {
+      closestBySubtree.set(id, entry)
+    }
+  })
+
+  return Array.from(closestBySubtree.values())
+    .sort((left, right) => Math.abs(left.t - hitchTime) - Math.abs(right.t - hitchTime))
+    .map((entry) => summarizeHitchSignal(entry, hitchTime))
+}
+
+function summarizeReactCorrelations(analyzedHitches) {
+  const bySubtree = new Map()
+  let hitchesWithReactCommit = 0
+
+  analyzedHitches.forEach(({ durationMs, reactCommits }) => {
+    if (reactCommits.length > 0) hitchesWithReactCommit += 1
+    reactCommits.forEach((commit) => {
+      const current = bySubtree.get(commit.id) ?? {
+        id: commit.id,
+        hitchCount: 0,
+        worstHitchMs: 0,
+        renderSampleCount: 0,
+        totalRenderMs: 0,
+        maxRenderMs: 0,
+      }
+      current.hitchCount += 1
+      current.worstHitchMs = Math.max(current.worstHitchMs, durationMs)
+      if (Number.isFinite(commit.durationMs)) {
+        current.renderSampleCount += 1
+        current.totalRenderMs += commit.durationMs
+        current.maxRenderMs = Math.max(current.maxRenderMs, commit.durationMs)
+      }
+      bySubtree.set(commit.id, current)
+    })
+  })
+
+  return {
+    windowMs: REACT_CORRELATION_WINDOW_MS,
+    hitchesWithReactCommit,
+    hitchesWithoutReactCommit: analyzedHitches.length - hitchesWithReactCommit,
+    bySubtree: Array.from(bySubtree.values())
+      .map((entry) => ({
+        id: entry.id,
+        hitchCount: entry.hitchCount,
+        worstHitchMs: entry.worstHitchMs,
+        averageRenderMs: entry.renderSampleCount > 0
+          ? entry.totalRenderMs / entry.renderSampleCount
+          : null,
+        maxRenderMs: entry.renderSampleCount > 0 ? entry.maxRenderMs : null,
+      }))
+      .sort((left, right) => right.hitchCount - left.hitchCount || right.worstHitchMs - left.worstHitchMs),
+  }
+}
+
 function summarizeHitches(events = []) {
   const frameEvents = events
     .map((entry) => ({ entry, durationMs: readDuration(entry) }))
     .filter(({ entry, durationMs }) => entry?.type === 'frame' && durationMs != null)
   const hitches = frameEvents.filter(({ durationMs }) => durationMs >= HITCH_THRESHOLDS_MS.hitch)
-  const top = hitches
+  const reactCommitEvents = events.filter((entry) => entry?.type === 'react:commit')
+  const analyzedHitches = hitches.map(({ entry, durationMs }) => ({
+    entry,
+    durationMs,
+    reactCommits: getReactCommitsNear(reactCommitEvents, finite(entry.t)),
+  }))
+  const top = analyzedHitches
     .slice()
     .sort((left, right) => right.durationMs - left.durationMs || Number(left.entry.t ?? 0) - Number(right.entry.t ?? 0))
     .slice(0, MAX_REPORTED_HITCHES)
-    .map(({ entry, durationMs }) => {
+    .map(({ entry, durationMs, reactCommits }) => {
       const hitchTime = finite(entry.t)
       const nearbySignals = events
         .filter((candidate) => {
@@ -103,6 +177,7 @@ function summarizeHitches(events = []) {
         severity: getHitchSeverity(durationMs),
         context: summarizeHitchContext(entry.context),
         renderer: entry.renderer ?? null,
+        reactCommits,
         nearbySignals,
       }
     })
@@ -115,6 +190,7 @@ function summarizeHitches(events = []) {
       atLeast60Ms: frameEvents.filter(({ durationMs }) => durationMs >= HITCH_THRESHOLDS_MS.severeStutter).length,
     },
     worstMs: hitches.length > 0 ? Math.max(...hitches.map(({ durationMs }) => durationMs)) : null,
+    reactCorrelations: summarizeReactCorrelations(analyzedHitches),
     top,
   }
 }

@@ -15,6 +15,9 @@ Il classe aussi les hitches à partir de 25, 40 et 60 ms, conserve les huit plus
 coûteux et ajoute leurs signaux proches (long tasks, commits React, assets,
 transitions et spans significatifs). Cela rend visibles les micro-saccades qui
 restent sous le seuil historique de 100 ms utilisé pour les captures de freeze.
+Pour chaque hitch, le rapport conserve également les identifiants des sous-arbres
+`React.Profiler` rendus dans une fenêtre stricte de 16,7 ms et agrège ces
+corrélations dans `diagnostics.hitches.reactCorrelations.bySubtree`.
 
 ## Faire une mesure reproductible
 

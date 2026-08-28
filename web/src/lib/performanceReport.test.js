@@ -54,6 +54,7 @@ describe('performanceReport', () => {
           { type: 'frame', t: 1000, durationMs: 26, context: { zone: 'outdoor' } },
           { type: 'frame', t: 1100, durationMs: 45, context: { phase: 'runtime' } },
           { type: 'frame', t: 1200, durationMs: 70, renderer: { calls: 210 } },
+          { type: 'react:commit', t: 1199, data: { id: 'OutdoorNeighborhood', phase: 'update', durationMs: 5 } },
           { type: 'browser:long-task', t: 1210, data: { durationMs: 55, source: 'window' } },
           { type: 'span', name: 'nearby-work', t: 1190, durationMs: 8 },
         ],
@@ -62,7 +63,7 @@ describe('performanceReport', () => {
     })
 
     expect(report.frame.p99Ms).toBe(23.8)
-    expect(report.version).toBe(4)
+    expect(report.version).toBe(5)
     expect(report.measurement).toEqual({
       epoch: 3,
       startedAtMs: 1000,
@@ -82,17 +83,40 @@ describe('performanceReport', () => {
       atLeast60Ms: 1,
     })
     expect(report.diagnostics.hitches.worstMs).toBe(70)
+    expect(report.diagnostics.hitches.reactCorrelations).toEqual({
+      windowMs: 16.7,
+      hitchesWithReactCommit: 1,
+      hitchesWithoutReactCommit: 2,
+      bySubtree: [{
+        id: 'OutdoorNeighborhood',
+        hitchCount: 1,
+        worstHitchMs: 70,
+        averageRenderMs: 5,
+        maxRenderMs: 5,
+      }],
+    })
     expect(report.diagnostics.hitches.top[0]).toMatchObject({
       timeMs: 1200,
       durationMs: 70,
       severity: 'severe-stutter',
       renderer: { calls: 210 },
+      reactCommits: [{
+        type: 'react:commit',
+        id: 'OutdoorNeighborhood',
+        offsetMs: -1,
+        durationMs: 5,
+        phase: 'update',
+      }],
     })
     expect(report.diagnostics.hitches.top[0].nearbySignals[0]).toMatchObject({
       type: 'browser:long-task',
       durationMs: 55,
       source: 'window',
     })
+    expect(report.diagnostics.hitches.top[0].nearbySignals).toContainEqual(expect.objectContaining({
+      type: 'react:commit',
+      id: 'OutdoorNeighborhood',
+    }))
     expect(serializePerformanceReport(report)).toContain('Extérieur complet')
   })
 
