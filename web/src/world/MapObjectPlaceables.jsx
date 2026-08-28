@@ -1,4 +1,14 @@
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import {
+  Component,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html, useAnimations, useFBX, useGLTF } from '@react-three/drei'
 import { Box3, LoopRepeat, Matrix4, Mesh, Quaternion, Vector3 } from 'three'
@@ -9,13 +19,26 @@ import InstancedTreeBatch from './trees/InstancedTreeBatch'
 import ProceduralTree from './trees/ProceduralTree'
 import {
   MAGIC_SKULL_DISCOVERY_OBJECT_ID,
-  MAP_OBJECT_CATALOG,
   MAP_OBJECT_PLACEMENTS,
   PACIFIC_SLIME_BOSS_OBJECT_ID,
   getMapObjectCatalogItem,
 } from './mapObjects'
 import { getTerrainHeight } from './terrain/terrainGeometry'
 import { getOrCreatePreparedAsset } from '../lib/assetPreparationCache'
+import { perfDiagnostics } from '../lib/perfDiagnostics'
+import {
+  beginMapObjectAsset,
+  collectMapObjectAssetEntries,
+  getMapObjectAssetPipelineRevision,
+  getMapObjectAssetPipelineSnapshot,
+  getMapObjectAssetStatus,
+  isMapObjectAssetReady,
+  isMapObjectAssetSettled,
+  markMapObjectAssetDecoded,
+  markMapObjectAssetError,
+  markMapObjectAssetReady,
+  subscribeMapObjectAssetPipeline,
+} from './mapObjectAssetPipeline'
 
 const PLAYER_REFERENCE_HEIGHT_METERS = 1.63
 const PLAYER_REFERENCE_HEIGHT_WORLD_UNITS = 2.25
@@ -142,8 +165,6 @@ function getModelExtension(modelUrl = '') {
   return modelUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
 }
 
-const mapObjectAssetPromises = new Map()
-
 function waitForIdleTurn() {
   if (typeof window === 'undefined') return Promise.resolve()
   return new Promise((resolve) => {
@@ -153,6 +174,131 @@ function waitForIdleTurn() {
       window.setTimeout(resolve, 16)
     }
   })
+}
+
+function waitForAnimationFrame() {
+  if (typeof window === 'undefined') return Promise.resolve()
+  return new Promise((resolve) => window.requestAnimationFrame(resolve))
+}
+
+function MapObjectGltfAssetProbe({ entry, onDecoded }) {
+  useGLTF(entry.url)
+  useEffect(() => onDecoded(entry), [entry, onDecoded])
+  return null
+}
+
+function MapObjectFbxAssetProbe({ entry, onDecoded }) {
+  useFBX(entry.url)
+  useEffect(() => onDecoded(entry), [entry, onDecoded])
+  return null
+}
+
+function MapObjectAssetProbe({ entry, onDecoded }) {
+  return entry.extension === 'fbx'
+    ? <MapObjectFbxAssetProbe entry={entry} onDecoded={onDecoded} />
+    : <MapObjectGltfAssetProbe entry={entry} onDecoded={onDecoded} />
+}
+
+class MapObjectAssetErrorBoundary extends Component {
+  state = { hasError: false }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error) {
+    this.props.onError(this.props.entry, error)
+  }
+
+  render() {
+    return this.state.hasError ? null : this.props.children
+  }
+}
+
+function MapObjectAssetStream({ objects, onReady = null }) {
+  const entries = useMemo(
+    () => collectMapObjectAssetEntries(objects, getMapObjectCatalogItem),
+    [objects],
+  )
+  useSyncExternalStore(
+    subscribeMapObjectAssetPipeline,
+    getMapObjectAssetPipelineRevision,
+    getMapObjectAssetPipelineRevision,
+  )
+  const [activeUrl, setActiveUrl] = useState(null)
+  const completedKeyRef = useRef(null)
+  const entriesKey = entries.map((entry) => entry.url).join('|')
+  const activePending = Boolean(activeUrl && !isMapObjectAssetSettled(activeUrl))
+  const activeEntry = activePending
+    ? entries.find((entry) => entry.url === activeUrl) ?? null
+    : null
+  const nextEntry = entries.find((entry) => !isMapObjectAssetSettled(entry.url)) ?? null
+  const complete = entries.every((entry) => isMapObjectAssetSettled(entry.url))
+
+  useEffect(() => {
+    if (activePending || !nextEntry) return undefined
+    let cancelled = false
+    let frameId = 0
+
+    const startNextAsset = async () => {
+      await waitForIdleTurn()
+      if (cancelled) return
+      await new Promise((resolve) => {
+        frameId = window.requestAnimationFrame(resolve)
+      })
+      if (cancelled) return
+      beginMapObjectAsset(nextEntry)
+      setActiveUrl(nextEntry.url)
+    }
+    startNextAsset()
+
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frameId)
+    }
+  }, [activePending, nextEntry])
+
+  const handleDecoded = useCallback((entry) => {
+    if (!markMapObjectAssetDecoded(entry)) return
+    const reveal = async () => {
+      // Decoding and scene insertion deliberately get separate browser turns.
+      // This prevents the next asset parse from sharing the model's first frame.
+      await waitForIdleTurn()
+      await waitForAnimationFrame()
+      markMapObjectAssetReady(entry)
+      setActiveUrl((current) => current === entry.url ? null : current)
+    }
+    reveal()
+  }, [])
+
+  const handleError = useCallback((entry, error) => {
+    markMapObjectAssetError(entry, error)
+    setActiveUrl((current) => current === entry.url ? null : current)
+  }, [])
+
+  useEffect(() => {
+    if (!complete || completedKeyRef.current === entriesKey) return
+    completedKeyRef.current = entriesKey
+    const snapshot = getMapObjectAssetPipelineSnapshot(entries)
+    perfDiagnostics.event('map-assets:ready', {
+      source: 'map-objects',
+      ...snapshot,
+    })
+    onReady?.(snapshot)
+  }, [complete, entries, entriesKey, onReady])
+
+  if (!activeEntry || getMapObjectAssetStatus(activeEntry.url) === 'error') return null
+  return (
+    <MapObjectAssetErrorBoundary
+      key={activeEntry.url}
+      entry={activeEntry}
+      onError={handleError}
+    >
+      <Suspense fallback={null}>
+        <MapObjectAssetProbe entry={activeEntry} onDecoded={handleDecoded} />
+      </Suspense>
+    </MapObjectAssetErrorBoundary>
+  )
 }
 
 function PacificSlimeBossMapModel({ catalogItem }) {
@@ -206,51 +352,11 @@ function PacificSlimeBossMapModel({ catalogItem }) {
   )
 }
 
-function preloadMapObjectAssets(objects = MAP_OBJECT_PLACEMENTS) {
-  const uniqueItems = []
-  const seenUrls = new Set()
-  objects.forEach((placement) => {
-    const item = MAP_OBJECT_CATALOG[placement.objectId]
-    if (!item?.modelUrl || seenUrls.has(item.modelUrl)) return
-    seenUrls.add(item.modelUrl)
-    uniqueItems.push(item)
-  })
-
-  let nextIndex = 0
-  const runWorker = async () => {
-    while (nextIndex < uniqueItems.length) {
-      const item = uniqueItems[nextIndex]
-      nextIndex += 1
-      if (!mapObjectAssetPromises.has(item.modelUrl)) {
-        await waitForIdleTurn()
-        const preload = getModelExtension(item.modelUrl) === 'fbx'
-          ? () => useFBX.preload(item.modelUrl)
-          : () => useGLTF.preload(item.modelUrl)
-        mapObjectAssetPromises.set(
-          item.modelUrl,
-          Promise.resolve().then(preload).catch(() => null),
-        )
-      }
-      await mapObjectAssetPromises.get(item.modelUrl)
-    }
-  }
-
-  const workerCount = Math.min(2, uniqueItems.length)
-  return Promise.all(Array.from({ length: workerCount }, runWorker))
-}
-
 export function MapObjectAssetsPreloader({
   objects = MAP_OBJECT_PLACEMENTS,
   onReady = null,
 }) {
-  useEffect(() => {
-    let cancelled = false
-    preloadMapObjectAssets(objects).finally(() => {
-      if (!cancelled) onReady?.()
-    })
-    return () => { cancelled = true }
-  }, [objects, onReady])
-  return null
+  return <MapObjectAssetStream objects={objects} onReady={onReady} />
 }
 
 function MapObjectTreeModel({ catalogItem }) {
@@ -605,10 +711,6 @@ export default function MapObjectPlaceables({
   batchStaticTrees = false,
   showTrees = true,
 }) {
-  useEffect(() => {
-    preloadMapObjectAssets(objects)
-  }, [objects])
-
   const canBatchStaticObjects = batchStaticTrees && !onSelect && !onStartDragging && !registerRef
   const visibleObjects = useMemo(
     () => showTrees
@@ -616,13 +718,31 @@ export default function MapObjectPlaceables({
       : objects.filter((placement) => getMapObjectCatalogItem(placement.objectId)?.type !== 'tree'),
     [objects, showTrees],
   )
+  const assetPipelineRevision = useSyncExternalStore(
+    subscribeMapObjectAssetPipeline,
+    getMapObjectAssetPipelineRevision,
+    getMapObjectAssetPipelineRevision,
+  )
+  const readyObjects = useMemo(
+    () => {
+      // The external-store revision invalidates this projection when an asset
+      // moves from decoded to revealable.
+      void assetPipelineRevision
+      return visibleObjects.filter((placement) => {
+        const modelUrl = getMapObjectCatalogItem(placement.objectId)?.modelUrl
+        return !modelUrl || isMapObjectAssetReady(modelUrl)
+      })
+    },
+    [assetPipelineRevision, visibleObjects],
+  )
   const { treeEntries, instancedModelGroups, objectPlacements } = useMemo(
-    () => splitStaticPlacements(visibleObjects, canBatchStaticObjects),
-    [canBatchStaticObjects, visibleObjects],
+    () => splitStaticPlacements(readyObjects, canBatchStaticObjects),
+    [canBatchStaticObjects, readyObjects],
   )
 
   return (
     <group userData={{ debugCategory: 'map-placeables' }}>
+      <MapObjectAssetStream objects={visibleObjects} />
       {treeEntries.length > 0 && (
         <InstancedTreeBatch trees={treeEntries} animated={false} forceSimplified />
       )}

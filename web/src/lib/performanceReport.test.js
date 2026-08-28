@@ -66,6 +66,16 @@ describe('performanceReport', () => {
               objects: [{ id: 'placed-3', objectId: 'oak_table', assetUrl: '/models/oak-table.glb' }],
             },
           },
+          {
+            type: 'map-asset:reveal',
+            t: 1198,
+            data: {
+              source: 'map-objects',
+              url: '/models/map/skeleton_tower/model.glb',
+              durationMs: 24,
+              objects: [{ id: 'tower-1', objectId: 'skeleton_tower', assetUrl: '/models/map/skeleton_tower/model.glb' }],
+            },
+          },
           { type: 'browser:long-task', t: 1210, data: { durationMs: 55, source: 'window' } },
           { type: 'span', name: 'nearby-work', t: 1190, durationMs: 8 },
         ],
@@ -74,7 +84,7 @@ describe('performanceReport', () => {
     })
 
     expect(report.frame.p99Ms).toBe(23.8)
-    expect(report.version).toBe(6)
+    expect(report.version).toBe(7)
     expect(report.measurement).toEqual({
       epoch: 3,
       startedAtMs: 1000,
@@ -126,6 +136,14 @@ describe('performanceReport', () => {
         total: 12,
         frameGapMs: 16.7,
         objects: [{ id: 'placed-3', objectId: 'oak_table', assetUrl: '/models/oak-table.glb' }],
+      }],
+      mapAssets: [{
+        type: 'map-asset:reveal',
+        offsetMs: -2,
+        durationMs: 24,
+        source: 'map-objects',
+        url: '/models/map/skeleton_tower/model.glb',
+        objects: [{ id: 'tower-1', objectId: 'skeleton_tower', assetUrl: '/models/map/skeleton_tower/model.glb' }],
       }],
     })
     expect(report.diagnostics.hitches.top[0].nearbySignals[0]).toMatchObject({
