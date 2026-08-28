@@ -18,6 +18,9 @@ restent sous le seuil historique de 100 ms utilisé pour les captures de freeze.
 Pour chaque hitch, le rapport conserve également les identifiants des sous-arbres
 `React.Profiler` rendus dans une fenêtre stricte de 16,7 ms et agrège ces
 corrélations dans `diagnostics.hitches.reactCorrelations.bySubtree`.
+Les lots de placeables montés jusqu'à 1,5 seconde autour d'un hitch apparaissent
+dans `placeableBatches`, avec les identifiants d'instances, les `objectId` et les
+URLs d'assets concernées.
 
 ## Faire une mesure reproductible
 

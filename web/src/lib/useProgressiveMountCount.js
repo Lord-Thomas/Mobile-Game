@@ -23,6 +23,7 @@ export function useProgressiveMountCount({
   batchSize = 1,
   stutterThresholdMs = DEFAULT_STUTTER_THRESHOLD_MS,
   freezeThresholdMs = DEFAULT_FREEZE_THRESHOLD_MS,
+  onAdvance = null,
   onComplete = null,
 }) {
   const normalizedTotal = Math.max(0, Math.floor(total))
@@ -34,11 +35,13 @@ export function useProgressiveMountCount({
   const [count, setCount] = useState(getInitialCount)
   const countRef = useRef(count)
   const completedTotalRef = useRef(null)
+  const onAdvanceRef = useRef(onAdvance)
   const onCompleteRef = useRef(onComplete)
 
   useEffect(() => {
+    onAdvanceRef.current = onAdvance
     onCompleteRef.current = onComplete
-  }, [onComplete])
+  }, [onAdvance, onComplete])
 
   useEffect(() => {
     if (!enabled) {
@@ -75,10 +78,17 @@ export function useProgressiveMountCount({
       if (cancelled || countRef.current >= normalizedTotal) return
       const frameGap = now - previousFrameAt
       previousFrameAt = now
+      const previousCount = countRef.current
       const nextCount = Math.min(
         normalizedTotal,
-        countRef.current + Math.max(1, Math.floor(batchSize)),
+        previousCount + Math.max(1, Math.floor(batchSize)),
       )
+      onAdvanceRef.current?.({
+        previousCount,
+        nextCount,
+        total: normalizedTotal,
+        frameGapMs: frameGap,
+      })
       countRef.current = nextCount
       setCount(nextCount)
 

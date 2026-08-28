@@ -55,6 +55,17 @@ describe('performanceReport', () => {
           { type: 'frame', t: 1100, durationMs: 45, context: { phase: 'runtime' } },
           { type: 'frame', t: 1200, durationMs: 70, renderer: { calls: 210 } },
           { type: 'react:commit', t: 1199, data: { id: 'OutdoorNeighborhood', phase: 'update', durationMs: 5 } },
+          {
+            type: 'placeables:reveal',
+            t: 1195,
+            data: {
+              previousCount: 2,
+              nextCount: 4,
+              total: 12,
+              frameGapMs: 16.7,
+              objects: [{ id: 'placed-3', objectId: 'oak_table', assetUrl: '/models/oak-table.glb' }],
+            },
+          },
           { type: 'browser:long-task', t: 1210, data: { durationMs: 55, source: 'window' } },
           { type: 'span', name: 'nearby-work', t: 1190, durationMs: 8 },
         ],
@@ -63,7 +74,7 @@ describe('performanceReport', () => {
     })
 
     expect(report.frame.p99Ms).toBe(23.8)
-    expect(report.version).toBe(5)
+    expect(report.version).toBe(6)
     expect(report.measurement).toEqual({
       epoch: 3,
       startedAtMs: 1000,
@@ -106,6 +117,15 @@ describe('performanceReport', () => {
         offsetMs: -1,
         durationMs: 5,
         phase: 'update',
+      }],
+      placeableBatches: [{
+        type: 'placeables:reveal',
+        offsetMs: -5,
+        previousCount: 2,
+        nextCount: 4,
+        total: 12,
+        frameGapMs: 16.7,
+        objects: [{ id: 'placed-3', objectId: 'oak_table', assetUrl: '/models/oak-table.glb' }],
       }],
     })
     expect(report.diagnostics.hitches.top[0].nearbySignals[0]).toMatchObject({

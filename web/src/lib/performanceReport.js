@@ -1,4 +1,4 @@
-const PERFORMANCE_REPORT_VERSION = 5
+const PERFORMANCE_REPORT_VERSION = 6
 const HITCH_THRESHOLDS_MS = Object.freeze({
   hitch: 25,
   stutter: 40,
@@ -6,6 +6,7 @@ const HITCH_THRESHOLDS_MS = Object.freeze({
 })
 const HITCH_SIGNAL_WINDOW_MS = 250
 const REACT_CORRELATION_WINDOW_MS = 16.7
+const PLACEABLE_CORRELATION_WINDOW_MS = 1500
 const MAX_REPORTED_HITCHES = 8
 const MAX_HITCH_SIGNALS = 6
 
@@ -54,7 +55,7 @@ function isUsefulHitchSignal(entry) {
 
   const durationMs = readDuration(entry)
   if (entry.type === 'span' && durationMs >= 4) return true
-  return /transition|stream|warmup|zone|load/i.test(`${entry.type ?? ''} ${entry.name ?? ''}`)
+  return /transition|stream|warmup|zone|load|placeable/i.test(`${entry.type ?? ''} ${entry.name ?? ''}`)
 }
 
 function summarizeHitchSignal(entry, hitchTime) {
@@ -71,7 +72,24 @@ function summarizeHitchSignal(entry, hitchTime) {
     source: data.source ?? null,
     phase: data.phase ?? null,
     url: data.url ?? null,
+    previousCount: finite(data.previousCount),
+    nextCount: finite(data.nextCount),
+    total: finite(data.total),
+    frameGapMs: finite(data.frameGapMs),
+    objects: Array.isArray(data.objects) ? data.objects.slice(0, 8) : null,
   }
+}
+
+function getPlaceableBatchesNear(placeableEvents, hitchTime) {
+  if (!Number.isFinite(hitchTime)) return []
+  return placeableEvents
+    .filter((entry) => (
+      Number.isFinite(entry?.t) &&
+      Math.abs(entry.t - hitchTime) <= PLACEABLE_CORRELATION_WINDOW_MS
+    ))
+    .sort((left, right) => Math.abs(left.t - hitchTime) - Math.abs(right.t - hitchTime))
+    .slice(0, 8)
+    .map((entry) => summarizeHitchSignal(entry, hitchTime))
 }
 
 function getReactCommitsNear(reactCommitEvents, hitchTime) {
@@ -146,16 +164,18 @@ function summarizeHitches(events = []) {
     .filter(({ entry, durationMs }) => entry?.type === 'frame' && durationMs != null)
   const hitches = frameEvents.filter(({ durationMs }) => durationMs >= HITCH_THRESHOLDS_MS.hitch)
   const reactCommitEvents = events.filter((entry) => entry?.type === 'react:commit')
+  const placeableEvents = events.filter((entry) => entry?.type === 'placeables:reveal')
   const analyzedHitches = hitches.map(({ entry, durationMs }) => ({
     entry,
     durationMs,
     reactCommits: getReactCommitsNear(reactCommitEvents, finite(entry.t)),
+    placeableBatches: getPlaceableBatchesNear(placeableEvents, finite(entry.t)),
   }))
   const top = analyzedHitches
     .slice()
     .sort((left, right) => right.durationMs - left.durationMs || Number(left.entry.t ?? 0) - Number(right.entry.t ?? 0))
     .slice(0, MAX_REPORTED_HITCHES)
-    .map(({ entry, durationMs, reactCommits }) => {
+    .map(({ entry, durationMs, reactCommits, placeableBatches }) => {
       const hitchTime = finite(entry.t)
       const nearbySignals = events
         .filter((candidate) => {
@@ -178,6 +198,7 @@ function summarizeHitches(events = []) {
         context: summarizeHitchContext(entry.context),
         renderer: entry.renderer ?? null,
         reactCommits,
+        placeableBatches,
         nearbySignals,
       }
     })

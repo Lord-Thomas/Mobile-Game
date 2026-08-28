@@ -1606,6 +1606,48 @@ function SmoothCooldownRadial({ remainingMs, totalMs }) {
   )
 }
 
+// L'horloge du cooldown reste dans le petit composant HUD. Elle ne réveille donc
+// jamais App ni les sous-arbres React Three Fiber, et elle s'arrête hors cooldown.
+function useSpellCooldownUi(config) {
+  const cooldownUntil = Number(config?.cooldownUntil ?? 0)
+  const cooldownActive = config?.cooldownActive === true
+  const [now, setNow] = useState(null)
+
+  useEffect(() => {
+    let intervalId = 0
+    const tick = () => {
+      const nextNow = Date.now()
+      setNow(nextNow)
+      if (intervalId && nextNow >= cooldownUntil) {
+        window.clearInterval(intervalId)
+        intervalId = 0
+      }
+    }
+
+    if (!cooldownActive) return undefined
+    intervalId = window.setInterval(tick, 100)
+    return () => {
+      if (intervalId) window.clearInterval(intervalId)
+    }
+  }, [cooldownActive, cooldownUntil])
+
+  if (!config) return null
+  const totalMs = Math.max(0, Number(config.cooldownTotalMs ?? 0))
+  const remainingMs = cooldownActive && now == null
+    ? totalMs
+    : Math.max(0, cooldownUntil - (now ?? cooldownUntil))
+  const cooldownRatio = totalMs > 0 ? Math.min(1, remainingMs / totalMs) : 0
+  return {
+    ...config,
+    disabled: config.disabled === true || remainingMs > 0,
+    cooldownAngle: Math.ceil(cooldownRatio * 360),
+    cooldownSeconds: Math.ceil(remainingMs / 1000),
+    cooldownKey: cooldownUntil,
+    cooldownRemainingMs: remainingMs,
+    cooldownTotalMs: totalMs,
+  }
+}
+
 function CombatActionDock({
   touchRef,
   canKick,
@@ -1620,6 +1662,7 @@ function CombatActionDock({
   controlSettings = DEFAULT_CONTROL_SETTINGS,
 }) {
   const wingsUi = useWingsSpellUi(wingsUiRef)
+  const activeSpellUi = useSpellCooldownUi(spellUi)
   const showWings = wingsUi.visible && !wingsUi.flying
   const showWingsBoost = wingsUi.visible && wingsUi.flying
   const count = 1 + (swordEquipped ? 1 : 0) + (canKick ? 1 : 0) + (showSpell ? 1 : 0) + (showWings ? 1 : 0) + (showWingsBoost ? 1 : 0)
@@ -1716,30 +1759,30 @@ function CombatActionDock({
       )}
       {showSpell && (
         <button
-          className={`combat-action-btn combat-action-btn--spell combat-action-btn--image-spell${(spellUi?.cooldownAngle ?? 0) > 0 ? ' combat-action-btn--cooling' : ''}`}
+          className={`combat-action-btn combat-action-btn--spell combat-action-btn--image-spell${(activeSpellUi?.cooldownAngle ?? 0) > 0 ? ' combat-action-btn--cooling' : ''}`}
           type="button"
-          aria-label={spellUi?.ariaLabel ?? 'Lancer un sort'}
-          disabled={spellUi?.disabled === true}
-          style={{ '--cooldown-angle': `${spellUi?.cooldownAngle ?? 0}deg` }}
+          aria-label={activeSpellUi?.ariaLabel ?? 'Lancer un sort'}
+          disabled={activeSpellUi?.disabled === true}
+          style={{ '--cooldown-angle': `${activeSpellUi?.cooldownAngle ?? 0}deg` }}
           onPointerDown={(event) => {
             event.preventDefault()
-            if (spellUi?.disabled !== true) {
+            if (activeSpellUi?.disabled !== true) {
               triggerControlHaptic(controlSettings.vibration)
               onSpellPress?.()
             }
           }}
         >
-          <img className="combat-action-img" src={spellUi?.icon ?? SPELL_ICON_FIREBALL} alt="" aria-hidden="true" draggable="false" />
-          {(spellUi?.cooldownAngle ?? 0) > 0 && (
+          <img className="combat-action-img" src={activeSpellUi?.icon ?? SPELL_ICON_FIREBALL} alt="" aria-hidden="true" draggable="false" />
+          {(activeSpellUi?.cooldownAngle ?? 0) > 0 && (
             <SmoothCooldownRadial
-              key={spellUi?.cooldownKey ?? 'spell-cooldown'}
-              remainingMs={spellUi?.cooldownRemainingMs}
-              totalMs={spellUi?.cooldownTotalMs}
+              key={activeSpellUi?.cooldownKey ?? 'spell-cooldown'}
+              remainingMs={activeSpellUi?.cooldownRemainingMs}
+              totalMs={activeSpellUi?.cooldownTotalMs}
             />
           )}
-          {(spellUi?.cooldownSeconds ?? 0) > 0 && (
+          {(activeSpellUi?.cooldownSeconds ?? 0) > 0 && (
             <span className="combat-action-cooldown-count" aria-hidden="true">
-              {spellUi.cooldownSeconds}
+              {activeSpellUi.cooldownSeconds}
             </span>
           )}
           <span className="combat-action-icon" aria-hidden="true">🔥</span>
@@ -16513,6 +16556,26 @@ function CustomizationLayer({
     total: renderablePlacedObjects.length,
     initialCount: PLACEABLE_PLAY_INITIAL_RENDER_COUNT,
     batchSize: PLACEABLE_PLAY_REVEAL_BATCH_SIZE,
+    onAdvance: ({ previousCount, nextCount, total, frameGapMs }) => {
+      const revealedObjects = renderablePlacedObjects
+        .slice(previousCount, nextCount)
+        .map((object) => {
+          const catalogItem = objectCatalog[object.objectId]
+          return {
+            id: object.id,
+            objectId: object.objectId ?? object.type ?? null,
+            type: object.type ?? catalogItem?.type ?? null,
+            assetUrl: catalogItem?.modelUrl ?? catalogItem?.imageUrl ?? null,
+          }
+        })
+      perfDiagnostics.event('placeables:reveal', {
+        previousCount,
+        nextCount,
+        total,
+        frameGapMs,
+        objects: revealedObjects,
+      })
+    },
     onComplete: ({ total }) => {
       perfDiagnostics.event('placeables:prepared', { total })
       onPlaceablesReady?.({ total })
@@ -19625,7 +19688,6 @@ function App() {
   const projectilesRef = useRef([])
   const remoteProjectilesRef = useRef([])
   const fireballCooldownRef = useRef(0)
-  const [spellCooldownNow, setSpellCooldownNow] = useState(Date.now())
   const isChargingRef = useRef(false)
   const [isCharging, setIsCharging] = useState(false)
   const magicSkullLearnTimerRef = useRef(null)
@@ -19640,10 +19702,6 @@ function App() {
   const nearbyYouTubeFrame = useGameStore((s) => s.near.youtubeFrame ?? null)
   const [youtubeFrameEditor, setYoutubeFrameEditor] = useState(null)
   const youtubeFrameEditorOpen = Boolean(youtubeFrameEditor)
-  useEffect(() => {
-    const interval = window.setInterval(() => setSpellCooldownNow(Date.now()), 100)
-    return () => window.clearInterval(interval)
-  }, [])
   useEffect(() => { activeNearbyTvId = nearbyTv?.id ?? null }, [nearbyTv])
   const [seatedState, setSeatedState] = useState(null)
   const authUser = useGameStore((s) => s.account.user)
@@ -22712,36 +22770,28 @@ function App() {
 
   const spellUi = useMemo(() => {
     if (equippedWeapon === 'magic_skull') {
-      const remainingMs = Math.max(0, summonCooldownUntil - spellCooldownNow)
       const totalMs = SUMMON_SKELETON_DURATION_MS + SUMMON_RECAST_EXTRA_MS
-      const cooldownRatio = totalMs > 0 ? Math.min(1, remainingMs / totalMs) : 0
       return {
         icon: SPELL_ICON_NECROMANCER,
         ariaLabel: 'Invocation necromancienne',
-        disabled: remainingMs > 0,
-        cooldownAngle: Math.ceil(cooldownRatio * 360),
-        cooldownSeconds: Math.ceil(remainingMs / 1000),
-        cooldownKey: summonCooldownUntil,
-        cooldownRemainingMs: remainingMs,
+        disabled: false,
+        cooldownActive: summonCooldownUntil > 0,
+        cooldownUntil: summonCooldownUntil,
         cooldownTotalMs: totalMs,
       }
     }
     if (equippedWeapon === 'magic_book') {
-      const remainingMs = Math.max(0, FIREBALL_COOLDOWN_MS - (spellCooldownNow - fireballCooldownRef.current))
-      const cooldownRatio = FIREBALL_COOLDOWN_MS > 0 ? Math.min(1, remainingMs / FIREBALL_COOLDOWN_MS) : 0
       return {
         icon: SPELL_ICON_FIREBALL,
         ariaLabel: 'Boule de feu',
-        disabled: remainingMs > 0 || isCharging,
-        cooldownAngle: Math.ceil(cooldownRatio * 360),
-        cooldownSeconds: Math.ceil(remainingMs / 1000),
-        cooldownKey: fireballCooldownRef.current,
-        cooldownRemainingMs: remainingMs,
+        disabled: isCharging,
+        cooldownActive: fireballCooldownRef.current > 0,
+        cooldownUntil: fireballCooldownRef.current + FIREBALL_COOLDOWN_MS,
         cooldownTotalMs: FIREBALL_COOLDOWN_MS,
       }
     }
     return null
-  }, [equippedWeapon, isCharging, spellCooldownNow, summonCooldownUntil])
+  }, [equippedWeapon, isCharging, summonCooldownUntil])
 
   const toggleCat = () => {
     // Summoning your own pet is a personal action (not a world edit), so it is
