@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createSavedPlayerLocation, normalizeSavedPlayerLocation } from './playerLocation'
+import {
+  createSavedPlayerLocation,
+  normalizeSavedPlayerLocation,
+  shouldApplySavedPlayerLocation,
+} from './playerLocation'
 
 const options = {
   limitsByZone: {
@@ -34,5 +38,11 @@ describe('playerLocation', () => {
   it('refuse une zone inconnue ou des coordonnées invalides', () => {
     expect(normalizeSavedPlayerLocation({ zone: 'void', position: [0, 0, 0] }, options)).toBeNull()
     expect(normalizeSavedPlayerLocation({ zone: 'outside', position: [0, NaN, 0] }, options)).toBeNull()
+  })
+
+  it('laisse une sauvegarde cloud plus récente remplacer la copie locale', () => {
+    expect(shouldApplySavedPlayerLocation({ savedAt: 200 }, 100)).toBe(true)
+    expect(shouldApplySavedPlayerLocation({ savedAt: 100 }, 200)).toBe(false)
+    expect(shouldApplySavedPlayerLocation({ savedAt: 200 }, 200)).toBe(false)
   })
 })

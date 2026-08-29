@@ -297,8 +297,18 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
   runtimeActive = viewerOutside,
   reducedGrassDensity = false,
   biomeAreas,
+  prepareDetails = true,
+  detailsVisible = true,
+  onBaseReady = null,
 }) {
   const groupRef = useRef()
+  const baseReadyReportedRef = useRef(false)
+
+  useEffect(() => {
+    if (baseReadyReportedRef.current) return
+    baseReadyReportedRef.current = true
+    onBaseReady?.()
+  }, [onBaseReady])
 
   useLayoutEffect(() => {
     groupRef.current?.traverse((object) => {
@@ -317,45 +327,49 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
         biomeAreas={biomeAreas}
       />
       {showTerrain && <OutdoorGround biomeAreas={biomeAreas} renderMode={terrainRenderMode} />}
-      {showPlayerPlot && <PlayerPlot />}
-      {showRoad && <Road />}
-      {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
-        <NeighborHouse key={house.id} {...house} />
-      ))}
-      {preloadMapObjects && (
-        <MapObjectAssetsPreloader
-          objects={DECOR_MAP_OBJECT_PLACEMENTS}
-          onReady={onMapObjectsPreloaded}
-        />
-      )}
-      <group>
-        {showMapObjects && (
-          <MapObjectPlaceables
-            objects={DECOR_MAP_OBJECT_PLACEMENTS}
-            batchStaticTrees
-            showTrees={showTrees}
-          />
-        )}
-        {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
-        {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
-      </group>
-      {showTrees && (
-        <InstancedTreeBatch
-          trees={DISTANT_TREES}
-          animated={false}
-          forceSimplified
-          castShadows={false}
-        />
-      )}
-      {showGrass && (
-        <TerrainGroundCover
-          playerPositionRef={playerPositionRef}
-          ballRef={ballRef}
-          active={lightingActive && runtimeActive}
-          debugStats={debugStats}
-          reducedDensity={reducedGrassDensity}
-          biomeAreas={biomeAreas}
-        />
+      {prepareDetails && (
+        <group visible={detailsVisible}>
+          {showPlayerPlot && <PlayerPlot />}
+          {showRoad && <Road />}
+          {showNeighborHouses && NEIGHBOR_HOUSES.map((house) => (
+            <NeighborHouse key={house.id} {...house} />
+          ))}
+          {preloadMapObjects && (
+            <MapObjectAssetsPreloader
+              objects={DECOR_MAP_OBJECT_PLACEMENTS}
+              onReady={onMapObjectsPreloaded}
+            />
+          )}
+          <group>
+            {showMapObjects && (
+              <MapObjectPlaceables
+                objects={DECOR_MAP_OBJECT_PLACEMENTS}
+                batchStaticTrees
+                showTrees={showTrees}
+              />
+            )}
+            {showMapObjects && <PaintedPaths paths={MAP_PATHS} />}
+            {showBiomeEffects && <BiomeAmbientEffects areas={biomeAreas} />}
+          </group>
+          {showTrees && (
+            <InstancedTreeBatch
+              trees={DISTANT_TREES}
+              animated={false}
+              forceSimplified
+              castShadows={false}
+            />
+          )}
+          {showGrass && (
+            <TerrainGroundCover
+              playerPositionRef={playerPositionRef}
+              ballRef={ballRef}
+              active={lightingActive && runtimeActive}
+              debugStats={debugStats}
+              reducedDensity={reducedGrassDensity}
+              biomeAreas={biomeAreas}
+            />
+          )}
+        </group>
       )}
     </group>
   )

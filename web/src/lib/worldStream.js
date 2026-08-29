@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react'
 
 let revealLevel = 0
 let running = false
+let fastUntilLevel = 0
 const listeners = new Set()
 
 // Plafond de sécurité : on arrête de tirer des frames une fois tous les niveaux
@@ -26,6 +27,10 @@ const MAX_LEVEL = 64
 // évite juste de tout révéler en 6 frames d'affilée sur une machine très rapide,
 // pour étaler la création GPU. Bien plus court que l'ancien 320 ms fixe.
 const REVEAL_STEP_FLOOR_MS = 90
+
+export function getWorldStreamStepDelay(level, acceleratedUntilLevel = 0) {
+  return level < acceleratedUntilLevel ? 0 : REVEAL_STEP_FLOOR_MS
+}
 
 const raf = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
   ? (cb) => window.requestAnimationFrame(cb)
@@ -42,15 +47,17 @@ function tick() {
   }
   // On attend le plancher (souffle GPU) PUIS la prochaine frame : ainsi le montage
   // du niveau suivant tombe en début de frame, jamais à la suite du précédent.
-  if (REVEAL_STEP_FLOOR_MS > 0) {
-    window.setTimeout(() => raf(tick), REVEAL_STEP_FLOOR_MS)
+  const stepDelay = getWorldStreamStepDelay(revealLevel, fastUntilLevel)
+  if (stepDelay > 0) {
+    window.setTimeout(() => raf(tick), stepDelay)
   } else {
     raf(tick)
   }
 }
 
 // À appeler quand l'overlay tombe : démarre la révélation progressive.
-export function startWorldStream() {
+export function startWorldStream({ acceleratedUntilLevel = 0 } = {}) {
+  fastUntilLevel = Math.max(fastUntilLevel, acceleratedUntilLevel)
   if (running || revealLevel >= MAX_LEVEL) return
   running = true
   raf(tick)

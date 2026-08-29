@@ -16,7 +16,7 @@ import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } f
 import { getFallDamage } from './game/fallDamage'
 import { accumulatePendingCameraDrag, clearPendingCameraDrag, consumePendingCameraDrag } from './game/cameraInput'
 import { getNextScorePopupExpiry, pruneExpiredScorePopups } from './game/scorePopups'
-import { createSavedPlayerLocation, normalizeSavedPlayerLocation } from './game/playerLocation'
+import { createSavedPlayerLocation, normalizeSavedPlayerLocation, shouldApplySavedPlayerLocation } from './game/playerLocation'
 import { OUTDOOR_PLAYER_COLLISION_HEIGHT, overlapsOutdoorColliderHeight } from './game/outdoorObstacleCollision'
 import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
 import { WORLD_LOADING_TIPS, advanceLoadingExperience, createLoadingExperience } from './game/loadingExperience'
@@ -36,7 +36,7 @@ import { MOB_ACTIVITY_TIERS, getMobActivityInterval, isMobVisuallyActive } from 
 import { MOB_STREAMING_BUDGETS, haveSameMobIds, resolveMobResidentIds } from './game/mobs/mobStreaming'
 import { forceInitialAssetBatchReady, installAssetLoadProfiler, installLongTaskObserver, isInitialAssetBatchReady, lockInitialAssetBatch, markLoad, recordRenderProfile, reportLoadTiming, startInitialAssetBatchCollection, subscribeInitialAssetBatch } from './lib/loadTiming'
 import { getOrCreatePreparedAsset } from './lib/assetPreparationCache'
-import { completeLoadTask, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
+import { completeLoadTask, isLoadTaskReady, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
 import { createPerformanceReport, getPerformanceReportFilename, serializePerformanceReport } from './lib/performanceReport'
 import { getRenderStatsSnapshot, publishRenderStats, subscribeRenderStats } from './lib/renderStatsStore'
@@ -285,7 +285,6 @@ const LOCAL_COIN_BUTTON_STORAGE_KEY = 'lab_show_local_coin_button_v1'
 const LOW_RESOLUTION_RENDER_SCALE = 0.62
 const SOFA_WIDTH_METERS = 1.5
 const MAGIC_SKULL_LEARN_INTERACTION_DISTANCE = 1.65
-const MUSHROOM_ENEMY_MODEL_URL = '/models/enemies/mushroom_man/model.fbx'
 const MUSHROOM_ENEMY_MODEL_GLB_URL = '/models/enemies/mushroom_man/model.glb'
 const MUSHROOM_ENEMY_COUNT = 4
 const MUSHROOM_ENEMY_MAX_HP = 30
@@ -321,7 +320,6 @@ const MUSHROOM_ENEMY_ATTACK_RANGE = 1.2
 const MUSHROOM_ENEMY_ATTACK_COOLDOWN = 1.65
 const MUSHROOM_ENEMY_ATTACK_DURATION = 0.82
 const MUSHROOM_ENEMY_ATTACK_CONTACT_DELAY = 0.34
-const SKELETON_ENEMY_MODEL_URL = '/models/enemies/skeleton/model.fbx'
 const SKELETON_ENEMY_MODEL_GLB_URL = '/models/enemies/skeleton/model.glb'
 const SKELETON_ENEMY_TEXTURE_URL = '/models/enemies/skeleton/skeleton.fbm'
 const SKELETON_ENEMY_MAX_HP = 80          // réduit (150 était abusé)
@@ -336,7 +334,7 @@ const MOB_CONFIGS = {
   mushroom: {
     // Pilote GLB : le mushroom passe en GLB (rig + anim + texture embarqués via
     // scripts/convert-enemies-glb.mjs). Pour revenir au FBX : modelFormat 'fbx' +
-    // modelUrl MUSHROOM_ENEMY_MODEL_URL. Le squelette reste en FBX pour l'instant.
+    // Le champ modelUrl est l'unique source de vérité pour le modèle du mob.
     modelFormat: 'glb',
     modelUrl: MUSHROOM_ENEMY_MODEL_GLB_URL,
     maxHp: MUSHROOM_ENEMY_MAX_HP,
@@ -375,7 +373,7 @@ const MOB_CONFIGS = {
   skeleton: {
     // GLB : rig + anim + texture embarqués (scripts/convert-enemies-glb.mjs). La texture
     // étant dans le GLB, plus besoin de la .fbm forcée. Revert : modelFormat 'fbx' +
-    // modelUrl SKELETON_ENEMY_MODEL_URL. Hérité par skeleton_archer / skeleton_mage.
+    // Hérité par skeleton_archer / skeleton_mage.
     modelFormat: 'glb',
     modelUrl: SKELETON_ENEMY_MODEL_GLB_URL,
     textureUrl: SKELETON_ENEMY_TEXTURE_URL,
@@ -16496,7 +16494,7 @@ function CustomizationLayer({
   selectedBuildElement,
   buildTool,
   partitionStart,
-  hideInteriorObjects = false,
+  activeZone = ZONES.interior,
   selectedObjectId,
   draggingObjectId,
   placingObjectId,
@@ -16561,10 +16559,11 @@ function CustomizationLayer({
   )
 
   const rooms = layout.rooms ?? houseLayout.rooms
-  const placedObjects = useMemo(() => objects.filter((object) => (
-    object.status !== 'stored' &&
-    (!hideInteriorObjects || !isPositionInsideHouse(object.position, 0.35, layout))
-  )), [hideInteriorObjects, layout, objects])
+  const placedObjects = useMemo(() => objects.filter((object) => {
+    if (object.status === 'stored') return false
+    const insideHouse = isPositionInsideHouse(object.position, 0.35, layout)
+    return activeZone === ZONES.outside ? !insideHouse : insideHouse
+  }), [activeZone, layout, objects])
   const renderablePlacedObjects = useMemo(
     () => placedObjects.filter((object) => object.type !== 'goal'),
     [placedObjects],
@@ -17835,11 +17834,9 @@ const OUTDOOR_EXIT_ZONE_SWITCH_DELAY_MS = 180
 // première frame extérieure (flash blanc possible) — le pop-in se fait sous le
 // voile. Là encore : aucune modif du chargement, juste le voile tenu plus longtemps.
 const OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS = 220
-// Plafond dur : le voile attend le signal de pré-warm shader (outdoorPrewarmReadyRef)
-// après le délai minimal ci-dessus, mais ne le retient JAMAIS au-delà de cette borne,
-// même si la compilation traîne ou échoue (sécurité anti-blocage, comme le garde-fou
-// du gate de boot). Au-delà : on rend la main quoi qu'il arrive.
-const OUTDOOR_EXIT_FADE_MAX_HOLD_MS = 12000
+// Après ce seuil, le texte explique simplement que la préparation prend plus de
+// temps. Il ne force jamais une révélation incomplète devant le joueur.
+const ZONE_TRANSITION_SLOW_LOAD_NOTICE_MS = 12000
 const OUTDOOR_CONTENT_STAGES = [
   { level: 1, delay: 0 },
   { level: 2, delay: 80 },
@@ -17856,7 +17853,10 @@ function preloadPlaceableAsset(asset) {
   return useGLTF.preload(asset.url)
 }
 
-const STABLE_INITIAL_ASSET_PRELOADS = [
+// Le boot ne bloque que sur les ressources indispensables dès la première
+// image jouable. Animations secondaires, montures, familiers et ennemis restent
+// chargés par leurs pipelines de zone, derrière le voile si nécessaire.
+const CORE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload(PLAYER_MODEL_URL),
   () => useTexture.preload(PLAYER_FACE_DETAILS_MASK_URL),
   () => useGLTF.preload('/models/player/anim/idle.glb'),
@@ -17864,40 +17864,18 @@ const STABLE_INITIAL_ASSET_PRELOADS = [
   () => useGLTF.preload('/models/player/anim/run.glb'),
   () => useGLTF.preload('/models/player/anim/kick.glb'),
   () => useGLTF.preload('/models/player/anim/punch.glb'),
-  () => useGLTF.preload('/models/player/anim/waving.glb'),
-  () => useGLTF.preload('/models/player/anim/dance.glb'),
-  () => useGLTF.preload('/models/player/anim/pointing-up.glb'),
-  () => useGLTF.preload('/models/player/anim/jump-start.glb'),
-  () => useGLTF.preload('/models/player/anim/jump-loop.glb'),
-  () => useGLTF.preload('/models/player/anim/jump-land.glb'),
-  () => useGLTF.preload('/models/player/anim/stand-to-sit.glb'),
-  () => useGLTF.preload('/models/player/anim/sitting-idle.glb'),
-  () => useGLTF.preload('/models/player/anim/stand-up.glb'),
   () => useGLTF.preload('/models/ball/ballon.glb'),
-  () => useGLTF.preload(ANGEL_WINGS_MODEL_URL),
-  () => useLoader.preload(GLTFLoader, SKELETON_ENEMY_MODEL_GLB_URL),
-  () => useTexture.preload(SKELETON_ENEMY_TEXTURE_URL),
-  () => useLoader.preload(GLTFLoader, MUSHROOM_ENEMY_MODEL_GLB_URL),
-  () => useGLTF.preload('/models/cat.glb'),
-  ...Object.values(MOUNT_CONFIGS)
-    .filter((mount) => mount.modelUrl)
-    .map((mount) => () => useGLTF.preload(mount.modelUrl)),
-  () => useGLTF.preload(MAGIC_BOOK_MODEL_URL),
-  () => useGLTF.preload(MAGIC_SKULL_MODEL_URL),
-  () => useGLTF.preload(SLIME_BOSS.modelUrl),
-  () => useGLTF.preload(SLIME_BOSS.summons.greenModelUrl),
-  () => useGLTF.preload(SLIME_BOSS.summons.blueModelUrl),
 ]
 
-let stableInitialAssetPreloadPromise = null
+let coreInitialAssetPreloadPromise = null
 
-function startStableInitialAssetPreloads() {
-  if (!stableInitialAssetPreloadPromise) {
-    stableInitialAssetPreloadPromise = Promise.allSettled(
-      STABLE_INITIAL_ASSET_PRELOADS.map((preload) => Promise.resolve().then(preload)),
+function startCoreInitialAssetPreloads() {
+  if (!coreInitialAssetPreloadPromise) {
+    coreInitialAssetPreloadPromise = Promise.allSettled(
+      CORE_INITIAL_ASSET_PRELOADS.map((preload) => Promise.resolve().then(preload)),
     )
   }
-  return stableInitialAssetPreloadPromise
+  return coreInitialAssetPreloadPromise
 }
 
 const enemyAssetPreloadPromises = new Map()
@@ -18017,6 +17995,7 @@ function ShaderWarmupGate({
   onComplete,
   onProgress,
   criticalPlaceableAssets = [],
+  initialZone = ZONES.interior,
   worldDataReady = true,
 }) {
   const { gl, scene, camera } = useThree()
@@ -18052,7 +18031,7 @@ function ShaderWarmupGate({
 
     const unsubscribe = subscribeInitialAssetBatch(refresh)
     startInitialAssetBatchCollection()
-    startStableInitialAssetPreloads()
+    startCoreInitialAssetPreloads()
     criticalPlaceableAssetsRef.current.forEach(preloadPlaceableAsset)
     onProgressRef.current?.({ percent: 18, phase: 'Chargement de la maison...' })
     markLoad('gate:lock')
@@ -18097,7 +18076,7 @@ function ShaderWarmupGate({
       )
       const preloadResult = await waitForPromiseWithTimeout(
         Promise.allSettled([
-          startStableInitialAssetPreloads(),
+          startCoreInitialAssetPreloads(),
           criticalPlaceablePreloads,
         ]),
         STABLE_INITIAL_ASSET_MAX_WAIT_MS,
@@ -18112,10 +18091,12 @@ function ShaderWarmupGate({
       })
       // Garantit que la collision binaire est chargée avant de masquer l'écran de
       // chargement (le fetch a démarré à l'import, donc déjà résolu en pratique).
-      await collisionReady
-      markLoad('collisionReady')
-      onProgress?.({ percent: 74, phase: 'Activation des collisions...' })
-      startWorldStream()
+      if (initialZone === ZONES.outside) {
+        await collisionReady
+        markLoad('collisionReady')
+        onProgress?.({ percent: 74, phase: 'Activation des collisions...' })
+      }
+      startWorldStream({ acceleratedUntilLevel: WORLD_STREAM_INITIAL_READY_LEVEL })
       const streamResult = await waitForRevealLevel(WORLD_STREAM_INITIAL_READY_LEVEL, WORLD_STREAM_INITIAL_MAX_WAIT_MS)
       if (!streamResult.ready) {
         console.warn(`[loadTiming] World stream level ${WORLD_STREAM_INITIAL_READY_LEVEL} timed out after ${WORLD_STREAM_INITIAL_MAX_WAIT_MS}ms`)
@@ -18126,7 +18107,9 @@ function ShaderWarmupGate({
         phase: 'Préparation des joueurs et des ennemis...',
       })
       const scenePreparation = await waitForLoadTasks(
-        [INITIAL_PLACEABLES_LOAD_TASK, SLIME_BOSS_PREPARE_TASK],
+        initialZone === ZONES.outside
+          ? [INITIAL_PLACEABLES_LOAD_TASK, SLIME_BOSS_PREPARE_TASK]
+          : [INITIAL_PLACEABLES_LOAD_TASK],
         INITIAL_SCENE_PREPARATION_MAX_WAIT_MS,
       )
       if (!scenePreparation.ready) {
@@ -18242,7 +18225,7 @@ function ShaderWarmupGate({
       cancelled = true
       if (frameId) window.cancelAnimationFrame(frameId)
     }
-  }, [camera, gl, initialAssetsReady, onComplete, onProgress, scene, worldDataReady])
+  }, [camera, gl, initialAssetsReady, initialZone, onComplete, onProgress, scene, worldDataReady])
 
   return null
 }
@@ -19656,7 +19639,7 @@ function App() {
   // stays mounted but dormant afterwards, so door travel never pays the mount
   // and shader cost during gameplay.
   const [outdoorEntryPreparing, setOutdoorEntryPreparing] = useState(true)
-  const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(true)
+  const [outdoorTransitionPrimed, setOutdoorTransitionPrimed] = useState(false)
   const [outdoorContentStage, setOutdoorContentStage] = useState(0)
   const [outdoorRuntimeRevealStage, setOutdoorRuntimeRevealStage] = useState(0)
   const [outdoorEnemyAssetsReady, setOutdoorEnemyAssetsReady] = useState(false)
@@ -19664,6 +19647,7 @@ function App() {
   const [outdoorEnemyEntryTargetCount, setOutdoorEnemyEntryTargetCount] = useState(0)
   const [outdoorEnemiesMounted, setOutdoorEnemiesMounted] = useState(false)
   const [outdoorMapAssetsReady, setOutdoorMapAssetsReady] = useState(false)
+  const [outdoorShellReady, setOutdoorShellReady] = useState(false)
   const [loadingExperience, setLoadingExperience] = useState(() => (
     createLoadingExperience({
       kind: 'initial',
@@ -19673,7 +19657,7 @@ function App() {
   ))
   // Passe à true quand OutdoorShaderPrewarm a fini de compiler les shaders
   // extérieurs : le fondu de transition attend ce signal avant de se lever
-  // (plafonné par OUTDOOR_EXIT_FADE_MAX_HOLD_MS). Jamais remis à false : une fois
+  // Le voile attend ce signal avant de se lever. Jamais remis à false : une fois
   // les programmes en cache GPU, les sorties suivantes n'attendent plus.
   const outdoorPrewarmReadyRef = useRef(false)
   const [outdoorPrewarmReady, setOutdoorPrewarmReady] = useState(PERF_NO_OUTDOOR_PREWARM)
@@ -19792,7 +19776,7 @@ function App() {
   const skipNextCloudSaveRef = useRef(false)
   const authUserRef = useRef(null)
   const latestProgressRef = useRef(null)
-  const playerLocationRestoredRef = useRef(false)
+  const restoredPlayerLocationSavedAtRef = useRef(-1)
   const personalProgressRef = useRef(null)
   const [personalProgressVersion, setPersonalProgressVersion] = useState(0)
   const [worldDataReady, setWorldDataReady] = useState(() => !isSupabaseConfigured)
@@ -20567,12 +20551,15 @@ function App() {
     if (includeIdentity && Array.isArray(parsed.friends)) {
       setAccount('friends',(current) => mergeSocialFriends(current, parsed.friends))
     }
-    if (includeLocation && !playerLocationRestoredRef.current && parsed.lastLocation) {
+    if (includeLocation && parsed.lastLocation) {
       const location = normalizeSavedPlayerLocation(parsed.lastLocation, {
         limitsByZone: PLAY_AREA_LIMITS,
         fallbackSpawns: PLAYER_SPAWNS,
       })
-      if (location) {
+      if (location && shouldApplySavedPlayerLocation(
+        location,
+        restoredPlayerLocationSavedAtRef.current,
+      )) {
         let [x, y, z] = location.position
         if (location.zone === ZONES.outside) {
           const referenceFootY = y - PLAYER_HEIGHT
@@ -20591,7 +20578,7 @@ function App() {
           }
           y = PLAYER_HEIGHT
         }
-        playerLocationRestoredRef.current = true
+        restoredPlayerLocationSavedAtRef.current = location.savedAt
         setView('zone', location.zone)
         playerBodyYawRef.current = location.rotationY
         setSpawnRequest({
@@ -20817,6 +20804,7 @@ function App() {
   }, [playerLocationStorageKey, progressStorageKey])
 
   useEffect(() => {
+    if (!worldDataReady) return undefined
     const snapshot = isGuestVisit ? createPersonalProgressSnapshot() : createCurrentProgressSnapshot()
     latestProgressRef.current = snapshot
     let idleId = 0
@@ -20843,9 +20831,10 @@ function App() {
       if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
       if (timeoutId) window.clearTimeout(timeoutId)
     }
-  }, [isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [worldDataReady, isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
+    if (!worldDataReady) return undefined
     const persistLocation = () => {
       const location = createCurrentPlayerLocation()
       if (!location) return
@@ -20857,7 +20846,7 @@ function App() {
     }
     const intervalId = window.setInterval(persistLocation, 2000)
     return () => window.clearInterval(intervalId)
-  }, [currentZone, playerLocationStorageKey])
+  }, [currentZone, playerLocationStorageKey, worldDataReady])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -21334,13 +21323,13 @@ function App() {
       return snapshot
     }
     const saveBeforeLeaving = () => {
-      if (mode !== 'customize' && document.visibilityState === 'hidden') {
+      if (worldDataReady && mode !== 'customize' && document.visibilityState === 'hidden') {
         persistFreshSnapshot()
         saveCurrentProgressToCloud()
       }
     }
     const saveOnPageHide = () => {
-      if (mode !== 'customize') {
+      if (worldDataReady && mode !== 'customize') {
         persistFreshSnapshot()
         saveCurrentProgressToCloud()
       }
@@ -21352,7 +21341,7 @@ function App() {
       document.removeEventListener('visibilitychange', saveBeforeLeaving)
       window.removeEventListener('pagehide', saveOnPageHide)
     }
-  }, [currentZone, mode, playerLocationStorageKey, progressScope, progressStorageKey])
+  }, [currentZone, mode, playerLocationStorageKey, progressScope, progressStorageKey, worldDataReady])
 
   useEffect(() => {
     const nextExpiry = getNextScorePopupExpiry(scorePopups)
@@ -21919,39 +21908,72 @@ function App() {
   )
   const goalObject = editableObjects.find((object) => object.id === 'goal_01') || defaultEditableObjects[0]
   const placedEditableObjects = editableObjects.filter((object) => object.status !== 'stored')
-  const criticalPlaceableAssets = useMemo(() => {
-    const assets = new Map()
-    const add = (kind, url) => {
+  const placeableAssetsByZone = useMemo(() => {
+    const assetsByZone = {
+      interior: new Map(),
+      outside: new Map(),
+    }
+    const add = (zone, kind, url) => {
       if (!url) return
-      assets.set(`${kind}:${url}`, { kind, url })
+      assetsByZone[zone].set(`${kind}:${url}`, { kind, url })
     }
 
     editableObjects
-      .filter((object) => object.status !== 'stored')
+      .filter((object) => object.status !== 'stored' && Array.isArray(object.position))
       .forEach((object) => {
         const item = objectCatalog[object.objectId]
         if (!item) return
-        add('gltf', item.modelUrl)
-        add('texture', item.imageUrl)
-
-        // Le canapé modulaire est encore un FBX avec texture externe. Ces deux
-        // ressources étaient absentes de l'ancien manifeste GLB et démarraient
-        // donc seulement lorsque le composant devenait visible.
+        const zone = isPositionInsideHouse(object.position, 0.35, activeHouseLayout)
+          ? 'interior'
+          : 'outside'
+        add(zone, 'gltf', item.modelUrl)
+        add(zone, 'texture', item.imageUrl)
         if (item.type === 'sofa' && !item.modelUrl) {
-          add('fbx', item.thumbnailModelUrl ?? MODULAR_SOFA_MODEL_URL)
-          add('texture', item.thumbnailTextureUrl ?? MODULAR_SOFA_TEXTURE_URL)
+          add(zone, 'fbx', item.thumbnailModelUrl ?? MODULAR_SOFA_MODEL_URL)
+          add(zone, 'texture', item.thumbnailTextureUrl ?? MODULAR_SOFA_TEXTURE_URL)
         }
       })
 
+    return {
+      interior: [...assetsByZone.interior.values()],
+      outside: [...assetsByZone.outside.values()],
+    }
+  }, [activeHouseLayout, editableObjects])
+  const criticalPlaceableAssets = useMemo(() => (
+    currentZone === ZONES.outside
+      ? placeableAssetsByZone.outside
+      : placeableAssetsByZone.interior
+  ), [currentZone, placeableAssetsByZone])
+  const allPlaceableAssets = useMemo(() => {
+    const assets = new Map()
+    ;[...placeableAssetsByZone.interior, ...placeableAssetsByZone.outside]
+      .forEach((asset) => assets.set(`${asset.kind}:${asset.url}`, asset))
     return [...assets.values()]
-  }, [editableObjects])
+  }, [placeableAssetsByZone])
+  useEffect(() => {
+    if (!shaderWarmupComplete) return
+    allPlaceableAssets.forEach(preloadPlaceableAsset)
+  }, [allPlaceableAssets, shaderWarmupComplete])
   const selectedObject = editableObjects.find((object) => object.id === selectedObjectId)
   const placingEditableObject = editableObjects.find((object) => object.id === placingObjectId)
   const inventoryCards = getInventoryCards(editableObjects)
-  const initialPreparationSettled = currentZone === ZONES.outside || !outdoorEntryPreparing
   const initialWorldReady = shaderWarmupComplete
-    && outdoorBackgroundPrepared
-    && initialPreparationSettled
+    && (currentZone === ZONES.outside ? outdoorBackgroundPrepared : outdoorShellReady)
+  useEffect(() => {
+    if (!initialWorldReady || currentZone === ZONES.outside || outdoorTransitionPrimed) return undefined
+    let idleId = 0
+    let timeoutId = 0
+    const prepare = () => setOutdoorTransitionPrimed(true)
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(prepare, { timeout: 1800 })
+    } else {
+      timeoutId = window.setTimeout(prepare, 250)
+    }
+    return () => {
+      if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
+  }, [currentZone, initialWorldReady, outdoorTransitionPrimed])
   const loadingUiActive = !initialWorldReady || zoneFadeActive
   const preloadGameplayUi = !initialWorldReady
     && !zoneFadeActive
@@ -23105,6 +23127,7 @@ function App() {
           ? 'Installation de l’herbe et des ennemis...'
           : 'Installation des meubles...',
       })
+      resetLoadTask(INITIAL_PLACEABLES_LOAD_TASK)
       setView('zone',nextZone)
       setSpawnRequest({ zone: nextZone, position: spawn, token: Date.now() })
       touchRef.current.moveX = 0
@@ -23113,67 +23136,49 @@ function App() {
       touchRef.current.lookY = 0
       touchRef.current.cameraDistance = CAMERA_SETTINGS[nextZone]?.distance ?? CAMERA_DISTANCE
       window.setTimeout(() => {
-        if (!goingOutside) {
-          perfDiagnostics.event('transition:fade-release', {
-            from: currentZone,
-            to: nextZone,
-            prewarmReady: true,
-          })
-          updateLoadingExperience({ percent: 100, phase: 'Maison prête !' })
-          window.requestAnimationFrame(() => {
-            setZoneFadeActive(false)
-            setCompactZoneTransition(false)
-          })
-          return
-        }
-        // Sortie : on ne lève le voile (= on ne rend la main) qu'une fois les
-        // shaders extérieurs pré-compilés, pour que la 1re frame jouable dehors
-        // ne tombe pas en plein freeze de compilation. Plafonné par
-        // OUTDOOR_EXIT_FADE_MAX_HOLD_MS pour ne jamais coincer le joueur.
-        const releaseFade = ({ timedOut = false, holdDurationMs = 0 } = {}) => {
+        const releaseFade = ({ holdDurationMs = 0 } = {}) => {
           perfDiagnostics.event('transition:fade-release', {
             from: currentZone,
             to: nextZone,
             prewarmReady: outdoorPrewarmReadyRef.current,
             outdoorReady: outdoorZoneReadyRef.current,
-            timedOut,
+            placeablesReady: isLoadTaskReady(INITIAL_PLACEABLES_LOAD_TASK),
             holdDurationMs,
           })
-          updateLoadingExperience({ percent: 100, phase: 'Extérieur prêt !' })
+          updateLoadingExperience({
+            percent: 100,
+            phase: goingOutside ? 'Extérieur prêt !' : 'Maison prête !',
+          })
           window.requestAnimationFrame(() => {
             setZoneFadeActive(false)
             setCompactZoneTransition(false)
-            setOutdoorEntryPreparing(false)
+            if (goingOutside) setOutdoorEntryPreparing(false)
           })
         }
-        if (
-          (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current)
-          && outdoorZoneReadyRef.current
-        ) {
-          releaseFade()
-          return
-        }
         const holdStartedAt = Date.now()
-        const pollPrewarm = () => {
+        const pollZoneReadiness = () => {
           const holdDurationMs = Date.now() - holdStartedAt
-          const ready = (
+          const placeablesReady = isLoadTaskReady(INITIAL_PLACEABLES_LOAD_TASK)
+          const outsideReady = !goingOutside || (
             (PERF_NO_OUTDOOR_PREWARM || outdoorPrewarmReadyRef.current)
             && outdoorZoneReadyRef.current
           )
-          const timedOut = holdDurationMs >= OUTDOOR_EXIT_FADE_MAX_HOLD_MS
-          if (ready || timedOut) {
-            releaseFade({ timedOut, holdDurationMs })
+          if (placeablesReady && outsideReady) {
+            releaseFade({ holdDurationMs })
             return
           }
+          const slow = holdDurationMs >= ZONE_TRANSITION_SLOW_LOAD_NOTICE_MS
           updateLoadingExperience({
-            percent: outdoorZoneReadyRef.current ? 96 : 88,
-            phase: outdoorZoneReadyRef.current
-              ? 'Stabilisation de la première image...'
-              : 'Finalisation du monde extérieur...',
+            percent: placeablesReady && outsideReady ? 99 : slow ? 94 : 88,
+            phase: slow
+              ? 'Finalisation en cours — encore un instant...'
+              : !placeablesReady
+                ? 'Installation des objets de la zone...'
+                : 'Stabilisation de la première image...',
           })
-          window.setTimeout(pollPrewarm, 60)
+          window.setTimeout(pollZoneReadiness, 60)
         }
-        pollPrewarm()
+        pollZoneReadiness()
       }, cachedTransition ? 80 : goingOutside ? OUTDOOR_EXIT_FADE_RELEASE_DELAY_MS : 180)
     }, zoneSwitchDelay)
   }
@@ -23720,6 +23725,11 @@ function App() {
     setOutdoorMapAssetsReady(true)
   }, [])
 
+  const handleOutdoorShellReady = useCallback(() => {
+    perfDiagnostics.event('outdoor:shell-ready')
+    setOutdoorShellReady(true)
+  }, [])
+
   const handleOutdoorEnemyMountProgress = useCallback((count, total, complete) => {
     setOutdoorEnemyEntryTargetCount(total)
     if (count === 0 || complete || count % 4 === 0) {
@@ -23870,6 +23880,7 @@ function App() {
           onComplete={completeShaderWarmup}
           onProgress={updateLoadingExperience}
           criticalPlaceableAssets={criticalPlaceableAssets}
+          initialZone={currentZone}
           worldDataReady={worldDataReady}
         />
         {PERF_RUNTIME_WARMUP_RIG && (
@@ -24023,6 +24034,7 @@ function App() {
           </group>
           <Defer level={6}>
           <CustomizationLayer
+            key={currentZone}
             mode={currentZone === ZONES.outside || !canModifyWorld ? 'play' : mode}
             view={customizeView}
             streamPlaceables
@@ -24035,7 +24047,7 @@ function App() {
             selectedBuildElement={selectedBuildElement}
             buildTool={activeBuildTool}
             partitionStart={partitionStart}
-            hideInteriorObjects={currentZone === ZONES.outside}
+            activeZone={currentZone}
             selectedObjectId={selectedObjectId}
             draggingObjectId={draggingObjectId}
             placingObjectId={placingObjectId}
@@ -24117,6 +24129,9 @@ function App() {
             showPlayerPlot={isOutsideZone && isDebugMode && debugToggles.plot}
             debugStats={isDebugMode}
             runtimeActive={outdoorRuntimeContentActive}
+            prepareDetails={isOutsideZone || outdoorTransitionPrimed}
+            detailsVisible={isOutsideZone || outdoorBackgroundPrepared}
+            onBaseReady={handleOutdoorShellReady}
           />
         </group>
         </Suspense>

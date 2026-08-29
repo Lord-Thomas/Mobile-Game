@@ -48,3 +48,10 @@ export function normalizeSavedPlayerLocation(value, { limitsByZone, fallbackSpaw
     ],
   }
 }
+
+export function shouldApplySavedPlayerLocation(location, restoredSavedAt = -1) {
+  const candidateSavedAt = Number(location?.savedAt)
+  const currentSavedAt = Number(restoredSavedAt)
+  return Number.isFinite(candidateSavedAt)
+    && candidateSavedAt > (Number.isFinite(currentSavedAt) ? currentSavedAt : -1)
+}

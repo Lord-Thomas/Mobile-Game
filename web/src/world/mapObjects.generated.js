@@ -1036,8 +1036,8 @@ export const MAP_OBJECT_PLACEMENTS = [
     "objectId": "pacific_slime_boss",
     "position": [
       -111.25,
-      -0.2386893840890648,
-      92
+      6.470469133636021,
+      178
     ],
     "rotationY": -2.89159265358979,
     "scale": 1
