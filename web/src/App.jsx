@@ -5,7 +5,7 @@ import { ACESFilmicToneMapping, AdditiveBlending, AlwaysStencilFunc, AnimationMi
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { FBXLoader, GLTFLoader } from 'three-stdlib'
-import { memo, Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import ParticleEffect from './effects/ParticleEffect'
 import { charHexToVec, getCharacterMaterialKey, makePantsDetailsTintApplyGlsl, makeSkinWithDetailsTintApplyGlsl, makeTintApplyGlsl, normalizeMixamoObjectName, TINT_RECOLOR_UNIFORM_DECL } from './game/characterShaders'
 import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/characterAppearance'
@@ -14,6 +14,8 @@ import { collidesWithGoalFrame, getKickContact, getMeleeAreaTargets, getNearestP
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { getFallDamage } from './game/fallDamage'
+import { accumulatePendingCameraDrag, clearPendingCameraDrag, consumePendingCameraDrag } from './game/cameraInput'
+import { getNextScorePopupExpiry, pruneExpiredScorePopups } from './game/scorePopups'
 import { createSavedPlayerLocation, normalizeSavedPlayerLocation } from './game/playerLocation'
 import { OUTDOOR_PLAYER_COLLISION_HEIGHT, overlapsOutdoorColliderHeight } from './game/outdoorObstacleCollision'
 import { DEFAULT_CONTROL_SETTINGS, getControlCssVariables, loadControlSettings, normalizeControlSettings, saveControlSettings, triggerControlHaptic } from './game/controlSettings'
@@ -37,6 +39,7 @@ import { getOrCreatePreparedAsset } from './lib/assetPreparationCache'
 import { completeLoadTask, resetLoadTask, waitForLoadTasks } from './lib/loadTaskRegistry'
 import { isPerfDiagnosticsEnabled, perfDiagnostics } from './lib/perfDiagnostics'
 import { createPerformanceReport, getPerformanceReportFilename, serializePerformanceReport } from './lib/performanceReport'
+import { getRenderStatsSnapshot, publishRenderStats, subscribeRenderStats } from './lib/renderStatsStore'
 import { WebGlGpuFrameTimer } from './lib/gpuFrameTimer'
 import { cloneRendererResourceWindow, createRendererResourceWindow, readRendererResourceCounts, recordRendererResourceCounts } from './lib/rendererResourceWindow'
 import { PERF_NO_MAP_COLLIDERS, PERF_NO_OUTDOOR_PREWARM, PERF_RUNTIME_WARMUP_RIG, PERF_SHADER_WARMUP } from './lib/perfFlags'
@@ -4401,6 +4404,18 @@ function Player({
 
     const key = keyboardRef.current
     const touch = touchRef.current
+    const cameraDrag = consumePendingCameraDrag(touch, {
+      sensitivity: CAMERA_DRAG_SENSITIVITY,
+      minPitch: PLAYER_CAMERA_PITCH_MIN,
+      maxPitch: PLAYER_CAMERA_PITCH_MAX,
+    })
+    if (cameraDrag) {
+      perfDiagnostics.event('camera:look-frame', {
+        source: 'pointer-coalesced',
+        zone: currentZone,
+        ...cameraDrag,
+      })
+    }
 
     // Le cast d'ailes est consommé dès le début de frame : si un chemin qui
     // sort tôt (monture, assis, caméra libre) est actif, la demande est
@@ -8292,6 +8307,19 @@ function ControlsOverlay({
     top: false,
     bottom: false,
   })
+  const edgeGlowRef = useRef(edgeGlow)
+
+  const updateEdgeGlow = (next) => {
+    const current = edgeGlowRef.current
+    if (
+      current.left === next.left &&
+      current.right === next.right &&
+      current.top === next.top &&
+      current.bottom === next.bottom
+    ) return
+    edgeGlowRef.current = next
+    setEdgeGlow(next)
+  }
 
   useEffect(() => {
     return () => {
@@ -8332,10 +8360,11 @@ function ControlsOverlay({
     clearEmoteTimer()
     setEmoteMenu(null)
     setActiveEmoteId(null)
-    setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+    updateEdgeGlow({ left: false, right: false, top: false, bottom: false })
     touchRef.current.lookActive = false
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
+    clearPendingCameraDrag(touchRef.current)
     pinchRef.current = {
       distance,
       cameraDistance: touchRef.current.cameraDistance ?? CAMERA_DISTANCE,
@@ -8408,7 +8437,8 @@ function ControlsOverlay({
     touchRef.current.lookActive = true
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
-    setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+    clearPendingCameraDrag(touchRef.current)
+    updateEdgeGlow({ left: false, right: false, top: false, bottom: false })
     clearEmoteTimer()
     emoteTimerRef.current = window.setTimeout(() => {
       if (lookPointerIdRef.current !== event.pointerId) return
@@ -8416,7 +8446,7 @@ function ControlsOverlay({
       touchRef.current.lookActive = false
       touchRef.current.lookX = 0
       touchRef.current.lookY = 0
-      setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+      updateEdgeGlow({ left: false, right: false, top: false, bottom: false })
       setActiveEmoteId(null)
       setEmoteMenu({ x: event.clientX, y: event.clientY })
     }, EMOTE_LONG_PRESS_MS)
@@ -8445,12 +8475,7 @@ function ControlsOverlay({
 
     const stepX = event.clientX - lookLastRef.current.x
     const stepY = event.clientY - lookLastRef.current.y
-    touchRef.current.cameraYaw -= stepX * CAMERA_DRAG_SENSITIVITY
-    touchRef.current.cameraPitch = MathUtils.clamp(
-      touchRef.current.cameraPitch + stepY * CAMERA_DRAG_SENSITIVITY,
-      PLAYER_CAMERA_PITCH_MIN,
-      PLAYER_CAMERA_PITCH_MAX,
-    )
+    accumulatePendingCameraDrag(touchRef.current, stepX, stepY)
 
     const viewportW = window.innerWidth
     const viewportH = window.innerHeight
@@ -8467,7 +8492,7 @@ function ControlsOverlay({
     if (edgeTop) touchRef.current.lookY = -1
     if (edgeBottom) touchRef.current.lookY = 1
 
-    setEdgeGlow({ left: edgeLeft, right: edgeRight, top: edgeTop, bottom: edgeBottom })
+    updateEdgeGlow({ left: edgeLeft, right: edgeRight, top: edgeTop, bottom: edgeBottom })
 
     lookLastRef.current.x = event.clientX
     lookLastRef.current.y = event.clientY
@@ -8484,7 +8509,7 @@ function ControlsOverlay({
       touchRef.current.lookActive = false
       touchRef.current.lookX = 0
       touchRef.current.lookY = 0
-      setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+      updateEdgeGlow({ left: false, right: false, top: false, bottom: false })
       event.currentTarget.releasePointerCapture(event.pointerId)
       return
     }
@@ -8495,7 +8520,7 @@ function ControlsOverlay({
     touchRef.current.lookActive = false
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
-    setEdgeGlow({ left: false, right: false, top: false, bottom: false })
+    updateEdgeGlow({ left: false, right: false, top: false, bottom: false })
     event.currentTarget.releasePointerCapture(event.pointerId)
     if (selectedEmoteId) {
       touchRef.current.emoteQueued = selectedEmoteId
@@ -18377,7 +18402,6 @@ function PerfFrameProbe({
 }
 
 function RenderStatsProbe({
-  onStatsChange,
   onRendererInfo,
   active,
   resetKey,
@@ -18562,7 +18586,7 @@ function RenderStatsProbe({
       grassDebug: typeof window !== 'undefined' ? window.__grassDebug ?? null : null,
     }
     if (typeof window !== 'undefined') window.__gameRenderStats = nextStats
-    onStatsChange(nextStats)
+    publishRenderStats(nextStats)
 
     elapsedRef.current = 0
     framesRef.current = 0
@@ -18574,7 +18598,6 @@ function RenderStatsProbe({
 }
 
 function RenderStatsOverlay({
-  stats,
   toggles,
   terrainRenderMode,
   measurementEpoch,
@@ -18584,6 +18607,11 @@ function RenderStatsOverlay({
   onTerrainRenderModeChange,
   onToggle,
 }) {
+  const stats = useSyncExternalStore(
+    subscribeRenderStats,
+    getRenderStatsSnapshot,
+    getRenderStatsSnapshot,
+  )
   const [expanded, setExpanded] = useState(() => !isLikelyMobileDevice())
   const [activeBenchmarkEpoch, setActiveBenchmarkEpoch] = useState(null)
   const [benchmarkConfig, setBenchmarkConfig] = useState('')
@@ -18899,7 +18927,12 @@ function RenderStatsOverlay({
   )
 }
 
-function FpsOverlay({ stats }) {
+function FpsOverlay() {
+  const stats = useSyncExternalStore(
+    subscribeRenderStats,
+    getRenderStatsSnapshot,
+    getRenderStatsSnapshot,
+  )
   if (!stats) return null
   const fps = Math.round(stats.fps)
   const level = fps >= 50 ? 'good' : fps >= 30 ? 'ok' : 'low'
@@ -19214,7 +19247,6 @@ function App() {
       renderer: rendererInfo,
     }
   }, [dynamicRenderScale, effectiveRenderScale, performanceSettings, renderSettings, rendererInfo])
-  const [renderStats, setRenderStats] = useState(null)
   const [renderBenchmarkEpoch, setRenderBenchmarkEpoch] = useState(0)
   const [gpuWarningDismissed, setGpuWarningDismissed] = useState(false)
   const [freeCameraActive, setFreeCameraActive] = useState(false)
@@ -19393,6 +19425,8 @@ function App() {
     cameraDistance: CAMERA_DISTANCE,
     lookX: 0,
     lookY: 0,
+    lookDeltaX: 0,
+    lookDeltaY: 0,
     lookActive: false,
     actionQueued: false,
     punchQueued: false,
@@ -19456,6 +19490,7 @@ function App() {
       touchRef.current.moveY = 0
       touchRef.current.lookX = 0
       touchRef.current.lookY = 0
+      clearPendingCameraDrag(touchRef.current)
       touchRef.current.lookActive = false
       touchRef.current.actionQueued = false
       touchRef.current.punchQueued = false
@@ -21320,12 +21355,15 @@ function App() {
   }, [currentZone, mode, playerLocationStorageKey, progressScope, progressStorageKey])
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      const now = Date.now()
-      setScorePopups((previous) => previous.filter((popup) => now < popup.startAt + popup.duration))
-    }, 120)
-    return () => clearInterval(interval)
-  }, [])
+    const nextExpiry = getNextScorePopupExpiry(scorePopups)
+    if (nextExpiry == null) return undefined
+
+    const timeout = window.setTimeout(() => {
+      setScorePopups((previous) => pruneExpiredScorePopups(previous, Date.now()))
+    }, Math.max(0, nextExpiry - Date.now()) + 1)
+
+    return () => window.clearTimeout(timeout)
+  }, [scorePopups])
 
   useEffect(() => {
     return () => {
@@ -23665,6 +23703,7 @@ function App() {
     touchRef.current.moveY = 0
     touchRef.current.lookX = 0
     touchRef.current.lookY = 0
+    clearPendingCameraDrag(touchRef.current)
     touchRef.current.lookActive = false
     touchRef.current.actionQueued = false
     touchRef.current.punchQueued = false
@@ -23859,7 +23898,6 @@ function App() {
           <RenderQualityGovernor onScaleChange={setDynamicRenderScale} />
         )}
         <RenderStatsProbe
-          onStatsChange={setRenderStats}
           onRendererInfo={setRendererInfo}
           active={isDebugMode || performanceSettings.showFps}
           resetKey={`${terrainRenderMode}:${renderBenchmarkEpoch}:${Object.entries(debugToggles).map(([key, value]) => `${key}:${value ? 1 : 0}`).join(',')}`}
@@ -24387,7 +24425,6 @@ function App() {
       />
       {!loadingUiActive && mode === 'play' && isDebugMode && (
         <RenderStatsOverlay
-          stats={renderStats}
           toggles={debugToggles}
           terrainRenderMode={terrainRenderMode}
           measurementEpoch={renderBenchmarkEpoch}
@@ -24398,7 +24435,7 @@ function App() {
           onToggle={(key) => setDebugToggles((current) => ({ ...current, [key]: !current[key] }))}
         />
       )}
-      {!loadingUiActive && mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay stats={renderStats} />}
+      {!loadingUiActive && mode === 'play' && !isDebugMode && performanceSettings.showFps && <FpsOverlay />}
       <GpuWarning visible={!loadingUiActive && mode === 'play' && showGpuWarning} onDismiss={() => setGpuWarningDismissed(true)} />
 
       {showGameplayControls && (

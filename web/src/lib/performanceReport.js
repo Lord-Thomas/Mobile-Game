@@ -1,4 +1,4 @@
-const PERFORMANCE_REPORT_VERSION = 7
+const PERFORMANCE_REPORT_VERSION = 8
 const HITCH_THRESHOLDS_MS = Object.freeze({
   hitch: 25,
   stutter: 40,
@@ -6,6 +6,7 @@ const HITCH_THRESHOLDS_MS = Object.freeze({
 })
 const HITCH_SIGNAL_WINDOW_MS = 250
 const REACT_CORRELATION_WINDOW_MS = 16.7
+const CAMERA_LOOK_CORRELATION_WINDOW_MS = 50
 const PLACEABLE_CORRELATION_WINDOW_MS = 1500
 const MAP_ASSET_CORRELATION_WINDOW_MS = 2000
 const MAX_REPORTED_HITCHES = 8
@@ -49,6 +50,7 @@ function isUsefulHitchSignal(entry) {
   if (
     entry.type === 'browser:long-task' ||
     entry.type === 'react:commit' ||
+    entry.type === 'camera:look-frame' ||
     entry.type === 'asset:start' ||
     entry.type === 'asset:end' ||
     entry.type === 'asset:error'
@@ -77,8 +79,25 @@ function summarizeHitchSignal(entry, hitchTime) {
     nextCount: finite(data.nextCount),
     total: finite(data.total),
     frameGapMs: finite(data.frameGapMs),
+    deltaX: finite(data.deltaX),
+    deltaY: finite(data.deltaY),
+    magnitude: finite(data.magnitude),
+    yawDelta: finite(data.yawDelta),
+    pitchDelta: finite(data.pitchDelta),
     objects: Array.isArray(data.objects) ? data.objects.slice(0, 8) : null,
   }
+}
+
+function getCameraLookEventsNear(cameraLookEvents, hitchTime) {
+  if (!Number.isFinite(hitchTime)) return []
+  return cameraLookEvents
+    .filter((entry) => (
+      Number.isFinite(entry?.t) &&
+      Math.abs(entry.t - hitchTime) <= CAMERA_LOOK_CORRELATION_WINDOW_MS
+    ))
+    .sort((left, right) => Math.abs(left.t - hitchTime) - Math.abs(right.t - hitchTime))
+    .slice(0, 4)
+    .map((entry) => summarizeHitchSignal(entry, hitchTime))
 }
 
 function getPlaceableBatchesNear(placeableEvents, hitchTime) {
@@ -171,6 +190,15 @@ function summarizeReactCorrelations(analyzedHitches) {
   }
 }
 
+function summarizeCameraCorrelations(analyzedHitches) {
+  const hitchesWithCameraLook = analyzedHitches.filter(({ cameraLook }) => cameraLook.length > 0).length
+  return {
+    windowMs: CAMERA_LOOK_CORRELATION_WINDOW_MS,
+    hitchesWithCameraLook,
+    hitchesWithoutCameraLook: analyzedHitches.length - hitchesWithCameraLook,
+  }
+}
+
 function summarizeHitches(events = []) {
   const frameEvents = events
     .map((entry) => ({ entry, durationMs: readDuration(entry) }))
@@ -179,18 +207,20 @@ function summarizeHitches(events = []) {
   const reactCommitEvents = events.filter((entry) => entry?.type === 'react:commit')
   const placeableEvents = events.filter((entry) => entry?.type === 'placeables:reveal')
   const mapAssetEvents = events.filter((entry) => /^map-asset:/.test(entry?.type ?? ''))
+  const cameraLookEvents = events.filter((entry) => entry?.type === 'camera:look-frame')
   const analyzedHitches = hitches.map(({ entry, durationMs }) => ({
     entry,
     durationMs,
     reactCommits: getReactCommitsNear(reactCommitEvents, finite(entry.t)),
     placeableBatches: getPlaceableBatchesNear(placeableEvents, finite(entry.t)),
     mapAssets: getMapAssetEventsNear(mapAssetEvents, finite(entry.t)),
+    cameraLook: getCameraLookEventsNear(cameraLookEvents, finite(entry.t)),
   }))
   const top = analyzedHitches
     .slice()
     .sort((left, right) => right.durationMs - left.durationMs || Number(left.entry.t ?? 0) - Number(right.entry.t ?? 0))
     .slice(0, MAX_REPORTED_HITCHES)
-    .map(({ entry, durationMs, reactCommits, placeableBatches, mapAssets }) => {
+    .map(({ entry, durationMs, reactCommits, placeableBatches, mapAssets, cameraLook }) => {
       const hitchTime = finite(entry.t)
       const nearbySignals = events
         .filter((candidate) => {
@@ -215,6 +245,7 @@ function summarizeHitches(events = []) {
         reactCommits,
         placeableBatches,
         mapAssets,
+        cameraLook,
         nearbySignals,
       }
     })
@@ -228,6 +259,7 @@ function summarizeHitches(events = []) {
     },
     worstMs: hitches.length > 0 ? Math.max(...hitches.map(({ durationMs }) => durationMs)) : null,
     reactCorrelations: summarizeReactCorrelations(analyzedHitches),
+    cameraCorrelations: summarizeCameraCorrelations(analyzedHitches),
     top,
   }
 }

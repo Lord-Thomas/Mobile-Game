@@ -56,6 +56,18 @@ describe('performanceReport', () => {
           { type: 'frame', t: 1200, durationMs: 70, renderer: { calls: 210 } },
           { type: 'react:commit', t: 1199, data: { id: 'OutdoorNeighborhood', phase: 'update', durationMs: 5 } },
           {
+            type: 'camera:look-frame',
+            t: 1197,
+            data: {
+              source: 'pointer-coalesced',
+              deltaX: 18,
+              deltaY: -4,
+              magnitude: 18.439,
+              yawDelta: -0.126,
+              pitchDelta: -0.028,
+            },
+          },
+          {
             type: 'placeables:reveal',
             t: 1195,
             data: {
@@ -84,7 +96,7 @@ describe('performanceReport', () => {
     })
 
     expect(report.frame.p99Ms).toBe(23.8)
-    expect(report.version).toBe(7)
+    expect(report.version).toBe(8)
     expect(report.measurement).toEqual({
       epoch: 3,
       startedAtMs: 1000,
@@ -116,6 +128,11 @@ describe('performanceReport', () => {
         maxRenderMs: 5,
       }],
     })
+    expect(report.diagnostics.hitches.cameraCorrelations).toEqual({
+      windowMs: 50,
+      hitchesWithCameraLook: 1,
+      hitchesWithoutCameraLook: 2,
+    })
     expect(report.diagnostics.hitches.top[0]).toMatchObject({
       timeMs: 1200,
       durationMs: 70,
@@ -144,6 +161,16 @@ describe('performanceReport', () => {
         source: 'map-objects',
         url: '/models/map/skeleton_tower/model.glb',
         objects: [{ id: 'tower-1', objectId: 'skeleton_tower', assetUrl: '/models/map/skeleton_tower/model.glb' }],
+      }],
+      cameraLook: [{
+        type: 'camera:look-frame',
+        offsetMs: -3,
+        source: 'pointer-coalesced',
+        deltaX: 18,
+        deltaY: -4,
+        magnitude: 18.439,
+        yawDelta: -0.126,
+        pitchDelta: -0.028,
       }],
     })
     expect(report.diagnostics.hitches.top[0].nearbySignals[0]).toMatchObject({
