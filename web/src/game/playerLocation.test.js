@@ -35,6 +35,23 @@ describe('playerLocation', () => {
     expect(location.position).toEqual([5, 0.42, -5])
   })
 
+  it('remplace une position incompatible avec sa zone par le spawn de cette zone', () => {
+    const location = normalizeSavedPlayerLocation({
+      zone: 'outside',
+      position: [0, 0.42, 2.2],
+      savedAt: 42,
+    }, {
+      ...options,
+      isPositionValid: (zone, position) => zone !== 'outside' || position[0] < -5,
+    })
+
+    expect(location).toMatchObject({
+      zone: 'outside',
+      position: [-6, 0.42, 0],
+      savedAt: 42,
+    })
+  })
+
   it('refuse une zone inconnue ou des coordonnées invalides', () => {
     expect(normalizeSavedPlayerLocation({ zone: 'void', position: [0, 0, 0] }, options)).toBeNull()
     expect(normalizeSavedPlayerLocation({ zone: 'outside', position: [0, NaN, 0] }, options)).toBeNull()

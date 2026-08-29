@@ -4226,6 +4226,7 @@ function Player({
   wingsUiRef = null,
   onWingsParticleBurst = null,
   onFallDamage = null,
+  loadOptionalAnimations = false,
 }) {
   const playerBodyRef = useRef()
   const visualRef = useRef()
@@ -5683,6 +5684,7 @@ function Player({
             equippedWeapon={equippedWeapon}
             appearance={appearance}
             currentZone={currentZone}
+            loadOptionalAnimations={loadOptionalAnimations}
           />
           <FloatingMagicBook active={equippedWeapon === 'magic_book'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
           <FloatingMagicSkull active={equippedWeapon === 'magic_skull'} handBoneRef={handBoneRef} playerGroupRef={visualRef} />
@@ -6162,6 +6164,41 @@ function useMixamoGlbAnimation(url, positionScale = MIXAMO_GLB_POSITION_SCALE) {
   }, [glb, positionScale])
 }
 
+const OPTIONAL_PLAYER_MOTIONS = new Set(['wave', 'dance', 'pointingUp'])
+
+function DeferredPlayerAnimationAssets({ onReady }) {
+  const wave = useMixamoGlbAnimation('/models/player/anim/waving.glb')
+  const dance = useMixamoGlbAnimation('/models/player/anim/dance.glb')
+  const pointingUp = useMixamoGlbAnimation('/models/player/anim/pointing-up.glb')
+  const assets = useMemo(() => ({
+    wave,
+    dance,
+    pointingUp,
+  }), [dance, pointingUp, wave])
+
+  useEffect(() => {
+    onReady?.(assets)
+  }, [assets, onReady])
+
+  return null
+}
+
+// Contrairement à drei/useAnimations, ce registre ne stoppe pas les actions
+// existantes quand un lot optionnel de clips est ajouté après le démarrage.
+function useIncrementalAnimations(clips, root) {
+  const mixer = useMemo(() => new AnimationMixer(root), [root])
+  const actions = useMemo(() => Object.fromEntries(
+    clips.map((clip) => [clip.name, mixer.clipAction(clip, root)]),
+  ), [clips, mixer, root])
+
+  useFrame((_, delta) => mixer.update(delta))
+  useEffect(() => () => {
+    mixer.stopAllAction()
+  }, [mixer])
+
+  return { actions, mixer }
+}
+
 function PlayerAvatar({
   motion,
   handBoneRef,
@@ -6169,6 +6206,7 @@ function PlayerAvatar({
   equippedWeapon,
   appearance,
   currentZone,
+  loadOptionalAnimations = false,
 }) {
   const { gl } = useThree()
   const { scene: modelScene } = useGLTF(PLAYER_MODEL_URL)
@@ -6186,15 +6224,31 @@ function PlayerAvatar({
   const swordSlash2 = useMixamoGlbAnimation('/models/player/anim/sword-slash-2.glb')
   const swordSlash3 = useMixamoGlbAnimation('/models/player/anim/sword-slash-3.glb')
   const dodgeRoll = useMixamoGlbAnimation('/models/player/anim/dodge-roll.glb')
-  const wave = useMixamoGlbAnimation('/models/player/anim/waving.glb')
-  const dance = useMixamoGlbAnimation('/models/player/anim/dance.glb')
-  const pointingUp = useMixamoGlbAnimation('/models/player/anim/pointing-up.glb')
   const jumpStart = useMixamoGlbAnimation('/models/player/anim/jump-start.glb')
   const jumpLoop = useMixamoGlbAnimation('/models/player/anim/jump-loop.glb')
   const jumpLand = useMixamoGlbAnimation('/models/player/anim/jump-land.glb')
   const sitDown = useMixamoGlbAnimation('/models/player/anim/stand-to-sit.glb')
   const sittingIdle = useMixamoGlbAnimation('/models/player/anim/sitting-idle.glb')
   const standUp = useMixamoGlbAnimation('/models/player/anim/stand-up.glb')
+  const [optionalAnimations, setOptionalAnimations] = useState(null)
+  const [optionalAnimationLoadStarted, setOptionalAnimationLoadStarted] = useState(false)
+
+  useEffect(() => {
+    const requested = loadOptionalAnimations || OPTIONAL_PLAYER_MOTIONS.has(motion)
+    if (!requested || optionalAnimationLoadStarted) return undefined
+    let idleId = 0
+    let timeoutId = 0
+    const start = () => setOptionalAnimationLoadStarted(true)
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(start, { timeout: 1200 })
+    } else {
+      timeoutId = window.setTimeout(start, 180)
+    }
+    return () => {
+      if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
+  }, [loadOptionalAnimations, motion, optionalAnimationLoadStarted])
   const avatar = useMemo(() => {
     const next = clone(modelScene)
     next.visible = false
@@ -6355,7 +6409,7 @@ function PlayerAvatar({
     })
   }, [avatar, appearance])
 
-  const animationClips = useMemo(() => {
+  const coreAnimationClips = useMemo(() => {
     const hipsRestHeight = getHipsRestHeight(idle.animations[0])
     const clips = [
       { source: idle.animations[0], name: 'idle' },
@@ -6370,9 +6424,6 @@ function PlayerAvatar({
       { source: swordSlash2.animations[0], name: 'swordSlash2' },
       { source: swordSlash3.animations[0], name: 'swordSlash3' },
       { source: dodgeRoll.animations[0], name: 'dodgeRoll' },
-      { source: wave.animations[0], name: 'wave' },
-      { source: dance.animations[0], name: 'dance' },
-      { source: pointingUp.animations[0], name: 'pointingUp' },
       { source: jumpStart.animations[0], name: 'jumpStart' },
       { source: jumpLoop.animations[0], name: 'fallingIdle' },
       { source: jumpLand.animations[0], name: 'jumpLand' },
@@ -6387,17 +6438,33 @@ function PlayerAvatar({
       .map(({ source, name }) => {
         const clip = source.clone()
         clip.name = name
-        if (name === 'wave' || name === 'dance' || name === 'pointingUp') {
-          lockEmoteHipsHeight(clip, hipsRestHeight)
-        }
         if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun' || name === 'dodgeRoll') {
           lockHipsPlanarPosition(clip)
         }
         return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, dodgeRoll.animations, wave.animations, dance.animations, pointingUp.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, dodgeRoll.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
-  const { actions, mixer } = useAnimations(animationClips, avatar)
+  const optionalAnimationClips = useMemo(() => {
+    if (!optionalAnimations) return []
+    const hipsRestHeight = getHipsRestHeight(idle.animations[0])
+    return [
+      { source: optionalAnimations.wave.animations[0], name: 'wave' },
+      { source: optionalAnimations.dance.animations[0], name: 'dance' },
+      { source: optionalAnimations.pointingUp.animations[0], name: 'pointingUp' },
+    ].filter(({ source }) => source).map(({ source, name }) => {
+      const clip = source.clone()
+      clip.name = name
+      lockEmoteHipsHeight(clip, hipsRestHeight)
+      return filterAnimationClipTracksForObject(clip, avatar)
+    })
+  }, [avatar, idle.animations, optionalAnimations])
+  const animationClips = useMemo(
+    () => [...coreAnimationClips, ...optionalAnimationClips],
+    [coreAnimationClips, optionalAnimationClips],
+  )
+
+  const { actions, mixer } = useIncrementalAnimations(animationClips, avatar)
   const currentActionRef = useRef(null)
   const currentMotionRef = useRef(null)
   const revealFramesRef = useRef(0)
@@ -6538,14 +6605,19 @@ function PlayerAvatar({
   // Avec l'épée équipée, le joueur adopte sa garde au repos et frappe avec
   // l'animation dédiée. Les déplacements et les états aériens restent inchangés.
   const resolveMotion = (nextMotion) => {
-    if (equippedWeapon !== 'cheat_sword') return nextMotion
-    if (nextMotion === 'idle') return 'swordIdle'
-    if (nextMotion === 'walk') return 'swordWalk'
-    if (nextMotion === 'run') return 'swordRun'
-    if (nextMotion === 'punch') return 'swordSlash'
-    if (nextMotion === 'punch2') return 'swordSlash2'
-    if (nextMotion === 'punch3') return 'swordSlash3'
-    return nextMotion
+    let resolvedMotion = nextMotion
+    if (equippedWeapon === 'cheat_sword') {
+      if (nextMotion === 'idle') resolvedMotion = 'swordIdle'
+      else if (nextMotion === 'walk') resolvedMotion = 'swordWalk'
+      else if (nextMotion === 'run') resolvedMotion = 'swordRun'
+      else if (nextMotion === 'punch') resolvedMotion = 'swordSlash'
+      else if (nextMotion === 'punch2') resolvedMotion = 'swordSlash2'
+      else if (nextMotion === 'punch3') resolvedMotion = 'swordSlash3'
+    }
+    if (OPTIONAL_PLAYER_MOTIONS.has(resolvedMotion) && !actions[resolvedMotion]) {
+      return equippedWeapon === 'cheat_sword' ? 'swordIdle' : 'idle'
+    }
+    return resolvedMotion
   }
 
   useEffect(() => {
@@ -6684,6 +6756,11 @@ function PlayerAvatar({
 
   return (
     <group>
+      {optionalAnimationLoadStarted && !optionalAnimations && (
+        <Suspense fallback={null}>
+          <DeferredPlayerAnimationAssets onReady={setOptionalAnimations} />
+        </Suspense>
+      )}
       <CharacterAuraGlow visible={avatarReady && appearance?.auraEquipped} />
       <primitive
         object={avatar}
@@ -8129,6 +8206,7 @@ function RemotePlayer({
             equippedWeapon={displayedEquippedWeapon}
             appearance={displayedAppearance}
             currentZone={currentZone}
+            loadOptionalAnimations
           />
           <FloatingMagicBook active={displayedEquippedWeapon === 'magic_book'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
           <FloatingMagicSkull active={displayedEquippedWeapon === 'magic_skull'} handBoneRef={remoteHandBoneRef} playerGroupRef={groupRef} />
@@ -19664,6 +19742,7 @@ function App() {
   const outdoorZoneReadyRef = useRef(false)
   const outdoorReadinessSnapshotRef = useRef('')
   const [spawnRequest, setSpawnRequest] = useState(null)
+  const [playerSpawnReady, setPlayerSpawnReady] = useState(false)
   const [captureUiHidden, setCaptureUiHidden] = useState(false)
   const [shaderWarmupComplete, setShaderWarmupComplete] = useState(false)
   // Slice "editor" migré vers le store. setEditor(key, value|updater).
@@ -19777,6 +19856,7 @@ function App() {
   const authUserRef = useRef(null)
   const latestProgressRef = useRef(null)
   const restoredPlayerLocationSavedAtRef = useRef(-1)
+  const hasResolvedInitialPlayerSpawnRef = useRef(false)
   const personalProgressRef = useRef(null)
   const [personalProgressVersion, setPersonalProgressVersion] = useState(0)
   const [worldDataReady, setWorldDataReady] = useState(() => !isSupabaseConfigured)
@@ -20201,14 +20281,14 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isAdminMode, isVerticalFrameMode])
 
-  const createCurrentPlayerLocation = () => createSavedPlayerLocation({
+  const createCurrentPlayerLocation = () => playerSpawnReady ? createSavedPlayerLocation({
     zone: currentZone,
     position: playerPositionRef.current,
     rotationY: playerBodyYawRef.current,
     cameraYaw: touchRef.current.cameraYaw,
     cameraPitch: touchRef.current.cameraPitch,
     cameraDistance: touchRef.current.cameraDistance,
-  })
+  }) : null
 
   const createCurrentProgressSnapshot = () => ({
     displayName,
@@ -20552,9 +20632,25 @@ function App() {
       setAccount('friends',(current) => mergeSocialFriends(current, parsed.friends))
     }
     if (includeLocation && parsed.lastLocation) {
+      const restoredHouseLayout = includeWorld && parsed.housePlan
+        ? deriveHouseLayout(normalizeHousePlan(parsed.housePlan))
+        : activeHouseLayout
+      const restoredEntrance = getHouseEntranceTransform(restoredHouseLayout)
+      const restoredSpawns = restoredEntrance ? {
+        interior: [restoredEntrance.insidePosition.x, PLAYER_HEIGHT, restoredEntrance.insidePosition.z],
+        secondRoom: [restoredEntrance.insidePosition.x, PLAYER_HEIGHT, restoredEntrance.insidePosition.z],
+        outside: [restoredEntrance.outsidePosition.x, PLAYER_HEIGHT, restoredEntrance.outsidePosition.z],
+      } : PLAYER_SPAWNS
       const location = normalizeSavedPlayerLocation(parsed.lastLocation, {
         limitsByZone: PLAY_AREA_LIMITS,
-        fallbackSpawns: PLAYER_SPAWNS,
+        fallbackSpawns: restoredSpawns,
+        isPositionValid: (zone, position) => {
+          if (zone !== ZONES.outside) return true
+          const [x, y, z] = position
+          if (!isInsideHouseFloor(restoredHouseLayout, { x, z })) return true
+          const wallTopY = Number(restoredHouseLayout?.maxWallHeight)
+          return Number.isFinite(wallTopY) && y - PLAYER_HEIGHT >= wallTopY - 0.05
+        },
       })
       if (location && shouldApplySavedPlayerLocation(
         location,
@@ -20571,14 +20667,16 @@ function App() {
           y = surfaceY + PLAYER_HEIGHT
         } else {
           const preferred = { x, z }
-          if (!isInsideHouseFloor(activeHouseLayout, preferred)) {
-            const fallback = PLAYER_SPAWNS.interior
+          if (!isInsideHouseFloor(restoredHouseLayout, preferred)) {
+            const fallback = restoredSpawns.interior
             x = fallback[0]
             z = fallback[2]
           }
           y = PLAYER_HEIGHT
         }
         restoredPlayerLocationSavedAtRef.current = location.savedAt
+        hasResolvedInitialPlayerSpawnRef.current = true
+        setPlayerSpawnReady(false)
         setView('zone', location.zone)
         playerBodyYawRef.current = location.rotationY
         setSpawnRequest({
@@ -20705,7 +20803,7 @@ function App() {
   }
 
   const saveCurrentProgressToCloud = async () => {
-    if (!isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return false
+    if (!playerSpawnReady || !isSupabaseConfigured || !authUserRef.current || !hasLoadedCloudProgressRef.current) return false
     setAccount('cloudSaveState','saving')
     try {
       const snapshot = isGuestVisit
@@ -20789,9 +20887,9 @@ function App() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(progressStorageKey)
-      if (!raw) return
-      const parsed = JSON.parse(raw)
+      const parsed = raw ? JSON.parse(raw) : {}
       const rawLocation = localStorage.getItem(playerLocationStorageKey)
+      if (!raw && !rawLocation) return
       if (rawLocation) {
         const localLocation = JSON.parse(rawLocation)
         if ((localLocation?.savedAt ?? 0) >= (parsed.lastLocation?.savedAt ?? 0)) {
@@ -20804,7 +20902,19 @@ function App() {
   }, [playerLocationStorageKey, progressStorageKey])
 
   useEffect(() => {
-    if (!worldDataReady) return undefined
+    if (!worldDataReady || hasResolvedInitialPlayerSpawnRef.current || spawnRequest) return
+    hasResolvedInitialPlayerSpawnRef.current = true
+    setPlayerSpawnReady(false)
+    setView('zone', ZONES.interior)
+    setSpawnRequest({
+      zone: ZONES.interior,
+      position: [...PLAYER_SPAWNS.interior],
+      token: Date.now(),
+    })
+  }, [spawnRequest, worldDataReady])
+
+  useEffect(() => {
+    if (!worldDataReady || !playerSpawnReady) return undefined
     const snapshot = isGuestVisit ? createPersonalProgressSnapshot() : createCurrentProgressSnapshot()
     latestProgressRef.current = snapshot
     let idleId = 0
@@ -20831,10 +20941,10 @@ function App() {
       if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
       if (timeoutId) window.clearTimeout(timeoutId)
     }
-  }, [worldDataReady, isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [worldDataReady, playerSpawnReady, isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
-    if (!worldDataReady) return undefined
+    if (!worldDataReady || !playerSpawnReady) return undefined
     const persistLocation = () => {
       const location = createCurrentPlayerLocation()
       if (!location) return
@@ -20846,7 +20956,7 @@ function App() {
     }
     const intervalId = window.setInterval(persistLocation, 2000)
     return () => window.clearInterval(intervalId)
-  }, [currentZone, playerLocationStorageKey, worldDataReady])
+  }, [currentZone, playerLocationStorageKey, playerSpawnReady, worldDataReady])
 
   useEffect(() => {
     authUserRef.current = authUser
@@ -21283,6 +21393,7 @@ function App() {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !authUser || !hasLoadedCloudProgressRef.current) return undefined
+    if (!playerSpawnReady) return undefined
     if (mode === 'customize') return undefined
     if (skipNextCloudSaveRef.current) {
       skipNextCloudSaveRef.current = false
@@ -21306,7 +21417,7 @@ function App() {
     return () => {
       if (cloudSaveTimeoutRef.current) window.clearTimeout(cloudSaveTimeoutRef.current)
     }
-  }, [isGuestVisit, authUser, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
+  }, [isGuestVisit, authUser, playerSpawnReady, progressScope, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, equippedWeapon, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials, mode])
 
   useEffect(() => {
     const persistFreshSnapshot = () => {
@@ -21323,13 +21434,13 @@ function App() {
       return snapshot
     }
     const saveBeforeLeaving = () => {
-      if (worldDataReady && mode !== 'customize' && document.visibilityState === 'hidden') {
+      if (worldDataReady && playerSpawnReady && mode !== 'customize' && document.visibilityState === 'hidden') {
         persistFreshSnapshot()
         saveCurrentProgressToCloud()
       }
     }
     const saveOnPageHide = () => {
-      if (worldDataReady && mode !== 'customize') {
+      if (worldDataReady && playerSpawnReady && mode !== 'customize') {
         persistFreshSnapshot()
         saveCurrentProgressToCloud()
       }
@@ -21341,7 +21452,7 @@ function App() {
       document.removeEventListener('visibilitychange', saveBeforeLeaving)
       window.removeEventListener('pagehide', saveOnPageHide)
     }
-  }, [currentZone, mode, playerLocationStorageKey, progressScope, progressStorageKey, worldDataReady])
+  }, [currentZone, mode, playerLocationStorageKey, playerSpawnReady, progressScope, progressStorageKey, worldDataReady])
 
   useEffect(() => {
     const nextExpiry = getNextScorePopupExpiry(scorePopups)
@@ -21781,6 +21892,7 @@ function App() {
         playerHpRef.current = PLAYER_MAX_HP
         setPlayerHp(PLAYER_MAX_HP)
         const spawn = PLAYER_SPAWNS.outside
+        setPlayerSpawnReady(false)
         setSpawnRequest({ zone: ZONES.outside, position: spawn, token: Date.now() })
         touchRef.current.moveX = 0
         touchRef.current.moveY = 0
@@ -21858,6 +21970,7 @@ function App() {
     // valide, avant la prochaine frame de déplacement.
     if (currentZone !== ZONES.outside && !isInsideHouseFloor(activeHouseLayout, playerPositionRef.current)) {
       const safePosition = getSafeHousePosition(activeHouseLayout, houseEntrance?.insidePosition, reservedStations)
+      setPlayerSpawnReady(false)
       setSpawnRequest({
         zone: currentZone,
         position: [safePosition.x, PLAYER_HEIGHT, safePosition.z],
@@ -23128,6 +23241,7 @@ function App() {
           : 'Installation des meubles...',
       })
       resetLoadTask(INITIAL_PLACEABLES_LOAD_TASK)
+      setPlayerSpawnReady(false)
       setView('zone',nextZone)
       setSpawnRequest({ zone: nextZone, position: spawn, token: Date.now() })
       touchRef.current.moveX = 0
@@ -23778,6 +23892,7 @@ function App() {
   }, [updateLoadingExperience])
 
   const consumeSpawnRequest = useCallback((token) => {
+    setPlayerSpawnReady(true)
     setSpawnRequest((current) => (
       current?.token === token ? null : current
     ))
@@ -23834,10 +23949,15 @@ function App() {
   const outdoorObjectsMounted = outdoorContentMounted && outdoorContentStage >= 3
   const outdoorGrassMounted = outdoorContentMounted && outdoorContentStage >= 4
   const outdoorEnemiesMountedInScene = outdoorContentMounted && outdoorContentStage >= 5
-  const outdoorEnemiesReady = outdoorRuntimeContentActive
+  const outdoorEnemiesPrepared = outdoorRuntimeContentActive
     && (outdoorEntryPreparing || outdoorRuntimeRevealStage >= 3)
     && outdoorContentStage >= 5
-  const outdoorVisualsReady = outdoorEnemiesReady && (
+  const outdoorEnemiesActive = playerSpawnReady
+    && isOutsideZone
+    && mode === 'play'
+    && outdoorRuntimeRevealStage >= 3
+    && outdoorContentStage >= 5
+  const outdoorVisualsReady = outdoorEnemiesPrepared && (
     monsterSpawnSlots.length === 0
     || outdoorEnemiesMounted
   )
@@ -23867,7 +23987,7 @@ function App() {
         <ArtDirectionRuntime />
         <GameFrameSchedulerDriver />
         <MobActivitySystem
-          enabled={outdoorEnemiesReady}
+          enabled={outdoorEnemiesActive}
           mobGroupRef={mobGroupRef}
           localPlayerPositionRef={playerPositionRef}
           remotePlayerStateRef={remotePlayerStateRef}
@@ -24205,7 +24325,7 @@ function App() {
           {outdoorEnemiesMountedInScene && outdoorEnemyAssetsReady && (
             <Defer level={2}>
             <ProgressiveOutdoorEnemyLayer
-              enabled={outdoorEnemiesReady}
+              enabled={outdoorEnemiesActive}
               assetsReady={outdoorEnemyAssetsReady}
               retainMounted={outdoorTransitionPrimed}
               slots={monsterSpawnSlots}
@@ -24319,6 +24439,7 @@ function App() {
                 sourceId: 'fall',
                 attackType: ATTACK_TYPE.PERSISTENT_AREA,
               })}
+              loadOptionalAnimations={initialWorldReady}
               onSpawnConsumed={consumeSpawnRequest}
               dragonRide={{
                 active: dragonMounted,

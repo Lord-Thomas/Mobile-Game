@@ -33,19 +33,28 @@ export function createSavedPlayerLocation({
   }
 }
 
-export function normalizeSavedPlayerLocation(value, { limitsByZone, fallbackSpawns } = {}) {
+export function normalizeSavedPlayerLocation(value, {
+  limitsByZone,
+  fallbackSpawns,
+  isPositionValid,
+} = {}) {
   const normalized = createSavedPlayerLocation(value)
   if (!normalized) return null
   const limits = limitsByZone?.[normalized.zone]
   const fallback = fallbackSpawns?.[normalized.zone]
   if (!limits || !Array.isArray(fallback)) return null
+  const position = [
+    clamp(normalized.position[0], limits.minX, limits.maxX),
+    normalized.position[1],
+    clamp(normalized.position[2], limits.minZ, limits.maxZ),
+  ]
+  const validatedPosition = typeof isPositionValid === 'function'
+    && !isPositionValid(normalized.zone, position)
+    ? [...fallback]
+    : position
   return {
     ...normalized,
-    position: [
-      clamp(normalized.position[0], limits.minX, limits.maxX),
-      normalized.position[1],
-      clamp(normalized.position[2], limits.minZ, limits.maxZ),
-    ],
+    position: validatedPosition,
   }
 }
 
