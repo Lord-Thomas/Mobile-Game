@@ -40,6 +40,7 @@ export default function InteractionPrompts({
   bossPlacements = [],
   bossAuthority = true,
   bossOfferingAvailable = false,
+  bossOfferingFreeForTests = false,
   onConsumeBossOffering,
   onRequestBossSummon,
   contextWindowOpen = false,
@@ -55,6 +56,9 @@ export default function InteractionPrompts({
   const nearbyQuestNpcId = useGameStore((s) => s.near.questNpcId ?? null)
   const bossActive = useBossStore((s) => s.active)
   const nearAltarId = useBossStore((s) => s.nearAltarId)
+  const bossRuntimeStatus = useBossStore((s) => s.runtimePreparationStatus)
+  const bossRuntimeReady = bossRuntimeStatus === 'ready'
+  const canOfferToBoss = bossOfferingFreeForTests || bossOfferingAvailable
 
   const menuSkin = useGameStore((s) => s.menus.skin ?? false)
   const menuEnvironment = useGameStore((s) => s.menus.environment ?? false)
@@ -66,10 +70,10 @@ export default function InteractionPrompts({
   if (!showCaptureUi || !modePlay || !noChoiceMenu) return null
 
   const summonBoss = () => {
-    if (useBossStore.getState().active || !bossOfferingAvailable) return
+    if (useBossStore.getState().active || !bossRuntimeReady || !canOfferToBoss) return
     const altar = bossPlacements.find((placement) => placement.id === nearAltarId)
     if (!altar) return
-    if (!onConsumeBossOffering?.()) return
+    if (!bossOfferingFreeForTests && !onConsumeBossOffering?.()) return
     if (!bossAuthority) {
       onRequestBossSummon?.({ type: 'summon', altarId: altar.id })
       return
@@ -98,10 +102,18 @@ export default function InteractionPrompts({
         : isOutsideZone && nearAltarId && !bossActive
             ? {
                 key: 'summon-boss',
-                label: bossOfferingAvailable ? 'Invoquer (1 cristal bleu + 1 rouge)' : 'Offrande requise : 1 bleu + 1 rouge',
+                label: !bossRuntimeReady
+                  ? bossRuntimeStatus === 'error'
+                    ? 'Autel temporairement indisponible'
+                    : 'L’autel rassemble son énergie...'
+                  : bossOfferingFreeForTests
+                    ? 'Invoquer (test gratuit)'
+                    : bossOfferingAvailable
+                      ? 'Invoquer (1 cristal bleu + 1 rouge)'
+                      : 'Offrande requise : 1 bleu + 1 rouge',
                 className: 'custom-open-btn',
                 onClick: summonBoss,
-                disabled: !bossOfferingAvailable,
+                disabled: !bossRuntimeReady || !canOfferToBoss,
               }
           : nearOutdoorDoor
             ? { key: 'door', label: isOutsideZone ? 'Entrer' : 'Sortir', className: 'outdoor-open-btn', onClick: onOutdoorToggle }

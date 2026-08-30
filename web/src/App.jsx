@@ -24829,6 +24829,7 @@ function App() {
         bossPlacements={SUMMONING_ALTAR_PLACEMENTS}
         bossAuthority={!isGuestVisit}
         bossOfferingAvailable={canConsumeItems(materials, SLIME_BOSS.summonOffering)}
+        bossOfferingFreeForTests={import.meta.env.DEV}
         onConsumeBossOffering={consumeBossOffering}
         onRequestBossSummon={({ altarId }) => sendBossSummonRequest(multiplayerChannelRef.current, altarId)}
         contextWindowOpen={questDialogOpen || questJournalOpen || vendorOpen || companionMenuOpen}

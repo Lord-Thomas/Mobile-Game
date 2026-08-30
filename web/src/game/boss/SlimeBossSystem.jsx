@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -16,7 +16,9 @@ import { PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS } from '../constants'
 import ParticleEffect from '../../effects/ParticleEffect'
 import { useStoredParticlePreset } from '../../effects/storedParticlePresets'
 import { completeLoadTask, resetLoadTask } from '../../lib/loadTaskRegistry'
+import { perfDiagnostics } from '../../lib/perfDiagnostics'
 import SlimeProceduralModel from '../../enemies/SlimeProceduralModel'
+import { prepareBossRuntime } from './bossRuntimePreparation'
 
 export const SLIME_BOSS_PREPARE_TASK = 'slime-boss:prepare'
 resetLoadTask(SLIME_BOSS_PREPARE_TASK)
@@ -113,7 +115,6 @@ function BossPhasePrewarm({
         <sphereGeometry args={[0.48, 16, 12]} />
         <meshStandardMaterial color="#e31520" emissive="#7b0000" emissiveIntensity={0.8} roughness={0.55} />
       </mesh>
-      <pointLight color="#ff1f18" intensity={0} distance={8} />
       <ParticleEffect preset={shockwavePreset} playing={false} warmup />
     </group>
   )
@@ -398,6 +399,9 @@ function BossHazards({
   onDamagePlayer,
   movementSpeedMultiplierRef,
   timeOffsetRef,
+  shockwavePreset,
+  fireballPreset,
+  groundZonePreset,
 }) {
   const hazards = useBossStore((state) => state.hazards)
   const attack = useBossStore((state) => state.attack)
@@ -406,20 +410,6 @@ function BossHazards({
   const damageTimesRef = useRef(new Map())
   const shockImpactRef = useRef(null)
   const shockHitRef = useRef(null)
-  const shockwavePreset = useStoredParticlePreset('slime_shockwave_fire')
-  const storedFireballPreset = useStoredParticlePreset('fireball_projectile')
-  const fireballPreset = useMemo(() => (
-    storedFireballPreset
-      ? {
-          ...storedFireballPreset,
-          // Une salve ne doit jamais modifier le nombre de lumières de la scène :
-          // Three.js recompilerait alors les shaders du décor à l'apparition et à l'impact.
-          light: { ...storedFireballPreset.light, enabled: false },
-        }
-      : null
-  ), [storedFireballPreset])
-  const groundZonePreset = useStoredParticlePreset('slime_projectile_zone')
-
   useEffect(() => () => {
     if (movementSpeedMultiplierRef) movementSpeedMultiplierRef.current = 1
   }, [movementSpeedMultiplierRef])
@@ -751,7 +741,6 @@ function BossModel({
   const deathTimeRef = useRef(0)
   const lastSimulationAtRef = useRef(0)
   const spawn = useBossStore((state) => state.spawn)
-  const phase = useBossStore((state) => state.phase)
 
   const swordRef = useRef(swordEquipped)
   const hitRef = useRef(onBossHit)
@@ -918,9 +907,97 @@ function BossModel({
       }}
     >
       <primitive object={scene} />
-      <pointLight color="#ff1f18" intensity={phase === 3 ? 2.2 : 0} distance={8} />
     </group>
   )
+}
+
+function BossRuntimeLight() {
+  const lightRef = useRef(null)
+
+  useFrame(() => {
+    if (!lightRef.current) return
+    const boss = useBossStore.getState()
+    const safePosition = boss.position ?? boss.spawn ?? [0, -500, 0]
+    lightRef.current.position.fromArray(safePosition)
+    lightRef.current.intensity = boss.active && boss.state !== 'dying' && boss.phase === 3 ? 2.2 : 0
+  })
+
+  // Cette lumière reste visible et montée pendant toute la session. Changer le
+  // nombre de lumières visibles change les defines GLSL de tous les matériaux
+  // standards et provoque une recompilation globale au moment de l'invocation.
+  return (
+    <pointLight
+      ref={lightRef}
+      position={[0, -500, 0]}
+      color="#ff1f18"
+      intensity={0}
+      distance={8}
+      userData={{ debugCategory: 'boss-runtime-light' }}
+    />
+  )
+}
+
+function BossRuntimePreparer({ runtimeRootRef, assetsReady }) {
+  const { gl, scene, camera } = useThree()
+  const preparationEpochRef = useRef(0)
+
+  useEffect(() => {
+    if (!assetsReady || !runtimeRootRef.current) return undefined
+
+    const epoch = preparationEpochRef.current + 1
+    preparationEpochRef.current = epoch
+    let cancelled = false
+    const setPreparation = useBossStore.getState().setRuntimePreparation
+    const waitFrame = () => new Promise((resolve) => window.requestAnimationFrame(resolve))
+
+    const run = async () => {
+      setPreparation('loading')
+      perfDiagnostics.event('boss:runtime-prepare-start', {
+        programs: gl.info?.programs?.length ?? null,
+      })
+
+      // Laisse React attacher les derniers matériaux/presets au graphe avant de
+      // prendre l'instantané détaché utilisé par compileAsync.
+      await waitFrame()
+      await waitFrame()
+      if (cancelled || preparationEpochRef.current !== epoch) return
+
+      setPreparation('compiling')
+      const startedAt = performance.now()
+      try {
+        const result = await prepareBossRuntime({
+          renderer: gl,
+          scene,
+          camera,
+          runtimeRoot: runtimeRootRef.current,
+          waitFrame,
+        })
+        if (cancelled || preparationEpochRef.current !== epoch) return
+        setPreparation('ready')
+        completeLoadTask(SLIME_BOSS_PREPARE_TASK)
+        perfDiagnostics.event('boss:runtime-prepare-ready', {
+          durationMs: performance.now() - startedAt,
+          ...result,
+        })
+      } catch (error) {
+        if (cancelled || preparationEpochRef.current !== epoch) return
+        const message = error instanceof Error ? error.message : String(error)
+        setPreparation('error', message)
+        // Ne garde jamais l'écran de chargement prisonnier d'un pilote WebGL en
+        // erreur. L'autel reste verrouillé et expose clairement l'état d'échec.
+        completeLoadTask(SLIME_BOSS_PREPARE_TASK)
+        perfDiagnostics.event('boss:runtime-prepare-error', { message })
+        console.warn('[boss] Runtime preparation failed', error)
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [assetsReady, camera, gl, runtimeRootRef, scene])
+
+  return null
 }
 
 export default function SlimeBossSystem({
@@ -939,22 +1016,40 @@ export default function SlimeBossSystem({
   enabled = true,
   mobGroupRef = null,
 }) {
+  const runtimeRootRef = useRef(null)
   const minions = useBossStore((state) => state.minions)
   const shockwavePreset = useStoredParticlePreset('slime_shockwave_fire')
+  const storedFireballPreset = useStoredParticlePreset('fireball_projectile')
+  const groundZonePreset = useStoredParticlePreset('slime_projectile_zone')
+  useGLTF(SLIME_BOSS.modelUrl)
   const greenGltf = useGLTF(SLIME_BOSS.summons.greenModelUrl)
   const blueGltf = useGLTF(SLIME_BOSS.summons.blueModelUrl)
+  const fireballPreset = useMemo(() => (
+    storedFireballPreset
+      ? {
+          ...storedFireballPreset,
+          // Une salve ne doit jamais modifier le nombre de lumières de la scène.
+          light: { ...storedFireballPreset.light, enabled: false },
+        }
+      : null
+  ), [storedFireballPreset])
   const preparedMinionModels = useMemo(() => PREPARED_MINION_KINDS.map((kind) => (
     prepareBossMinionAsset(kind === 'blue' ? blueGltf.scene : greenGltf.scene, kind)
   )), [blueGltf.scene, greenGltf.scene])
-  useLayoutEffect(() => {
-    completeLoadTask(SLIME_BOSS_PREPARE_TASK)
-  }, [preparedMinionModels])
+  const runtimeAssetsReady = Boolean(
+    shockwavePreset
+    && fireballPreset
+    && groundZonePreset
+    && preparedMinionModels.length === PREPARED_MINION_KINDS.length,
+  )
   useEffect(() => () => {
     if (movementSpeedMultiplierRef) movementSpeedMultiplierRef.current = 1
   }, [movementSpeedMultiplierRef])
 
   return (
-    <>
+    <group ref={runtimeRootRef}>
+      <BossRuntimePreparer runtimeRootRef={runtimeRootRef} assetsReady={runtimeAssetsReady} />
+      <BossRuntimeLight />
       <BossPhasePrewarm
         shockwavePreset={shockwavePreset}
       />
@@ -984,6 +1079,9 @@ export default function SlimeBossSystem({
         onDamagePlayer={onDamagePlayer}
         movementSpeedMultiplierRef={movementSpeedMultiplierRef}
         timeOffsetRef={timeOffsetRef}
+        shockwavePreset={shockwavePreset}
+        fireballPreset={fireballPreset}
+        groundZonePreset={groundZonePreset}
       />
       <BossModel
         authority={authority}
@@ -996,7 +1094,7 @@ export default function SlimeBossSystem({
         timeOffsetRef={timeOffsetRef}
         mobGroupRef={mobGroupRef}
       />
-    </>
+    </group>
   )
 }
 

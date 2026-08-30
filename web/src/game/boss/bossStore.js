@@ -14,8 +14,14 @@ const initialState = createInactiveBossState()
 export const useBossStore = create((set, get) => ({
   ...initialState,
   nearAltarId: null,
+  runtimePreparationStatus: 'idle',
+  runtimePreparationError: null,
 
   setNearAltar: (id) => set((state) => (state.nearAltarId === id ? state : { nearAltarId: id })),
+  setRuntimePreparation: (status, error = null) => set({
+    runtimePreparationStatus: status,
+    runtimePreparationError: error,
+  }),
 
   summon: (payload) => {
     const previous = get()
