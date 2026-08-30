@@ -105,21 +105,23 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
       const [fx, fy, fz] = drop.from
       const restY = fy + 0.3
       const age = now - drop.bornAt
+      const lifetimeMs = Math.max(1000, Number(drop.lifetimeMs) || LIFETIME_MS)
+      const pickupDelayMs = Math.max(0, Number(drop.pickupDelayMs) || 0)
       group.rotation.y = age * 0.003 // rotation lente "loot"
 
       if (state.magnetStart == null) {
         // --- Au sol : disparition en fin de vie, sinon repos + détection joueur.
-        if (age >= LIFETIME_MS) {
+        if (age >= lifetimeMs) {
           state.done = true
           onExpire?.(drop.id)
           continue
         }
-        const remaining = LIFETIME_MS - age
+        const remaining = lifetimeMs - age
         group.scale.setScalar(remaining < FADE_MS ? Math.max(0, remaining / FADE_MS) : 1)
         group.position.set(fx, restY + Math.sin(age * 0.012) * 0.06, fz)
 
         // Déclenche l'aimantation seulement si le joueur est assez proche.
-        if (player) {
+        if (player && age >= pickupDelayMs) {
           const distance = Math.hypot(player.x - fx, player.z - fz)
           if (distance < PICKUP_RADIUS) state.magnetStart = now
         }

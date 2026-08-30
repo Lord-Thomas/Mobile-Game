@@ -133,6 +133,22 @@ export const useGameStore = create((set) => ({
     return { inventory: { ...state.inventory, [key]: next } }
   }),
 
+  // --- Slice "oiseaux" --------------------------------------------------
+  // Progression persistée du premier oiseau apprivoisable. La structure est
+  // volontairement indépendante du modèle 3D : remplacer le GLB ne change ni
+  // la confiance, ni l'adoption, ni le lien.
+  birds: {
+    adopted: false,
+    active: false,
+    trust: 0,
+    bond: 0,
+  },
+  setBirds: (value) => set((state) => {
+    const next = typeof value === 'function' ? value(state.birds) : value
+    if (next === state.birds) return state
+    return { birds: next }
+  }),
+
   // --- Slice "equipment" (équipement / identité) -------------------------
   // Montures possédées, arme équipée, livre/crâne magiques possédés, titres
   // (possédés / équipé), apparence du personnage. PERSISTÉ (même principe que
