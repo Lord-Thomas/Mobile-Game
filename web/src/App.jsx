@@ -25,7 +25,7 @@ import { MOUNT_AIRBORNE_THRESHOLD, rebaseMountAltitudeForSurface } from './game/
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
 import BirdFeature, { BIRD_SEED_ITEM_ID } from './game/birds/BirdFeature'
-import { adoptBird, gainBirdBond, gainBirdTrust, normalizeBirdProgress } from './game/birds/birdProgress'
+import { adoptBird, gainBirdBond, gainBirdTrust, loseBirdTrust, normalizeBirdProgress } from './game/birds/birdProgress'
 import { useGameTexture } from './game/ktx2'
 import GameFrameSchedulerDriver from './game/runtime/GameFrameSchedulerDriver'
 import { FRAME_PHASES, gameFrameScheduler } from './game/runtime/frameScheduler'
@@ -21928,6 +21928,10 @@ function App() {
     setBirds((current) => gainBirdTrust(current))
   }, [setBirds])
 
+  const frightenWildBird = useCallback(() => {
+    setBirds((current) => loseBirdTrust(current))
+  }, [setBirds])
+
   const feedAdoptedBird = useCallback(() => {
     setBirds((current) => gainBirdBond(current))
   }, [setBirds])
@@ -24681,6 +24685,7 @@ function App() {
             onHarvest={harvestBirdBush}
             onSeedEaten={expireLootDrop}
             onTrustGain={feedWildBird}
+            onFear={frightenWildBird}
             onBondGain={feedAdoptedBird}
             onAdopt={adoptWildBird}
           />
@@ -24895,19 +24900,6 @@ function App() {
           onSelectMaterial={setSelectedMaterialId}
           onDropMaterial={dropInventoryItem}
         />
-      )}
-      {showCaptureUi && mode === 'play' && currentZone === ZONES.outside && (
-        <div className="bird-progress-hud" aria-live="polite">
-          <span className="bird-progress-hud__icon">🐦</span>
-          <span>
-            <strong>{birdProgress.adopted ? 'Lien avec l’oiseau' : 'Confiance de l’oiseau'}</strong>
-            <small>
-              {birdProgress.adopted
-                ? `${'♥'.repeat(birdProgress.bond)}${'♡'.repeat(5 - birdProgress.bond)} · nourris-le pour renforcer votre lien`
-                : `${'♥'.repeat(birdProgress.trust)}${'♡'.repeat(3 - birdProgress.trust)} · dépose des graines puis recule`}
-            </small>
-          </span>
-        </div>
       )}
       {showGameplayUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (
         <button className="debug-add-coins-btn" type="button" onClick={() => applyCoinDelta(500)}>

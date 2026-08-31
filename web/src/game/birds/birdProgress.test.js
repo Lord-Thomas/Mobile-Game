@@ -5,6 +5,7 @@ import {
   adoptBird,
   gainBirdBond,
   gainBirdTrust,
+  loseBirdTrust,
   normalizeBirdProgress,
 } from './birdProgress'
 
@@ -26,5 +27,11 @@ describe('birdProgress', () => {
   it('caps trust and bond progression', () => {
     expect(gainBirdTrust({ trust: BIRD_TRUST_MAX }).trust).toBe(BIRD_TRUST_MAX)
     expect(gainBirdBond({ adopted: true, trust: 3, bond: BIRD_BOND_MAX }).bond).toBe(BIRD_BOND_MAX)
+  })
+
+  it('loses one trust heart when a wild bird is frightened', () => {
+    expect(loseBirdTrust({ trust: 2 }).trust).toBe(1)
+    expect(loseBirdTrust({ trust: 0 }).trust).toBe(0)
+    expect(loseBirdTrust({ adopted: true, trust: 3 }).trust).toBe(3)
   })
 })

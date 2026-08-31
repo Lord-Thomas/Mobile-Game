@@ -23,6 +23,12 @@ export function gainBirdTrust(raw) {
   return { ...current, trust: Math.min(BIRD_TRUST_MAX, current.trust + 1) }
 }
 
+export function loseBirdTrust(raw) {
+  const current = normalizeBirdProgress(raw)
+  if (current.adopted) return current
+  return { ...current, trust: Math.max(0, current.trust - 1) }
+}
+
 export function adoptBird(raw) {
   const current = normalizeBirdProgress(raw)
   if (current.trust < BIRD_TRUST_MAX) return current
