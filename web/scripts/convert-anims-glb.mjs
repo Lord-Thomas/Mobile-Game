@@ -17,6 +17,7 @@ const OUT_DIR = 'public/models/player/anim'
 
 // nom logique de sortie -> fichier FBX source (dans anim-src/)
 const ANIMATIONS = {
+  'crouched-walk': '../public/models/player/anim/Crouched Walking.fbx',
   idle: 'player-idle.fbx',
   walk: 'player-walk.fbx',
   run: 'player-run.fbx',

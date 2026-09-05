@@ -12,6 +12,7 @@ import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/char
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getMeleeAreaTargets, getNearestPunchTarget, getPunchTargetAtContact } from './game/combatGeometry'
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
+import { CROUCH_WALK_SPEED } from './game/crouch'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { getFallDamage } from './game/fallDamage'
 import { accumulatePendingCameraDrag, clearPendingCameraDrag, consumePendingCameraDrag } from './game/cameraInput'
@@ -24,7 +25,7 @@ import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
 import { MOUNT_AIRBORNE_THRESHOLD, rebaseMountAltitudeForSurface } from './game/mountGrounding'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
-import BirdFeature, { BIRD_SEED_ITEM_ID } from './game/birds/BirdFeature'
+import BirdFeature, { BIRD_SEED_ITEM_ID, WILD_BERRY_ITEM_ID } from './game/birds/BirdFeature'
 import { adoptBird, gainBirdBond, gainBirdTrust, loseBirdTrust, normalizeBirdProgress } from './game/birds/birdProgress'
 import { useGameTexture } from './game/ktx2'
 import GameFrameSchedulerDriver from './game/runtime/GameFrameSchedulerDriver'
@@ -4198,6 +4199,8 @@ function GoalNet({ ballRef, goalObject }) {
 }
 
 function Player({
+  crouching = false,
+  playerCrouchingRef,
   touchRef,
   ballRef,
   playerPositionRef,
@@ -4403,6 +4406,7 @@ function Player({
   useFrame((state, delta) => {
     if (!playerBodyRef.current || !visualRef.current) return
 
+    playerCrouchingRef.current = false
     const key = keyboardRef.current
     const touch = touchRef.current
     const cameraDrag = consumePendingCameraDrag(touch, {
@@ -4941,11 +4945,12 @@ function Player({
     }
 
     const wingsAirborne = isWingsFlying(wings)
+    const isCrouching = crouching && onGroundRef.current && !isDodging && !wingsAirborne && !isEmoting
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
     const speed = isDodging
       ? getDodgeSpeed(dodgeElapsed, dodge.entrySpeed)
       : isMoving
-        ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) * (movementSpeedMultiplierRef?.current ?? 1)
+        ? (isCrouching ? CROUCH_WALK_SPEED : MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95))) * (movementSpeedMultiplierRef?.current ?? 1)
         : 0
     if (wingsAirborne) {
       // Plané : l'avance est dirigée par la caméra (wings.forwardSpeed le long
@@ -5425,11 +5430,14 @@ function Player({
                     ? equippedWeapon === 'cheat_sword' ? swordAttackRef.current.motion : 'punch'
                   : state.clock.elapsedTime < kickUntilRef.current
                     ? 'kick'
+                    : isCrouching
+                      ? isMoving ? 'crouchWalk' : 'crouchIdle'
                     : isMoving
                       ? speed > 2.45
                         ? 'run'
                         : 'walk'
                       : 'idle'
+    playerCrouchingRef.current = nextMotion === 'crouchWalk' || nextMotion === 'crouchIdle'
     setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
     if (localPlayerStateRef) {
       localPlayerStateRef.current = {
@@ -6225,6 +6233,7 @@ function PlayerAvatar({
   const swordSlash = useMixamoGlbAnimation('/models/player/anim/sword-slash.glb')
   const swordSlash2 = useMixamoGlbAnimation('/models/player/anim/sword-slash-2.glb')
   const swordSlash3 = useMixamoGlbAnimation('/models/player/anim/sword-slash-3.glb')
+  const crouchedWalk = useMixamoGlbAnimation('/models/player/anim/crouched-walk.glb')
   const dodgeRoll = useMixamoGlbAnimation('/models/player/anim/dodge-roll.glb')
   const jumpStart = useMixamoGlbAnimation('/models/player/anim/jump-start.glb')
   const jumpLoop = useMixamoGlbAnimation('/models/player/anim/jump-loop.glb')
@@ -6425,6 +6434,8 @@ function PlayerAvatar({
       { source: swordSlash.animations[0], name: 'swordSlash' },
       { source: swordSlash2.animations[0], name: 'swordSlash2' },
       { source: swordSlash3.animations[0], name: 'swordSlash3' },
+      { source: crouchedWalk.animations[0], name: 'crouchWalk' },
+      { source: crouchedWalk.animations[0], name: 'crouchIdle' },
       { source: dodgeRoll.animations[0], name: 'dodgeRoll' },
       { source: jumpStart.animations[0], name: 'jumpStart' },
       { source: jumpLoop.animations[0], name: 'fallingIdle' },
@@ -6440,12 +6451,12 @@ function PlayerAvatar({
       .map(({ source, name }) => {
         const clip = source.clone()
         clip.name = name
-        if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun' || name === 'dodgeRoll') {
+        if (name === 'crouchWalk' || name === 'crouchIdle' || name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun' || name === 'dodgeRoll') {
           lockHipsPlanarPosition(clip)
         }
         return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, dodgeRoll.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, dodgeRoll.animations, crouchedWalk.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const optionalAnimationClips = useMemo(() => {
     if (!optionalAnimations) return []
@@ -6569,7 +6580,7 @@ function PlayerAvatar({
           ? PLAYER_AIR_ANIMATION_FADE
           : PLAYER_DEFAULT_ANIMATION_FADE
 
-    const motionTimeScale = nextMotion === 'dodgeRoll'
+    const motionTimeScale = nextMotion === 'crouchIdle' ? 0 : nextMotion === 'crouchWalk' ? 0.8 : nextMotion === 'dodgeRoll'
       ? Math.max(0.01, nextAction.getClip().duration) / PLAYER_DODGE.duration
       : nextMotion === 'kick'
         ? 1.2
@@ -8357,6 +8368,8 @@ function NetworkSlimePet({ slimePetId, stateRef, currentZone }) {
 }
 
 function ControlsOverlay({
+  crouching = false,
+  onToggleCrouch,
   touchRef,
   adminCameraControls = false,
   uiHidden = false,
@@ -8369,6 +8382,17 @@ function ControlsOverlay({
   controlSettings = DEFAULT_CONTROL_SETTINGS,
   onTap,
 }) {
+  useEffect(() => {
+    if (uiHidden || adminCameraControls || !onToggleCrouch) return undefined
+    const onKeyDown = (event) => {
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || isTextInputEvent(event)) return
+      if (getKeyboardKey(event) !== 'c') return
+      event.preventDefault()
+      onToggleCrouch()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [uiHidden, adminCameraControls, onToggleCrouch])
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookPointersRef = useRef(new Map())
@@ -8748,6 +8772,20 @@ function ControlsOverlay({
           }}
         >
           <span aria-hidden="true">↻</span>
+        </button>
+      )}
+      {!uiHidden && showDodgeAction && onToggleCrouch && (
+        <button className={`mobility-dodge-btn mobility-crouch-btn${crouching ? ' is-active' : ''}`}
+          type="button" aria-label="Marcher accroupi" aria-pressed={crouching}
+          title="Marcher accroupi (C)" onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            triggerControlHaptic(controlSettings.vibration)
+            onToggleCrouch()
+          }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="14" cy="5" r="2" /><path d="m12 9-3 5 5 2-3 5H6m6-12 4 4h4M9 14l-4 3" />
+          </svg>
         </button>
       )}
       {!uiHidden && selectedMount && onToggleMount && (
@@ -19801,6 +19839,9 @@ function App() {
   const catActive = useGameStore((s) => s.inventory.catActive)
   const ownedSlimePets = useGameStore((s) => s.inventory.ownedSlimePets)
   const activeSlimePetId = useGameStore((s) => s.inventory.activeSlimePetId)
+  const [crouching, setCrouching] = useState(false)
+  const playerCrouchingRef = useRef(false)
+  const toggleCrouch = useCallback(() => setCrouching((value) => !value), [])
   const birdProgress = useGameStore((s) => s.birds)
   const setBirds = useGameStore((s) => s.setBirds)
   const ownedMagicBook = useGameStore((s) => s.equipment.ownedMagicBook)
@@ -21903,7 +21944,7 @@ function App() {
         itemId,
         from: [x, y, z],
         bornAt: performance.now(),
-        pickupDelayMs: 5000,
+        pickupDelayMs: [BIRD_SEED_ITEM_ID, WILD_BERRY_ITEM_ID].includes(itemId) ? 30000 : 5000,
         lifetimeMs: 60000,
         source: 'player_drop',
       }
@@ -21924,8 +21965,8 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [currentZone, dropInventoryItem, mode])
 
-  const feedWildBird = useCallback(() => {
-    setBirds((current) => gainBirdTrust(current))
+  const feedWildBird = useCallback((birdId) => {
+    setBirds((current) => ({ ...gainBirdTrust(current), birdId }))
   }, [setBirds])
 
   const frightenWildBird = useCallback(() => {
@@ -24562,6 +24603,8 @@ function App() {
             <Suspense fallback={null}>
             <Profiler id="Player" onRender={recordRenderProfile}>
             <Player
+              crouching={crouching}
+              playerCrouchingRef={playerCrouchingRef}
               touchRef={touchRef}
               ballRef={ballRef}
               playerPositionRef={playerPositionRef}
@@ -24676,11 +24719,12 @@ function App() {
             onExpire={expireLootDrop}
           />
           <BirdFeature
+            playerCrouchingRef={playerCrouchingRef}
             enabled={currentZone === ZONES.outside && mode === 'play'}
             origin={[OUTDOOR_ENTRY_POSITION.x - 5, 0, OUTDOOR_ENTRY_POSITION.z]}
             playerPositionRef={playerPositionRef}
             playerVelocityRef={playerVelocityRef}
-            seedDrops={lootDrops.filter((drop) => drop.source === 'player_drop' && drop.itemId === BIRD_SEED_ITEM_ID)}
+            seedDrops={lootDrops.filter((drop) => drop.source === 'player_drop' && [BIRD_SEED_ITEM_ID, WILD_BERRY_ITEM_ID].includes(drop.itemId))}
             birdProgress={birdProgress}
             onHarvest={harvestBirdBush}
             onSeedEaten={expireLootDrop}
@@ -24750,6 +24794,8 @@ function App() {
 
       {showGameplayControls && (
         <ControlsOverlay
+          crouching={crouching}
+          onToggleCrouch={!dragonMounted && !seatedState?.phase ? toggleCrouch : undefined}
           touchRef={touchRef}
           controlSettings={controlSettings}
           adminCameraControls={isAdminMode || isVerticalFrameMode || (isLocalNetwork && freeCameraActive)}

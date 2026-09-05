@@ -47,6 +47,22 @@ function LootDropModel({ url }) {
 }
 
 function LootDropVisual({ def }) {
+  if (def?.id === 'wild_berry') {
+    return <group>{[[-0.06, 0, 0], [0.06, 0, 0.015], [0, 0.08, -0.025]].map((position, index) => (
+      <mesh key={index} position={position}>
+        <sphereGeometry args={[0.075, 12, 8]} />
+        <meshStandardMaterial color={index % 2 ? '#5965b5' : '#35458c'} roughness={0.6} depthTest depthWrite />
+      </mesh>
+    ))}</group>
+  }
+  if (def?.id === 'bird_seed') {
+    return <group>{[[0, 0, 0], [0.09, 0, 0.04], [-0.08, 0, 0.05], [0.03, 0, -0.08]].map((position, index) => (
+      <mesh key={index} position={position} scale={[1, 0.5, 0.65]}>
+        <sphereGeometry args={[0.04, 8, 6]} />
+        <meshStandardMaterial color={index % 2 ? '#a97432' : '#e6c477'} depthTest depthWrite />
+      </mesh>
+    ))}</group>
+  }
   if (def?.model) {
     return (
       <Suspense fallback={null}>
@@ -107,7 +123,7 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
       const age = now - drop.bornAt
       const lifetimeMs = Math.max(1000, Number(drop.lifetimeMs) || LIFETIME_MS)
       const pickupDelayMs = Math.max(0, Number(drop.pickupDelayMs) || 0)
-      group.rotation.y = age * 0.003 // rotation lente "loot"
+      group.rotation.y = age * 0.003
 
       if (state.magnetStart == null) {
         // --- Au sol : disparition en fin de vie, sinon repos + détection joueur.

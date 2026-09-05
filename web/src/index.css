@@ -6275,6 +6275,22 @@ html[data-orientation='landscape'] .quest-journal-btn {
   border-radius: 50%;
 }
 
+/* Share the dodge button dimensions and responsive position, shifted by one button. */
+.mobility-dodge-btn.mobility-crouch-btn {
+  translate: calc(-100% - 12px) 0;
+  opacity: calc(var(--control-opacity, 1) * 0.76);
+}
+
+.hud--left-handed .mobility-dodge-btn.mobility-crouch-btn {
+  translate: calc(100% + 12px) 0;
+}
+
+.mobility-crouch-btn.is-active {
+  border-color: #b8d6a0;
+  color: #d5ebc5;
+  box-shadow: 0 0 0 2px rgba(152, 188, 125, 0.22);
+}
+
 .mobility-dodge-btn:active {
   transform: scale(0.9);
   background: rgba(29, 78, 216, 0.92);

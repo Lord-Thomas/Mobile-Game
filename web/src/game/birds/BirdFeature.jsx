@@ -1,10 +1,13 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Html, useAnimations, useGLTF, useTexture } from '@react-three/drei'
+import { Billboard, Html, useAnimations, useGLTF, useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { Box3, LoopRepeat, MathUtils, Mesh, Vector3 } from 'three'
+import { Box3, CubicBezierCurve3, LoopRepeat, MathUtils, Mesh, Vector3 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { getTerrainHeight } from '../../world/terrain/terrainGeometry'
 import { BIRD_TRUST_MAX } from './birdProgress'
+import { createBirdBushSites } from './birdHabitat'
+import { nearestBirdFood, nearestFeedingBird } from './birdFeeding'
+import { getBirdApproachLimits } from '../crouch'
 
 export const BIRD_MODEL_URL = '/models/birds/bird-01.glb'
 export const BIRD_BUSH_TEXTURE_URL = '/textures/birds/seed-bush-proxy.png'
@@ -12,19 +15,24 @@ export const BIRD_SEED_ITEM_ID = 'bird_seed'
 export const WILD_BERRY_ITEM_ID = 'wild_berry'
 
 const BUSH_RESPAWN_MS = 30_000
-const BIRD_TARGET_HEIGHT = 0.42
-const BUSH_OFFSETS = [
-  [-3.8, 3.5],
-  [2.7, 5.2],
-  [5.4, 0.6],
-]
+const BIRD_TARGET_HEIGHT = 0.22
+const AMBIENT_PROGRESS = { adopted: false, active: false, trust: 0 }
+const NO_SEEDS = []
+const FLOCK_ORIGINS = [[-14, 0, 8], [17, 0, -13], [-24, 0, -20], [26, 0, 29], [-30, 0, 32], [55, 0, -45], [-65, 0, 55], [85, 0, 70], [-90, 0, -75]]
 const BIRD_LANDING_OFFSET = [1.1, 3.1]
 const WILD_WANDER_RADIUS = 1.8
-const WILD_FLIGHT_RADIUS = 4.8
+const WILD_FLIGHT_RADIUS = 12
 const BIRD_GROUND_SPEED = 0.72
 const BIRD_FOLLOW_SPEED = 3.4
 const BIRD_CATCHUP_SPEED = 5.2
-const ADOPTED_LAND_DELAY = 3.6
+const ADOPTED_LAND_DELAY = 18
+
+function wildGroundPause(trust, random = Math.random) {
+  // Some brief stops, some real feeding opportunities; fed birds linger longer.
+  return trust > 0 || random() < 0.45
+    ? 16000 + random() * 14000
+    : 5000 + random() * 4000
+}
 
 function dampAngle(current, target, speed, delta) {
   const difference = Math.atan2(Math.sin(target - current), Math.cos(target - current))
@@ -75,13 +83,11 @@ function BushVisual({ ripe }) {
   )
 }
 
-function HarvestableBushes({ enabled, origin, playerPositionRef, onHarvest }) {
+function HarvestableBushes({ enabled, playerPositionRef, onHarvest }) {
   const [harvestedAt, setHarvestedAt] = useState({})
   const [nearBushId, setNearBushId] = useState(null)
   const firstHarvestRef = useRef(true)
   const [, setClock] = useState(0)
-  const originX = origin[0]
-  const originZ = origin[2]
 
   useEffect(() => {
     if (!enabled) return undefined
@@ -89,11 +95,9 @@ function HarvestableBushes({ enabled, origin, playerPositionRef, onHarvest }) {
     return () => window.clearInterval(timer)
   }, [enabled])
 
-  const bushes = useMemo(() => BUSH_OFFSETS.map(([dx, dz], index) => {
-    const x = originX + dx
-    const z = originZ + dz
-    return { id: `seed-bush-${index}`, position: [x, getTerrainHeight(x, z), z] }
-  }), [originX, originZ])
+  const bushes = useMemo(() => createBirdBushSites().map((site) => ({
+    ...site, position: [site.x, getTerrainHeight(site.x, site.z), site.z],
+  })), [])
 
   const isRipe = useCallback((bushId) => {
     const harvested = harvestedAt[bushId]
@@ -145,7 +149,7 @@ function HarvestableBushes({ enabled, origin, playerPositionRef, onHarvest }) {
     const ripe = isRipe(bush.id)
     const near = nearBushId === bush.id
     return (
-      <group key={bush.id} position={bush.position} userData={{ debugCategory: 'vegetation' }}>
+      <group key={bush.id} position={bush.position} scale={bush.scale} userData={{ debugCategory: 'vegetation' }}>
         <BushVisual ripe={ripe} />
         {near && (
           <Html center position={[0, 1.65, 0]} distanceFactor={8} occlude={false}>
@@ -205,9 +209,13 @@ function BirdModel({ animationRef }) {
 
 function BirdActor({
   enabled,
+  ambient = false,
+  birdId = 'primary',
+  positionsRef,
   origin,
   playerPositionRef,
   playerVelocityRef,
+  playerCrouchingRef,
   seedDrops,
   birdProgress,
   onSeedEaten,
@@ -259,16 +267,29 @@ function BirdActor({
     const planarDistance = Math.hypot(dx, dz) || 1
     const directionX = dx / planarDistance
     const directionZ = dz / planarDistance
-    const cruiseHeight = Math.max(group.position.y + 1.5, landY + 1.8)
+    const cruiseHeight = Math.max(group.position.y + 2, landY + 9 + Math.random() * 5)
+    const radius = 12 + Math.random() * 9
+    const angle = Math.atan2(-directionZ, directionX)
+    const center = new Vector3(landX, cruiseHeight, landZ)
+    const entry = new Vector3(center.x + Math.cos(angle) * radius, cruiseHeight, center.z + Math.sin(angle) * radius * 0.7)
+    const tangent = new Vector3(-Math.sin(angle), 0, Math.cos(angle) * 0.7).normalize()
+    const start = group.position.clone()
+    const curve = new CubicBezierCurve3(start,
+      start.clone().add(new Vector3(directionX * 4, 3, directionZ * 4)),
+      entry.clone().addScaledVector(tangent, -5), entry)
     flightPlanRef.current = {
       phase: 'takeoff',
       reason,
-      takeoff: new Vector3(
-        group.position.x + directionX * 1.25,
-        cruiseHeight,
-        group.position.z + directionZ * 1.25,
-      ),
-      cruise: new Vector3(landX - directionX * 1.1, landY + 1.25, landZ - directionZ * 1.1),
+      elapsed: 0,
+      duration: curve.getLength() / 4.2,
+      curve,
+      center,
+      radius,
+      angle,
+      cruiseTime: 0,
+      cruiseDuration: 28 + Math.random() * 24,
+      point: new Vector3(),
+      tangent: new Vector3(),
       land: new Vector3(landX, landY, landZ),
     }
     stateRef.current = 'flight'
@@ -306,6 +327,10 @@ function BirdActor({
     const player = playerPositionRef?.current
     if (!group || !player) return
     group.visible = Boolean(enabled && (!birdProgress.adopted || birdProgress.active))
+    const canDetectFood = group.visible && stateRef.current !== 'flight'
+      && stateRef.current !== 'adopted_follow'
+      && Math.abs(group.position.y - getTerrainHeight(group.position.x, group.position.z)) < 0.18
+    positionsRef.current.set(birdId, { position: group.position, grounded: canDetectFood })
     if (!group.visible) return
 
     if (!Number.isFinite(group.position.x)) {
@@ -315,6 +340,7 @@ function BirdActor({
 
     const playerSpeed = Math.hypot(playerVelocityRef?.current?.x ?? 0, playerVelocityRef?.current?.z ?? 0)
     const distanceToPlayer = Math.hypot(player.x - group.position.x, player.z - group.position.z)
+    const approachLimits = getBirdApproachLimits(playerCrouchingRef?.current === true)
     const now = performance.now()
     const isNear = distanceToPlayer < 8
     if (isNear !== nearBird) setNearBird(isNear)
@@ -329,37 +355,67 @@ function BirdActor({
     if (body) {
       const pecking = stateRef.current === 'pecking'
       const peckWave = pecking ? Math.max(0, Math.sin((stateUntilRef.current - now) * 0.024)) : 0
-      body.rotation.x = MathUtils.damp(body.rotation.x, peckWave * 0.42, 14, delta)
+      if (stateRef.current !== 'flight') {
+        body.rotation.x = MathUtils.damp(body.rotation.x, peckWave * 0.42, 14, delta)
+        body.rotation.z = MathUtils.damp(body.rotation.z, 0, 5, delta)
+      }
       body.position.y = MathUtils.damp(body.position.y, peckWave * -0.035, 14, delta)
     }
 
-    const availableSeeds = seedDrops.filter((drop) => !consumedDropIdsRef.current.has(drop.id))
-    let targetSeed = null
-    let seedDistance = Infinity
-    for (const drop of availableSeeds) {
-      const distance = Math.hypot(drop.from[0] - group.position.x, drop.from[2] - group.position.z)
-      if (distance < seedDistance && distance < 5.5) {
-        targetSeed = drop
-        seedDistance = distance
-      }
-    }
+    const targetSeed = nearestBirdFood(seedDrops, group.position, consumedDropIdsRef.current, canDetectFood)
 
     const flightPlan = flightPlanRef.current
     if (stateRef.current === 'flight' && flightPlan) {
-      const target = flightPlan[flightPlan.phase]
-      const phaseSpeed = flightPlan.phase === 'cruise' ? 3.8 : 2.7
-      const distance = moveTowards(group, target, phaseSpeed, delta)
-      animationRef.current?.(flightPlan.phase === 'cruise' && distance > 0.55 ? 'Glide' : 'Flap')
-      if (distance < 0.12) {
+      const dt = Math.min(delta, 0.05)
+      const previousYaw = group.rotation.y
+      if (flightPlan.phase === 'cruise') {
+        flightPlan.cruiseTime += dt
+        const speed = 4.5 + Math.sin(flightPlan.cruiseTime * 0.6) * 0.35
+        const a = flightPlan.angle
+        const arcSpeed = flightPlan.radius * Math.hypot(Math.sin(a), Math.cos(a) * 0.7)
+        flightPlan.angle += speed * dt / arcSpeed
+        const angle = flightPlan.angle
+        flightPlan.point.set(
+          flightPlan.center.x + Math.cos(angle) * flightPlan.radius,
+          flightPlan.center.y + Math.sin(flightPlan.cruiseTime * 0.45) * 0.65,
+          flightPlan.center.z + Math.sin(angle) * flightPlan.radius * 0.7,
+        )
+        flightPlan.tangent.copy(flightPlan.point).sub(group.position).normalize()
+      } else {
+        flightPlan.elapsed += dt
+        const t = Math.min(1, flightPlan.elapsed / flightPlan.duration)
+        flightPlan.curve.getPointAt(t, flightPlan.point)
+        flightPlan.curve.getTangentAt(t, flightPlan.tangent)
+      }
+      group.position.copy(flightPlan.point)
+      const tangent = flightPlan.tangent
+      group.rotation.y = dampAngle(previousYaw, Math.atan2(tangent.x, tangent.z), 6, dt)
+      if (body) {
+        const turn = Math.atan2(Math.sin(group.rotation.y - previousYaw), Math.cos(group.rotation.y - previousYaw)) / Math.max(dt, 0.001)
+        body.rotation.z = MathUtils.damp(body.rotation.z, MathUtils.clamp(-turn * 0.7, -0.5, 0.5), 4, dt)
+        body.rotation.x = MathUtils.damp(body.rotation.x, -Math.asin(MathUtils.clamp(tangent.y, -0.6, 0.6)), 4, dt)
+      }
+      animationRef.current?.(flightPlan.phase === 'cruise' && flightPlan.cruiseTime % 6 > 1.6 ? 'Glide' : 'Flap')
+      const segmentDone = flightPlan.phase === 'cruise'
+        ? birdProgress.adopted || flightPlan.cruiseTime >= flightPlan.cruiseDuration
+        : flightPlan.elapsed >= flightPlan.duration
+      if (segmentDone) {
         if (flightPlan.phase === 'takeoff') flightPlan.phase = 'cruise'
-        else if (flightPlan.phase === 'cruise') flightPlan.phase = 'land'
+        else if (flightPlan.phase === 'cruise') {
+            flightPlan.phase = 'land'
+            const end = flightPlan.land
+            const approach = end.clone().sub(group.position).setY(0).normalize()
+            flightPlan.curve = new CubicBezierCurve3(group.position.clone(),
+              group.position.clone().addScaledVector(tangent, 6),
+              end.clone().addScaledVector(approach, -4).add(new Vector3(0, 1.5, 0)), end.clone())
+            flightPlan.elapsed = 0
+            flightPlan.duration = Math.max(2, flightPlan.curve.getLength() / 3.6)
+        }
         else {
           group.position.copy(flightPlan.land)
-          const reason = flightPlan.reason
           flightPlanRef.current = null
           stateRef.current = birdProgress.adopted ? 'adopted_ground_idle' : 'wild_idle'
-          naturalActionAtRef.current = now + 2800 + Math.random() * 4200
-          if (reason === 'adopted_seed' && targetSeed) startPecking(targetSeed, now)
+          naturalActionAtRef.current = now + (birdProgress.adopted ? 3000 : wildGroundPause(birdProgress.trust))
           animationRef.current?.('Idle')
         }
       }
@@ -370,12 +426,12 @@ function BirdActor({
       const drop = peckDropRef.current
       if (!peckHandledRef.current && now >= stateUntilRef.current - 560) {
         peckHandledRef.current = true
-        if (drop && !consumedDropIdsRef.current.has(drop.id)) {
+        if (drop && seedDrops.some((candidate) => candidate.id === drop.id) && !consumedDropIdsRef.current.has(drop.id)) {
           consumedDropIdsRef.current.add(drop.id)
           onSeedEaten?.(drop.id)
           if (birdProgress.adopted) onBondGain?.()
           else {
-            onTrustGain?.()
+            onTrustGain?.(birdId)
             showTrustFeedback('gain')
           }
         }
@@ -384,7 +440,7 @@ function BirdActor({
       if (now >= stateUntilRef.current) {
         peckDropRef.current = null
         stateRef.current = birdProgress.adopted ? 'adopted_ground_idle' : 'wild_idle'
-        naturalActionAtRef.current = now + 1800 + Math.random() * 2600
+        naturalActionAtRef.current = now + (birdProgress.adopted ? 4000 : 20000 + Math.random() * 10000)
       }
       return
     }
@@ -394,15 +450,10 @@ function BirdActor({
       stillTimeRef.current = playerSpeed < 0.14 ? stillTimeRef.current + delta : 0
 
       const groundY = getTerrainHeight(group.position.x, group.position.z) + 0.03
-      const grounded = Math.abs(group.position.y - groundY) < 0.18
 
       if (targetSeed && distanceToPlayer > 0.8) {
         const seedX = targetSeed.from[0]
         const seedZ = targetSeed.from[2]
-        if (!grounded) {
-          beginFlight(seedX, seedZ, 'adopted_seed')
-          return
-        }
         groundTargetRef.current.set(seedX, getTerrainHeight(seedX, seedZ) + 0.03, seedZ)
         const distance = moveTowards(group, groundTargetRef.current, BIRD_GROUND_SPEED * 1.45, delta)
         animationRef.current?.('Walk')
@@ -438,7 +489,7 @@ function BirdActor({
         return
       }
 
-      if (playerSpeed > 0.32 || distanceToPlayer > 3.2) {
+      if (playerSpeed > 0.32 || distanceToPlayer > 3.2 || now >= naturalActionAtRef.current) {
         stateRef.current = 'adopted_follow'
         stillTimeRef.current = 0
         animationRef.current?.('Flap')
@@ -469,11 +520,11 @@ function BirdActor({
       return
     }
 
-    const readyToAdopt = birdProgress.trust >= BIRD_TRUST_MAX && distanceToPlayer < 2.2
+    const readyToAdopt = !ambient && birdProgress.trust >= BIRD_TRUST_MAX && distanceToPlayer < 2.2
     if (readyToAdopt !== canAdopt) setCanAdopt(readyToAdopt)
 
     const frightened = birdProgress.trust < BIRD_TRUST_MAX
-      && (distanceToPlayer < 0.82 || (distanceToPlayer < 3.1 && playerSpeed > 1.65))
+      && (distanceToPlayer < approachLimits.fearDistance || (distanceToPlayer < approachLimits.runningDistance && playerSpeed > approachLimits.runningSpeed))
     if (frightened) {
       const awayX = group.position.x - player.x
       const awayZ = group.position.z - player.z
@@ -487,7 +538,7 @@ function BirdActor({
       return
     }
 
-    if (targetSeed && distanceToPlayer > 1.15 && birdProgress.trust < BIRD_TRUST_MAX) {
+    if (targetSeed && distanceToPlayer > approachLimits.feedingDistance) {
       groundTargetRef.current.set(
         targetSeed.from[0],
         getTerrainHeight(targetSeed.from[0], targetSeed.from[2]) + 0.03,
@@ -507,16 +558,16 @@ function BirdActor({
       animationRef.current?.('Walk')
       if (distance < 0.12 || now >= stateUntilRef.current) {
         stateRef.current = 'wild_idle'
-        naturalActionAtRef.current = now + 1800 + Math.random() * 3600
+        naturalActionAtRef.current = now + wildGroundPause(birdProgress.trust)
       }
       return
     }
 
     animationRef.current?.(Math.random() < 0.0025 ? 'Rest_Pose' : 'Idle')
     if (now >= naturalActionAtRef.current) {
-      if (Math.random() < 0.32) {
+      if (Math.random() < 0.9) {
         const angle = Math.random() * Math.PI * 2
-        const radius = 2.4 + Math.random() * (WILD_FLIGHT_RADIUS - 2.4)
+        const radius = 6 + Math.random() * (WILD_FLIGHT_RADIUS - 6)
         beginFlight(
           landing.x + Math.cos(angle) * radius,
           landing.z + Math.sin(angle) * radius,
@@ -535,7 +586,7 @@ function BirdActor({
     }
   })
 
-  const showTrust = !birdProgress.adopted
+  const showTrust = !ambient && !birdProgress.adopted
     && nearBird
     && (birdProgress.trust > 0 || trustFeedback)
 
@@ -546,6 +597,18 @@ function BirdActor({
           <BirdModel animationRef={animationRef} />
         </Suspense>
       </group>
+      {!ambient && !birdProgress.adopted && birdProgress.hasBeenFed && (
+        <Billboard position={[0, 0.52, 0]}>
+          <mesh rotation={[0, 0, Math.PI / 4]}>
+            <planeGeometry args={[0.19, 0.19]} />
+            <meshBasicMaterial color="#ffd879" depthTest depthWrite toneMapped={false} />
+          </mesh>
+          <mesh position={[0, 0, 0.005]} rotation={[0, 0, Math.PI / 4]}>
+            <planeGeometry args={[0.1, 0.1]} />
+            <meshBasicMaterial color="#8b5622" depthTest depthWrite toneMapped={false} />
+          </mesh>
+        </Billboard>
+      )}
       {showTrust && (
         <Html center position={[0, 0.68, 0]} distanceFactor={8} occlude={false}>
           <div className={`bird-trust-bubble${trustFeedback ? ` is-${trustFeedback.kind}` : ''}`}>
@@ -571,6 +634,27 @@ function BirdActor({
 
 export default function BirdFeature(props) {
   const { enabled, origin, playerPositionRef, onHarvest } = props
+  const positionsRef = useRef(new Map())
+  const [feedingBirdId, setFeedingBirdId] = useState(null)
+  const savedBirdId = props.birdProgress.birdId ?? 'primary'
+  const tracked = props.birdProgress.hasBeenFed || props.birdProgress.adopted
+  const activeBirdId = tracked ? savedBirdId : feedingBirdId ?? 'primary'
+  useFrame(() => {
+    if (!enabled || tracked) return
+    // Keep the same recipient while food is present, so two birds cannot eat it.
+    const recipient = positionsRef.current.get(feedingBirdId)
+    if (recipient && nearestBirdFood(props.seedDrops, recipient.position, new Set(), recipient.grounded)) return
+    const next = nearestFeedingBird(positionsRef.current, props.seedDrops)
+    if (next !== feedingBirdId) setFeedingBirdId(next)
+  })
+  const actorProps = (id) => ({
+    ...props,
+    birdId: id,
+    ambient: id !== activeBirdId,
+    birdProgress: id === activeBirdId ? props.birdProgress : AMBIENT_PROGRESS,
+    seedDrops: id === activeBirdId ? props.seedDrops : NO_SEEDS,
+    onFear: id === activeBirdId ? props.onFear : undefined,
+  })
   return (
     <group visible={enabled}>
       <HarvestableBushes
@@ -579,7 +663,10 @@ export default function BirdFeature(props) {
         playerPositionRef={playerPositionRef}
         onHarvest={onHarvest}
       />
-      <BirdActor {...props} />
+      <BirdActor {...actorProps('primary')} positionsRef={positionsRef} />
+      {FLOCK_ORIGINS.map((birdOrigin, index) => (
+        <BirdActor key={index} {...actorProps(`flock-${index}`)} positionsRef={positionsRef} origin={birdOrigin} />
+      ))}
     </group>
   )
 }

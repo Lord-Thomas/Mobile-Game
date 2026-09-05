@@ -11,6 +11,8 @@ export function normalizeBirdProgress(raw) {
     adopted,
     active: adopted && source.active !== false,
     trust,
+    hasBeenFed: Boolean(source.hasBeenFed || trust > 0),
+    ...(typeof source.birdId === 'string' ? { birdId: source.birdId } : {}),
     bond: adopted
       ? Math.max(0, Math.min(BIRD_BOND_MAX, Math.floor(Number(source.bond) || 0)))
       : 0,
@@ -20,7 +22,7 @@ export function normalizeBirdProgress(raw) {
 export function gainBirdTrust(raw) {
   const current = normalizeBirdProgress(raw)
   if (current.adopted) return current
-  return { ...current, trust: Math.min(BIRD_TRUST_MAX, current.trust + 1) }
+  return { ...current, hasBeenFed: true, trust: Math.min(BIRD_TRUST_MAX, current.trust + 1) }
 }
 
 export function loseBirdTrust(raw) {
