@@ -37,6 +37,18 @@ const BASE_ITEMS = {
     emoji: '🔷',
     sellPrice: 181,
   },
+  bird_seed: {
+    id: 'bird_seed',
+    name: 'Graines sauvages',
+    emoji: '🌰',
+    sellPrice: 1,
+  },
+  wild_berry: {
+    id: 'wild_berry',
+    name: 'Baies sauvages',
+    emoji: '🫐',
+    sellPrice: 3,
+  },
 }
 
 function normalizeGeneratedItem(definition) {

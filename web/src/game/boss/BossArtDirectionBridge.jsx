@@ -20,16 +20,14 @@ const UPDATE_INTERVAL_MS = 50
 
 export default function BossArtDirectionBridge() {
   const combatAtmosphereActive = useBossStore((state) => state.active && state.state !== 'dying')
-  const previousActiveRef = useRef(false)
   const normalValuesRef = useRef(null)
   const animationFrameRef = useRef(0)
 
   useEffect(() => {
-    if (combatAtmosphereActive === previousActiveRef.current) return undefined
-    previousActiveRef.current = combatAtmosphereActive
     window.cancelAnimationFrame(animationFrameRef.current)
 
     const artState = useArtDirectionStore.getState()
+    if (!combatAtmosphereActive && !artState.runtimeValues) return undefined
     const fromValues = getEffectiveArtDirectionValues(artState)
     let targetValues
 

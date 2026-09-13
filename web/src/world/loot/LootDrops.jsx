@@ -47,6 +47,22 @@ function LootDropModel({ url }) {
 }
 
 function LootDropVisual({ def }) {
+  if (def?.id === 'wild_berry') {
+    return <group>{[[-0.06, 0, 0], [0.06, 0, 0.015], [0, 0.08, -0.025]].map((position, index) => (
+      <mesh key={index} position={position}>
+        <sphereGeometry args={[0.075, 12, 8]} />
+        <meshStandardMaterial color={index % 2 ? '#5965b5' : '#35458c'} roughness={0.6} depthTest depthWrite />
+      </mesh>
+    ))}</group>
+  }
+  if (def?.id === 'bird_seed') {
+    return <group>{[[0, 0, 0], [0.09, 0, 0.04], [-0.08, 0, 0.05], [0.03, 0, -0.08]].map((position, index) => (
+      <mesh key={index} position={position} scale={[1, 0.5, 0.65]}>
+        <sphereGeometry args={[0.04, 8, 6]} />
+        <meshStandardMaterial color={index % 2 ? '#a97432' : '#e6c477'} depthTest depthWrite />
+      </mesh>
+    ))}</group>
+  }
   if (def?.model) {
     return (
       <Suspense fallback={null}>
@@ -105,21 +121,23 @@ export default function LootDrops({ drops = [], playerPositionRef, onAbsorb, onE
       const [fx, fy, fz] = drop.from
       const restY = fy + 0.3
       const age = now - drop.bornAt
-      group.rotation.y = age * 0.003 // rotation lente "loot"
+      const lifetimeMs = Math.max(1000, Number(drop.lifetimeMs) || LIFETIME_MS)
+      const pickupDelayMs = Math.max(0, Number(drop.pickupDelayMs) || 0)
+      group.rotation.y = age * 0.003
 
       if (state.magnetStart == null) {
         // --- Au sol : disparition en fin de vie, sinon repos + détection joueur.
-        if (age >= LIFETIME_MS) {
+        if (age >= lifetimeMs) {
           state.done = true
           onExpire?.(drop.id)
           continue
         }
-        const remaining = LIFETIME_MS - age
+        const remaining = lifetimeMs - age
         group.scale.setScalar(remaining < FADE_MS ? Math.max(0, remaining / FADE_MS) : 1)
         group.position.set(fx, restY + Math.sin(age * 0.012) * 0.06, fz)
 
         // Déclenche l'aimantation seulement si le joueur est assez proche.
-        if (player) {
+        if (player && age >= pickupDelayMs) {
           const distance = Math.hypot(player.x - fx, player.z - fz)
           if (distance < PICKUP_RADIUS) state.magnetStart = now
         }

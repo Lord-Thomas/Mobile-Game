@@ -12,6 +12,7 @@ import { CHARACTER_BASE_COLORS, CHARACTER_DEFAULT_APPEARANCE } from './game/char
 import { BALL_RADIUS, GOAL_Z, PLAYER_CAPSULE_HALF_HEIGHT, PLAYER_CAPSULE_RADIUS, PLAYER_KICK_CONTACT_DELAY, PLAYER_KICK_CONTACT_WINDOW, PLAYER_KICK_DURATION, PLAYER_PUNCH_COMBO_STEP, PLAYER_PUNCH_CONTACT_DELAY, PLAYER_PUNCH_CONTACT_WINDOW, PLAYER_PUNCH_DAMAGE, PLAYER_PUNCH_DAMAGE_MAX, PLAYER_PUNCH_DURATION, PUNCH_COMBO_WINDOW } from './game/constants'
 import { collidesWithGoalFrame, getKickContact, getMeleeAreaTargets, getNearestPunchTarget, getPunchTargetAtContact } from './game/combatGeometry'
 import { ATTACK_TYPE, isDamageIgnoredByDodge } from './game/damageTypes'
+import { CROUCH_WALK_SPEED } from './game/crouch'
 import { PLAYER_DODGE, getDodgeDirection, getDodgeSpeed, isDodgeInvulnerable } from './game/dodge'
 import { getFallDamage } from './game/fallDamage'
 import { accumulatePendingCameraDrag, clearPendingCameraDrag, consumePendingCameraDrag } from './game/cameraInput'
@@ -24,6 +25,8 @@ import { MELEE_WEAPONS, getMeleeHitDamage } from './game/meleeWeapons'
 import { MOUNT_AIRBORNE_THRESHOLD, rebaseMountAltitudeForSurface } from './game/mountGrounding'
 import { WINGS_CONFIG, WINGS_PHASE, boostWings, canBoostWings, canCastWings, cancelWings, castWings, createWingsState, getWingsCooldownRemaining, getWingsEnergyRatio, isWingsFlying, stepWings } from './game/wingsSpell'
 import { getAngelWingsBounds } from './game/angelWingsBounds'
+import BirdFeature, { BIRD_SEED_ITEM_ID, WILD_BERRY_ITEM_ID } from './game/birds/BirdFeature'
+import { adoptBird, gainBirdBond, gainBirdTrust, loseBirdTrust, normalizeBirdProgress } from './game/birds/birdProgress'
 import { useGameTexture } from './game/ktx2'
 import GameFrameSchedulerDriver from './game/runtime/GameFrameSchedulerDriver'
 import { FRAME_PHASES, gameFrameScheduler } from './game/runtime/frameScheduler'
@@ -4196,6 +4199,8 @@ function GoalNet({ ballRef, goalObject }) {
 }
 
 function Player({
+  crouching = false,
+  playerCrouchingRef,
   touchRef,
   ballRef,
   playerPositionRef,
@@ -4401,6 +4406,7 @@ function Player({
   useFrame((state, delta) => {
     if (!playerBodyRef.current || !visualRef.current) return
 
+    playerCrouchingRef.current = false
     const key = keyboardRef.current
     const touch = touchRef.current
     const cameraDrag = consumePendingCameraDrag(touch, {
@@ -4939,11 +4945,12 @@ function Player({
     }
 
     const wingsAirborne = isWingsFlying(wings)
+    const isCrouching = crouching && onGroundRef.current && !isDodging && !wingsAirborne && !isEmoting
     const moveIntensity = MathUtils.clamp(rawLength, 0, 1)
     const speed = isDodging
       ? getDodgeSpeed(dodgeElapsed, dodge.entrySpeed)
       : isMoving
-        ? MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95)) * (movementSpeedMultiplierRef?.current ?? 1)
+        ? (isCrouching ? CROUCH_WALK_SPEED : MathUtils.lerp(1.65, PLAYER_MAX_RUN_SPEED, MathUtils.smoothstep(moveIntensity, 0.25, 0.95))) * (movementSpeedMultiplierRef?.current ?? 1)
         : 0
     if (wingsAirborne) {
       // Plané : l'avance est dirigée par la caméra (wings.forwardSpeed le long
@@ -5423,11 +5430,14 @@ function Player({
                     ? equippedWeapon === 'cheat_sword' ? swordAttackRef.current.motion : 'punch'
                   : state.clock.elapsedTime < kickUntilRef.current
                     ? 'kick'
+                    : isCrouching
+                      ? isMoving ? 'crouchWalk' : 'crouchIdle'
                     : isMoving
                       ? speed > 2.45
                         ? 'run'
                         : 'walk'
                       : 'idle'
+    playerCrouchingRef.current = nextMotion === 'crouchWalk' || nextMotion === 'crouchIdle'
     setPlayerMotion((current) => (current === nextMotion ? current : nextMotion))
     if (localPlayerStateRef) {
       localPlayerStateRef.current = {
@@ -6223,6 +6233,7 @@ function PlayerAvatar({
   const swordSlash = useMixamoGlbAnimation('/models/player/anim/sword-slash.glb')
   const swordSlash2 = useMixamoGlbAnimation('/models/player/anim/sword-slash-2.glb')
   const swordSlash3 = useMixamoGlbAnimation('/models/player/anim/sword-slash-3.glb')
+  const crouchedWalk = useMixamoGlbAnimation('/models/player/anim/crouched-walk.glb')
   const dodgeRoll = useMixamoGlbAnimation('/models/player/anim/dodge-roll.glb')
   const jumpStart = useMixamoGlbAnimation('/models/player/anim/jump-start.glb')
   const jumpLoop = useMixamoGlbAnimation('/models/player/anim/jump-loop.glb')
@@ -6423,6 +6434,8 @@ function PlayerAvatar({
       { source: swordSlash.animations[0], name: 'swordSlash' },
       { source: swordSlash2.animations[0], name: 'swordSlash2' },
       { source: swordSlash3.animations[0], name: 'swordSlash3' },
+      { source: crouchedWalk.animations[0], name: 'crouchWalk' },
+      { source: crouchedWalk.animations[0], name: 'crouchIdle' },
       { source: dodgeRoll.animations[0], name: 'dodgeRoll' },
       { source: jumpStart.animations[0], name: 'jumpStart' },
       { source: jumpLoop.animations[0], name: 'fallingIdle' },
@@ -6438,12 +6451,12 @@ function PlayerAvatar({
       .map(({ source, name }) => {
         const clip = source.clone()
         clip.name = name
-        if (name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun' || name === 'dodgeRoll') {
+        if (name === 'crouchWalk' || name === 'crouchIdle' || name === 'sitDown' || name === 'sittingIdle' || name === 'mountedIdle' || name === 'standUp' || name === 'walk' || name === 'run' || name === 'swordIdle' || name === 'swordWalk' || name === 'swordRun' || name === 'dodgeRoll') {
           lockHipsPlanarPosition(clip)
         }
         return filterAnimationClipTracksForObject(clip, avatar)
       })
-  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, dodgeRoll.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
+  }, [avatar, idle.animations, walk.animations, run.animations, kick.animations, punch.animations, swordIdle.animations, swordWalk.animations, swordRun.animations, swordSlash.animations, swordSlash2.animations, swordSlash3.animations, dodgeRoll.animations, crouchedWalk.animations, jumpStart.animations, jumpLoop.animations, jumpLand.animations, sitDown.animations, sittingIdle.animations, standUp.animations])
 
   const optionalAnimationClips = useMemo(() => {
     if (!optionalAnimations) return []
@@ -6567,7 +6580,7 @@ function PlayerAvatar({
           ? PLAYER_AIR_ANIMATION_FADE
           : PLAYER_DEFAULT_ANIMATION_FADE
 
-    const motionTimeScale = nextMotion === 'dodgeRoll'
+    const motionTimeScale = nextMotion === 'crouchIdle' ? 0 : nextMotion === 'crouchWalk' ? 0.8 : nextMotion === 'dodgeRoll'
       ? Math.max(0.01, nextAction.getClip().duration) / PLAYER_DODGE.duration
       : nextMotion === 'kick'
         ? 1.2
@@ -8355,6 +8368,8 @@ function NetworkSlimePet({ slimePetId, stateRef, currentZone }) {
 }
 
 function ControlsOverlay({
+  crouching = false,
+  onToggleCrouch,
   touchRef,
   adminCameraControls = false,
   uiHidden = false,
@@ -8367,6 +8382,17 @@ function ControlsOverlay({
   controlSettings = DEFAULT_CONTROL_SETTINGS,
   onTap,
 }) {
+  useEffect(() => {
+    if (uiHidden || adminCameraControls || !onToggleCrouch) return undefined
+    const onKeyDown = (event) => {
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || isTextInputEvent(event)) return
+      if (getKeyboardKey(event) !== 'c') return
+      event.preventDefault()
+      onToggleCrouch()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [uiHidden, adminCameraControls, onToggleCrouch])
   const joystickPointerIdRef = useRef(null)
   const lookPointerIdRef = useRef(null)
   const lookPointersRef = useRef(new Map())
@@ -8748,6 +8774,20 @@ function ControlsOverlay({
           <span aria-hidden="true">↻</span>
         </button>
       )}
+      {!uiHidden && showDodgeAction && onToggleCrouch && (
+        <button className={`mobility-dodge-btn mobility-crouch-btn${crouching ? ' is-active' : ''}`}
+          type="button" aria-label="Marcher accroupi" aria-pressed={crouching}
+          title="Marcher accroupi (C)" onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            triggerControlHaptic(controlSettings.vibration)
+            onToggleCrouch()
+          }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="14" cy="5" r="2" /><path d="m12 9-3 5 5 2-3 5H6m6-12 4 4h4M9 14l-4 3" />
+          </svg>
+        </button>
+      )}
       {!uiHidden && selectedMount && onToggleMount && (
         <button
           className={`mount-summon-action-btn${mountActive ? ' is-active' : ''}`}
@@ -8776,7 +8816,18 @@ const BAG_ITEM_DEFS = [
 
 const BAG_GRID_SIZE = 12
 
-function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose, materials = {}, coins = 0 }) {
+function BagPanel({
+  open,
+  ownedItems,
+  equippedWeapon,
+  onEquip,
+  onClose,
+  materials = {},
+  coins = 0,
+  selectedMaterialId = null,
+  onSelectMaterial,
+  onDropMaterial,
+}) {
   const lastTapRef = useRef({})
 
   function handleSlotInteraction(itemId) {
@@ -8820,20 +8871,29 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose, material
           </span>
           <button type="button" className="weapon-inventory-close" onClick={onClose}>✕</button>
         </div>
-        <p className="bag-hint">Double-cliquer pour équiper</p>
+        <p className="bag-hint">Double-cliquer pour équiper · sélectionner un matériau pour le déposer</p>
         <div className="bag-grid">
           {slots.map((item, i) => {
             const isEquipment = item?.kind === 'equipment'
+            const isMaterial = item?.kind === 'material'
             const isEquipped = isEquipment && equippedWeapon === item.id
+            const isSelectedMaterial = isMaterial && selectedMaterialId === item.itemId
             return (
               <div
                 key={item ? item.id : `empty-${i}`}
-                className={`bag-slot ${item ? 'has-item' : ''} ${isEquipped ? 'equipped' : ''}`}
-                onClick={() => isEquipment && handleSlotInteraction(item.id)}
+                className={`bag-slot ${item ? 'has-item' : ''} ${isEquipped ? 'equipped' : ''} ${isSelectedMaterial ? 'selected-material' : ''}`}
+                onClick={() => {
+                  if (isEquipment) handleSlotInteraction(item.id)
+                  if (isMaterial) onSelectMaterial?.(item.itemId)
+                }}
                 title={item ? `${item.name}${item.desc ? ` — ${item.desc}` : ''}` : ''}
-                role={isEquipment ? 'button' : undefined}
-                tabIndex={isEquipment ? 0 : undefined}
-                onKeyDown={isEquipment ? (e) => e.key === 'Enter' && handleSlotInteraction(item.id) : undefined}
+                role={item ? 'button' : undefined}
+                tabIndex={item ? 0 : undefined}
+                onKeyDown={item ? (event) => {
+                  if (event.key !== 'Enter') return
+                  if (isEquipment) handleSlotInteraction(item.id)
+                  if (isMaterial) onSelectMaterial?.(item.itemId)
+                } : undefined}
               >
                 {isEquipment && (
                   <>
@@ -8867,6 +8927,11 @@ function BagPanel({ open, ownedItems, equippedWeapon, onEquip, onClose, material
             )
           })}
         </div>
+        {selectedMaterialId && materials[selectedMaterialId] > 0 && (
+          <button className="bag-drop-btn" type="button" onClick={() => onDropMaterial?.(selectedMaterialId)}>
+            Déposer 1 {getItemDefinition(selectedMaterialId)?.name ?? selectedMaterialId} <kbd>G</kbd>
+          </button>
+        )}
       </div>
     </div>
   )
@@ -8911,6 +8976,8 @@ function CompanionMenu({
   ownedSlimePets,
   activeSlimePetId,
   onToggleSlimePet,
+  birdProgress,
+  onToggleBird,
   onClose,
 }) {
   if (!open) return null
@@ -8964,7 +9031,14 @@ function CompanionMenu({
               </button>
             )
           })}
-          {((activeTab === 'mounts' && mounts.length === 0) || (activeTab === 'pets' && !ownedCat && slimePets.length === 0)) && (
+          {activeTab === 'pets' && birdProgress?.adopted && (
+            <button type="button" className={`companion-card${birdProgress.active ? ' is-selected' : ''}`} onClick={onToggleBird}>
+              <span className="companion-card-icon" aria-hidden="true">🐦</span>
+              <strong>Oiseau sauvage</strong>
+              <small>{birdProgress.active ? `Lien ${birdProgress.bond}/5 · Désinvoquer` : `Lien ${birdProgress.bond}/5 · Invoquer`}</small>
+            </button>
+          )}
+          {((activeTab === 'mounts' && mounts.length === 0) || (activeTab === 'pets' && !ownedCat && slimePets.length === 0 && !birdProgress?.adopted)) && (
             <p className="companion-menu-empty">Aucun compagnon débloqué.</p>
           )}
         </div>
@@ -19765,6 +19839,11 @@ function App() {
   const catActive = useGameStore((s) => s.inventory.catActive)
   const ownedSlimePets = useGameStore((s) => s.inventory.ownedSlimePets)
   const activeSlimePetId = useGameStore((s) => s.inventory.activeSlimePetId)
+  const [crouching, setCrouching] = useState(false)
+  const playerCrouchingRef = useRef(false)
+  const toggleCrouch = useCallback(() => setCrouching((value) => !value), [])
+  const birdProgress = useGameStore((s) => s.birds)
+  const setBirds = useGameStore((s) => s.setBirds)
   const ownedMagicBook = useGameStore((s) => s.equipment.ownedMagicBook)
   const ownedMagicSkull = useGameStore((s) => s.equipment.ownedMagicSkull)
   const ownedCheatSword = useGameStore((s) => s.equipment.ownedCheatSword)
@@ -19832,6 +19911,7 @@ function App() {
   const vendorOpen = useGameStore((s) => s.quests.vendorOpen)
   // Objets lootés au sol en attente d'absorption (transitoire, non persisté).
   const [lootDrops, setLootDrops] = useState([])
+  const [selectedMaterialId, setSelectedMaterialId] = useState(null)
   // Quête épinglée (mini-tracker). Préférence d'UI : persistée en localStorage,
   // pas dans la sauvegarde de progression.
   const pinnedQuestId = useGameStore((s) => s.quests.pinnedId)
@@ -20324,6 +20404,7 @@ function App() {
     friends,
     quests: questProgress,
     materials,
+    bird: birdProgress,
     lastLocation: createCurrentPlayerLocation(),
   })
 
@@ -20395,6 +20476,7 @@ function App() {
       friends,
       quests: questProgress,
       materials,
+      bird: birdProgress,
       lastLocation: createCurrentPlayerLocation(),
       roomLightOn: savedWorld.roomLightOn ?? roomLightOn,
       lightColor: savedWorld.lightColor ?? lightColor,
@@ -20436,6 +20518,7 @@ function App() {
     setInventory('catActive',false)
     setInventory('ownedSlimePets',[])
     setInventory('activeSlimePetId',null)
+    setBirds(normalizeBirdProgress(null))
     setEquipment('ownedMagicBook',false)
     setEquipment('ownedMagicSkull',false)
     setEquipment('ownedCheatSword',false)
@@ -20591,6 +20674,12 @@ function App() {
       setInventory('ownedSlimePets',parsedOwnedSlimePets)
       setInventory('activeSlimePetId',parsedActiveSlimePetId)
       if (parsedActiveSlimePetId) setInventory('catActive',false)
+      const parsedBird = normalizeBirdProgress(parsed.bird)
+      setBirds(parsedBird)
+      if (parsedBird.active) {
+        setInventory('catActive',false)
+        setInventory('activeSlimePetId',null)
+      }
       // Hauts faits locaux : on charge le set sauvegardé (les hauts faits
       // événementiels ne sont pas redérivables, il faut les conserver).
       const parsedAchievements = Array.isArray(parsed.unlockedAchievements)
@@ -20941,7 +21030,7 @@ function App() {
       if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
       if (timeoutId) window.clearTimeout(timeoutId)
     }
-  }, [worldDataReady, playerSpawnReady, isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
+  }, [worldDataReady, playerSpawnReady, isGuestVisit, progressStorageKey, displayName, coins, ownedSkins, selectedSkinId, roomLightOn, lightColor, lightIntensity, housePlan, ownedFloorSkins, ownedWallSkins, selectedFloorSkinId, selectedWallSkinId, applyWallToCeiling, editableObjects, ownedCat, catActive, ownedSlimePets, activeSlimePetId, birdProgress, ownedMagicBook, ownedMagicSkull, ownedCheatSword, magicSkullDiscovered, unlockedAchievements, mobKillCount, bossKillCount, ownedMounts, equippedWeapon, ownedTitleIds, equippedTitleId, characterAppearance, friends, questProgress, materials])
 
   useEffect(() => {
     if (!worldDataReady || !playerSpawnReady) return undefined
@@ -21815,6 +21904,103 @@ function App() {
       },
     ])
   }
+
+  const harvestBirdBush = useCallback((itemIds, position) => {
+    if (!Array.isArray(itemIds) || itemIds.length === 0) return
+    setEconomy('materials',(current) => addItems(current, itemIds))
+    if (itemIds.includes(BIRD_SEED_ITEM_ID)) setSelectedMaterialId(BIRD_SEED_ITEM_ID)
+    const labels = itemIds.map((itemId) => getItemDefinition(itemId)?.emoji ?? '📦').join(' ')
+    setScorePopups((previous) => [
+      ...previous,
+      {
+        id: `bush-harvest-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        label: `Récolte ${labels}`,
+        x: position?.[0] ?? 0,
+        y: (position?.[1] ?? 0) + 1.4,
+        z: position?.[2] ?? 0,
+        startAt: Date.now(),
+        duration: 900,
+      },
+    ])
+  }, [setEconomy])
+
+  const dropInventoryItem = useCallback((requestedItemId = null) => {
+    if (mode !== 'play' || currentZone !== ZONES.outside) return false
+    const itemId = requestedItemId ?? selectedMaterialId
+    if (!itemId || !getItemDefinition(itemId)) return false
+    const currentMaterials = useGameStore.getState().economy.materials
+    const result = consumeItems(currentMaterials, { [itemId]: 1 })
+    if (!result.consumed) return false
+
+    const player = playerPositionRef.current
+    const yaw = playerBodyYawRef.current ?? 0
+    const x = player.x + Math.sin(yaw) * 1.15
+    const z = player.z + Math.cos(yaw) * 1.15
+    const y = getTerrainHeight(x, z)
+    setEconomy('materials',result.materials)
+    setLootDrops((previous) => {
+      const drop = {
+        id: `player-drop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        itemId,
+        from: [x, y, z],
+        bornAt: performance.now(),
+        pickupDelayMs: [BIRD_SEED_ITEM_ID, WILD_BERRY_ITEM_ID].includes(itemId) ? 30000 : 5000,
+        lifetimeMs: 60000,
+        source: 'player_drop',
+      }
+      const merged = [...previous, drop]
+      return merged.length > LOOT_DROP_MAX ? merged.slice(merged.length - LOOT_DROP_MAX) : merged
+    })
+    return true
+  }, [currentZone, mode, selectedMaterialId, setEconomy])
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.repeat || isTextInputEvent(event) || getKeyboardKey(event) !== 'g') return
+      if (mode !== 'play' || currentZone !== ZONES.outside) return
+      event.preventDefault()
+      dropInventoryItem()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [currentZone, dropInventoryItem, mode])
+
+  const feedWildBird = useCallback((birdId) => {
+    setBirds((current) => ({ ...gainBirdTrust(current), birdId }))
+  }, [setBirds])
+
+  const frightenWildBird = useCallback(() => {
+    setBirds((current) => loseBirdTrust(current))
+  }, [setBirds])
+
+  const feedAdoptedBird = useCallback(() => {
+    setBirds((current) => gainBirdBond(current))
+  }, [setBirds])
+
+  const adoptWildBird = useCallback(() => {
+    let adopted = false
+    setBirds((current) => {
+      const next = adoptBird(current)
+      adopted = next.adopted && !normalizeBirdProgress(current).adopted
+      return next
+    })
+    if (!adopted) return
+    setInventory('catActive',false)
+    setInventory('activeSlimePetId',null)
+    const player = playerPositionRef.current
+    setScorePopups((previous) => [
+      ...previous,
+      {
+        id: `bird-adopted-${Date.now()}`,
+        label: '🐦 Oiseau adopté !',
+        x: player?.x ?? 0,
+        y: (player?.y ?? 0) + 1.5,
+        z: player?.z ?? 0,
+        startAt: Date.now(),
+        duration: 1200,
+      },
+    ])
+  }, [setBirds, setInventory])
 
   const stopPlayerRegeneration = useCallback(() => {
     if (playerRegenDelayRef.current) {
@@ -22975,6 +23161,7 @@ function App() {
     setInventory('catActive',nextCatActive)
     if (nextCatActive) {
       setInventory('activeSlimePetId',null)
+      setBirds((current) => ({ ...normalizeBirdProgress(current), active: false }))
     } else {
       setCameraOnCat(false)
     }
@@ -22987,6 +23174,20 @@ function App() {
     setInventory('activeSlimePetId',nextSlimePetId)
     if (nextSlimePetId) {
       setInventory('catActive',false)
+      setBirds((current) => ({ ...normalizeBirdProgress(current), active: false }))
+      setCameraOnCat(false)
+    }
+  }
+
+  const toggleBird = () => {
+    if (mode !== 'play') return
+    const current = normalizeBirdProgress(useGameStore.getState().birds)
+    if (!current.adopted) return
+    const nextActive = !current.active
+    setBirds({ ...current, active: nextActive })
+    if (nextActive) {
+      setInventory('catActive',false)
+      setInventory('activeSlimePetId',null)
       setCameraOnCat(false)
     }
   }
@@ -24402,6 +24603,8 @@ function App() {
             <Suspense fallback={null}>
             <Profiler id="Player" onRender={recordRenderProfile}>
             <Player
+              crouching={crouching}
+              playerCrouchingRef={playerCrouchingRef}
               touchRef={touchRef}
               ballRef={ballRef}
               playerPositionRef={playerPositionRef}
@@ -24515,6 +24718,21 @@ function App() {
             onAbsorb={absorbLootDrop}
             onExpire={expireLootDrop}
           />
+          <BirdFeature
+            playerCrouchingRef={playerCrouchingRef}
+            enabled={currentZone === ZONES.outside && mode === 'play'}
+            origin={[OUTDOOR_ENTRY_POSITION.x - 5, 0, OUTDOOR_ENTRY_POSITION.z]}
+            playerPositionRef={playerPositionRef}
+            playerVelocityRef={playerVelocityRef}
+            seedDrops={lootDrops.filter((drop) => drop.source === 'player_drop' && [BIRD_SEED_ITEM_ID, WILD_BERRY_ITEM_ID].includes(drop.itemId))}
+            birdProgress={birdProgress}
+            onHarvest={harvestBirdBush}
+            onSeedEaten={expireLootDrop}
+            onTrustGain={feedWildBird}
+            onFear={frightenWildBird}
+            onBondGain={feedAdoptedBird}
+            onAdopt={adoptWildBird}
+          />
           <SeatInteractionTrigger
             playerPositionRef={playerPositionRef}
             objects={placedEditableObjects}
@@ -24576,6 +24794,8 @@ function App() {
 
       {showGameplayControls && (
         <ControlsOverlay
+          crouching={crouching}
+          onToggleCrouch={!dragonMounted && !seatedState?.phase ? toggleCrouch : undefined}
           touchRef={touchRef}
           controlSettings={controlSettings}
           adminCameraControls={isAdminMode || isVerticalFrameMode || (isLocalNetwork && freeCameraActive)}
@@ -24695,6 +24915,8 @@ function App() {
           ownedSlimePets={ownedSlimePets}
           activeSlimePetId={activeSlimePetId}
           onToggleSlimePet={toggleSlimePet}
+          birdProgress={birdProgress}
+          onToggleBird={toggleBird}
           onClose={() => setCompanionMenuOpen(false)}
         />
       )}
@@ -24720,6 +24942,9 @@ function App() {
           onClose={() => setUi('weaponMenuOpen',false)}
           materials={materials}
           coins={coins}
+          selectedMaterialId={selectedMaterialId}
+          onSelectMaterial={setSelectedMaterialId}
+          onDropMaterial={dropInventoryItem}
         />
       )}
       {showGameplayUi && isLocalNetwork && showLocalCoinButton && canModifyWorld && (

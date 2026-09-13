@@ -237,12 +237,23 @@ export function parseArtDirectionDocument(input) {
 
 function createStateFromDocument(document) {
   const presets = ensureBuiltinPresets(parseArtDirectionDocument(document))
-  const activePresetId = presets.some((preset) => preset.id === document?.activePresetId)
-    ? document.activePresetId
+  const normalPresetId = presets.find((preset) => (
+    preset.id === document?.normalPresetId && preset.id !== BOSS_SLIME_PRESET_ID
+  ))?.id ?? presets.find((preset) => (
+    preset.id !== BOSS_SLIME_PRESET_ID && preset.id !== FACTORY_PRESET_ID
+  ))?.id ?? FACTORY_PRESET_ID
+  const params = new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)
+  const isEditor = params.has('editor') || params.has('treeeditor')
+  const requestedPresetId = document?.activePresetId === BOSS_SLIME_PRESET_ID && !isEditor
+    ? normalPresetId
+    : document?.activePresetId
+  const activePresetId = presets.some((preset) => preset.id === requestedPresetId)
+    ? requestedPresetId
     : presets[0].id
   return {
     presets,
     activePresetId,
+    normalPresetId: activePresetId === BOSS_SLIME_PRESET_ID ? normalPresetId : activePresetId,
     comparisonPresetId: presets.some((preset) => preset.id === document?.comparisonPresetId)
       ? document.comparisonPresetId
       : presets.find((preset) => preset.id !== activePresetId)?.id ?? activePresetId,
@@ -289,6 +300,7 @@ const initialBossPreset = createBossSlimePreset()
 export const useArtDirectionStore = create((set, get) => ({
   presets: persistedState?.presets ?? [initialPreset, initialBossPreset],
   activePresetId: persistedState?.activePresetId ?? initialPreset.id,
+  normalPresetId: persistedState?.normalPresetId ?? initialPreset.id,
   comparisonPresetId: persistedState?.comparisonPresetId ?? initialPreset.id,
   comparisonView: 'active',
   runtimeValues: null,
@@ -299,7 +311,11 @@ export const useArtDirectionStore = create((set, get) => ({
 
   selectPreset: (presetId) => set((state) => (
     state.presets.some((preset) => preset.id === presetId)
-      ? { activePresetId: presetId, comparisonView: 'active' }
+      ? {
+        activePresetId: presetId,
+        normalPresetId: presetId === BOSS_SLIME_PRESET_ID ? state.normalPresetId : presetId,
+        comparisonView: 'active',
+      }
       : {}
   )),
 
@@ -328,6 +344,7 @@ export const useArtDirectionStore = create((set, get) => ({
     set((state) => ({
       presets: [...state.presets, preset],
       activePresetId: preset.id,
+      normalPresetId: preset.id,
       comparisonView: 'active',
     }))
     return preset.id
@@ -347,6 +364,7 @@ export const useArtDirectionStore = create((set, get) => ({
     set((state) => ({
       presets: [...state.presets, preset],
       activePresetId: preset.id,
+      normalPresetId: preset.id,
       comparisonView: 'active',
     }))
     return preset.id
@@ -377,6 +395,7 @@ export const useArtDirectionStore = create((set, get) => ({
     return {
       presets,
       activePresetId,
+      normalPresetId: activePresetId === BOSS_SLIME_PRESET_ID ? state.normalPresetId : activePresetId,
       comparisonPresetId: presets.some((preset) => preset.id === state.comparisonPresetId)
         ? state.comparisonPresetId
         : activePresetId,
@@ -403,6 +422,7 @@ export const useArtDirectionStore = create((set, get) => ({
     set((state) => ({
       presets: [...state.presets, ...imported],
       activePresetId: imported[0].id,
+      normalPresetId: imported[0].id,
       comparisonView: 'active',
     }))
     return imported.length
@@ -460,6 +480,7 @@ export function createArtDirectionDocument() {
     version: ART_DIRECTION_DOCUMENT_VERSION,
     exportedAt: new Date().toISOString(),
     activePresetId: state.activePresetId,
+    normalPresetId: state.normalPresetId,
     comparisonPresetId: state.comparisonPresetId,
     presets: state.presets,
   }
@@ -513,6 +534,7 @@ useArtDirectionStore.subscribe((state, previousState) => {
     window.localStorage.setItem(ART_DIRECTION_STORAGE_KEY, JSON.stringify({
       version: ART_DIRECTION_DOCUMENT_VERSION,
       activePresetId: state.activePresetId,
+      normalPresetId: state.normalPresetId,
       comparisonPresetId: state.comparisonPresetId,
       presets: state.presets,
     }))

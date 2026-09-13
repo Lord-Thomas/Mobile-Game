@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   ART_DIRECTION_STORAGE_KEY,
+  BOSS_SLIME_PRESET_ID,
   DEFAULT_ART_DIRECTION_VALUES,
   applyArtDirectionDocument,
   createArtDirectionDocument,
@@ -80,5 +81,28 @@ describe('artDirectionStore', () => {
     const state = useArtDirectionStore.getState()
     expect(state.presets.find((preset) => preset.id === 'factory-daylight').values.lighting.sunIntensity).toBe(6.4)
     expect(state.presets.filter((preset) => preset.id === 'factory-daylight')).toHaveLength(1)
+  })
+
+  it('restaure la dernière ambiance normale après un aperçu boss sauvegardé', () => {
+    const store = useArtDirectionStore.getState()
+    const normalId = store.createPreset('Ambiance personnelle')
+    store.setValue('sky.zenith', '#123456')
+    store.selectPreset(BOSS_SLIME_PRESET_ID)
+    const document = createArtDirectionDocument()
+
+    expect(document.activePresetId).toBe(BOSS_SLIME_PRESET_ID)
+    expect(document.normalPresetId).toBe(normalId)
+    expect(applyArtDirectionDocument(document)).toBe(true)
+    expect(useArtDirectionStore.getState().activePresetId).toBe(normalId)
+    expect(getEffectiveArtDirectionValues().sky.zenith).toBe('#123456')
+  })
+
+  it('récupère une ancienne sauvegarde bloquée sur le preset boss', () => {
+    expect(applyArtDirectionDocument({
+      activePresetId: BOSS_SLIME_PRESET_ID,
+      presets: [{ id: BOSS_SLIME_PRESET_ID, values: {} }],
+    })).toBe(true)
+    expect(useArtDirectionStore.getState().activePresetId).toBe('factory-daylight')
+    expect(getEffectiveArtDirectionValues()).toEqual(DEFAULT_ART_DIRECTION_VALUES)
   })
 })
