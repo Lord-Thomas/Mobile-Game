@@ -304,14 +304,19 @@ async function buildFullGrassField() {
 }
 
 const flatGrassFields = new Map()
-export function getFlatGrassField(size = 30) {
-  if (flatGrassFields.has(size)) return flatGrassFields.get(size)
+export function getFlatGrassField(size = 30, density = 1) {
+  if (!Number.isFinite(size) || size < 1 || size > 120 || !Number.isFinite(density) || density < 0.25 || density > 6) {
+    throw new RangeError('Invalid grass test dimensions or density')
+  }
+  const key = `${size}:${density}`
+  if (flatGrassFields.has(key)) return flatGrassFields.get(key)
+  const step = GRASS_GRID_STEP / Math.sqrt(density)
   const half = size / 2
-  const capacity = (Math.ceil(half / GRASS_GRID_STEP) + 2) ** 2
+  const capacity = (Math.ceil((half + grassPlacementSettings.positionJitter) / step) + 2) ** 2
   const fields = QUADRANTS.map(() => ({ data: new Float32Array(capacity * 4), count: 0 }))
   const started = performance.now()
-  for (let xi = -half; xi < half; xi += GRASS_GRID_STEP) {
-    for (let zi = -half; zi < half; zi += GRASS_GRID_STEP) {
+  for (let xi = -half; xi < half; xi += step) {
+    for (let zi = -half; zi < half; zi += step) {
       const seed = (xi + 61) * 197 + (zi + 43) * 137
       const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
       const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
@@ -325,7 +330,9 @@ export function getFlatGrassField(size = 30) {
     }
   }
   const promise = Promise.resolve({ fields, buildMs: performance.now() - started })
-  flatGrassFields.set(size, promise)
+  // Slider experiments must not retain every previous large field in memory.
+  if (flatGrassFields.size >= 2) flatGrassFields.delete(flatGrassFields.keys().next().value)
+  flatGrassFields.set(key, promise)
   return promise
 }
 
@@ -521,7 +528,7 @@ function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
 }
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false,
-  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, volumeTufts = false }) {
+  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, flatTestDensity = 1, volumeTufts = false, onFieldReady = null }) {
   const shaderRef = useRef(null)
   const biomeRef = useRef(getGrassBiomeShaderData(biomeAreas))
   const baseTexture = useTexture(GRASS_TEXTURE)
@@ -529,7 +536,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     const t = baseTexture.clone(); t.colorSpace = SRGBColorSpace; t.needsUpdate = true
     return t
   }, [baseTexture])
-  const field = use(flatTestSize ? getFlatGrassField(flatTestSize) : getFullGrassField())
+  const field = use(flatTestSize ? getFlatGrassField(flatTestSize, flatTestDensity) : getFullGrassField())
+  useEffect(() => {
+    onFieldReady?.({ count: field.fields.reduce((sum, batch) => sum + batch.count, 0), buildMs: field.buildMs })
+  }, [field, onFieldReady])
   const geometries = useMemo(() => {
     const card = createGrassCardGeometry()
     const base = volumeTufts ? createVolumeTuftGeometry(card) : card

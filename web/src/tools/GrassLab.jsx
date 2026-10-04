@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { Physics, RigidBody, CuboidCollider } from '@react-three/rapier'
 import { ACESFilmicToneMapping, PCFShadowMap, SRGBColorSpace } from 'three'
@@ -13,9 +13,8 @@ import TerrainGroundCover from '../world/TerrainGroundCover'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import './GrassLab.css'
 
-const SIZE = 30
+const DEFAULT_FIELD = { size: 30, density: 1 }
 const EMPTY_BIOMES = []
-const AREA = { minX: -SIZE / 2 + 0.5, maxX: SIZE / 2 - 0.5, minZ: -SIZE / 2 + 0.5, maxZ: SIZE / 2 - 0.5 }
 const SPAWN = { token: 'grass-lab', zone: ZONES.outside, position: [0, PLAYER_HEIGHT, 3], cameraYaw: 0, cameraPitch: -0.22 }
 function LabCamera() {
   const { camera } = useThree()
@@ -31,6 +30,18 @@ export default function GrassLab() {
   const [controls, setControls] = useState(loadControlSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [volumeTufts, setVolumeTufts] = useState(true)
+  const [draftField, setDraftField] = useState(DEFAULT_FIELD)
+  const [fieldSettings, setFieldSettings] = useState(DEFAULT_FIELD)
+  const [fieldStats, setFieldStats] = useState(null)
+  const [fieldPending, startFieldTransition] = useTransition()
+  const size = fieldSettings.size
+  const area = useMemo(() => ({ minX: -size / 2 + 0.5, maxX: size / 2 - 0.5,
+    minZ: -size / 2 + 0.5, maxZ: size / 2 - 0.5 }), [size])
+  const applyField = () => startFieldTransition(() => setFieldSettings(draftField))
+  const resetField = () => {
+    setDraftField(DEFAULT_FIELD)
+    startFieldTransition(() => setFieldSettings(DEFAULT_FIELD))
+  }
   const [crouching, setCrouching] = useState(false)
   const [ready, setReady] = useState(false)
   const [scale, setScale] = useState(1)
@@ -71,20 +82,20 @@ export default function GrassLab() {
         <GameFrameSchedulerDriver />
         <LabCamera />
         <LayeredSceneRenderer currentZone={ZONES.outside} />
-        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey="grass-lab" />
+        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey={`grass-lab:${size}:${fieldSettings.density}:${volumeTufts}`} />
         {settings.autoQuality && <RenderQualityGovernor onScaleChange={setScale} />}
         <Suspense fallback={null}>
           <OutdoorLighting active showSky={false} castShadows={!settings.disableShadows}
             playerPositionRef={playerPositionRef} biomeAreas={EMPTY_BIOMES} />
           <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow onUpdate={mesh => mesh.layers.enable(OUTDOOR_LIGHT_LAYER)}>
-            <planeGeometry args={[SIZE, SIZE]} />
+            <planeGeometry args={[size, size]} />
             <meshStandardMaterial color="#438f32" roughness={1} />
           </mesh>
-          {settings.grass && <TerrainGroundCover volumeTufts={volumeTufts} flatTestSize={SIZE} biomeAreas={EMPTY_BIOMES}
+          {settings.grass && <TerrainGroundCover volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
             playerPositionRef={playerPositionRef} ballRef={ballRef} />}
           <Physics gravity={[0, -9.81, 0]}>
-            <RigidBody type="fixed" colliders={false}><CuboidCollider args={[SIZE / 2, 0.1, SIZE / 2]} position={[0, -0.1, 0]} /></RigidBody>
-            <Player testArea={AREA} touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef}
+            <RigidBody key={size} type="fixed" colliders={false}><CuboidCollider args={[size / 2, 0.1, size / 2]} position={[0, -0.1, 0]} /></RigidBody>
+            <Player testArea={area} touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef}
               playerVelocityRef={playerVelocityRef} playerCrouchingRef={playerCrouchingRef}
               crouching={crouching} mode="play" currentZone={ZONES.outside} spawnRequest={SPAWN}
               movementLocked={settingsOpen} loadOptionalAnimations />
@@ -98,12 +109,29 @@ export default function GrassLab() {
       onToggleCrouch={() => setCrouching(value => !value)} controlSettings={controls} showDodgeAction />}
     {ready && settings.showFps && <FpsOverlay />}
     <nav className="grass-lab-toolbar" aria-label="Scène de test">
-      <span>Herbe · 30 × 30 m</span>
+      <span>Herbe · {size} × {size} m · ×{fieldSettings.density}</span>
       <button onClick={() => { resetInput(); setSettingsOpen(value => !value) }}>Paramètres</button>
       <a href="/">Retour au jeu</a>
     </nav>
     {settingsOpen && <div className="grass-lab-settings" role="dialog" aria-modal="true" aria-label="Paramètres">
       <button className="grass-lab-close" onClick={() => setSettingsOpen(false)}>Fermer</button>
+      <div className="settings-group-title">Terrain de test</div>
+      <label className="settings-range-row">
+        <span><strong>Densité de l’herbe</strong><output>×{draftField.density.toFixed(2)}</output></span>
+        <input type="range" aria-label="Densité de l’herbe" min="0.5" max="6" step="0.25" value={draftField.density}
+          onChange={event => setDraftField(current => ({ ...current, density: Number(event.target.value) }))}
+          onPointerUp={applyField} onKeyUp={applyField} onBlur={applyField} />
+      </label>
+      <label className="settings-range-row">
+        <span><strong>Taille du terrain</strong><output>{draftField.size} × {draftField.size} m</output></span>
+        <input type="range" aria-label="Taille du terrain" min="10" max="120" step="10" value={draftField.size}
+          onChange={event => setDraftField(current => ({ ...current, size: Number(event.target.value) }))}
+          onPointerUp={applyField} onKeyUp={applyField} onBlur={applyField} />
+      </label>
+      <p className="grass-lab-field-info" role="status">{fieldPending ? 'Préparation du terrain…' : !settings.grass ? 'Herbe désactivée' :
+        `${(fieldStats?.count ?? 0).toLocaleString('fr-FR')} touffes · ${(size * size).toLocaleString('fr-FR')} m²`}</p>
+      <button type="button" className="settings-action-row" onClick={resetField}>Revenir à 30 m / ×1</button>
+      <p className="grass-lab-field-info">Relâche le curseur pour appliquer. Pour comparer les FPS à résolution constante, désactive « Qualité auto ».</p>
       <label className="settings-toggle-row">
         <input type="checkbox" checked={volumeTufts} onChange={event => setVolumeTufts(event.target.checked)} />
         <span><strong>Touffes en volume</strong><small>Désactiver pour comparer avec la forme d’origine, à densité identique.</small></span>

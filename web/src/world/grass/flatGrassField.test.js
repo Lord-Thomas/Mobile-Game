@@ -21,3 +21,20 @@ it('builds only a flat 30m test field, at full density, and reuses it', async ()
   expect(total).toBeLessThan(19000)
   expect((await getFlatGrassField(12)).fields.reduce((sum, batch) => sum + batch.count, 0)).toBeLessThan(total / 4)
 })
+
+it('scales tuft count with density and terrain area, with bounded valid buffers', async () => {
+  const count = field => field.fields.reduce((sum, batch) => sum + batch.count, 0)
+  const base = count(await getFlatGrassField(20, 1))
+  const denseField = await getFlatGrassField(20, 4)
+  expect(count(denseField) / base).toBeGreaterThan(3.9)
+  expect(count(denseField) / base).toBeLessThan(4.1)
+  expect(count(await getFlatGrassField(40, 1)) / base).toBeGreaterThan(3.9)
+  const maximum = await getFlatGrassField(120, 6)
+  for (const batch of maximum.fields) {
+    expect(batch.count * 4).toBeLessThanOrEqual(batch.data.length)
+    expect(batch.data.subarray(0, batch.count * 4).every(Number.isFinite)).toBe(true)
+  }
+  expect(count(maximum)).toBeGreaterThan(1700000)
+  expect(() => getFlatGrassField(Infinity, 1)).toThrow(RangeError)
+  expect(() => getFlatGrassField(30, 0)).toThrow(RangeError)
+})
