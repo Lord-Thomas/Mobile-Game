@@ -4201,6 +4201,7 @@ function GoalNet({ ballRef, goalObject }) {
 
 function Player({
   testArea = null,
+  worldOriginRef = null,
   crouching = false,
   playerCrouchingRef,
   touchRef,
@@ -4408,6 +4409,30 @@ function Player({
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  // Optional laboratory origin rebasing; the game controller is unchanged otherwise.
+  // Run before physics and vegetation, preserving velocity and camera smoothing.
+  useFrame(({ camera }) => {
+    if (!worldOriginRef || !testArea || !playerBodyRef.current) return
+    const pos = playerPosRef.current
+    const dx = Math.abs(pos.x) >= 128 ? Math.trunc(pos.x / 128) * 128 : 0
+    const dz = Math.abs(pos.z) >= 128 ? Math.trunc(pos.z / 128) * 128 : 0
+    if (!dx && !dz) return
+    worldOriginRef.current.x += dx
+    worldOriginRef.current.z += dz
+    for (const point of new Set([pos, playerPositionRef.current, cameraLookRef.current])) {
+      point.x -= dx; point.z -= dz
+    }
+    camera.position.x -= dx; camera.position.z -= dz
+    if (visualRef.current) { visualRef.current.position.x -= dx; visualRef.current.position.z -= dz }
+    const body = playerBodyRef.current
+    const translation = body.translation()
+    const next = { x: translation.x - dx, y: translation.y, z: translation.z - dz }
+    body.setTranslation(next, true)
+    body.setNextKinematicTranslation(next)
+    testArea.minX -= dx; testArea.maxX -= dx
+    testArea.minZ -= dz; testArea.maxZ -= dz
+  }, -100)
 
   useFrame((state, delta) => {
     if (!playerBodyRef.current || !visualRef.current) return

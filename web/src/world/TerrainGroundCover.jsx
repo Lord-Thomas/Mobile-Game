@@ -125,7 +125,7 @@ function softenGrassNormals(geometry, upStrength = 0.65) {
   geometry.attributes.normal.needsUpdate = true
 }
 
-function createGrassCardGeometry() {
+export function createGrassCardGeometry() {
   const width = 1.08
   const height = GRASS_CARD_HEIGHT
   const positions = []
@@ -355,7 +355,7 @@ export function getFlatGrassField(size = 30, density = 1) {
   return promise
 }
 
-function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData(), volumeTufts = false, freezeDistantAnimation = false, densityLod = false) {
+export function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData(), volumeTufts = false, freezeDistantAnimation = false, densityLod = false) {
   return (shader) => {
     const biomeData = getBiomeData()
     shader.uniforms.uTime = { value: 0 }
@@ -548,7 +548,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
   }
 }
 
-function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
+export function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
   const grassSurface = useArtDirectionValues().surfaces.grass
   useEffect(() => {
     const [r, g, b] = getArtDirectionColorMultiplier('grass', grassSurface.color)

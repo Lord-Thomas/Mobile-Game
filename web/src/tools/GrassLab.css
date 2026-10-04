@@ -10,3 +10,4 @@
 .grass-lab-field-info { font-size: 12px; line-height: 1.5; color: #c5d9ca; }
 .grass-lab-toolbar { flex-wrap: wrap; }
 .grass-lab .fps-overlay { top: auto; bottom: max(12px, env(safe-area-inset-bottom)); right: 50%; transform: translateX(50%); z-index: 110; }
+.grass-lab-settings select { width: 100%; margin-top: 8px; padding: 10px; border-radius: 8px; background: #2d4035; color: white; border: 1px solid #ffffff40; font: inherit; }

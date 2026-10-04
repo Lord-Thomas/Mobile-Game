@@ -12,9 +12,11 @@ import { OutdoorLighting } from '../world/OutdoorNeighborhood'
 import TerrainGroundCover from '../world/TerrainGroundCover'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import GrassLabGround from './GrassLabGround'
+import StreamedGrass from '../world/grass/StreamedGrass'
+import { EARTH_AREA_SIDE } from '../world/grass/streamedField'
 import './GrassLab.css'
 
-const DEFAULT_FIELD = { size: 50, density: 5 }
+const DEFAULT_FIELD = { size: 1000, density: 5 }
 const EMPTY_BIOMES = []
 const SPAWN = { token: 'grass-lab', zone: ZONES.outside, position: [0, PLAYER_HEIGHT, 3], cameraYaw: 0, cameraPitch: -0.22 }
 function LabCamera() {
@@ -34,18 +36,25 @@ export default function GrassLab() {
   const [densityLod, setDensityLod] = useState(true)
   const [freezeDistantAnimation, setFreezeDistantAnimation] = useState(true)
   const [spatialCulling, setSpatialCulling] = useState(true)
-  const [volumeTufts, setVolumeTufts] = useState(true)
+  const [volumeTufts, setVolumeTufts] = useState(false)
+  const [streaming, setStreaming] = useState(true)
+  const [streamReady, setStreamReady] = useState(false)
+  const [spawnRequest, setSpawnRequest] = useState(SPAWN)
+  const originRef = useRef({ x: 0, z: 0 })
   const [draftField, setDraftField] = useState(DEFAULT_FIELD)
   const [fieldSettings, setFieldSettings] = useState(DEFAULT_FIELD)
   const [fieldStats, setFieldStats] = useState(null)
   const [fieldPending, startFieldTransition] = useTransition()
   const size = fieldSettings.size
-  const area = useMemo(() => ({ minX: -size / 2 + 0.5, maxX: size / 2 - 0.5,
-    minZ: -size / 2 + 0.5, maxZ: size / 2 - 0.5 }), [size])
-  const applyField = () => startFieldTransition(() => setFieldSettings(draftField))
+  const area = useMemo(() => ({ minX: -size / 2 + 0.5 - originRef.current.x, maxX: size / 2 - 0.5 - originRef.current.x,
+    minZ: -size / 2 + 0.5 - originRef.current.z, maxZ: size / 2 - 0.5 - originRef.current.z }), [size, spawnRequest])
+  const applyField = () => { if (draftField.size !== size || draftField.density !== fieldSettings.density) {
+    setStreamReady(false); jumpTo(0, 0); startFieldTransition(() => setFieldSettings(draftField))
+  } }
   const resetField = () => {
-    setDraftField(DEFAULT_FIELD)
-    startFieldTransition(() => setFieldSettings(DEFAULT_FIELD))
+    const next = streaming ? DEFAULT_FIELD : { size: 50, density: 5 }
+    setDraftField(next); setStreamReady(false); jumpTo(0, 0)
+    startFieldTransition(() => setFieldSettings(next))
   }
   const [crouching, setCrouching] = useState(false)
   const [ready, setReady] = useState(false)
@@ -60,6 +69,26 @@ export default function GrassLab() {
     lookX: 0, lookY: 0, lookDeltaX: 0, lookDeltaY: 0, lookActive: false,
     actionQueued: false, punchQueued: false, kickQueued: false, punchChargeMs: 0, dodgeQueued: false,
     wingsQueued: false, wingsBoostQueued: false, emoteQueued: null, mountAscend: false, mountDescend: false })
+  const jumpTo = (x, z) => {
+    const limit = Math.max(0, size / 2 - 150)
+    originRef.current.x = Math.trunc(Math.max(-limit, Math.min(limit, x)) / 8) * 8
+    originRef.current.z = Math.trunc(Math.max(-limit, Math.min(limit, z)) / 8) * 8
+    setStreamReady(false)
+    setSpawnRequest({ ...SPAWN, token: `grass-lab-${Date.now()}`, position: [0, PLAYER_HEIGHT, 0],
+      cameraYaw: touchRef.current.cameraYaw, cameraPitch: touchRef.current.cameraPitch,
+      cameraDistance: touchRef.current.cameraDistance })
+  }
+  const onStreamReady = useMemo(() => () => setStreamReady(true), [])
+  const changeStreaming = enabled => {
+    jumpTo(0, 0); setStreaming(enabled); setFieldStats(null)
+    const next = { size: enabled ? 1000 : 250, density: fieldSettings.density }
+    setDraftField(next); setFieldSettings(next)
+  }
+  const changeSize = value => {
+    jumpTo(0, 0); setStreamReady(false)
+    const next = { ...fieldSettings, size: Number(value) }
+    setDraftField(next); setFieldSettings(next)
+  }
   const renderScale = Math.min(settings.lowResolution ? 0.62 : 1, settings.autoQuality ? scale : 1)
   const render = useViewportRenderSettings(renderScale)
   const resetInput = () => {
@@ -68,6 +97,7 @@ export default function GrassLab() {
   }
   useEffect(() => { try { localStorage.setItem(PERFORMANCE_SETTINGS_STORAGE_KEY, JSON.stringify(settings)) } catch { /* private browsing */ } }, [settings])
   useEffect(() => { saveControlSettings(controls) }, [controls])
+  useEffect(() => { if (streaming && settings.grass) setStreamReady(false) }, [streaming, settings.grass])
   useEffect(() => {
     window.addEventListener('blur', resetInput)
     document.addEventListener('visibilitychange', resetInput)
@@ -92,59 +122,78 @@ export default function GrassLab() {
         <Suspense fallback={null}>
           <OutdoorLighting active showSky={false} castShadows={!settings.disableShadows}
             playerPositionRef={playerPositionRef} biomeAreas={EMPTY_BIOMES} />
-          <GrassLabGround size={size} meadow={meadowGround} />
-          {settings.grass && <TerrainGroundCover densityLod={densityLod} freezeDistantAnimation={freezeDistantAnimation} spatialCulling={spatialCulling} volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
+          <GrassLabGround size={streaming ? Math.min(size, 1200) : size} meadow={meadowGround} originRef={streaming ? originRef : null} />
+          {settings.grass && streaming && <StreamedGrass key={`${size}:${fieldSettings.density}`} size={size} density={fieldSettings.density}
+            playerPositionRef={playerPositionRef} originRef={originRef} volumeTufts={volumeTufts}
+            freezeDistantAnimation={freezeDistantAnimation} onStats={setFieldStats} onReady={onStreamReady} resetToken={spawnRequest.token} />}
+          {settings.grass && !streaming && <TerrainGroundCover densityLod={densityLod} freezeDistantAnimation={freezeDistantAnimation} spatialCulling={spatialCulling} volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
             playerPositionRef={playerPositionRef} ballRef={ballRef} />}
           <Physics gravity={[0, -9.81, 0]}>
-            <RigidBody key={size} type="fixed" colliders={false}><CuboidCollider args={[size / 2, 0.1, size / 2]} position={[0, -0.1, 0]} /></RigidBody>
-            <Player testArea={area} touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef}
+            <RigidBody key={size} type="fixed" colliders={false}><CuboidCollider args={[streaming ? 600 : size / 2, 0.1, streaming ? 600 : size / 2]} position={[0, -0.1, 0]} /></RigidBody>
+            <Player testArea={area} worldOriginRef={streaming ? originRef : null} touchRef={touchRef} ballRef={ballRef} playerPositionRef={playerPositionRef}
               playerVelocityRef={playerVelocityRef} playerCrouchingRef={playerCrouchingRef}
-              crouching={crouching} mode="play" currentZone={ZONES.outside} spawnRequest={SPAWN}
-              movementLocked={settingsOpen} loadOptionalAnimations />
+              crouching={crouching} mode="play" currentZone={ZONES.outside} spawnRequest={spawnRequest}
+              movementLocked={settingsOpen || (streaming && settings.grass && !streamReady)} loadOptionalAnimations />
           </Physics>
           <Ready onReady={onReady} />
         </Suspense>
       </Canvas>
     </div>
-    {!ready && <div className="grass-lab-loading" role="status">Chargement du joueur et de l’herbe…</div>}
+    {(!ready || (streaming && settings.grass && !streamReady)) && <div className="grass-lab-loading" role="status">Préparation de la zone autour du joueur…</div>}
     {ready && !settingsOpen && <ControlsOverlay touchRef={touchRef} crouching={crouching}
       onToggleCrouch={() => setCrouching(value => !value)} controlSettings={controls} showDodgeAction />}
     {ready && settings.showFps && <FpsOverlay />}
     <nav className="grass-lab-toolbar" aria-label="Scène de test">
-      <span>Herbe · {spatialCulling ? 'Optimisée' : 'Référence'} · {size} × {size} m · ×{fieldSettings.density}</span>
+      <span>Herbe · {streaming ? 'Monde étendu' : spatialCulling ? 'Optimisée' : 'Référence'} · {size >= 1000 ? `${(size / 1000).toLocaleString('fr-FR')} km de côté` : `${size} × ${size} m`} · ×{fieldSettings.density}</span>
       <button onClick={() => { resetInput(); setSettingsOpen(value => !value) }}>Paramètres</button>
       <a href="/">Retour au jeu</a>
     </nav>
     {settingsOpen && <div className="grass-lab-settings" role="dialog" aria-modal="true" aria-label="Paramètres">
       <button className="grass-lab-close" onClick={() => setSettingsOpen(false)}>Fermer</button>
       <div className="settings-group-title">Terrain de test</div>
+      <label className="settings-toggle-row">
+        <input type="checkbox" checked={streaming} onChange={event => changeStreaming(event.target.checked)} />
+        <span><strong>Monde étendu</strong><small>Charge les alentours en avance et réutilise les blocs éloignés. Désactive pour retrouver le test de référence.</small></span>
+      </label>
+      {streaming && <>
+        <label className="settings-range-row"><strong>Étendue de la carte plate</strong>
+          <select value={size} onChange={event => changeSize(event.target.value)}>
+            <option value={250}>250 × 250 m</option><option value={1000}>1 × 1 km</option>
+            <option value={10000}>10 × 10 km</option><option value={1000000}>1 000 × 1 000 km</option>
+            <option value={EARTH_AREA_SIDE}>Surface terrestre ≈ 510 millions de km²</option>
+          </select>
+        </label>
+        <button className="settings-action-row" onClick={() => jumpTo(size / 4, size / 4)}>Aller loin : à un quart de la carte</button>
+        <button className="settings-action-row" onClick={() => jumpTo(0, 0)}>Revenir au point de départ</button>
+        <p className="grass-lab-field-info">Position : {Math.round(fieldStats?.worldX ?? 0).toLocaleString('fr-FR')} m / {Math.round(fieldStats?.worldZ ?? 0).toLocaleString('fr-FR')} m</p>
+      </>}
       <label className="settings-range-row">
         <span><strong>Densité de l’herbe</strong><output>×{draftField.density.toFixed(2)}</output></span>
         <input type="range" aria-label="Densité de l’herbe" min="0.5" max="6" step="0.25" value={draftField.density}
           onChange={event => setDraftField(current => ({ ...current, density: Number(event.target.value) }))}
           onPointerUp={applyField} onKeyUp={applyField} onBlur={applyField} />
       </label>
-      <label className="settings-range-row">
+      {!streaming && <label className="settings-range-row">
         <span><strong>Taille du terrain</strong><output>{draftField.size} × {draftField.size} m</output></span>
         <input type="range" aria-label="Taille du terrain" min="10" max="250" step="10" value={draftField.size}
           onChange={event => setDraftField(current => ({ ...current, size: Number(event.target.value) }))}
           onPointerUp={applyField} onKeyUp={applyField} onBlur={applyField} />
-      </label>
+      </label>}
       <p className="grass-lab-field-info" role="status">{fieldPending ? 'Préparation du terrain…' : !settings.grass ? 'Herbe désactivée' :
-        `${(fieldStats?.count ?? 0).toLocaleString('fr-FR')} touffes · ${(size * size).toLocaleString('fr-FR')} m²`}</p>
-      <button type="button" className="settings-action-row" onClick={resetField}>Revenir à 50 m / ×5</button>
+        streaming ? `${(fieldStats?.count ?? 0).toLocaleString('fr-FR')} touffes chargées · ${fieldStats?.loaded ?? 0} / ${fieldStats?.capacity ?? 961} blocs · ${fieldStats?.pending ?? 0} à préparer · données CPU ${Math.round(fieldStats?.memoryMb ?? 0)} Mo` : `${(fieldStats?.count ?? 0).toLocaleString('fr-FR')} touffes · ${(size * size).toLocaleString('fr-FR')} m²`}</p>
+      <button type="button" className="settings-action-row" onClick={resetField}>{streaming ? 'Revenir à 1 km / ×5' : 'Revenir à 50 m / ×5'}</button>
       <p className="grass-lab-field-info">Relâche le curseur pour appliquer. Pour comparer les FPS à résolution constante, désactive « Qualité auto ».</p>
       <label className="settings-toggle-row">
         <input type="checkbox" checked={meadowGround} onChange={event => setMeadowGround(event.target.checked)} />
         <span><strong>Sol prairie</strong><small>Variations de verts et grain fin sur un sol parfaitement plat. Désactive pour retrouver le sol uni.</small></span>
       </label>
       <label className="settings-toggle-row">
-        <input type="checkbox" checked={spatialCulling} onChange={event => setSpatialCulling(event.target.checked)} />
-        <span><strong>Optimisation par blocs</strong><small>Blocs de 8 m hors champ ignorés. Désactive pour comparer avec les quatre grands blocs d’origine, à densité identique.</small></span>
+        <input type="checkbox" disabled={streaming} checked={streaming || spatialCulling} onChange={event => setSpatialCulling(event.target.checked)} />
+        <span><strong>Optimisation par blocs</strong><small>{streaming ? 'Blocs de 8 m hors champ ignorés. Toujours actif en monde étendu.' : 'Blocs de 8 m hors champ ignorés. Désactive pour comparer avec les quatre grands blocs d’origine, à densité identique.'}</small></span>
       </label>
       <label className="settings-toggle-row">
-        <input type="checkbox" checked={densityLod} onChange={event => setDensityLod(event.target.checked)} />
-        <span><strong>Densité progressive au loin</strong><small>Pleine densité sur 80 × 80 m autour du joueur, moitié tous les 10 m au-delà, puis disparition à 100 m du joueur. Désactive pour comparer.</small></span>
+        <input type="checkbox" disabled={streaming} checked={streaming || densityLod} onChange={event => setDensityLod(event.target.checked)} />
+        <span><strong>Densité progressive au loin</strong><small>Pleine densité sur 80 × 80 m autour du joueur, moitié tous les 10 m au-delà, puis disparition à 100 m du joueur. {streaming ? 'Toujours actif en monde étendu.' : 'Désactive pour comparer.'}</small></span>
       </label>
       <label className="settings-toggle-row">
         <input type="checkbox" checked={freezeDistantAnimation} onChange={event => setFreezeDistantAnimation(event.target.checked)} />
