@@ -29,3 +29,10 @@ it('keeps full density near the player and never cuts a still-fading instance', 
     }
   }
 })
+
+it('can prepare world cells in place without retaining a second placement buffer', () => {
+  const data = new Float32Array([1,2,3,0.2,4,5,6,0.3])
+  const prepared = prepareDensityBatch({data,count:2}, false)
+  expect(prepared.data.buffer).toBe(data.buffer)
+  expect(prepared.ranks.length).toBe(2)
+})

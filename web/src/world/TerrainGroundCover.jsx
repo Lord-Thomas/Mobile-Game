@@ -193,8 +193,8 @@ function makeGrassInstance(x, z, seed) {
   }
 }
 
-function pushGrassRow(grass, xi, minZ, maxZ) {
-  for (let zi = minZ; zi <= maxZ; zi += GRASS_GRID_STEP) {
+function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP) {
+  for (let zi = minZ; zi < maxZ; zi += step) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
     const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
@@ -266,8 +266,7 @@ function getAllGrassChunkKeys() {
   return keys
 }
 
-// Cached once per page load. Player movement and quality presets never rebuild,
-// thin out or replace this reference field. Keep only compact xyz + uniform scale.
+// Cached once per page load; player movement changes draw counts, never placement.
 let fullGrassFieldPromise = null
 export function getFullGrassField() {
   if (!fullGrassFieldPromise) fullGrassFieldPromise = buildFullGrassField()
@@ -275,34 +274,39 @@ export function getFullGrassField() {
 }
 async function buildFullGrassField() {
   const started = performance.now()
-  const capacity = Math.ceil(TERRAIN_HALF_SIZE / GRASS_CHUNK_SIZE) ** 2
-    * (Math.ceil(GRASS_CHUNK_SIZE / GRASS_GRID_STEP) + 1) ** 2
-  const fields = QUADRANTS.map(() => ({ data: new Float32Array(capacity * 4), count: 0 }))
+  // Generate directly into render cells: avoid a full-world copy/repartition at ×5.
+  const step = GRASS_GRID_STEP / Math.sqrt(5)
+  const cellSize = 8
+  const fields = []
   const row = []
   let lastYield = performance.now()
-  for (const key of getAllGrassChunkKeys()) {
-    const [x, z] = key.split(':').map(Number)
-    const bounds = getGrassChunkBounds(x, z)
-    const field = fields[getChunkQuadrantIndex(x, z)]
-    for (let xi = bounds.minX; xi <= bounds.maxX; xi += GRASS_GRID_STEP) {
-      row.length = 0
-      pushGrassRow(row, xi, bounds.minZ, bounds.maxZ)
-      for (const item of row) {
-        const offset = field.count++ * 4
-        field.data[offset] = item.position[0]
-        field.data[offset + 1] = item.position[1]
-        field.data[offset + 2] = item.position[2]
-        field.data[offset + 3] = item.scale
+  for (let minX = GRASS_AREA_MIN; minX < GRASS_AREA_MAX; minX += cellSize) {
+    for (let minZ = GRASS_AREA_MIN; minZ < GRASS_AREA_MAX; minZ += cellSize) {
+      const maxX = Math.min(minX + cellSize, GRASS_AREA_MAX)
+      const maxZ = Math.min(minZ + cellSize, GRASS_AREA_MAX)
+      const capacity = (Math.ceil((maxX - minX) / step) + 1) * (Math.ceil((maxZ - minZ) / step) + 1)
+      const data = new Float32Array(capacity * 4)
+      const bounds = new Box3()
+      const point = new Vector3()
+      let count = 0
+      for (let xi = minX; xi < maxX; xi += step) {
+        row.length = 0
+        pushGrassRow(row, xi, minZ, maxZ, step)
+        for (const item of row) {
+          const offset = count++ * 4
+          data.set(item.position, offset)
+          data[offset + 3] = item.scale
+          bounds.expandByPoint(point.fromArray(item.position))
+        }
+        if (performance.now() - lastYield > 12) {
+          await new Promise(resolve => setTimeout(resolve, 0))
+          lastYield = performance.now()
+        }
       }
-      // Yield only during initial preparation. Nothing is mounted partially:
-      // Suspense reveals the entire completed field in one commit.
-      if (performance.now() - lastYield > 12) {
-        await new Promise(resolve => setTimeout(resolve, 0))
-        lastYield = performance.now()
-      }
+      if (count) fields.push(prepareDensityBatch({ data, count, bounds: bounds.expandByScalar(2) }, false))
     }
   }
-  return { fields, buildMs: performance.now() - started }
+  return { fields, preparedDensity: true, buildMs: performance.now() - started }
 }
 
 const flatGrassFields = new Map()
@@ -557,8 +561,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     onFieldReady?.({ count: field.fields.reduce((sum, batch) => sum + batch.count, 0), buildMs: field.buildMs })
   }, [field, onFieldReady])
   const batches = useMemo(() => {
-    const result = flatTestSize && (spatialCulling || densityLod) ? partitionGrassField(field.fields) : field.fields
-    return flatTestSize && densityLod ? result.map(prepareDensityBatch) : result
+    if (field.preparedDensity) return field.fields
+    const result = (spatialCulling || densityLod) ? partitionGrassField(field.fields) : field.fields
+    return densityLod ? result.map(batch => prepareDensityBatch(batch)) : result
   }, [field, flatTestSize, spatialCulling, densityLod])
   const geometries = useMemo(() => {
     const card = createGrassCardGeometry()
@@ -580,8 +585,8 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   const material = useMemo(() => {
     const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: volumeTufts ? DoubleSide : FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
-    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts, !!flatTestSize && freezeDistantAnimation, !!flatTestSize && densityLod)
-    mat.customProgramCacheKey = () => `terrain-grass-static-v14-${volumeTufts ? 'volume' : 'card'}-${!!flatTestSize && freezeDistantAnimation}-${!!flatTestSize && densityLod}`
+    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts, freezeDistantAnimation, densityLod)
+    mat.customProgramCacheKey = () => `terrain-grass-static-v14-${volumeTufts ? 'volume' : 'card'}-${freezeDistantAnimation}-${densityLod}`
     return mat
   }, [texture, volumeTufts, flatTestSize, freezeDistantAnimation, densityLod])
   useEffect(() => {
@@ -608,7 +613,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     if (!active) return
     const pp = playerPositionRef?.current, shader = shaderRef.current
     if (!pp || !shader) return
-    if (flatTestSize && densityLod) {
+    if (densityLod) {
       for (let i = 0; i < geometries.length; i++) {
         geometries[i].instanceCount = densityDrawCount(batches[i].count, batches[i].bounds, pp.x, pp.z)
       }

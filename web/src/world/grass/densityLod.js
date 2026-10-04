@@ -1,6 +1,6 @@
 // Fixed nested subsets: a shorter prefix never changes the surviving tufts.
-export function prepareDensityBatch(batch) {
-  const data = batch.data.slice(0, batch.count * 4)
+export function prepareDensityBatch(batch, copy = true) {
+  const data = copy ? batch.data.slice(0, batch.count * 4) : batch.data.subarray(0, batch.count * 4)
   let seed = (0x12345678 ^ Math.imul(Math.round(data[0] * 1000), 73856093) ^ Math.imul(Math.round(data[2] * 1000), 19349663)) >>> 0
   for (let i = batch.count - 1; i > 0; i--) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0

@@ -361,6 +361,9 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
           )}
           {showGrass && (
             <TerrainGroundCover
+              spatialCulling
+              densityLod
+              volumeTufts={false}
               playerPositionRef={playerPositionRef}
               ballRef={ballRef}
               active={lightingActive && runtimeActive}

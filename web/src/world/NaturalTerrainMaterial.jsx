@@ -1,3 +1,4 @@
+import { meadowSurfaceGlsl } from './grass/meadowSurface'
 import { useTexture } from '@react-three/drei'
 import { useEffect, useMemo, useRef } from 'react'
 import { ClampToEdgeWrapping, Color, RepeatWrapping, SRGBColorSpace, Vector2 } from 'three'
@@ -82,6 +83,8 @@ function NaturalTerrainMaterial({
   // une transition où le ref n'est pas encore (ré)attaché) → évite un throw qui
   // avortait toute la passe de compilation.
   const handleBeforeCompile = useMemo(() => function handleBeforeCompile(shader) {
+    shader.uniforms.meadowDark = { value: new Color('#438f32') }
+    shader.uniforms.meadowLight = { value: new Color('#74bd3c') }
     shader.uniforms.uGrassMap = { value: grassMap }
     shader.uniforms.uDirtMap = { value: dirtMap }
     shader.uniforms.uGrassNormalMap = { value: grassNormalMap }
@@ -115,6 +118,7 @@ function NaturalTerrainMaterial({
       uniform vec3 uGraveyardColdShadow;
       uniform vec3 uArtTerrainTint;
       varying vec3 vNaturalWorldPosition;
+      ${meadowSurfaceGlsl}
 
       float naturalHash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -166,14 +170,7 @@ function NaturalTerrainMaterial({
       vec4 naturalGrassColor = naturalTextureNoTile(uGrassMap, naturalUv * 0.155);
       vec4 naturalDirtColor = naturalTextureNoTile(uDirtMap, naturalUv * 0.18);
 
-      // Keep the terrain close to the blade palette so sparse distant grass blends into it.
-      float grassLum = dot(naturalGrassColor.rgb, vec3(0.299, 0.587, 0.114));
-      vec3 grassTarget = vec3(0.055, 0.37, 0.035);
-      vec3 grassGraded = mix(
-        naturalGrassColor.rgb,
-        grassTarget * clamp(grassLum * 2.8 + 0.10, 0.0, 0.84),
-        0.90
-      );
+      vec3 grassGraded = meadowSurfaceColor(naturalUv);
 
       // Grade dirt toward warm amber-ochre: harmonious earth tones under green (linear: ~#b87a30)
       float dirtLum = dot(naturalDirtColor.rgb, vec3(0.299, 0.587, 0.114));
@@ -208,7 +205,7 @@ function NaturalTerrainMaterial({
       #ifdef USE_NORMALMAP_TANGENTSPACE
         vec2 naturalNormalUv = vNaturalWorldPosition.xz;
         float naturalNormalDirt = max(naturalDirt, naturalGraveyard * 0.86);
-        vec3 naturalGrassNormal = naturalNormalSample(uGrassNormalMap, naturalNormalUv * 0.155);
+        vec3 naturalGrassNormal = vec3(0.0, 0.0, 1.0);
         vec3 naturalDirtNormal = naturalNormalSample(uDirtNormalMap, naturalNormalUv * 0.18);
         vec3 mapN = normalize(mix(naturalGrassNormal, naturalDirtNormal, naturalNormalDirt));
         mapN.xy *= normalScale;
