@@ -306,7 +306,7 @@ async function buildFullGrassField() {
 
 const flatGrassFields = new Map()
 export function getFlatGrassField(size = 30, density = 1) {
-  if (!Number.isFinite(size) || size < 1 || size > 200 || !Number.isFinite(density) || density < 0.25 || density > 6) {
+  if (!Number.isFinite(size) || size < 1 || size > 250 || !Number.isFinite(density) || density < 0.25 || density > 6) {
     throw new RangeError('Invalid grass test dimensions or density')
   }
   const key = `${size}:${density}`
@@ -337,7 +337,7 @@ export function getFlatGrassField(size = 30, density = 1) {
   return promise
 }
 
-function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData(), volumeTufts = false) {
+function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData(), volumeTufts = false, freezeDistantAnimation = false) {
   return (shader) => {
     const biomeData = getBiomeData()
     shader.uniforms.uTime = { value: 0 }
@@ -442,12 +442,20 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       );
       vOutdoorGrassHighlight = heightFactor * grassLightVariation;
 
+      // Preserve the original mean wind lean at distance; only motion fades.
+      float animationWeight = ${freezeDistantAnimation
+        ? '1.0 - smoothstep(30.0, 50.0, distance(grassOrigin.xz, cameraPosition.xz))'
+        : '1.0'};
+      float wind = 0.59;
+      if (animationWeight > 0.0) {
       float travel = dot(grassOrigin.xz, uWindDirection.xz) * uWindScale;
       float cross = dot(grassOrigin.xz, vec2(-uWindDirection.z, uWindDirection.x)) * 0.06;
       float windPhase = uTime * uWindSpeed - travel + cross;
       float mainWave = 0.5 + 0.5 * sin(windPhase);
       float detailWave = 0.5 + 0.5 * sin(windPhase * 2.37 + grassOrigin.x * 0.11 + grassOrigin.z * 0.07);
-      float wind = 0.18 + 0.82 * mix(mainWave, detailWave, 0.16);
+      wind = mix(0.59, 0.18 + 0.82 * mix(mainWave, detailWave, 0.16), animationWeight);
+
+      }
 
       transformed.x += uWindDirection.x * wind * uWindStrength * heightFactor;
       transformed.z += uWindDirection.z * wind * uWindStrength * heightFactor;
@@ -459,12 +467,13 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       transformed.x += cos(leanAngle) * tiltT * 0.6;
       transformed.z += sin(leanAngle) * tiltT * 0.6;
 
+      // No density fade, thinning, enlargement or spawn animation.
+      transformed.y -= graveyardGrassCull * 1000.0;
+      if (animationWeight > 0.0) {
       vec2 fromPlayer = grassOrigin.xz - uPlayerPosition.xz;
       float playerDistance = length(fromPlayer);
-      // No distance fade, thinning, LOD, enlargement or spawn animation.
-      transformed.y -= graveyardGrassCull * 1000.0;
 
-      float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
+      float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor * animationWeight;
 
       if (playerDistance > 0.0001) {
         vec2 pushDirection = normalize(fromPlayer);
@@ -475,12 +484,13 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
 
       vec2 fromBall = grassOrigin.xz - uBallPosition.xz;
       float ballDistance = length(fromBall);
-      float ballInfluence = smoothstep(uBallInteractionRadius, 0.0, ballDistance) * heightFactor;
+      float ballInfluence = smoothstep(uBallInteractionRadius, 0.0, ballDistance) * heightFactor * animationWeight;
       if (ballDistance > 0.0001) {
         vec2 ballPushDir = normalize(fromBall);
         transformed.x += ballPushDir.x * uInteractionStrength * ballInfluence;
         transformed.z += ballPushDir.y * uInteractionStrength * ballInfluence;
         transformed.y -= uInteractionStrength * 0.06 * ballInfluence;
+      }
       }
 `,
     )
@@ -529,7 +539,7 @@ function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
 }
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false,
-  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, flatTestDensity = 1, volumeTufts = false, spatialCulling = false, onFieldReady = null }) {
+  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, flatTestDensity = 1, volumeTufts = false, spatialCulling = false, freezeDistantAnimation = false, onFieldReady = null }) {
   const shaderRef = useRef(null)
   const biomeRef = useRef(getGrassBiomeShaderData(biomeAreas))
   const baseTexture = useTexture(GRASS_TEXTURE)
@@ -562,10 +572,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   const material = useMemo(() => {
     const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: volumeTufts ? DoubleSide : FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
-    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts)
-    mat.customProgramCacheKey = () => `terrain-grass-static-v12-${volumeTufts ? 'volume' : 'card'}`
+    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts, !!flatTestSize && freezeDistantAnimation)
+    mat.customProgramCacheKey = () => `terrain-grass-static-v13-${volumeTufts ? 'volume' : 'card'}-${!!flatTestSize && freezeDistantAnimation}`
     return mat
-  }, [texture, volumeTufts])
+  }, [texture, volumeTufts, flatTestSize, freezeDistantAnimation])
   useEffect(() => {
     const data = getGrassBiomeShaderData(biomeAreas)
     biomeRef.current = data
