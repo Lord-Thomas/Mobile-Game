@@ -30,6 +30,7 @@ export default function GrassLab() {
   const [settings, setSettings] = useState(loadPerformanceSettings)
   const [controls, setControls] = useState(loadControlSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [volumeTufts, setVolumeTufts] = useState(true)
   const [crouching, setCrouching] = useState(false)
   const [ready, setReady] = useState(false)
   const [scale, setScale] = useState(1)
@@ -79,7 +80,7 @@ export default function GrassLab() {
             <planeGeometry args={[SIZE, SIZE]} />
             <meshStandardMaterial color="#438f32" roughness={1} />
           </mesh>
-          {settings.grass && <TerrainGroundCover flatTestSize={SIZE} biomeAreas={EMPTY_BIOMES}
+          {settings.grass && <TerrainGroundCover volumeTufts={volumeTufts} flatTestSize={SIZE} biomeAreas={EMPTY_BIOMES}
             playerPositionRef={playerPositionRef} ballRef={ballRef} />}
           <Physics gravity={[0, -9.81, 0]}>
             <RigidBody type="fixed" colliders={false}><CuboidCollider args={[SIZE / 2, 0.1, SIZE / 2]} position={[0, -0.1, 0]} /></RigidBody>
@@ -103,6 +104,10 @@ export default function GrassLab() {
     </nav>
     {settingsOpen && <div className="grass-lab-settings" role="dialog" aria-modal="true" aria-label="Paramètres">
       <button className="grass-lab-close" onClick={() => setSettingsOpen(false)}>Fermer</button>
+      <label className="settings-toggle-row">
+        <input type="checkbox" checked={volumeTufts} onChange={event => setVolumeTufts(event.target.checked)} />
+        <span><strong>Touffes en volume</strong><small>Désactiver pour comparer avec la forme d’origine, à densité identique.</small></span>
+      </label>
       <SettingsPanel settings={settings} onToggle={key => setSettings(value => ({ ...value, [key]: !value[key] }))}
         controlSettings={controls} onControlSettingChange={(key, value) => setControls(current => normalizeControlSettings({ ...current, [key]: value }))}
         onResetControlSettings={() => setControls({ ...DEFAULT_CONTROL_SETTINGS })}

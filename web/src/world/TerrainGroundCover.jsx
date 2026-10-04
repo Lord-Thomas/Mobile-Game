@@ -1,7 +1,7 @@
 import { use, useEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, InstancedBufferGeometry, InstancedBufferAttribute, MathUtils, MeshBasicMaterial, Sphere, SRGBColorSpace, Vector3, Vector4 } from 'three'
+import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, DoubleSide, InstancedBufferGeometry, InstancedBufferAttribute, MathUtils, MeshBasicMaterial, Sphere, SRGBColorSpace, Vector3, Vector4 } from 'three'
 import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
 import {
   BIOME_SHADER_MAX_AREAS,
@@ -14,6 +14,7 @@ import {
 import { getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
 import { MAP_PATH_SURFACE_SAMPLER } from './paths'
+import { createVolumeTuftGeometry } from './grass/tuftGeometry'
 import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 import {
   getArtDirectionColorMultiplier,
@@ -328,7 +329,7 @@ export function getFlatGrassField(size = 30) {
   return promise
 }
 
-function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData()) {
+function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData(), volumeTufts = false) {
   return (shader) => {
     const biomeData = getBiomeData()
     shader.uniforms.uTime = { value: 0 }
@@ -400,13 +401,17 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       `
       #include <begin_vertex>
 
-      // Cylindrical billboard: rotate the card to face the camera around the Y axis.
-      // position.x holds the horizontal half-width offset; we redirect it along the
-      // camera's perpendicular so the blade always shows its face, never its edge.
+      ${volumeTufts ? `
+      // A stable world orientation keeps crossed tufts volumetric as the camera moves.
+      float tuftYaw = grassHash(instancePlacement.xz + vec2(2.4, 6.8)) * 6.283185;
+      float tuftCos = cos(tuftYaw), tuftSin = sin(tuftYaw);
+      transformed.xz = mat2(tuftCos, tuftSin, -tuftSin, tuftCos) * transformed.xz;
+      ` : `
       vec2 camRight = vec2(-uCameraForward.z, uCameraForward.x);
       float localX = transformed.x;
       transformed.x = localX * camRight.x;
       transformed.z = localX * camRight.y;
+      `}
 
       float heightFactor = clamp(position.y / uBladeHeight, 0.0, 1.0);
       heightFactor = heightFactor * heightFactor;
@@ -516,7 +521,7 @@ function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
 }
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false,
-  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null }) {
+  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, volumeTufts = false }) {
   const shaderRef = useRef(null)
   const biomeRef = useRef(getGrassBiomeShaderData(biomeAreas))
   const baseTexture = useTexture(GRASS_TEXTURE)
@@ -526,7 +531,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   }, [baseTexture])
   const field = use(flatTestSize ? getFlatGrassField(flatTestSize) : getFullGrassField())
   const geometries = useMemo(() => {
-    const base = createGrassCardGeometry()
+    const card = createGrassCardGeometry()
+    const base = volumeTufts ? createVolumeTuftGeometry(card) : card
+    if (base !== card) card.dispose()
     const result = field.fields.map(({ data, count }, index) => {
       const geometry = new InstancedBufferGeometry().copy(base)
       geometry.setAttribute('instancePlacement', new InstancedBufferAttribute(data.subarray(0, count * 4), 4))
@@ -538,14 +545,14 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     })
     base.dispose()
     return result
-  }, [field])
+  }, [field, volumeTufts])
   const material = useMemo(() => {
-    const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: FrontSide,
+    const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: volumeTufts ? DoubleSide : FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
-    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current)
-    mat.customProgramCacheKey = () => 'terrain-grass-full-density-static-v11'
+    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts)
+    mat.customProgramCacheKey = () => `terrain-grass-static-v12-${volumeTufts ? 'volume' : 'card'}`
     return mat
-  }, [texture])
+  }, [texture, volumeTufts])
   useEffect(() => {
     const data = getGrassBiomeShaderData(biomeAreas)
     biomeRef.current = data
