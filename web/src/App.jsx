@@ -1,3 +1,4 @@
+import { scheduleWarmupPass } from './lib/scheduleWarmupPass'
 import { Canvas, addAfterEffect, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { Html, OrthographicCamera, PerspectiveCamera as DreiPerspectiveCamera, useAnimations, useFBX, useGLTF, useTexture } from '@react-three/drei'
 import { BallCollider, CapsuleCollider, CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier'
@@ -7719,11 +7720,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef, onReady }) {
   const pass1Active = stage >= 3
   useEffect(() => {
     if (!pass1Active || pass1Ref.current) return undefined
-    pass1Ref.current = true
-    let raf1 = 0
-    let raf2 = 0
-    raf1 = window.requestAnimationFrame(() => {
-      raf2 = window.requestAnimationFrame(() => {
+    return scheduleWarmupPass(pass1Ref, () => {
         const spawn = PLAYER_SPAWNS.outside ?? PLAYER_SPAWNS.interior
         const aspect = Math.max(0.1, gl.domElement.clientWidth / Math.max(gl.domElement.clientHeight, 1))
         const cam = new PerspectiveCamera(BASE_CAMERA_VERTICAL_FOV, aspect, 0.1, 420)
@@ -7732,12 +7729,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef, onReady }) {
         cam.updateProjectionMatrix()
         cam.updateMatrixWorld(true)
         pass1PromiseRef.current = compileWith(cam, 1)
-      })
     })
-    return () => {
-      window.cancelAnimationFrame(raf1)
-      window.cancelAnimationFrame(raf2)
-    }
   }, [pass1Active, gl, compileWith])
 
   // Passe 2 — désormais dehors, herbe + ennemis montés (gate isOutsideZone) :
@@ -7745,11 +7737,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef, onReady }) {
   const pass2Active = isOutside && stage >= 5
   useEffect(() => {
     if (!pass2Active || pass2Ref.current) return undefined
-    pass2Ref.current = true
-    let raf1 = 0
-    let raf2 = 0
-    raf1 = window.requestAnimationFrame(() => {
-      raf2 = window.requestAnimationFrame(() => {
+    return scheduleWarmupPass(pass2Ref, () => {
         // WebGL ne doit pas compiler deux traversées de la même scène en
         // parallèle. Sur certains GPU, le chevauchement des deux passes
         // produisait des glGetProgramiv(GL_INVALID_VALUE) et rallongeait le gel.
@@ -7761,12 +7749,7 @@ function OutdoorShaderPrewarm({ stage, isOutside, readyRef, onReady }) {
             onReady?.()
             perfDiagnostics.event('outdoor:shader-prewarm-ready')
           })
-      })
     })
-    return () => {
-      window.cancelAnimationFrame(raf1)
-      window.cancelAnimationFrame(raf2)
-    }
   }, [pass2Active, camera, compileWith, onReady, readyRef])
 
   return null
@@ -23491,7 +23474,9 @@ function App() {
           updateLoadingExperience({
             percent: placeablesReady && outsideReady ? 99 : slow ? 94 : 88,
             phase: slow
-              ? 'Finalisation en cours — encore un instant...'
+              ? !placeablesReady ? 'Attente des objets de la zone…'
+                : goingOutside && !outdoorZoneReadyRef.current ? 'Chargement du terrain, des décors et des créatures…'
+                  : 'Préparation graphique de l’extérieur…'
               : !placeablesReady
                 ? 'Installation des objets de la zone...'
                 : 'Stabilisation de la première image...',

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Color, MathUtils, Vector3 } from 'three'
@@ -360,6 +360,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
             />
           )}
           {showGrass && (
+            <Suspense fallback={null}>
             <TerrainGroundCover
               spatialCulling
               densityLod
@@ -371,6 +372,7 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
               reducedDensity={reducedGrassDensity}
               biomeAreas={biomeAreas}
             />
+            </Suspense>
           )}
         </group>
       )}
