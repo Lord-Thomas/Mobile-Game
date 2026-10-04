@@ -3,7 +3,9 @@ import { use, useEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, DoubleSide, InstancedBufferGeometry, InstancedBufferAttribute, MathUtils, MeshBasicMaterial, Sphere, SRGBColorSpace, Vector3, Vector4 } from 'three'
-import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
+import { getCachedVisualGeometry, TERRAIN_HALF_SIZE, terrainReady } from './terrain/terrainGeometry'
+import { createTerrainHeightSampler } from './grass/terrainHeightSampler'
+import { createPlacementSampler } from './grass/placementSampler'
 import {
   BIOME_SHADER_MAX_AREAS,
   GRAVEYARD_SHADER_AREAS,
@@ -183,8 +185,8 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t)
 }
 
-function makeGrassInstance(x, z, seed) {
-  const h = getTerrainHeight(x, z)
+function makeGrassInstance(x, z, seed, sampleHeight) {
+  const h = sampleHeight(x, z)
   return {
     position: [x, h + 0.04, z],
     rotation: [0, (seededRandom(seed + 18) - 0.5) * grassPlacementSettings.rotationRandomness * 2, 0],
@@ -193,22 +195,22 @@ function makeGrassInstance(x, z, seed) {
   }
 }
 
-function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP) {
+function pushGrassRow(grass, xi, minZ, maxZ, step, sampleHeight, samplePlacement, localBiomes) {
   for (let zi = minZ; zi < maxZ; zi += step) {
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
     const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
-    const graveyardInfluence = getBiomeInfluence('graveyard', x, z, null)
+    const graveyardInfluence = getBiomeInfluence('graveyard', x, z, null, localBiomes)
     if (graveyardInfluence > 0.28) continue
     const livingCoverMultiplier = Math.pow(1 - graveyardInfluence, 3.5)
-    const gameplayDensity = Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9)
-    const visualDensity = getVisualGrassDensity(x, z) * livingCoverMultiplier
+    if (isInsideHouseFootprint(x, z, 0.9)) continue
+    const naturalDensity = samplePlacement(x, z)
     const { naturalWeight, grassWeight } = MAP_PATH_SURFACE_SAMPLER.sampleGrassWeights(x, z)
     const density = Math.min(1, (
-      Math.max(gameplayDensity, visualDensity) * naturalWeight
+      naturalDensity * naturalWeight
       + PAINTED_GRASS_DENSITY * grassWeight * livingCoverMultiplier
     ) * GRASS_DENSITY_MULTIPLIER)
-    if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
+    if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed, sampleHeight))
   }
 }
 
@@ -274,6 +276,13 @@ export function getFullGrassField() {
 }
 async function buildFullGrassField() {
   const started = performance.now()
+  await terrainReady
+  const sampleHeight = createTerrainHeightSampler(getCachedVisualGeometry())
+  const samplePlacement = createPlacementSampler(GRASS_AREA_MIN, GRASS_AREA_MAX, (x, z) => {
+    const living = Math.pow(1 - getBiomeInfluence('graveyard', x, z, null), 3.5)
+    const gameplay = Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9)
+    return Math.max(gameplay, getVisualGrassDensity(x, z) * living)
+  })
   // Generate directly into render cells: avoid a full-world copy/repartition at ×5.
   const step = GRASS_GRID_STEP / Math.sqrt(5)
   const cellSize = 8
@@ -284,6 +293,10 @@ async function buildFullGrassField() {
     for (let minZ = GRASS_AREA_MIN; minZ < GRASS_AREA_MAX; minZ += cellSize) {
       const maxX = Math.min(minX + cellSize, GRASS_AREA_MAX)
       const maxZ = Math.min(minZ + cellSize, GRASS_AREA_MAX)
+      const margin = grassPlacementSettings.positionJitter
+      const localBiomes = MAP_BIOME_AREAS.filter(area => area.biome === 'graveyard'
+        && area.center[0] + area.radius >= minX - margin && area.center[0] - area.radius <= maxX + margin
+        && area.center[1] + area.radius >= minZ - margin && area.center[1] - area.radius <= maxZ + margin)
       const capacity = (Math.ceil((maxX - minX) / step) + 1) * (Math.ceil((maxZ - minZ) / step) + 1)
       const data = new Float32Array(capacity * 4)
       const bounds = new Box3()
@@ -291,7 +304,7 @@ async function buildFullGrassField() {
       let count = 0
       for (let xi = minX; xi < maxX; xi += step) {
         row.length = 0
-        pushGrassRow(row, xi, minZ, maxZ, step)
+        pushGrassRow(row, xi, minZ, maxZ, step, sampleHeight, samplePlacement, localBiomes)
         for (const item of row) {
           const offset = count++ * 4
           data.set(item.position, offset)

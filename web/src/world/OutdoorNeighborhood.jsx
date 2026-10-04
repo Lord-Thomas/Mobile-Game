@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
 import { Color, MathUtils, Vector3 } from 'three'
 import OutdoorGround from './OutdoorGround'
 import PlayerPlot from './PlayerPlot'
@@ -360,7 +361,15 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
             />
           )}
           {showGrass && (
-            <Suspense fallback={null}>
+            <Suspense fallback={runtimeActive && lightingActive ? (
+              <Html fullscreen style={{ pointerEvents: 'none' }}>
+                <div role="status" style={{ position: 'absolute', bottom: 105, left: '50%',
+                  transform: 'translateX(-50%)', padding: '8px 14px', borderRadius: 12,
+                  background: 'rgba(20, 35, 27, 0.85)', color: '#fff', whiteSpace: 'nowrap' }}>
+                  Préparation de l’herbe…
+                </div>
+              </Html>
+            ) : null}>
             <TerrainGroundCover
               spatialCulling
               densityLod
