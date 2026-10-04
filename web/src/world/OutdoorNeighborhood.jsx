@@ -6,6 +6,7 @@ import OutdoorGround from './OutdoorGround'
 import PlayerPlot from './PlayerPlot'
 import Road from './Road'
 import TerrainGroundCover from './TerrainGroundCover'
+import LushEnvironmentPatch from './vegetation/LushEnvironmentPatch'
 import CloudSky from './CloudSky'
 import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
@@ -358,6 +359,9 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
               forceSimplified
               castShadows={false}
             />
+          )}
+          {showGrass && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('lush') === '1' && (
+            <LushEnvironmentPatch active={lightingActive && runtimeActive} reducedDensity={reducedGrassDensity} />
           )}
           {showGrass && (
             <TerrainGroundCover
