@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, InstancedBufferAttribute, MathUtils, MeshBasicMaterial, Sphere, SRGBColorSpace, Vector3, Vector4 } from 'three'
+import { Box3, BufferGeometry, Color, Float32BufferAttribute, FrontSide, DynamicDrawUsage, InstancedBufferAttribute, MathUtils, MeshBasicMaterial, Sphere, SRGBColorSpace, Vector3, Vector4 } from 'three'
 import { getTerrainHeight, TERRAIN_HALF_SIZE } from './terrain/terrainGeometry'
 import {
   BIOME_SHADER_MAX_AREAS,
@@ -15,6 +15,7 @@ import { getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFoot
 import { ROAD_WIDTH } from './outdoorData'
 import { MAP_PATH_SURFACE_SAMPLER } from './paths'
 import { createChunkSlots, writeGrassSlot } from './grass/chunkSlots'
+import { GRASS_LODS, grassGridAxis, grassSampleLevel, grassLevelCapacity } from './grass/grassLod'
 import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 import {
   getArtDirectionColorMultiplier,
@@ -35,10 +36,10 @@ const GRASS_GRID_STEP = 0.22
 const GRASS_DENSITY_MULTIPLIER = 7.5
 const PAINTED_GRASS_DENSITY = 0.18
 const GRASS_CHUNK_SIZE = 6
-const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 1
-const GRASS_ACTIVE_CHUNK_RADIUS = 5
-// Terrain split into 4 quadrants — each gets its own instancedMesh so Three.js
-// frustum-culls entire quadrants when they fall outside the camera view.
+const GRASS_CHUNK_BUILD_TIME_BUDGET_MS = 2
+const GRASS_ACTIVE_CHUNK_RADIUS = 7
+// Permanent coarse coverage is split into quadrants for frustum culling.
+// Each streamed detail tier uses one shared buffer, avoiding 4x memory reservation.
 const QUADRANTS = [
   { id: 'ne', minX: 0,               maxX: TERRAIN_HALF_SIZE,  minZ: 0,               maxZ: TERRAIN_HALF_SIZE },
   { id: 'nw', minX: -TERRAIN_HALF_SIZE, maxX: 0,               minZ: 0,               maxZ: TERRAIN_HALF_SIZE },
@@ -63,17 +64,6 @@ const grassGroundColorGlsl = new Color(OUTDOOR_DAY_ATMOSPHERE.groundLightColor)
   .join(', ')
 const GRASS_CARD_HEIGHT = 0.78
 const GRASS_VERTICAL_SEGMENTS = 1
-const GRASS_FULL_DENSITY_RADIUS = 10
-const GRASS_THINNING_RADIUS = 150
-const GRASS_MIN_KEEP_PROBABILITY = 0.015
-const GRASS_CULL_FADE_START = 150
-const GRASS_CULL_RADIUS = TERRAIN_HALF_SIZE * 1.42
-const GRASS_LOCAL_FADE_START = 16
-const GRASS_LOCAL_FADE_END = 22
-const GRASS_CHUNK_REVEAL_DURATION = 0.9
-const GRASS_CHUNK_REVEAL_STAGGER = 0.35
-const GRASS_FAR_WIDTH_SCALE = 1.65
-const GRASS_FAR_HEIGHT_SCALE = 1.08
 const grassWindSettings = {
   strength: 0.13,
   speed: 1.05,
@@ -186,10 +176,6 @@ function seededRandom(seed) {
   return MathUtils.euclideanModulo(Math.sin(seed * 12.9898) * 43758.5453, 1)
 }
 
-function grassHash2(x, z) {
-  return MathUtils.euclideanModulo(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453123, 1)
-}
-
 function clamp01(value) {
   return Math.min(1, Math.max(0, value))
 }
@@ -209,8 +195,10 @@ function makeGrassInstance(x, z, seed) {
   }
 }
 
-function pushGrassRow(grass, xi, minZ, maxZ, step = GRASS_GRID_STEP) {
-  for (let zi = minZ; zi <= maxZ; zi += step) {
+function pushGrassRow(grass, xi, zValues, row, level) {
+  for (let column = 0; column < zValues.length; column++) {
+    if (grassSampleLevel(row, column) !== level) continue
+    const zi = zValues[column]
     const seed = (xi + 61) * 197 + (zi + 43) * 137
     const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
     const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
@@ -244,9 +232,9 @@ function getVisualGrassDensity(x, z) {
 
 function getGrassChunkBounds(chunkX, chunkZ) {
   const minX = Math.max(GRASS_AREA_MIN, chunkX * GRASS_CHUNK_SIZE)
-  const maxX = Math.min(GRASS_AREA_MAX, minX + GRASS_CHUNK_SIZE)
+  const maxX = Math.min(GRASS_AREA_MAX, (chunkX + 1) * GRASS_CHUNK_SIZE)
   const minZ = Math.max(GRASS_AREA_MIN, chunkZ * GRASS_CHUNK_SIZE)
-  const maxZ = Math.min(GRASS_AREA_MAX, minZ + GRASS_CHUNK_SIZE)
+  const maxZ = Math.min(GRASS_AREA_MAX, (chunkZ + 1) * GRASS_CHUNK_SIZE)
   return { minX, maxX, minZ, maxZ }
 }
 
@@ -293,35 +281,27 @@ function getActiveGrassChunkKeys(
   centerChunkZ,
   radius = GRASS_ACTIVE_CHUNK_RADIUS,
 ) {
-  return allKeys
-    .filter((key) => getGrassChunkDistance(key, centerChunkX, centerChunkZ) <= radius)
-    .sort((a, b) => getGrassChunkDistance(a, centerChunkX, centerChunkZ) - getGrassChunkDistance(b, centerChunkX, centerChunkZ))
+  // Parse each key once, not repeatedly inside the sort comparator.
+  return allKeys.map(key => ({ key, distance: getGrassChunkDistance(key, centerChunkX, centerChunkZ) }))
+    .filter(chunk => chunk.distance <= radius)
+    .sort((a, b) => a.distance - b.distance)
+    .map(chunk => chunk.key)
 }
 
-function createGrassChunkBuildJob(key, step = GRASS_GRID_STEP) {
+function createGrassChunkBuildJob(key, step, level) {
   const [chunkX, chunkZ] = key.split(':').map(Number)
   const bounds = getGrassChunkBounds(chunkX, chunkZ)
-  return {
-    key,
-    bounds,
-    nextX: bounds.minX,
-    step,
-    grass: [],
-    buildTimeMs: 0,
-  }
+  return { key, level, row: 0, grass: [],
+    xs: grassGridAxis(bounds.minX, bounds.maxX, step),
+    zs: grassGridAxis(bounds.minZ, bounds.maxZ, step) }
 }
 
 function continueGrassChunkBuild(job, deadline) {
-  const sliceStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
-  while (job.nextX <= job.bounds.maxX) {
-    pushGrassRow(job.grass, job.nextX, job.bounds.minZ, job.bounds.maxZ, job.step)
-    job.nextX += job.step
-    if (typeof performance !== 'undefined' && performance.now() >= deadline) {
-      job.buildTimeMs += performance.now() - sliceStartedAt
-      return false
-    }
+  while (job.row < job.xs.length) {
+    pushGrassRow(job.grass, job.xs[job.row], job.zs, job.row, job.level)
+    job.row++
+    if (performance.now() >= deadline) return false
   }
-  if (typeof performance !== 'undefined') job.buildTimeMs += performance.now() - sliceStartedAt
   return true
 }
 
@@ -338,13 +318,6 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
     shader.uniforms.uWindScale = { value: grassWindSettings.scale }
     shader.uniforms.uInteractionRadius = { value: grassInteractionSettings.radius }
     shader.uniforms.uInteractionStrength = { value: grassInteractionSettings.strength }
-    shader.uniforms.uFullDensityRadius = { value: GRASS_FULL_DENSITY_RADIUS }
-    shader.uniforms.uThinningRadius = { value: GRASS_THINNING_RADIUS }
-    shader.uniforms.uMinKeepProbability = { value: GRASS_MIN_KEEP_PROBABILITY }
-    shader.uniforms.uCullFadeStart = { value: GRASS_CULL_FADE_START }
-    shader.uniforms.uCullRadius = { value: GRASS_CULL_RADIUS }
-    shader.uniforms.uFarWidthScale = { value: GRASS_FAR_WIDTH_SCALE }
-    shader.uniforms.uFarHeightScale = { value: GRASS_FAR_HEIGHT_SCALE }
     shader.uniforms.uWindDirection = {
       value: new Vector3(grassWindSettings.directionX, 0, grassWindSettings.directionZ).normalize(),
     }
@@ -366,13 +339,6 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       uniform float uWindScale;
       uniform float uInteractionRadius;
       uniform float uInteractionStrength;
-      uniform float uFullDensityRadius;
-      uniform float uThinningRadius;
-      uniform float uMinKeepProbability;
-      uniform float uCullFadeStart;
-      uniform float uCullRadius;
-      uniform float uFarWidthScale;
-      uniform float uFarHeightScale;
       uniform vec3 uPlayerPosition;
       uniform vec3 uBallPosition;
       uniform float uBallInteractionRadius;
@@ -382,6 +348,8 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       uniform float uGraveyardGroundIntensities[${BIOME_SHADER_MAX_AREAS}];
       uniform int uGraveyardAreaCount;
       attribute float instanceSpawnTime;
+      attribute float instanceLod;
+      varying float vGrassCoverage;
       varying vec3 vOutdoorGrassLight;
       varying float vOutdoorGrassHighlight;
 
@@ -463,58 +431,21 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
 
       vec2 fromPlayer = grassOrigin.xz - uPlayerPosition.xz;
       float playerDistance = length(fromPlayer);
-      float distanceSq = dot(fromPlayer, fromPlayer);
-      float fullDensityRadiusSq = uFullDensityRadius * uFullDensityRadius;
-      float thinningRadiusSq = uThinningRadius * uThinningRadius;
-      float thinningT = clamp(
-        (distanceSq - fullDensityRadiusSq) / max(thinningRadiusSq - fullDensityRadiusSq, 0.0001),
-        0.0,
-        1.0
-      );
-      float keepProbability = mix(1.0, uMinKeepProbability, thinningT);
-      float transitionOffset = (grassHash(grassOrigin.xz + vec2(7.3, 2.1)) - 0.5) * 8.0;
-      float horizonFade = 1.0 - smoothstep(
-        uCullFadeStart + transitionOffset * 2.0,
-        uCullRadius + transitionOffset * 2.0,
-        playerDistance
-      );
-      float localFade = 1.0 - smoothstep(
-        ${GRASS_LOCAL_FADE_START.toFixed(1)} + transitionOffset,
-        ${GRASS_LOCAL_FADE_END.toFixed(1)} + transitionOffset,
-        playerDistance
-      );
-      float layerFade = localFade;
-      keepProbability *= horizonFade * layerFade;
-
-      // Distant blades represent small clusters: fewer instances, slightly wider cards.
-      // The curve stays gradual so there is no visible LOD transition.
-      float clusterT = thinningT * thinningT;
-      float widthScale = uFarWidthScale;
-      float heightScale = uFarHeightScale;
-      transformed.x *= mix(1.0, widthScale, clusterT);
-      transformed.y *= mix(1.0, heightScale, clusterT);
-
-      float keep = step(grassHash(grassOrigin.xz), keepProbability);
-      keep *= 1.0 - graveyardGrassCull;
-
-
-      // Newly streamed local chunks grow in progressively instead of appearing at once.
-      float spawnTime = instanceSpawnTime;
-      float revealDelay = grassHash(grassOrigin.xz + vec2(4.1, 9.7)) * ${GRASS_CHUNK_REVEAL_STAGGER.toFixed(2)};
-      float reveal = smoothstep(
-        0.0,
-        ${GRASS_CHUNK_REVEAL_DURATION.toFixed(2)},
-        uTime - spawnTime - revealDelay
-      );
-      float revealGrowth = smoothstep(0.0, 1.0, reveal);
-      transformed.x *= mix(0.78, 1.0, revealGrowth);
-      transformed.z *= mix(0.78, 1.0, revealGrowth);
-      // Keep a valid card below the ground at the beginning. Collapsing it to
-      // zero height creates degenerate triangles that can flicker against the terrain.
-      transformed.y *= mix(0.35, 1.0, revealGrowth);
-      transformed.y -= (1.0 - revealGrowth) * 0.58;
-      transformed.y -= (1.0 - keep) * 1000.0;
-
+      // Fade individual pixels, not whole tiles or randomly culled whole blades.
+      // The permanent coarse subset continues all the way to the terrain edge.
+      float viewDistance = playerDistance;
+      float fine = 1.0 - smoothstep(${GRASS_LODS[0].fadeStart.toFixed(1)}, ${GRASS_LODS[0].fadeEnd.toFixed(1)}, viewDistance);
+      float middle = 1.0 - smoothstep(${GRASS_LODS[1].fadeStart.toFixed(1)}, ${GRASS_LODS[1].fadeEnd.toFixed(1)}, viewDistance);
+      float coverage = instanceLod < 0.5 ? fine : (instanceLod < 1.5 ? middle : 1.0);
+      float density = (8.0 / 9.0) * fine + (8.0 / 81.0) * middle + 1.0 / 81.0;
+      float clusterWidth = min(6.0, inversesqrt(max(density, 0.012)));
+      transformed.x *= clusterWidth;
+      transformed.z *= clusterWidth;
+      transformed.y *= mix(1.0, 1.15, 1.0 - middle);
+      float reveal = smoothstep(0.0, 0.8, uTime - instanceSpawnTime);
+      vGrassCoverage = coverage * reveal * (1.0 - graveyardGrassCull);
+      // Skip rasterization for invisible cards, with no per-frame matrix uploads.
+      if (vGrassCoverage < 0.001) transformed.y -= 10000.0;
 
       float playerInfluence = smoothstep(uInteractionRadius, 0.0, playerDistance) * heightFactor;
 
@@ -542,6 +473,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       `
       #include <common>
       uniform float uArtGrassRoughness;
+      varying float vGrassCoverage;
       varying vec3 vOutdoorGrassLight;
       varying float vOutdoorGrassHighlight;
       `,
@@ -559,6 +491,13 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       `,
     )
 
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <alphatest_fragment>',
+      `#include <alphatest_fragment>
+       // Screen-space ordered coverage keeps depth writes and avoids transparent sorting.
+       float grassDither = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))));
+       if (vGrassCoverage <= grassDither) discard;`,
+    )
     onShaderReady(shader)
   }
 }
@@ -584,18 +523,23 @@ function TerrainGroundCover(props) {
 function GrassStreamer({ playerPositionRef, ballRef, active = true, debugStats = false,
   biomeAreas = MAP_BIOME_AREAS, reducedDensity = false }) {
   const step = reducedDensity ? 0.3 : GRASS_GRID_STEP
-  // Include the last grid point and floating-point rounding at chunk boundaries.
-  const slotCapacity = (Math.ceil(GRASS_CHUNK_SIZE / step) + 1) ** 2
-  const chunkCapacity = (GRASS_ACTIVE_CHUNK_RADIUS * 2 + 1) ** 2
-  const maxInstances = slotCapacity * chunkCapacity
+  // Fixed memory budgets per tier; coarse coverage is never recycled on movement.
+  const batches = useMemo(() => GRASS_LODS.flatMap((lod, level) => (level === 2 ? QUADRANTS : [{
+    id: 'local', minX: -TERRAIN_HALF_SIZE, maxX: TERRAIN_HALF_SIZE,
+    minZ: -TERRAIN_HALF_SIZE, maxZ: TERRAIN_HALF_SIZE,
+  }]).map((quadrant, q) => ({
+    ...quadrant, level, quadrant: q,
+    slotCapacity: grassLevelCapacity(step, level),
+    chunkCapacity: level === 2 ? (Math.ceil(TERRAIN_HALF_SIZE / GRASS_CHUNK_SIZE)) ** 2 : (lod.radius * 2 + 1) ** 2,
+  }))), [step])
   const allKeys = useMemo(() => getAllGrassChunkKeys(), [])
-  const meshes = useRef([null, null, null, null])
+  const meshes = useRef(Array(6).fill(null))
   const shaderRef = useRef(null)
   const biomeRef = useRef(getGrassBiomeShaderData(biomeAreas))
   const state = useRef(null)
   if (!state.current) state.current = {
-    center: null, target: new Set(), queue: [], job: null,
-    pools: Array.from({ length: 4 }, () => createChunkSlots(chunkCapacity)),
+    center: null, targets: [], queues: [[], [], []], jobs: [null, null, null], turn: 0,
+    pools: batches.map(batch => createChunkSlots(batch.chunkCapacity)),
     cache: new Map(), elapsed: 0, lastDebug: 0,
   }
   const baseTexture = useTexture(GRASS_TEXTURE)
@@ -605,9 +549,11 @@ function GrassStreamer({ playerPositionRef, ballRef, active = true, debugStats =
   }, [baseTexture])
   const geometries = useMemo(() => {
     const base = createGrassCardGeometry()
-    const result = QUADRANTS.map(({ minX, maxX, minZ, maxZ }) => {
+    const result = batches.map(({ minX, maxX, minZ, maxZ, slotCapacity, chunkCapacity, level }) => {
+      const maxInstances = slotCapacity * chunkCapacity
       const geometry = base.clone()
-      geometry.setAttribute('instanceSpawnTime', new InstancedBufferAttribute(new Float32Array(maxInstances), 1))
+      geometry.setAttribute('instanceSpawnTime', new InstancedBufferAttribute(new Float32Array(maxInstances), 1).setUsage(DynamicDrawUsage))
+      geometry.setAttribute('instanceLod', new InstancedBufferAttribute(new Float32Array(maxInstances).fill(level), 1))
       geometry.boundingBox = new Box3(new Vector3(minX, -2, minZ), new Vector3(maxX, 5, maxZ))
       geometry.boundingSphere = new Sphere(new Vector3((minX + maxX) / 2, 1.5, (minZ + maxZ) / 2),
         Math.hypot(maxX - minX, maxZ - minZ) / 2 + 6)
@@ -615,22 +561,23 @@ function GrassStreamer({ playerPositionRef, ballRef, active = true, debugStats =
     })
     base.dispose()
     return result
-  }, [maxInstances])
+  }, [batches])
   const material = useMemo(() => {
     const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
     mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current)
-    mat.customProgramCacheKey = () => 'terrain-grass-single-stream-v8'
+    mat.customProgramCacheKey = () => 'terrain-grass-unified-lod-v9'
     return mat
   }, [texture])
   // Stable callbacks: never zero mesh.count merely because React rerenders.
-  const meshRefs = useMemo(() => QUADRANTS.map((_, i) => mesh => {
+  const meshRefs = useMemo(() => batches.map((_, i) => mesh => {
     meshes.current[i] = mesh
     if (mesh) {
       mesh.count = 0
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage)
       mesh.boundingSphere = geometries[i].boundingSphere.clone()
     }
-  }), [geometries])
+  }), [geometries, batches])
 
   useEffect(() => {
     const data = getGrassBiomeShaderData(biomeAreas)
@@ -656,42 +603,50 @@ function GrassStreamer({ playerPositionRef, ballRef, active = true, debugStats =
     const center = getGrassChunkKey(cx, cz)
     if (center !== current.center) {
       current.center = center
-      const keys = getActiveGrassChunkKeys(allKeys, cx, cz)
-      const target = new Set(keys)
-      current.target = target
-      // Retiring chunks are beyond the visible radius (22 + jitter <= 26 m),
-      // while the loaded ring reaches at least 30 m along each side.
-      current.pools.forEach((pool, quadrant) => {
-        const mesh = meshes.current[quadrant]
-        for (const { key, slot } of pool.retireOutside(target)) {
-          writeGrassSlot(mesh, slot, slotCapacity, [], -1000)
-          current.cache.delete(key)
+      GRASS_LODS.forEach((lod, level) => {
+        const keys = getActiveGrassChunkKeys(allKeys, cx, cz, lod.radius)
+        const target = new Set(keys)
+        current.targets[level] = target
+        for (let q = 0; q < (level === 2 ? 4 : 1); q++) {
+          const index = level === 2 ? 2 + q : level
+          const pool = current.pools[index], mesh = meshes.current[index]
+          for (const { key, slot } of pool.retireOutside(target)) {
+            writeGrassSlot(mesh, slot, batches[index].slotCapacity, [], -1000)
+            current.cache.delete(`${level}/${key}`)
+          }
+          mesh.count = pool.slots.size ? (Math.max(...pool.slots.values()) + 1) * batches[index].slotCapacity : 0
         }
-        mesh.count = pool.slots.size ? (Math.max(...pool.slots.values()) + 1) * slotCapacity : 0
-      })
-      if (current.job && !target.has(current.job.key)) current.job = null
-      current.queue = keys.filter(key => {
-        const [x, z] = key.split(':').map(Number)
-        return !current.pools[getChunkQuadrantIndex(x, z)].slots.has(key) && key !== current.job?.key
+        if (current.jobs[level] && !target.has(current.jobs[level].key)) current.jobs[level] = null
+        current.queues[level] = keys.filter(key => {
+          const [x, z] = key.split(':').map(Number)
+          return !current.pools[level === 2 ? 2 + getChunkQuadrantIndex(x, z) : level].slots.has(key) && key !== current.jobs[level]?.key
+        })
       })
     }
 
-    const deadline = performance.now() + GRASS_CHUNK_BUILD_TIME_BUDGET_MS
-    // Bounded generation and one chunk upload per frame. Existing visible slots
-    // are untouched while replacements are prepared in the outer safety ring.
-    if (!current.job && current.queue.length) current.job = createGrassChunkBuildJob(current.queue.shift(), step)
-    if (current.job && continueGrassChunkBuild(current.job, deadline)) {
-      const job = current.job
+    const started = performance.now()
+    const deadline = started + GRASS_CHUNK_BUILD_TIME_BUDGET_MS
+    // Fair scheduling: distant coverage can never be starved by player movement.
+    // Several cheap coarse tiles fit in a frame; expensive fine tiles resume next frame.
+    let uploads = 0
+    for (let attempt = 0; attempt < 24 && performance.now() < deadline && uploads < 8; attempt++) {
+      const level = current.turn++ % 3
+      if (!current.jobs[level] && current.queues[level].length) {
+        current.jobs[level] = createGrassChunkBuildJob(current.queues[level].shift(), step, level)
+      }
+      const job = current.jobs[level]
+      if (!job || !continueGrassChunkBuild(job, deadline)) continue
       const [x, z] = job.key.split(':').map(Number)
-      const quadrant = getChunkQuadrantIndex(x, z)
-      const pool = current.pools[quadrant]
-      const slot = pool.claim(job.key)
-      const mesh = meshes.current[quadrant]
-      writeGrassSlot(mesh, slot, slotCapacity, job.grass, current.elapsed)
-      mesh.count = Math.max(mesh.count, (slot + 1) * slotCapacity)
-      current.cache.set(job.key, job.grass.length)
-      current.job = null
+      const index = level === 2 ? 2 + getChunkQuadrantIndex(x, z) : level
+      const slot = current.pools[index].claim(job.key)
+      const mesh = meshes.current[index], capacity = batches[index].slotCapacity
+      writeGrassSlot(mesh, slot, capacity, job.grass, current.elapsed)
+      mesh.count = Math.max(mesh.count, (slot + 1) * capacity)
+      current.cache.set(`${level}/${job.key}`, job.grass.length)
+      current.jobs[level] = null
+      uploads++
     }
+    current.lastBuildMs = performance.now() - started
 
     const shader = shaderRef.current
     if (shader) {
@@ -708,20 +663,21 @@ function GrassStreamer({ playerPositionRef, ballRef, active = true, debugStats =
     if (debugStats && current.elapsed - current.lastDebug > 0.6) {
       current.lastDebug = current.elapsed
       window.__grassDebug = {
-        system: 'single-local-stream', queuedChunks: current.queue.length,
-        activeChunk: center, targetChunks: current.target.size,
+        system: 'unified-world-lod', queuedChunks: current.queues.map(q => q.length),
+        generationMs: current.lastBuildMs,
+        activeChunk: center, targetChunks: current.targets.map(t => t.size),
         mountedChunks: current.cache.size,
         mountedBlades: [...current.cache.values()].reduce((a, b) => a + b, 0),
         submittedSlots: meshes.current.reduce((sum, mesh) => sum + mesh.count, 0),
-        buildingChunk: current.job?.key ?? null,
+        buildingChunks: current.jobs.map(job => job?.key ?? null),
       }
     }
   })
 
   return <group visible={active} userData={{ debugCategory: 'grass' }}>
     <GrassArtDirectionUpdater grassMaterial={material} shaderRef={shaderRef} />
-    {QUADRANTS.map((quadrant, i) => <instancedMesh key={quadrant.id} ref={meshRefs[i]}
-      args={[geometries[i], material, maxInstances]} frustumCulled userData={{ debugCategory: 'grass-mesh' }} />)}
+    {batches.map((batch, i) => <instancedMesh key={`${batch.level}/${batch.id}`} ref={meshRefs[i]}
+      args={[geometries[i], material, batch.slotCapacity * batch.chunkCapacity]} frustumCulled userData={{ debugCategory: 'grass-mesh' }} />)}
   </group>
 }
 

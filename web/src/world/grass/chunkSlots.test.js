@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BufferGeometry, InstancedBufferAttribute } from 'three'
 import { createChunkSlots, writeGrassSlot } from './chunkSlots'
+import { GRASS_LODS } from './grassLod'
 
 function windowKeys(x, z, radius = 5) {
   const keys = new Set()
@@ -52,9 +53,9 @@ describe('persistent grass chunk slots', () => {
     expect(() => writeGrassSlot(mesh, 0, 1, [plant, plant], 0)).toThrow('capacity')
   })
   it('retires chunks beyond even the most distant visible blade', () => {
-    const radius = 5, chunkSize = 6, maxVisible = 22 + 4, jitter = 0.45
-    // Cross any chunk boundary in either direction: the nearest point in the
-    // retired strip is still beyond the shader fade, including placement jitter.
-    expect(radius * chunkSize - jitter).toBeGreaterThan(maxVisible)
+    for (const lod of GRASS_LODS.slice(0, 2)) {
+      // Includes placement jitter and the widest moving card, with a preload margin.
+      expect(lod.radius * 6 - 0.45 - 2).toBeGreaterThan(lod.fadeEnd)
+    }
   })
 })
