@@ -14,6 +14,7 @@ import {
 import { getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFootprint } from './worldZones'
 import { ROAD_WIDTH } from './outdoorData'
 import { MAP_PATH_SURFACE_SAMPLER } from './paths'
+import { partitionGrassField } from './grass/spatialGrass'
 import { createVolumeTuftGeometry } from './grass/tuftGeometry'
 import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 import {
@@ -528,7 +529,7 @@ function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
 }
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false,
-  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, flatTestDensity = 1, volumeTufts = false, onFieldReady = null }) {
+  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, flatTestDensity = 1, volumeTufts = false, spatialCulling = false, onFieldReady = null }) {
   const shaderRef = useRef(null)
   const biomeRef = useRef(getGrassBiomeShaderData(biomeAreas))
   const baseTexture = useTexture(GRASS_TEXTURE)
@@ -540,22 +541,24 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   useEffect(() => {
     onFieldReady?.({ count: field.fields.reduce((sum, batch) => sum + batch.count, 0), buildMs: field.buildMs })
   }, [field, onFieldReady])
+  const batches = useMemo(() => flatTestSize && spatialCulling
+    ? partitionGrassField(field.fields) : field.fields, [field, flatTestSize, spatialCulling])
   const geometries = useMemo(() => {
     const card = createGrassCardGeometry()
     const base = volumeTufts ? createVolumeTuftGeometry(card) : card
     if (base !== card) card.dispose()
-    const result = field.fields.map(({ data, count }, index) => {
+    const result = batches.map(({ data, count, bounds }, index) => {
       const geometry = new InstancedBufferGeometry().copy(base)
       geometry.setAttribute('instancePlacement', new InstancedBufferAttribute(data.subarray(0, count * 4), 4))
       geometry.instanceCount = count
-      const { minX, maxX, minZ, maxZ } = QUADRANTS[index]
-      geometry.boundingBox = new Box3(new Vector3(minX - 1, -20, minZ - 1), new Vector3(maxX + 1, 40, maxZ + 1))
+      const { minX, maxX, minZ, maxZ } = QUADRANTS[index] ?? QUADRANTS[0]
+      geometry.boundingBox = bounds?.clone() ?? new Box3(new Vector3(minX - 1, -20, minZ - 1), new Vector3(maxX + 1, 40, maxZ + 1))
       geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new Sphere())
       return geometry
     })
     base.dispose()
     return result
-  }, [field, volumeTufts])
+  }, [batches, volumeTufts])
   const material = useMemo(() => {
     const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: volumeTufts ? DoubleSide : FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
@@ -573,9 +576,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
       shader.uniforms.uGraveyardAreaCount.value = data.count
     }
   }, [biomeAreas])
-  useEffect(() => () => {
-    geometries.forEach(g => g.dispose()); material.dispose(); texture.dispose()
-  }, [geometries, material, texture])
+  useEffect(() => () => { geometries.forEach(g => g.dispose()) }, [geometries])
+  useEffect(() => () => { material.dispose() }, [material])
+  useEffect(() => () => { texture.dispose() }, [texture])
   useEffect(() => {
     if (debugStats) window.__grassDebug = {
       system: 'full-density-static', gridStep: GRASS_GRID_STEP,
@@ -597,9 +600,9 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     if (bp) shader.uniforms.uBallPosition.value.set(bp.x, bp.y, bp.z)
     else shader.uniforms.uBallPosition.value.set(9999, 0, 9999)
   })
-  return <group visible={active} userData={{ debugCategory: 'grass' }}>
+  return <group visible={active} dispose={null} userData={{ debugCategory: 'grass' }}>
     <GrassArtDirectionUpdater grassMaterial={material} shaderRef={shaderRef} />
-    {geometries.map((geometry, i) => <mesh key={QUADRANTS[i].id}
+    {geometries.map((geometry, i) => <mesh key={i}
       geometry={geometry} material={material} frustumCulled userData={{ debugCategory: 'grass-mesh' }} />)}
   </group>
 }

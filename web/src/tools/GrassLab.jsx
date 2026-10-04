@@ -13,7 +13,7 @@ import TerrainGroundCover from '../world/TerrainGroundCover'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
 import './GrassLab.css'
 
-const DEFAULT_FIELD = { size: 30, density: 1 }
+const DEFAULT_FIELD = { size: 50, density: 5 }
 const EMPTY_BIOMES = []
 const SPAWN = { token: 'grass-lab', zone: ZONES.outside, position: [0, PLAYER_HEIGHT, 3], cameraYaw: 0, cameraPitch: -0.22 }
 function LabCamera() {
@@ -29,6 +29,7 @@ export default function GrassLab() {
   const [settings, setSettings] = useState(loadPerformanceSettings)
   const [controls, setControls] = useState(loadControlSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [spatialCulling, setSpatialCulling] = useState(true)
   const [volumeTufts, setVolumeTufts] = useState(true)
   const [draftField, setDraftField] = useState(DEFAULT_FIELD)
   const [fieldSettings, setFieldSettings] = useState(DEFAULT_FIELD)
@@ -82,7 +83,7 @@ export default function GrassLab() {
         <GameFrameSchedulerDriver />
         <LabCamera />
         <LayeredSceneRenderer currentZone={ZONES.outside} />
-        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey={`grass-lab:${size}:${fieldSettings.density}:${volumeTufts}`} />
+        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey={`grass-lab:${size}:${fieldSettings.density}:${volumeTufts}:${spatialCulling}`} />
         {settings.autoQuality && <RenderQualityGovernor onScaleChange={setScale} />}
         <Suspense fallback={null}>
           <OutdoorLighting active showSky={false} castShadows={!settings.disableShadows}
@@ -91,7 +92,7 @@ export default function GrassLab() {
             <planeGeometry args={[size, size]} />
             <meshStandardMaterial color="#438f32" roughness={1} />
           </mesh>
-          {settings.grass && <TerrainGroundCover volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
+          {settings.grass && <TerrainGroundCover spatialCulling={spatialCulling} volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
             playerPositionRef={playerPositionRef} ballRef={ballRef} />}
           <Physics gravity={[0, -9.81, 0]}>
             <RigidBody key={size} type="fixed" colliders={false}><CuboidCollider args={[size / 2, 0.1, size / 2]} position={[0, -0.1, 0]} /></RigidBody>
@@ -109,7 +110,7 @@ export default function GrassLab() {
       onToggleCrouch={() => setCrouching(value => !value)} controlSettings={controls} showDodgeAction />}
     {ready && settings.showFps && <FpsOverlay />}
     <nav className="grass-lab-toolbar" aria-label="Scène de test">
-      <span>Herbe · {size} × {size} m · ×{fieldSettings.density}</span>
+      <span>Herbe · {spatialCulling ? 'Optimisée' : 'Référence'} · {size} × {size} m · ×{fieldSettings.density}</span>
       <button onClick={() => { resetInput(); setSettingsOpen(value => !value) }}>Paramètres</button>
       <a href="/">Retour au jeu</a>
     </nav>
@@ -130,8 +131,12 @@ export default function GrassLab() {
       </label>
       <p className="grass-lab-field-info" role="status">{fieldPending ? 'Préparation du terrain…' : !settings.grass ? 'Herbe désactivée' :
         `${(fieldStats?.count ?? 0).toLocaleString('fr-FR')} touffes · ${(size * size).toLocaleString('fr-FR')} m²`}</p>
-      <button type="button" className="settings-action-row" onClick={resetField}>Revenir à 30 m / ×1</button>
+      <button type="button" className="settings-action-row" onClick={resetField}>Revenir à 50 m / ×5</button>
       <p className="grass-lab-field-info">Relâche le curseur pour appliquer. Pour comparer les FPS à résolution constante, désactive « Qualité auto ».</p>
+      <label className="settings-toggle-row">
+        <input type="checkbox" checked={spatialCulling} onChange={event => setSpatialCulling(event.target.checked)} />
+        <span><strong>Optimisation par blocs</strong><small>Blocs de 8 m hors champ ignorés. Désactive pour comparer avec les quatre grands blocs d’origine, à densité identique.</small></span>
+      </label>
       <label className="settings-toggle-row">
         <input type="checkbox" checked={volumeTufts} onChange={event => setVolumeTufts(event.target.checked)} />
         <span><strong>Touffes en volume</strong><small>Désactiver pour comparer avec la forme d’origine, à densité identique.</small></span>
