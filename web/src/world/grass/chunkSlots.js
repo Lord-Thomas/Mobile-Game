@@ -30,6 +30,7 @@ export function writeGrassSlot(mesh, slot, capacity, items, spawnTime) {
   const offset = slot * capacity
   const matrices = mesh.instanceMatrix.array
   const spawn = mesh.geometry.getAttribute('instanceSpawnTime')
+  const slope = mesh.geometry.getAttribute('instanceGroundSlope')
   for (let j = 0; j < capacity; j++) {
     const index = (offset + j) * 16
     matrices.fill(0, index, index + 16)
@@ -41,9 +42,17 @@ export function writeGrassSlot(mesh, slot, capacity, items, spawnTime) {
     matrices[index + 14] = item?.position[2] ?? 0
     matrices[index + 15] = 1
     spawn.array[offset + j] = spawnTime
+    if (slope) {
+      slope.array[(offset + j) * 2] = item?.groundSlope?.[0] ?? 0
+      slope.array[(offset + j) * 2 + 1] = item?.groundSlope?.[1] ?? 0
+    }
   }
   mesh.instanceMatrix.addUpdateRange(offset * 16, capacity * 16)
   spawn.addUpdateRange(offset, capacity)
   mesh.instanceMatrix.needsUpdate = true
   spawn.needsUpdate = true
+  if (slope) {
+    slope.addUpdateRange(offset * 2, capacity * 2)
+    slope.needsUpdate = true
+  }
 }

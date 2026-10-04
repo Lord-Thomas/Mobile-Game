@@ -15,6 +15,7 @@ import { getDistanceToPath, getDistanceToRoad, getZoneDensity, isInsideHouseFoot
 import { ROAD_WIDTH } from './outdoorData'
 import { MAP_PATH_SURFACE_SAMPLER } from './paths'
 import { createChunkSlots, writeGrassSlot } from './grass/chunkSlots'
+import { addBouquetRows } from './grass/grassBouquets'
 import { GRASS_LODS, grassGridAxis, grassSampleLevel, grassLevelCapacity } from './grass/grassLod'
 import { OUTDOOR_DAY_ATMOSPHERE } from './outdoorAtmosphere'
 import {
@@ -185,10 +186,13 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t)
 }
 
-function makeGrassInstance(x, z, seed) {
+function makeGrassInstance(x, z, seed, level) {
   const h = getTerrainHeight(x, z)
   return {
     position: [x, h + 0.04, z],
+    // Local terrain plane keeps bouquet rows grounded on slopes as the camera turns.
+    groundSlope: level > 0 ? [getTerrainHeight(x + 0.5, z) - getTerrainHeight(x - 0.5, z),
+      getTerrainHeight(x, z + 0.5) - getTerrainHeight(x, z - 0.5)] : [0, 0],
     rotation: [0, (seededRandom(seed + 18) - 0.5) * grassPlacementSettings.rotationRandomness * 2, 0],
     scale: grassPlacementSettings.minScale + seededRandom(seed + 9) * GRASS_SCALE_RANGE,
     colorShift: seededRandom(seed + 41),
@@ -212,7 +216,7 @@ function pushGrassRow(grass, xi, zValues, row, level) {
       Math.max(gameplayDensity, visualDensity) * naturalWeight
       + PAINTED_GRASS_DENSITY * grassWeight * livingCoverMultiplier
     ) * GRASS_DENSITY_MULTIPLIER)
-    if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed))
+    if (seededRandom(seed + 19) < density) grass.push(makeGrassInstance(x, z, seed, level))
   }
 }
 
@@ -349,6 +353,10 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       uniform int uGraveyardAreaCount;
       attribute float instanceSpawnTime;
       attribute float instanceLod;
+      attribute float grassRow;
+      attribute vec2 instanceGroundSlope;
+      varying float vGrassColumns;
+      varying float vGrassBouquetSeed;
       varying float vGrassCoverage;
       varying vec3 vOutdoorGrassLight;
       varying float vOutdoorGrassHighlight;
@@ -437,13 +445,26 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       float fine = 1.0 - smoothstep(${GRASS_LODS[0].fadeStart.toFixed(1)}, ${GRASS_LODS[0].fadeEnd.toFixed(1)}, viewDistance);
       float middle = 1.0 - smoothstep(${GRASS_LODS[1].fadeStart.toFixed(1)}, ${GRASS_LODS[1].fadeEnd.toFixed(1)}, viewDistance);
       float coverage = instanceLod < 0.5 ? fine : (instanceLod < 1.5 ? middle : 1.0);
-      float density = (8.0 / 9.0) * fine + (8.0 / 81.0) * middle + 1.0 / 81.0;
-      float clusterWidth = min(6.0, inversesqrt(max(density, 0.012)));
-      transformed.x *= clusterWidth;
-      transformed.z *= clusterWidth;
-      transformed.y *= mix(1.0, 1.15, 1.0 - middle);
+      // Expand the footprint by ADDING texture repetitions, never stretching a tuft.
+      // Detail replaces 3x3 cells, coarse replaces 9x9 cells of the same grid.
+      float localColumns = sqrt(9.0 - 8.0 * fine);
+      float columns = instanceLod < 0.5 ? 1.0 : localColumns;
+      if (instanceLod > 1.5) columns *= sqrt(9.0 - 8.0 * middle);
+      vGrassColumns = columns;
+      vGrassBouquetSeed = grassHash(grassOrigin.xz + grassRow * vec2(17.3, 9.1));
+      // Stretch only the underlying surface: UV repetition keeps tuft width constant.
+      transformed.x += localX * camRight.x * (columns - 1.0);
+      transformed.z += localX * camRight.y * (columns - 1.0);
+      float rowVisibility = clamp((columns - 1.0) * 0.5 - abs(grassRow) + 1.0, 0.0, 1.0);
+      if (abs(grassRow) < 0.5) rowVisibility = 1.0;
+      vec2 rowForward = vec2(-camRight.y, camRight.x);
+      float rowStagger = (vGrassBouquetSeed - 0.5) * 0.7 * min(1.0, columns - 1.0);
+      vec2 rowOffset = rowForward * grassRow * 0.92 + camRight * rowStagger;
+      transformed.x += rowOffset.x;
+      transformed.z += rowOffset.y;
+      transformed.y += dot(rowOffset + camRight * localX * (columns - 1.0), instanceGroundSlope);
       float reveal = smoothstep(0.0, 0.8, uTime - instanceSpawnTime);
-      vGrassCoverage = coverage * reveal * (1.0 - graveyardGrassCull);
+      vGrassCoverage = coverage * rowVisibility * reveal * (1.0 - graveyardGrassCull);
       // Skip rasterization for invisible cards, with no per-frame matrix uploads.
       if (vGrassCoverage < 0.001) transformed.y -= 10000.0;
 
@@ -473,6 +494,8 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       `
       #include <common>
       uniform float uArtGrassRoughness;
+      varying float vGrassColumns;
+      varying float vGrassBouquetSeed;
       varying float vGrassCoverage;
       varying vec3 vOutdoorGrassLight;
       varying float vOutdoorGrassHighlight;
@@ -481,7 +504,30 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `
-      #include <map_fragment>
+      #ifdef USE_MAP
+        vec2 tuftUv = vMapUv;
+        float edgeCoverage = 1.0;
+        if (vGrassColumns > 1.001) {
+          // Center-aligned repetitions: new tufts enter at the outside edges,
+          // existing tufts never slide or widen during the transition.
+          float tiledX = (vMapUv.x - 0.5) * vGrassColumns + 0.5;
+          float cell = floor(tiledX);
+          float variation = fract(sin(cell * 127.1 + vGrassBouquetSeed * 311.7) * 43758.5453);
+          float tuftHeight = mix(0.84, 1.0, variation);
+          // Preserve the original central tuft exactly until the bouquet develops.
+          float bouquetMix = smoothstep(1.0, 2.0, vGrassColumns);
+          tuftUv = vec2(fract(tiledX), vMapUv.y / mix(1.0, tuftHeight, bouquetMix));
+          if (variation < 0.5 && bouquetMix > 0.0) tuftUv.x = 1.0 - tuftUv.x;
+          edgeCoverage = 1.0 - smoothstep(0.94, 1.0, abs(vMapUv.x - 0.5) * 2.0);
+          if (tuftUv.y > 1.0) discard;
+        }
+        // Explicit gradients avoid excessively blurry mip levels at UV repeat seams.
+        vec2 grassDx = dFdx(vMapUv) * vec2(vGrassColumns, 1.0);
+        vec2 grassDy = dFdy(vMapUv) * vec2(vGrassColumns, 1.0);
+        vec4 sampledGrass = textureGrad(map, tuftUv, grassDx, grassDy);
+        diffuseColor *= sampledGrass;
+        diffuseColor.a *= edgeCoverage;
+      #endif
       diffuseColor.rgb *= vOutdoorGrassLight;
       float artGrassSheen = pow(
         clamp(vOutdoorGrassHighlight, 0.0, 1.0),
@@ -551,8 +597,9 @@ function GrassStreamer({ playerPositionRef, ballRef, active = true, debugStats =
     const base = createGrassCardGeometry()
     const result = batches.map(({ minX, maxX, minZ, maxZ, slotCapacity, chunkCapacity, level }) => {
       const maxInstances = slotCapacity * chunkCapacity
-      const geometry = base.clone()
+      const geometry = addBouquetRows(base.clone(), level, Float32BufferAttribute)
       geometry.setAttribute('instanceSpawnTime', new InstancedBufferAttribute(new Float32Array(maxInstances), 1).setUsage(DynamicDrawUsage))
+      geometry.setAttribute('instanceGroundSlope', new InstancedBufferAttribute(new Float32Array(maxInstances * 2), 2).setUsage(DynamicDrawUsage))
       geometry.setAttribute('instanceLod', new InstancedBufferAttribute(new Float32Array(maxInstances).fill(level), 1))
       geometry.boundingBox = new Box3(new Vector3(minX, -2, minZ), new Vector3(maxX, 5, maxZ))
       geometry.boundingSphere = new Sphere(new Vector3((minX + maxX) / 2, 1.5, (minZ + maxZ) / 2),
@@ -566,7 +613,7 @@ function GrassStreamer({ playerPositionRef, ballRef, active = true, debugStats =
     const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
     mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current)
-    mat.customProgramCacheKey = () => 'terrain-grass-unified-lod-v9'
+    mat.customProgramCacheKey = () => 'terrain-grass-bouquets-v10'
     return mat
   }, [texture])
   // Stable callbacks: never zero mesh.count merely because React rerenders.
