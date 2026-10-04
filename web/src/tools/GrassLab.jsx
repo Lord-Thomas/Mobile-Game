@@ -11,6 +11,7 @@ import ArtDirectionRuntime from '../artDirection/ArtDirectionRuntime'
 import { OutdoorLighting } from '../world/OutdoorNeighborhood'
 import TerrainGroundCover from '../world/TerrainGroundCover'
 import { OUTDOOR_LIGHT_LAYER } from '../world/lightingLayers'
+import GrassLabGround from './GrassLabGround'
 import './GrassLab.css'
 
 const DEFAULT_FIELD = { size: 50, density: 5 }
@@ -29,6 +30,7 @@ export default function GrassLab() {
   const [settings, setSettings] = useState(loadPerformanceSettings)
   const [controls, setControls] = useState(loadControlSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [meadowGround, setMeadowGround] = useState(true)
   const [densityLod, setDensityLod] = useState(true)
   const [freezeDistantAnimation, setFreezeDistantAnimation] = useState(true)
   const [spatialCulling, setSpatialCulling] = useState(true)
@@ -85,15 +87,12 @@ export default function GrassLab() {
         <GameFrameSchedulerDriver />
         <LabCamera />
         <LayeredSceneRenderer currentZone={ZONES.outside} />
-        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey={`grass-lab:${size}:${fieldSettings.density}:${volumeTufts}:${spatialCulling}:${freezeDistantAnimation}:${densityLod}`} />
+        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey={`grass-lab:${size}:${fieldSettings.density}:${volumeTufts}:${spatialCulling}:${freezeDistantAnimation}:${densityLod}:${meadowGround}`} />
         {settings.autoQuality && <RenderQualityGovernor onScaleChange={setScale} />}
         <Suspense fallback={null}>
           <OutdoorLighting active showSky={false} castShadows={!settings.disableShadows}
             playerPositionRef={playerPositionRef} biomeAreas={EMPTY_BIOMES} />
-          <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow onUpdate={mesh => mesh.layers.enable(OUTDOOR_LIGHT_LAYER)}>
-            <planeGeometry args={[size, size]} />
-            <meshStandardMaterial color="#438f32" roughness={1} />
-          </mesh>
+          <GrassLabGround size={size} meadow={meadowGround} />
           {settings.grass && <TerrainGroundCover densityLod={densityLod} freezeDistantAnimation={freezeDistantAnimation} spatialCulling={spatialCulling} volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
             playerPositionRef={playerPositionRef} ballRef={ballRef} />}
           <Physics gravity={[0, -9.81, 0]}>
@@ -135,6 +134,10 @@ export default function GrassLab() {
         `${(fieldStats?.count ?? 0).toLocaleString('fr-FR')} touffes · ${(size * size).toLocaleString('fr-FR')} m²`}</p>
       <button type="button" className="settings-action-row" onClick={resetField}>Revenir à 50 m / ×5</button>
       <p className="grass-lab-field-info">Relâche le curseur pour appliquer. Pour comparer les FPS à résolution constante, désactive « Qualité auto ».</p>
+      <label className="settings-toggle-row">
+        <input type="checkbox" checked={meadowGround} onChange={event => setMeadowGround(event.target.checked)} />
+        <span><strong>Sol prairie</strong><small>Variations de verts et grain fin sur un sol parfaitement plat. Désactive pour retrouver le sol uni.</small></span>
+      </label>
       <label className="settings-toggle-row">
         <input type="checkbox" checked={spatialCulling} onChange={event => setSpatialCulling(event.target.checked)} />
         <span><strong>Optimisation par blocs</strong><small>Blocs de 8 m hors champ ignorés. Désactive pour comparer avec les quatre grands blocs d’origine, à densité identique.</small></span>
