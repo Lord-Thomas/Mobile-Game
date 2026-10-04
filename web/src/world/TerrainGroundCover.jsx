@@ -1,3 +1,4 @@
+import { prepareDensityBatch, densityDrawCount, densityVertexDeclarations, densityVertex, densityFragment } from './grass/densityLod'
 import { use, useEffect, useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
@@ -337,7 +338,7 @@ export function getFlatGrassField(size = 30, density = 1) {
   return promise
 }
 
-function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData(), volumeTufts = false, freezeDistantAnimation = false) {
+function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData(), volumeTufts = false, freezeDistantAnimation = false, densityLod = false) {
   return (shader) => {
     const biomeData = getBiomeData()
     shader.uniforms.uTime = { value: 0 }
@@ -380,6 +381,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       uniform float uGraveyardGroundIntensities[${BIOME_SHADER_MAX_AREAS}];
       uniform int uGraveyardAreaCount;
       attribute vec4 instancePlacement;
+      ${densityLod ? densityVertexDeclarations : ''}
       varying vec3 vOutdoorGrassLight;
       varying float vOutdoorGrassHighlight;
 
@@ -425,6 +427,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       heightFactor = heightFactor * heightFactor;
 
       vec3 grassOrigin = instancePlacement.xyz;
+      ${densityLod ? densityVertex : ''}
       float graveyardGrassCull = smoothstep(0.18, 0.42, grassGraveyardInfluence(grassOrigin.xz));
       float grassLightVariation = 0.88 + grassHash(grassOrigin.xz + vec2(5.3, 8.7)) * 0.12;
       vec3 grassAmbientLight = mix(
@@ -500,6 +503,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       `
       #include <common>
       uniform float uArtGrassRoughness;
+      ${densityLod ? 'varying float vDensityCoverage;' : ''}
       varying vec3 vOutdoorGrassLight;
       varying float vOutdoorGrassHighlight;
       `,
@@ -508,6 +512,7 @@ function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGr
       '#include <map_fragment>',
       `
       #include <map_fragment>
+      ${densityLod ? densityFragment : ''}
       diffuseColor.rgb *= vOutdoorGrassLight;
       float artGrassSheen = pow(
         clamp(vOutdoorGrassHighlight, 0.0, 1.0),
@@ -539,7 +544,7 @@ function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
 }
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false,
-  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, flatTestDensity = 1, volumeTufts = false, spatialCulling = false, freezeDistantAnimation = false, onFieldReady = null }) {
+  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null, flatTestDensity = 1, volumeTufts = false, spatialCulling = false, freezeDistantAnimation = false, densityLod = false, onFieldReady = null }) {
   const shaderRef = useRef(null)
   const biomeRef = useRef(getGrassBiomeShaderData(biomeAreas))
   const baseTexture = useTexture(GRASS_TEXTURE)
@@ -551,15 +556,18 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   useEffect(() => {
     onFieldReady?.({ count: field.fields.reduce((sum, batch) => sum + batch.count, 0), buildMs: field.buildMs })
   }, [field, onFieldReady])
-  const batches = useMemo(() => flatTestSize && spatialCulling
-    ? partitionGrassField(field.fields) : field.fields, [field, flatTestSize, spatialCulling])
+  const batches = useMemo(() => {
+    const result = flatTestSize && (spatialCulling || densityLod) ? partitionGrassField(field.fields) : field.fields
+    return flatTestSize && densityLod ? result.map(prepareDensityBatch) : result
+  }, [field, flatTestSize, spatialCulling, densityLod])
   const geometries = useMemo(() => {
     const card = createGrassCardGeometry()
     const base = volumeTufts ? createVolumeTuftGeometry(card) : card
     if (base !== card) card.dispose()
-    const result = batches.map(({ data, count, bounds }, index) => {
+    const result = batches.map(({ data, count, bounds, ranks }, index) => {
       const geometry = new InstancedBufferGeometry().copy(base)
       geometry.setAttribute('instancePlacement', new InstancedBufferAttribute(data.subarray(0, count * 4), 4))
+      if (ranks) geometry.setAttribute('instanceDensityRank', new InstancedBufferAttribute(ranks, 1))
       geometry.instanceCount = count
       const { minX, maxX, minZ, maxZ } = QUADRANTS[index] ?? QUADRANTS[0]
       geometry.boundingBox = bounds?.clone() ?? new Box3(new Vector3(minX - 1, -20, minZ - 1), new Vector3(maxX + 1, 40, maxZ + 1))
@@ -572,10 +580,10 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
   const material = useMemo(() => {
     const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: volumeTufts ? DoubleSide : FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
-    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts, !!flatTestSize && freezeDistantAnimation)
-    mat.customProgramCacheKey = () => `terrain-grass-static-v13-${volumeTufts ? 'volume' : 'card'}-${!!flatTestSize && freezeDistantAnimation}`
+    mat.onBeforeCompile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts, !!flatTestSize && freezeDistantAnimation, !!flatTestSize && densityLod)
+    mat.customProgramCacheKey = () => `terrain-grass-static-v14-${volumeTufts ? 'volume' : 'card'}-${!!flatTestSize && freezeDistantAnimation}-${!!flatTestSize && densityLod}`
     return mat
-  }, [texture, volumeTufts, flatTestSize, freezeDistantAnimation])
+  }, [texture, volumeTufts, flatTestSize, freezeDistantAnimation, densityLod])
   useEffect(() => {
     const data = getGrassBiomeShaderData(biomeAreas)
     biomeRef.current = data
@@ -600,6 +608,11 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     if (!active) return
     const pp = playerPositionRef?.current, shader = shaderRef.current
     if (!pp || !shader) return
+    if (flatTestSize && densityLod) {
+      for (let i = 0; i < geometries.length; i++) {
+        geometries[i].instanceCount = densityDrawCount(batches[i].count, batches[i].bounds, pp.x, pp.z)
+      }
+    }
     _cameraForward.set(0, 0, -1).applyQuaternion(frame.camera.quaternion)
     _cameraForward.y = 0
     if (_cameraForward.lengthSq() > 0.0001) _cameraForward.normalize()

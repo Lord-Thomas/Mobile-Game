@@ -29,6 +29,7 @@ export default function GrassLab() {
   const [settings, setSettings] = useState(loadPerformanceSettings)
   const [controls, setControls] = useState(loadControlSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [densityLod, setDensityLod] = useState(true)
   const [freezeDistantAnimation, setFreezeDistantAnimation] = useState(true)
   const [spatialCulling, setSpatialCulling] = useState(true)
   const [volumeTufts, setVolumeTufts] = useState(true)
@@ -84,7 +85,7 @@ export default function GrassLab() {
         <GameFrameSchedulerDriver />
         <LabCamera />
         <LayeredSceneRenderer currentZone={ZONES.outside} />
-        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey={`grass-lab:${size}:${fieldSettings.density}:${volumeTufts}:${spatialCulling}:${freezeDistantAnimation}`} />
+        <RenderStatsProbe active={settings.showFps} onRendererInfo={setRendererInfo} resetKey={`grass-lab:${size}:${fieldSettings.density}:${volumeTufts}:${spatialCulling}:${freezeDistantAnimation}:${densityLod}`} />
         {settings.autoQuality && <RenderQualityGovernor onScaleChange={setScale} />}
         <Suspense fallback={null}>
           <OutdoorLighting active showSky={false} castShadows={!settings.disableShadows}
@@ -93,7 +94,7 @@ export default function GrassLab() {
             <planeGeometry args={[size, size]} />
             <meshStandardMaterial color="#438f32" roughness={1} />
           </mesh>
-          {settings.grass && <TerrainGroundCover freezeDistantAnimation={freezeDistantAnimation} spatialCulling={spatialCulling} volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
+          {settings.grass && <TerrainGroundCover densityLod={densityLod} freezeDistantAnimation={freezeDistantAnimation} spatialCulling={spatialCulling} volumeTufts={volumeTufts} flatTestSize={size} flatTestDensity={fieldSettings.density} onFieldReady={setFieldStats} biomeAreas={EMPTY_BIOMES}
             playerPositionRef={playerPositionRef} ballRef={ballRef} />}
           <Physics gravity={[0, -9.81, 0]}>
             <RigidBody key={size} type="fixed" colliders={false}><CuboidCollider args={[size / 2, 0.1, size / 2]} position={[0, -0.1, 0]} /></RigidBody>
@@ -137,6 +138,10 @@ export default function GrassLab() {
       <label className="settings-toggle-row">
         <input type="checkbox" checked={spatialCulling} onChange={event => setSpatialCulling(event.target.checked)} />
         <span><strong>Optimisation par blocs</strong><small>Blocs de 8 m hors champ ignorés. Désactive pour comparer avec les quatre grands blocs d’origine, à densité identique.</small></span>
+      </label>
+      <label className="settings-toggle-row">
+        <input type="checkbox" checked={densityLod} onChange={event => setDensityLod(event.target.checked)} />
+        <span><strong>Densité progressive au loin</strong><small>Pleine densité sur 80 × 80 m autour du joueur, moitié tous les 10 m au-delà, puis disparition à 100 m du joueur. Désactive pour comparer.</small></span>
       </label>
       <label className="settings-toggle-row">
         <input type="checkbox" checked={freezeDistantAnimation} onChange={event => setFreezeDistantAnimation(event.target.checked)} />
