@@ -125,7 +125,7 @@ export default function GrassLab() {
       </label>
       <label className="settings-range-row">
         <span><strong>Taille du terrain</strong><output>{draftField.size} × {draftField.size} m</output></span>
-        <input type="range" aria-label="Taille du terrain" min="10" max="120" step="10" value={draftField.size}
+        <input type="range" aria-label="Taille du terrain" min="10" max="200" step="10" value={draftField.size}
           onChange={event => setDraftField(current => ({ ...current, size: Number(event.target.value) }))}
           onPointerUp={applyField} onKeyUp={applyField} onBlur={applyField} />
       </label>

@@ -306,7 +306,7 @@ async function buildFullGrassField() {
 
 const flatGrassFields = new Map()
 export function getFlatGrassField(size = 30, density = 1) {
-  if (!Number.isFinite(size) || size < 1 || size > 120 || !Number.isFinite(density) || density < 0.25 || density > 6) {
+  if (!Number.isFinite(size) || size < 1 || size > 200 || !Number.isFinite(density) || density < 0.25 || density > 6) {
     throw new RangeError('Invalid grass test dimensions or density')
   }
   const key = `${size}:${density}`
