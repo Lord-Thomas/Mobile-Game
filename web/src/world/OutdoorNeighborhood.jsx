@@ -6,7 +6,7 @@ import { Color, MathUtils, Vector3 } from 'three'
 import OutdoorGround from './OutdoorGround'
 import PlayerPlot from './PlayerPlot'
 import Road from './Road'
-import TerrainGroundCover from './TerrainGroundCover'
+import OutdoorStreamedGrass from './grass/OutdoorStreamedGrass'
 import CloudSky from './CloudSky'
 import NeighborHouse from './NeighborHouse'
 import InstancedTreeBatch from './trees/InstancedTreeBatch'
@@ -370,15 +370,11 @@ const OutdoorNeighborhood = React.memo(function OutdoorNeighborhood({
                 </div>
               </Html>
             ) : null}>
-            <TerrainGroundCover
-              spatialCulling
-              densityLod
-              volumeTufts={false}
+            <OutdoorStreamedGrass
               playerPositionRef={playerPositionRef}
               ballRef={ballRef}
               active={lightingActive && runtimeActive}
               debugStats={debugStats}
-              reducedDensity={reducedGrassDensity}
               biomeAreas={biomeAreas}
             />
             </Suspense>

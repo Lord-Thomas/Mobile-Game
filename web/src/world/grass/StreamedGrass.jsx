@@ -8,14 +8,18 @@ import { densityDrawCount } from './densityLod'
 import { createStreamedField } from './streamedField'
 import { BIOME_SHADER_MAX_AREAS } from '../biomeAreas'
 
+const ZERO_ORIGIN = { current: { x: 0, z: 0 } }
 const EMPTY_BIOMES = { areas: Array.from({ length: BIOME_SHADER_MAX_AREAS }, () => new Vector4(0, 0, 0, 1)),
   groundIntensities: new Float32Array(BIOME_SHADER_MAX_AREAS), count: 0 }
 
-export default function StreamedGrass({ density, size, playerPositionRef, originRef,
-  volumeTufts, freezeDistantAnimation, onStats, onReady, resetToken }) {
-  const field = useMemo(() => createStreamedField(density, size), [density, size])
+export default function StreamedGrass({ density, size, playerPositionRef, originRef = ZERO_ORIGIN,
+  volumeTufts = false, freezeDistantAnimation = false, onStats, onReady, resetToken,
+  surface = null, biomeData = EMPTY_BIOMES, active = true, ballRef = null }) {
+  const field = useMemo(() => createStreamedField(density, size, surface), [density, size, surface])
   const meshes = useRef([])
   const shaderRef = useRef(null)
+  const biomeRef = useRef(biomeData)
+  biomeRef.current = biomeData
   const reportedReady = useRef(false)
   const lastReport = useRef(-Infinity)
   const forward = useMemo(() => new Vector3(), [])
@@ -28,7 +32,7 @@ export default function StreamedGrass({ density, size, playerPositionRef, origin
     const list = field.slots.map(slot => {
       const geometry = new InstancedBufferGeometry().copy(base)
       geometry.setAttribute('instancePlacement', new InstancedBufferAttribute(slot.data, 4).setUsage(DynamicDrawUsage))
-      geometry.setAttribute('instanceDensityRank', ranks)
+      geometry.setAttribute('instanceDensityRank', surface ? new InstancedBufferAttribute(slot.ranks, 1).setUsage(DynamicDrawUsage) : ranks)
       geometry.instanceCount = 0
       geometry.boundingBox = slot.bounds.clone()
       geometry.boundingSphere = slot.bounds.getBoundingSphere(new Sphere())
@@ -37,11 +41,11 @@ export default function StreamedGrass({ density, size, playerPositionRef, origin
     })
     base.dispose(); if (base !== card) card.dispose()
     return list
-  }, [field, volumeTufts])
+  }, [field, volumeTufts, surface])
   const material = useMemo(() => {
     const mat = new MeshBasicMaterial({ map: texture, alphaTest: 0.45, side: volumeTufts ? DoubleSide : FrontSide,
       transparent: false, depthWrite: true, color: 0xffffff, vertexColors: true })
-    const compile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => EMPTY_BIOMES, volumeTufts, freezeDistantAnimation, true)
+    const compile = buildGrassHandleBeforeCompile(shader => { shaderRef.current = shader }, () => biomeRef.current, volumeTufts, freezeDistantAnimation, true)
     mat.onBeforeCompile = shader => {
       compile(shader)
       shader.uniforms.uStreamWindPhase = { value: new Vector2() }
@@ -63,6 +67,7 @@ export default function StreamedGrass({ density, size, playerPositionRef, origin
   useEffect(() => () => material.dispose(), [material])
   useEffect(() => () => texture.dispose(), [texture])
   useFrame(({ camera, clock }) => {
+    if (!active) return
     const player = playerPositionRef.current, origin = originRef.current
     field.target(origin.x + player.x, origin.z + player.z)
     field.step(3, 6)
@@ -75,6 +80,12 @@ export default function StreamedGrass({ density, size, playerPositionRef, origin
       if (geometry.userData.version !== slot.version) {
         const attribute = geometry.attributes.instancePlacement
         attribute.clearUpdateRanges(); attribute.addUpdateRange(0, slot.count * 4); attribute.needsUpdate = true
+        if (surface) {
+          const rankAttribute = geometry.attributes.instanceDensityRank
+          rankAttribute.clearUpdateRanges(); rankAttribute.addUpdateRange(0, slot.count); rankAttribute.needsUpdate = true
+          geometry.boundingBox.copy(slot.bounds)
+          slot.bounds.getBoundingSphere(geometry.boundingSphere)
+        }
         geometry.userData.version = slot.version
       }
       geometry.instanceCount = densityDrawCount(slot.count, slot.bounds, player.x - mesh.position.x, player.z - mesh.position.z)
@@ -89,7 +100,12 @@ export default function StreamedGrass({ density, size, playerPositionRef, origin
       const phase = -(origin.x * direction.x + origin.z * direction.z) * shader.uniforms.uWindScale.value
         + (-origin.x * direction.z + origin.z * direction.x) * 0.06
       shader.uniforms.uStreamWindPhase.value.set(phase % (2 * Math.PI), (phase * 2.37 + origin.x * 0.11 + origin.z * 0.07) % (2 * Math.PI))
-      shader.uniforms.uBallPosition.value.set(9999, 0, 9999)
+      const ball = ballRef?.current?.translation?.()
+      if (ball) shader.uniforms.uBallPosition.value.set(ball.x, ball.y, ball.z)
+      else shader.uniforms.uBallPosition.value.set(9999, 0, 9999)
+      shader.uniforms.uGraveyardAreas.value = biomeData.areas
+      shader.uniforms.uGraveyardGroundIntensities.value = biomeData.groundIntensities
+      shader.uniforms.uGraveyardAreaCount.value = biomeData.count
     }
     if (clock.elapsedTime - lastReport.current > 0.5 || !reportedReady.current) {
       const stats = field.stats()
@@ -101,9 +117,9 @@ export default function StreamedGrass({ density, size, playerPositionRef, origin
       }
     }
   })
-  return <group dispose={null}>
+  return <group visible={active} dispose={null} userData={{ debugCategory: 'grass' }}>
     <GrassArtDirectionUpdater grassMaterial={material} shaderRef={shaderRef} />
     {geometries.map((geometry, i) => <mesh key={i} ref={mesh => { meshes.current[i] = mesh }}
-      geometry={geometry} material={material} visible={false} frustumCulled />)}
+      geometry={geometry} material={material} visible={false} frustumCulled userData={{ debugCategory: 'grass-mesh' }} />)}
   </group>
 }

@@ -32,7 +32,7 @@ function smoothstep(edge0, edge1, value) {
 }
 
 function distanceToSamples(x, z, samples = roadSamples) {
-  let minDistance = Infinity
+  let minDistanceSq = Infinity
 
   for (let index = 0; index < samples.length - 1; index += 1) {
     const a = samples[index]
@@ -45,10 +45,11 @@ function distanceToSamples(x, z, samples = roadSamples) {
     const t = lengthSq > 0 ? clamp01((apX * abX + apZ * abZ) / lengthSq) : 0
     const closestX = a.x + abX * t
     const closestZ = a.z + abZ * t
-    minDistance = Math.min(minDistance, Math.hypot(x - closestX, z - closestZ))
+    const dx = x - closestX, dz = z - closestZ
+    minDistanceSq = Math.min(minDistanceSq, dx * dx + dz * dz)
   }
 
-  return minDistance
+  return Math.sqrt(minDistanceSq)
 }
 
 function isInsideAxisRect(x, z, centerX, centerZ, width, depth, margin = 0) {

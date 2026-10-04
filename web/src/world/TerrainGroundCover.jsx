@@ -82,7 +82,7 @@ const grassGraveyardGroundIntensities = Float32Array.from(Array.from({ length: B
   GRAVEYARD_SHADER_GROUND_INTENSITIES[index] ?? 0
 )))
 
-function getGrassBiomeShaderData(biomeAreas = MAP_BIOME_AREAS) {
+export function getGrassBiomeShaderData(biomeAreas = MAP_BIOME_AREAS) {
   if (biomeAreas === MAP_BIOME_AREAS) {
     return {
       areas: grassGraveyardShaderAreas,
@@ -274,15 +274,18 @@ export function getFullGrassField() {
   if (!fullGrassFieldPromise) fullGrassFieldPromise = buildFullGrassField()
   return fullGrassFieldPromise
 }
-async function buildFullGrassField() {
-  const started = performance.now()
-  await terrainReady
-  const sampleHeight = createTerrainHeightSampler(getCachedVisualGeometry())
-  const samplePlacement = createPlacementSampler(GRASS_AREA_MIN, GRASS_AREA_MAX, (x, z) => {
+export function createWorldGrassPlacementSampler() {
+  return createPlacementSampler(GRASS_AREA_MIN, GRASS_AREA_MAX, (x, z) => {
     const living = Math.pow(1 - getBiomeInfluence('graveyard', x, z, null), 3.5)
     const gameplay = Math.max(getZoneDensity('tall_grass', x, z), getZoneDensity('lawn_blade', x, z) * 0.9)
     return Math.max(gameplay, getVisualGrassDensity(x, z) * living)
   })
+}
+async function buildFullGrassField() {
+  const started = performance.now()
+  await terrainReady
+  const sampleHeight = createTerrainHeightSampler(getCachedVisualGeometry())
+  const samplePlacement = createWorldGrassPlacementSampler()
   // Generate directly into render cells: avoid a full-world copy/repartition at ×5.
   const step = GRASS_GRID_STEP / Math.sqrt(5)
   const cellSize = 8

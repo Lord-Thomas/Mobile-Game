@@ -3,7 +3,10 @@
 The previous validated version is retained on GitHub branch
 `backup/grass-before-streaming-2026-10-04` (f90d3f9bb142ba53853a653d71778124e5fc5fe1).
 The laboratory's **Monde étendu** toggle switches back to the finite reference field.
-The main outdoor world retains its existing grass system.
+The validated streaming lab is also retained on branch
+`backup/grass-streaming-validated-2026-10-04` (2343b9c1060c88cb577ad6b0d77169005c0b18f2).
+The main outdoor world now uses the same streaming engine through an outdoor
+surface adapter, with density ×5 and volume tufts disabled.
 
 ## Budget and appearance
 
@@ -41,3 +44,19 @@ travel, distinct cell patterns, map bounds, work limits and recycling beyond
 the visible LOD range. A ×5 CPU run covers a kilometre of diagonal travel.
 Build checked. Mobile FPS, GPU memory, visual seams and controller smoothness
 still need validation on the owner's device; no browser QA available here.
+
+## Outdoor integration
+
+`OutdoorStreamedGrass` replaces the old complete-field loader in the private
+world. The adapter samples the actual rendered terrain triangles and retains
+house exclusions, ordered painted-path masks, road fades and graveyard masks.
+Each recycled cell updates both its placement/rank buffers and its vertical
+culling bounds. Ball/player interactions and biome shader uniforms are retained.
+Generation pauses indoors, resumes around the current player on return, and
+never waits for all 376 × 376 m of grass to be created. A small preparation
+notice remains while the initial surrounding ring fills.
+
+Outdoor tests inspect over 73,000 blade samples against actual terrain and
+masks, then travel to another region while checking fixed buffer ownership.
+The road-distance calculation uses squared distances and one final square root;
+a reference-equivalence test confirms unchanged results.

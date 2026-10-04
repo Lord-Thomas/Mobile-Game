@@ -12,14 +12,14 @@ function hash(value) {
   return (n ^ (n >>> 16)) >>> 0
 }
 
-export function createStreamedField(density = 5, size = 1000) {
+export function createStreamedField(density = 5, size = 1000, surface = null) {
   const divisions = Math.max(1, Math.round(STREAM_CELL_SIZE / (0.22 / Math.sqrt(density))))
   const capacity = divisions ** 2
   const spacing = STREAM_CELL_SIZE / divisions
   const ranks = Float32Array.from({ length: capacity }, (_, i) => (i + 0.5) / capacity)
   const slots = Array.from({ length: STREAM_SLOT_COUNT }, (_, id) => ({
     id, key: null, cx: 0, cz: 0, count: 0, version: 0,
-    data: new Float32Array(capacity * 4), ranks,
+    data: new Float32Array(capacity * 4), ranks: surface ? new Float32Array(capacity) : ranks,
     bounds: new Box3(new Vector3(-2, -2, -2), new Vector3(10, 2, 10)),
   }))
   const active = new Map()
@@ -53,7 +53,8 @@ export function createStreamedField(density = 5, size = 1000) {
       const j = Math.floor(state / 4294967296 * (i + 1))
       const old = order[i]; order[i] = order[j]; order[j] = old
     }
-    let count = 0
+    const sampleSurface = surface?.cell(cell.cx, cell.cz)
+    let count = 0, minY = Infinity, maxY = -Infinity
     for (let i = 0; i < capacity; i++) {
       const index = order[i]
       const a = hash(seed ^ Math.imul(index + 1, 1597334677)) / 4294967296
@@ -62,9 +63,18 @@ export function createStreamedField(density = 5, size = 1000) {
       const x = (index % divisions + 0.5) * spacing + (a - 0.5) * 0.9
       const z = (Math.floor(index / divisions) + 0.5) * spacing + (b - 0.5) * 0.9
       if (Math.abs(cell.cx * 8 + x) > half - 0.15 || Math.abs(cell.cz * 8 + z) > half - 0.15) continue
+      const groundY = sampleSurface ? sampleSurface(cell.cx * 8 + x, cell.cz * 8 + z,
+        hash(seed ^ Math.imul(index + 1, 2146121005)) / 4294967296) : 0
+      if (groundY === null || !Number.isFinite(groundY)) continue
+      minY = Math.min(minY, groundY); maxY = Math.max(maxY, groundY)
       const offset = count++ * 4
-      slot.data[offset] = x; slot.data[offset + 1] = 0.04
+      slot.data[offset] = x; slot.data[offset + 1] = groundY + 0.04
       slot.data[offset + 2] = z; slot.data[offset + 3] = 0.18 + c * 0.12
+    }
+    if (surface) {
+      for (let i = 0; i < count; i++) slot.ranks[i] = (i + 0.5) / count
+      slot.bounds.min.y = count ? minY - 2 : -2
+      slot.bounds.max.y = count ? maxY + 2 : 2
     }
     Object.assign(slot, { key: cell.key, cx: cell.cx, cz: cell.cz, count, version: slot.version + 1 })
     active.set(cell.key, slot)
@@ -72,7 +82,7 @@ export function createStreamedField(density = 5, size = 1000) {
   }
   return {
     slots, capacity,
-    byteLength: slots.length * capacity * 16 + ranks.byteLength + order.byteLength,
+    byteLength: slots.length * capacity * 16 + ranks.byteLength * (surface ? slots.length + 1 : 1) + order.byteLength,
     target,
     // Bounded work per frame. Slots and their GPU buffers survive recycling.
     step(budgetMs = 3, maxCells = 6) {
