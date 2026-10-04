@@ -1,0 +1,8 @@
+.grass-lab { position: fixed; inset: 0; }
+.grass-lab .canvas-wrap { position: absolute; inset: 0; width: 100%; height: 100%; }
+.grass-lab-toolbar { position: absolute; z-index: 60; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); right: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; font-size: 12px; }
+.grass-lab-toolbar span { padding: 8px; background: #17251de0; border-radius: 8px; color: white; }
+.grass-lab-toolbar button, .grass-lab-toolbar a, .grass-lab-close { pointer-events: auto; color: white; background: #25382e; border: 1px solid #ffffff40; padding: 10px 12px; border-radius: 8px; text-decoration: none; font: inherit; }
+.grass-lab-settings { position: absolute; z-index: 100; inset: max(60px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); margin-left: auto; width: min(440px, calc(100% - 24px)); overflow-y: auto; background: #19261ff5; border: 1px solid #ffffff30; border-radius: 14px; padding: 14px; color: white; }
+.grass-lab-close { display: block; margin: 0 0 14px auto; }
+.grass-lab-loading { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; background: #17251dea; color: white; }

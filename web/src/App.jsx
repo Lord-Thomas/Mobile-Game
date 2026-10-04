@@ -4199,6 +4199,7 @@ function GoalNet({ ballRef, goalObject }) {
 }
 
 function Player({
+  testArea = null,
   crouching = false,
   playerCrouchingRef,
   touchRef,
@@ -4233,6 +4234,10 @@ function Player({
   onFallDamage = null,
   loadOptionalAnimations = false,
 }) {
+  // The grass laboratory reuses the real controller on an empty flat play area.
+  const clampPlayerCamera = testArea
+    ? (x, y, z) => ({ x, y: Math.max(0.35, y), z })
+    : clampCameraInPlayableVolume
   const playerBodyRef = useRef()
   const visualRef = useRef()
   const playerPosRef = useRef({ x: 0, y: PLAYER_HEIGHT, z: 2.2 })
@@ -4369,7 +4374,7 @@ function Player({
       ? spawnRequest.cameraYaw
       : spawnRequest.zone === ZONES.outside ? -Math.PI / 2 : touch.cameraYaw ?? 0
     const horizontalDistance = cameraDistance * Math.cos(cameraPitch)
-    const targetCamera = clampCameraInPlayableVolume(
+    const targetCamera = clampPlayerCamera(
       x + Math.sin(cameraYaw) * horizontalDistance,
       y + cameraSettings.height + Math.sin(cameraPitch) * cameraDistance,
       z + Math.cos(cameraYaw) * horizontalDistance,
@@ -4546,7 +4551,7 @@ function Player({
       const dirX = Math.sin(yaw)
       const dirZ = Math.cos(yaw)
 
-      const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
+      const limits = testArea ?? PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
       let nextX = MathUtils.clamp(pos.x + dirX * forwardInput * speed * delta, limits.minX, limits.maxX)
       let nextZ = MathUtils.clamp(pos.z + dirZ * forwardInput * speed * delta, limits.minZ, limits.maxZ)
       let nextGroundY = currentZone === ZONES.outside
@@ -4799,7 +4804,7 @@ function Player({
         }
       }
 
-      const clampedCamera = clampCameraInPlayableVolume(targetCameraX, targetCameraY, targetCameraZ, currentZone)
+      const clampedCamera = clampPlayerCamera(targetCameraX, targetCameraY, targetCameraZ, currentZone)
       camera.position.x = MathUtils.damp(camera.position.x, clampedCamera.x, 7, delta)
       camera.position.y = MathUtils.damp(camera.position.y, clampedCamera.y, 7, delta)
       camera.position.z = MathUtils.damp(camera.position.z, clampedCamera.z, 7, delta)
@@ -4999,7 +5004,7 @@ function Player({
       wingsTiltRef.current.rotation.x = MathUtils.damp(wingsTiltRef.current.rotation.x, tiltTarget, 5, delta)
     }
 
-    const limits = PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
+    const limits = testArea ?? PLAY_AREA_LIMITS[currentZone] ?? PLAY_AREA_LIMITS.interior
     nextX = MathUtils.clamp(nextX, limits.minX, limits.maxX)
     nextZ = MathUtils.clamp(nextZ, limits.minZ, limits.maxZ)
 
@@ -5223,7 +5228,7 @@ function Player({
       velocityYRef.current = 0
     }
     const currentFootY = playerPosRef.current.y - PLAYER_HEIGHT
-    const outdoorGroundY = currentZone === ZONES.outside
+    const outdoorGroundY = !testArea && currentZone === ZONES.outside
       ? Math.max(
           getOutdoorWalkableHeight(nextX, nextZ, currentFootY),
           getOutdoorHouseRoofHeight(nextX, nextZ, currentFootY) ?? -Infinity,
@@ -5292,7 +5297,7 @@ function Player({
       planarVelocityRef.current.z = 0
     }
 
-    if (currentZone === ZONES.outside && collidesWithOutdoorObstacle(nextX, nextZ, nextY - PLAYER_HEIGHT)) {
+    if (!testArea && currentZone === ZONES.outside && collidesWithOutdoorObstacle(nextX, nextZ, nextY - PLAYER_HEIGHT)) {
       nextX = prevX
       nextZ = prevZ
       planarVelocityRef.current.x = 0
@@ -5476,7 +5481,7 @@ function Player({
     const focusY = cameraOnCat && catPositionRef ? catPositionRef.current.y : nextY
     const focusZ = cameraOnCat && catPositionRef ? catPositionRef.current.z : nextZ
     const lookHeight = cameraOnCat ? 0.3 : 0.55
-    const towerCameraContext = currentZone === ZONES.outside && !cameraOnCat
+    const towerCameraContext = !testArea && currentZone === ZONES.outside && !cameraOnCat
       ? getSkeletonTowerCameraContext(focusX, focusY, focusZ)
       : null
     const effectivePitch = towerCameraContext
@@ -5515,7 +5520,7 @@ function Player({
       }
     }
 
-    if (currentZone === ZONES.outside) {
+    if (!testArea && currentZone === ZONES.outside) {
       const constrainedTarget = constrainOutdoorCameraAgainstManualObstacles(
         focusX,
         originY,
@@ -5545,7 +5550,7 @@ function Player({
       targetZ = constrainedTarget.z
     }
 
-    const clampedTarget = clampCameraInPlayableVolume(targetX, targetY, targetZ, currentZone)
+    const clampedTarget = clampPlayerCamera(targetX, targetY, targetZ, currentZone)
     const cameraDamping = isDodging ? 30 : towerCameraContext ? 20 : 12
     let nextCameraX = MathUtils.damp(camera.position.x, clampedTarget.x, cameraDamping, delta)
     let nextCameraY = MathUtils.damp(camera.position.y, clampedTarget.y, cameraDamping, delta)
@@ -5645,7 +5650,7 @@ function Player({
     let targetCameraX = cameraFocus.x + Math.sin(touch.cameraYaw) * horizontalDistance
     let targetCameraY = cameraFocus.y + 1.6 + Math.sin(pitch) * cameraDistance
     let targetCameraZ = cameraFocus.z + Math.cos(touch.cameraYaw) * horizontalDistance
-    if (currentZone === ZONES.outside) {
+    if (!testArea && currentZone === ZONES.outside) {
       const constrainedTarget = constrainOutdoorCameraAgainstManualObstacles(
         cameraFocus.x,
         cameraFocus.y + 0.6,
@@ -5658,7 +5663,7 @@ function Player({
       targetCameraY = constrainedTarget.y
       targetCameraZ = constrainedTarget.z
     }
-    const cameraTarget = clampCameraInPlayableVolume(
+    const cameraTarget = clampPlayerCamera(
       targetCameraX,
       targetCameraY,
       targetCameraZ,
@@ -26034,3 +26039,8 @@ markLoad('jsBoot')
 // gonflaient l'écran de chargement pour RIEN — le rendu utilise les .ktx2 (via
 // useGameTexture), pas ces PNG. Le skin actif charge son .ktx2 au montage de la scène ;
 // les autres variantes chargent à la demande (sélection / vignettes boutique en CSS).
+
+// Shared game components for isolated development scenes; App itself is not mounted.
+export { Player, ControlsOverlay, SettingsPanel, FpsOverlay, RenderStatsProbe, LayeredSceneRenderer,
+  AdaptiveCameraFov, RenderQualityGovernor, useViewportRenderSettings,
+  loadPerformanceSettings, PERFORMANCE_SETTINGS_STORAGE_KEY, PLAYER_HEIGHT, ZONES }

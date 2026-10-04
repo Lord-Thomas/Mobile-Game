@@ -302,6 +302,32 @@ async function buildFullGrassField() {
   return { fields, buildMs: performance.now() - started }
 }
 
+const flatGrassFields = new Map()
+export function getFlatGrassField(size = 30) {
+  if (flatGrassFields.has(size)) return flatGrassFields.get(size)
+  const half = size / 2
+  const capacity = (Math.ceil(half / GRASS_GRID_STEP) + 2) ** 2
+  const fields = QUADRANTS.map(() => ({ data: new Float32Array(capacity * 4), count: 0 }))
+  const started = performance.now()
+  for (let xi = -half; xi < half; xi += GRASS_GRID_STEP) {
+    for (let zi = -half; zi < half; zi += GRASS_GRID_STEP) {
+      const seed = (xi + 61) * 197 + (zi + 43) * 137
+      const x = xi + (seededRandom(seed) - 0.5) * grassPlacementSettings.positionJitter * 2
+      const z = zi + (seededRandom(seed + 5) - 0.5) * grassPlacementSettings.positionJitter * 2
+      if (Math.abs(x) > half - 0.15 || Math.abs(z) > half - 0.15) continue
+      const field = fields[(x >= 0 ? 0 : 1) + (z >= 0 ? 0 : 2)]
+      const offset = field.count++ * 4
+      field.data[offset] = x
+      field.data[offset + 1] = 0.04
+      field.data[offset + 2] = z
+      field.data[offset + 3] = grassPlacementSettings.minScale + seededRandom(seed + 9) * GRASS_SCALE_RANGE
+    }
+  }
+  const promise = Promise.resolve({ fields, buildMs: performance.now() - started })
+  flatGrassFields.set(size, promise)
+  return promise
+}
+
 function buildGrassHandleBeforeCompile(onShaderReady, getBiomeData = () => getGrassBiomeShaderData()) {
   return (shader) => {
     const biomeData = getBiomeData()
@@ -490,7 +516,7 @@ function GrassArtDirectionUpdater({ grassMaterial, shaderRef }) {
 }
 
 function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugStats = false,
-  biomeAreas = MAP_BIOME_AREAS }) {
+  biomeAreas = MAP_BIOME_AREAS, flatTestSize = null }) {
   const shaderRef = useRef(null)
   const biomeRef = useRef(getGrassBiomeShaderData(biomeAreas))
   const baseTexture = useTexture(GRASS_TEXTURE)
@@ -498,7 +524,7 @@ function TerrainGroundCover({ playerPositionRef, ballRef, active = true, debugSt
     const t = baseTexture.clone(); t.colorSpace = SRGBColorSpace; t.needsUpdate = true
     return t
   }, [baseTexture])
-  const field = use(getFullGrassField())
+  const field = use(flatTestSize ? getFlatGrassField(flatTestSize) : getFullGrassField())
   const geometries = useMemo(() => {
     const base = createGrassCardGeometry()
     const result = field.fields.map(({ data, count }, index) => {

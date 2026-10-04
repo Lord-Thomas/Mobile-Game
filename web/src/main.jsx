@@ -17,7 +17,13 @@ const isEditor = params.has('editor') || params.has('treeeditor')
 // so App() never has an early return before its hooks — see Rules of Hooks.
 const isThumbnailTool = params.get('tool') === 'thumbnail'
 
-if (isThumbnailTool) {
+if (params.get('scene') === 'grass') {
+  import('./tools/GrassLab.jsx').then(({ default: GrassLab }) => {
+    createRoot(document.getElementById('root')).render(
+      <StrictMode><ErrorBoundary><GrassLab /></ErrorBoundary></StrictMode>,
+    )
+  })
+} else if (isThumbnailTool) {
   import('./tools/ThumbnailTool.jsx').then(({ default: ThumbnailTool }) => {
     createRoot(document.getElementById('root')).render(
       <StrictMode>
